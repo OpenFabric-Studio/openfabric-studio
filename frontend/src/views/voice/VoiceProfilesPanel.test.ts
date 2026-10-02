@@ -4,16 +4,21 @@ import { createApp, h, nextTick, ref, type App } from 'vue'
 import { createI18n } from 'vue-i18n'
 import VoiceProfilesPanel from './VoiceProfilesPanel.vue'
 import * as api from '../../api/voiceProfiles'
-import type { SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
+import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
+import type { StarterSpeechVoice } from '../../api/contracts'
 import { ApiError } from '../../api/http'
 import en from '../../locales/en'
 import { speechWorkspaceEn } from '../../locales/speechWorkspace'
 import { hasOpenDialog } from '../../composables/useDialogA11y'
 
-vi.mock('../../api/voiceProfiles', () => ({
+vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(),
   listSpeechVoiceProfiles: vi.fn(), getSpeechCloneEngine: vi.fn(),
   createSpeechVoiceProfile: vi.fn(), deleteSpeechVoiceProfile: vi.fn(), startSpeechCloneTrial: vi.fn(),
+  listStarterSpeechVoices: vi.fn(), importStarterSpeechVoice: vi.fn(),
 }))
+
+const starter: StarterSpeechVoice = { id: 'vctk-p225', name: 'VCTK p225', accent: 'English · Southern England', transcript: 'Please call Stella.', duration_seconds: 4.2, sample_rate_hz: 48000, audio_url: '/api/voice-profiles/starter-voices/vctk-p225/audio', source_url: 'https://datashare.ed.ac.uk/handle/10283/3443', license_name: 'CC BY 4.0', license_url: 'https://creativecommons.org/licenses/by/4.0/', attribution: 'VCTK Corpus 0.92 · University of Edinburgh' }
+const imported = { ...profile('33333333333333333333333333333333', starter.name), starter_voice_id: starter.id, notes: starter.transcript }
 
 function profile(id = '11111111111111111111111111111111', name = 'First narrator'): SpeechVoiceProfile {
   return { id, name, consent_confirmed: true, reference_audio_path: '/private/library/reference.wav', notes: 'Reference transcript', created_at: '2026-10-02', updated_at: '2026-10-02', engine_hints: null }
@@ -29,6 +34,8 @@ beforeEach(() => {
   vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([first, second])
   vi.mocked(api.getSpeechCloneEngine).mockResolvedValue({ installed: true, mock: false, api_reachable: true, install_hints: ['Install the official engine.'], root: '/private/engine', api_base_url: 'http://localhost:9880' })
   vi.mocked(api.deleteSpeechVoiceProfile).mockResolvedValue(undefined)
+  vi.mocked(api.listStarterSpeechVoices).mockResolvedValue([starter])
+  vi.mocked(api.importStarterSpeechVoice).mockResolvedValue(imported)
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren() })
 async function settle() { for (let i = 0; i < 8; i++) await nextTick() }
@@ -73,6 +80,146 @@ function deferred<T>() {
   const promise = new Promise<T>(release => { resolve = release })
   return { promise, resolve }
 }
+
+it('shows licensed starters without depending on profile or engine loading', async () => {
+  vi.mocked(api.listSpeechVoiceProfiles).mockRejectedValue(new Error('/private/library'))
+  vi.mocked(api.getSpeechCloneEngine).mockRejectedValue(new Error('/private/engine'))
+  const container = await mount()
+  expect(container.querySelector('[aria-label="Starter voices"] h3')?.textContent).toBe(starter.accent)
+  expect(container.querySelector('audio')?.getAttribute('src')).toBe(starter.audio_url)
+  expect(container.textContent).toContain('Licensed reference')
+  expect(container.textContent).not.toContain('/private/')
+})
+it('allows importing after the library resolves while the independently owned engine check is pending', async () => {
+  const engine = deferred<SpeechCloneEngineStatus>()
+  vi.mocked(api.getSpeechCloneEngine).mockReturnValue(engine.promise)
+  vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([])
+  const container = await mount()
+  expect(button(container, 'Add VCTK p225 to my voices').disabled).toBe(false)
+  expect(button(container, 'New profile').disabled).toBe(false)
+  expect(button(container, 'Refresh status').disabled).toBe(true)
+  await click(container, 'Add VCTK p225 to my voices')
+  expect(api.importStarterSpeechVoice).toHaveBeenCalledTimes(1)
+  expect(form(container, 'Speech synthesis').textContent).toContain(starter.name)
+  button(container, 'Refresh status').dispatchEvent(new Event('click', { bubbles: true })); await settle()
+  expect(api.getSpeechCloneEngine).toHaveBeenCalledTimes(1)
+  engine.resolve({ installed: false, mock: true, api_reachable: false }); await settle()
+  expect(button(container, 'Refresh status').disabled).toBe(false)
+  expect(form(container, 'Speech synthesis').textContent).toContain(starter.name)
+})
+it('imports a starter once and selects its licensed independent library copy', async () => {
+  vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([])
+  const request = deferred<SpeechVoiceProfile>(); vi.mocked(api.importStarterSpeechVoice).mockReturnValue(request.promise)
+  const container = await mount()
+  const add = button(container, 'Add VCTK p225 to my voices')
+  add.click(); add.dispatchEvent(new Event('click', { bubbles: true })); await settle()
+  expect(api.importStarterSpeechVoice).toHaveBeenCalledTimes(1)
+  expect(api.importStarterSpeechVoice).toHaveBeenCalledWith(starter.id, expect.any(AbortSignal))
+  request.resolve(imported); await settle()
+  expect(form(container, 'Speech synthesis').textContent).toContain(starter.name)
+  expect(form(container, 'Speech synthesis').textContent).toContain('Licensed reference')
+  expect(form(container, 'Speech synthesis').textContent).not.toContain(en.voiceProfiles.consentOk)
+  expect(container.querySelector<HTMLElement>('#starter-voice-catalog')?.style.display).toBe('none')
+  expect(document.activeElement).toBe(field(container, 'Text to speak'))
+  await click(container, 'Browse starter voices')
+  expect(button(container, 'Use VCTK p225')).toBeDefined()
+})
+it('collapses the catalog and focuses synthesis when an existing licensed voice is chosen', async () => {
+  vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([first, imported])
+  const container = await mount(); await click(container, 'Browse starter voices'); await click(container, 'Use VCTK p225')
+  expect(form(container, 'Speech synthesis').textContent).toContain(starter.name)
+  expect(container.querySelector<HTMLElement>('#starter-voice-catalog')?.style.display).toBe('none')
+  expect(document.activeElement).toBe(field(container, 'Text to speak'))
+  expect(api.importStarterSpeechVoice).not.toHaveBeenCalled()
+})
+it('shows missing permission for a revoked starter profile instead of treating provenance as permission', async () => {
+  vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([{ ...imported, consent_confirmed: false }])
+  const container = await mount()
+  expect(container.querySelector('[aria-pressed=true]')?.textContent).toContain(en.voiceProfiles.consentMissing)
+  expect(form(container, 'Speech synthesis').textContent).toContain(en.voiceProfiles.consentMissing)
+  expect(form(container, 'Speech synthesis').textContent).not.toContain('Licensed reference')
+  await change(container, 'Text to speak', 'Hello')
+  expect(button(container, 'Generate speech trial').disabled).toBe(true)
+})
+it('rejects an import response belonging to another starter before adding it to the library', async () => {
+  vi.mocked(api.importStarterSpeechVoice).mockResolvedValue({ ...imported, starter_voice_id: 'vctk-p237' })
+  const container = await mount(); await click(container, 'Browse starter voices'); await click(container, 'Add VCTK p225 to my voices')
+  expect(container.textContent).toContain('Could not add the starter voice')
+  expect(form(container, 'Speech synthesis').textContent).toContain('First narrator')
+  expect([...container.querySelectorAll('[aria-pressed]')].some(item => item.textContent?.includes(starter.name))).toBe(false)
+})
+it('preserves newer selection and speech text when an import finishes late', async () => {
+  const request = deferred<SpeechVoiceProfile>(); vi.mocked(api.importStarterSpeechVoice).mockReturnValue(request.promise)
+  const container = await mount(); await click(container, 'Browse starter voices')
+  await change(container, 'Text to speak', 'Keep my text')
+  await click(container, 'Add VCTK p225 to my voices'); await click(container, 'Second narrator')
+  request.resolve(imported); await settle()
+  expect(form(container, 'Speech synthesis').textContent).toContain('Second narrator')
+  expect(field(container, 'Text to speak').value).toBe('Keep my text')
+  expect(button(container, starter.name)).toBeDefined()
+  expect(container.querySelector<HTMLElement>('#starter-voice-catalog')?.style.display).not.toBe('none')
+})
+it('preserves a new creation draft opened while a starter import is pending', async () => {
+  const request = deferred<SpeechVoiceProfile>(); vi.mocked(api.importStarterSpeechVoice).mockReturnValue(request.promise)
+  const container = await mount(); await click(container, 'Browse starter voices'); await click(container, 'Add VCTK p225 to my voices')
+  await creationDraft(container)
+  request.resolve(imported); await settle()
+  expect(form(container, 'Create speech profile').style.display).not.toBe('none')
+  expect(field(container, 'Profile name').value).toBe('New narrator')
+  expect(container.querySelector<HTMLElement>('#starter-voice-catalog')?.style.display).not.toBe('none')
+})
+it('keeps import errors private and retries deliberately without refreshing over the import', async () => {
+  vi.mocked(api.importStarterSpeechVoice).mockRejectedValueOnce(new Error('token=secret /private/database')).mockResolvedValue(imported)
+  const container = await mount(); await click(container, 'Browse starter voices'); await click(container, 'Add VCTK p225 to my voices')
+  expect(container.textContent).toContain('Could not add the starter voice')
+  expect(container.textContent).not.toContain('token=secret')
+  expect(container.querySelector<HTMLElement>('#starter-voice-catalog')?.style.display).not.toBe('none')
+  await click(container, 'Add VCTK p225 to my voices')
+  expect(api.importStarterSpeechVoice).toHaveBeenCalledTimes(2)
+  expect(api.listSpeechVoiceProfiles).toHaveBeenCalledTimes(1)
+})
+it('aborts a pending import and ignores its late completion after unmount', async () => {
+  const request = deferred<SpeechVoiceProfile>(); vi.mocked(api.importStarterSpeechVoice).mockReturnValue(request.promise)
+  const activity = vi.fn<(message: string) => void>()
+  const container = await mount({ activity }); await click(container, 'Browse starter voices'); await click(container, 'Add VCTK p225 to my voices')
+  const signal = vi.mocked(api.importStarterSpeechVoice).mock.calls[0]?.[1]
+  app?.unmount(); app = undefined
+  expect(signal?.aborted).toBe(true)
+  const emitted = activity.mock.calls.length
+  request.resolve(imported); await settle()
+  expect(activity).toHaveBeenCalledTimes(emitted)
+})
+it('does not reclaim focus when a starter import succeeds after Speech is hidden', async () => {
+  const request = deferred<SpeechVoiceProfile>(); vi.mocked(api.importStarterSpeechVoice).mockReturnValue(request.promise)
+  const active = ref(true)
+  const container = await mount({ active }); await click(container, 'Browse starter voices'); await click(container, 'Add VCTK p225 to my voices')
+  const outside = document.body.appendChild(document.createElement('button')); outside.focus()
+  active.value = false; await settle(); request.resolve(imported); await settle()
+  expect(document.activeElement).toBe(outside)
+  expect(form(container, 'Speech synthesis').textContent).toContain(starter.name)
+})
+it('does not move focus back to synthesis after a newer creation action follows Use voice', async () => {
+  vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([first, imported])
+  const container = await mount(); await click(container, 'Browse starter voices')
+  button(container, 'Use VCTK p225').click(); button(container, 'New profile').click(); await settle()
+  expect(form(container, 'Create speech profile').style.display).not.toBe('none')
+  expect(document.activeElement).toBe(field(container, 'Profile name'))
+})
+it.each(['completed', 'mock_completed'] as const)('plays and downloads identifier-routed $status trial audio while keeping raw paths private', async status => {
+  const id = 'a'.repeat(32)
+  vi.mocked(api.startSpeechCloneTrial).mockResolvedValue({ ...trial(), trial_id: id, status })
+  const active = ref(true)
+  const container = await mount({ active }); await change(container, 'Text to speak', 'Hello'); await submit(container, 'Speech synthesis')
+  const audio = container.querySelector(`[data-speech-trial] audio`)
+  if (!(audio instanceof HTMLAudioElement)) throw new Error('Missing generated audio')
+  expect(audio.getAttribute('src')).toBe(`/api/speech-clone/trials/${id}/audio`)
+  expect(container.querySelector('[data-speech-trial] a[download]')?.getAttribute('href')).toBe(`/api/speech-clone/trials/${id}/audio`)
+  expect(container.textContent).not.toContain('/private/')
+  if (status === 'mock_completed') expect(container.querySelector('[data-speech-trial]')?.textContent).toContain('silent placeholder')
+  const pause = vi.spyOn(audio, 'pause').mockImplementation(() => undefined)
+  active.value = false; await settle()
+  expect(pause).toHaveBeenCalled()
+})
 
 it('opens creation on demand and requires explicit consent before submitting', async () => {
   const container = await mount()

@@ -9,7 +9,7 @@ import * as profilesApi from '../../api/voiceProfiles'
 import { i18n, setLocale } from '../../i18n'
 import { voiceProfile } from './voiceTestFixtures'
 vi.mock('../../api/voices', async original => ({ ...await original<typeof import('../../api/voices')>(), createVoice: vi.fn(), startVoiceComparison: vi.fn(), uploadRecordings: vi.fn(), listVoices: vi.fn(), getVoicePreparation: vi.fn(), voiceSeparationOptions: vi.fn(), listVoiceTrialSources: vi.fn(), listVoiceComparisons: vi.fn() }))
-vi.mock('../../api/voiceProfiles', () => ({ listSpeechVoiceProfiles: vi.fn().mockResolvedValue([]), getSpeechCloneEngine: vi.fn().mockRejectedValue(new Error('Unavailable in test')), createSpeechVoiceProfile: vi.fn(), deleteSpeechVoiceProfile: vi.fn(), startSpeechCloneTrial: vi.fn() }))
+vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(), listStarterSpeechVoices: vi.fn().mockResolvedValue([]), importStarterSpeechVoice: vi.fn(), listSpeechVoiceProfiles: vi.fn().mockResolvedValue([]), getSpeechCloneEngine: vi.fn().mockRejectedValue(new Error('Unavailable in test')), createSpeechVoiceProfile: vi.fn(), deleteSpeechVoiceProfile: vi.fn(), startSpeechCloneTrial: vi.fn() }))
 vi.mock('../../api/audiobooks', () => ({ __v_isRef: false, listAudiobooks: vi.fn().mockResolvedValue([]), listAudiobookJobs: vi.fn().mockResolvedValue([]), createAudiobook: vi.fn(), retryAudiobook: vi.fn(), audiobookExportUrl: (id: string) => `/api/audiobooks/${id}/export`, audiobookChapterAudioUrl: (id: string, chapter: number) => `/api/audiobooks/${id}/chapters/${chapter}/audio` }))
 let app: App | undefined
 beforeEach(() => {

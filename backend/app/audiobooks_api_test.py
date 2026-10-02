@@ -70,6 +70,33 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
 
+    async def test_imported_starter_voice_can_narrate_an_audiobook(self) -> None:
+        catalog = await self.client.get("/api/voice-profiles/starter-voices")
+        self.assertEqual(catalog.status_code, 200, catalog.text)
+        starter = catalog.json()["voices"][0]
+        imported = await self.client.post(f"/api/voice-profiles/starter-voices/{starter['id']}/import")
+        self.assertEqual(imported.status_code, 200, imported.text)
+        profile = imported.json()
+        self.assertEqual(profile["notes"], starter["transcript"])
+        self.assertEqual(profile["starter_voice_id"], starter["id"])
+        created = await self.client.post(
+            "/api/audiobooks",
+            json={
+                "title": "Starter voice book",
+                "profile_id": profile["id"],
+                "chapters": [{"title": "One", "text": "A short narration trial."}],
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        book_id = created.json()["book"]["id"]
+        book = await self.client.get(f"/api/audiobooks/{book_id}")
+        self.assertEqual(book.status_code, 200, book.text)
+        self.assertEqual(book.json()["status"], "done", book.text)
+        self.assertEqual(book.json()["profile_id"], profile["id"])
+        chapter = await self.client.get(f"/api/audiobooks/{book_id}/chapters/0/audio")
+        self.assertEqual(chapter.status_code, 200, chapter.text)
+        self.assertTrue(chapter.content.startswith(b"RIFF"))
+
     async def test_create_book_synthesizes_chapters_and_export(self) -> None:
         profile_id = await self._profile()
         created = await self.client.post(

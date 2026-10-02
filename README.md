@@ -45,7 +45,7 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **ACE-Step 1.5** | Text/style music generation, covers, section edits |
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
-| **Speech profiles** | Consent-backed reference clips for talking / audiobook (GPT-SoVITS planned) |
+| **Speech profiles** | Reference clips for speech and audiobooks, with four licensed English starter voices |
 | **Video Studio** | Shot lists / LTX-oriented video workflow (experimental) |
 | **Demucs / DAW** | Stems and multitrack timeline |
 
@@ -86,7 +86,7 @@ Desktop packaging is experimental; CI packaging runs only on tags / manual dispa
 
 Singing voice cloning uses **Seed-VC** today.
 
-Talking and audiobook cloning is planned via **[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)** (MIT). OpenFabric stores consent-backed speech **voice profiles** (`/api/voice-profiles`) and exposes a scaffold trial endpoint (`POST /api/speech-clone/trials`) that returns `engine_not_installed` until you install GPT-SoVITS yourself. Model weights are not downloaded by this repo.
+Speech and audiobook synthesis uses an optional local **[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)** API (MIT). OpenFabric stores speech **voice profiles** (`/api/voice-profiles`) and offers four bundled English [starter reference voices](docs/speech-starter-voices.md), including previews, transcripts and attribution. These VCTK recordings are licensed separately under CC BY 4.0. Speech trials require an installed, running engine; missing engines are reported explicitly. Model weights are not downloaded by this repo.
 
 ## License and liability
 

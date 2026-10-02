@@ -5,6 +5,7 @@ import {
   parseSpeechCloneTrialResponse,
   parseSpeechCloneEngineStatus,
   parsePatchSpeechVoiceProfileRequest,
+  parseStarterSpeechVoicesResponse,
 } from './contracts'
 import type {
   SpeechVoiceProfile,
@@ -12,9 +13,24 @@ import type {
   SpeechCloneTrialResponse,
   SpeechCloneEngineStatus,
   PatchSpeechVoiceProfileRequest,
+  StarterSpeechVoice,
 } from './contracts'
 
-export type { SpeechVoiceProfile, SpeechCloneTrialResponse, SpeechCloneEngineStatus }
+export type { SpeechVoiceProfile, SpeechCloneTrialResponse, SpeechCloneEngineStatus, StarterSpeechVoice }
+
+export async function listStarterSpeechVoices(signal?: AbortSignal): Promise<StarterSpeechVoice[]> {
+  const response = await apiFetch('/api/voice-profiles/starter-voices', { signal }, parseStarterSpeechVoicesResponse)
+  return response.voices
+}
+
+export async function importStarterSpeechVoice(id: string, signal?: AbortSignal): Promise<SpeechVoiceProfile> {
+  if (!/^vctk-p[0-9]{3}$/.test(id)) throw new TypeError('Invalid starter voice identifier')
+  return apiFetch(`/api/voice-profiles/starter-voices/${id}/import`, { method: 'POST', signal }, parseSpeechVoiceProfile)
+}
+
+export function speechTrialAudioUrl(id: SpeechCloneTrialResponse['trial_id']): string | null {
+  return typeof id === 'string' && /^[0-9a-f]{32}$/.test(id) ? `/api/speech-clone/trials/${id}/audio` : null
+}
 
 export async function listSpeechVoiceProfiles(signal?: AbortSignal): Promise<SpeechVoiceProfile[]> {
   const json = await apiFetch('/api/voice-profiles', { signal }, parseSpeechVoiceProfilesResponse)

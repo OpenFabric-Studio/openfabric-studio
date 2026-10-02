@@ -673,10 +673,30 @@ export type SpeechVoiceProfile = {
   "created_at": string
   "updated_at": string
   "engine_hints"?: (Record<string, JsonValue> | null)
+  "starter_voice_id"?: (string | null)
 }
 
 export type SpeechVoiceProfilesResponse = {
   "profiles": Array<SpeechVoiceProfile>
+}
+
+export type StarterSpeechVoice = {
+  "id": string
+  "name": string
+  "language"?: "en"
+  "accent": string
+  "transcript": string
+  "duration_seconds": number
+  "sample_rate_hz": number
+  "audio_url": string
+  "source_url": "https://datashare.ed.ac.uk/handle/10283/3443"
+  "license_name": "CC BY 4.0"
+  "license_url": "https://creativecommons.org/licenses/by/4.0/"
+  "attribution": string
+}
+
+export type StarterSpeechVoicesResponse = {
+  "voices": Array<StarterSpeechVoice>
 }
 
 export type StemAudioExportResponse = {
@@ -6688,6 +6708,19 @@ const schemas = {
         ],
         "default": null,
         "title": "Engine Hints"
+      },
+      "starter_voice_id": {
+        "anyOf": [
+          {
+            "pattern": "^vctk-p[0-9]{3}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Starter Voice Id"
       }
     },
     "required": [
@@ -6958,6 +6991,108 @@ const schemas = {
       "mock"
     ],
     "title": "SpeechCloneEngineStatus",
+    "type": "object"
+  },
+  "StarterSpeechVoice": {
+    "properties": {
+      "id": {
+        "pattern": "^vctk-p[0-9]{3}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "language": {
+        "const": "en",
+        "default": "en",
+        "title": "Language",
+        "type": "string"
+      },
+      "accent": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Accent",
+        "type": "string"
+      },
+      "transcript": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "title": "Transcript",
+        "type": "string"
+      },
+      "duration_seconds": {
+        "maximum": 10,
+        "minimum": 3,
+        "title": "Duration Seconds",
+        "type": "number"
+      },
+      "sample_rate_hz": {
+        "maximum": 96000,
+        "minimum": 16000,
+        "title": "Sample Rate Hz",
+        "type": "integer"
+      },
+      "audio_url": {
+        "pattern": "^/api/voice-profiles/starter-voices/vctk-p[0-9]{3}/audio$",
+        "title": "Audio Url",
+        "type": "string"
+      },
+      "source_url": {
+        "const": "https://datashare.ed.ac.uk/handle/10283/3443",
+        "title": "Source Url",
+        "type": "string"
+      },
+      "license_name": {
+        "const": "CC BY 4.0",
+        "title": "License Name",
+        "type": "string"
+      },
+      "license_url": {
+        "const": "https://creativecommons.org/licenses/by/4.0/",
+        "title": "License Url",
+        "type": "string"
+      },
+      "attribution": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Attribution",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "accent",
+      "transcript",
+      "duration_seconds",
+      "sample_rate_hz",
+      "audio_url",
+      "source_url",
+      "license_name",
+      "license_url",
+      "attribution"
+    ],
+    "title": "StarterSpeechVoice",
+    "type": "object"
+  },
+  "StarterSpeechVoicesResponse": {
+    "properties": {
+      "voices": {
+        "items": {
+          "$ref": "#/$defs/StarterSpeechVoice"
+        },
+        "title": "Voices",
+        "type": "array"
+      }
+    },
+    "required": [
+      "voices"
+    ],
+    "title": "StarterSpeechVoicesResponse",
     "type": "object"
   },
   "AudiobookChapterInput": {
@@ -10688,6 +10823,22 @@ function isSpeechCloneEngineStatus(value: unknown): value is SpeechCloneEngineSt
 }
 export function parseSpeechCloneEngineStatus(value: unknown): SpeechCloneEngineStatus {
   if (!isSpeechCloneEngineStatus(value)) throw new TypeError("Invalid SpeechCloneEngineStatus response")
+  return value
+}
+
+function isStarterSpeechVoice(value: unknown): value is StarterSpeechVoice {
+  return decodeSchema(schemas.StarterSpeechVoice, value, schemas)
+}
+export function parseStarterSpeechVoice(value: unknown): StarterSpeechVoice {
+  if (!isStarterSpeechVoice(value)) throw new TypeError("Invalid StarterSpeechVoice response")
+  return value
+}
+
+function isStarterSpeechVoicesResponse(value: unknown): value is StarterSpeechVoicesResponse {
+  return decodeSchema(schemas.StarterSpeechVoicesResponse, value, schemas)
+}
+export function parseStarterSpeechVoicesResponse(value: unknown): StarterSpeechVoicesResponse {
+  if (!isStarterSpeechVoicesResponse(value)) throw new TypeError("Invalid StarterSpeechVoicesResponse response")
   return value
 }
 

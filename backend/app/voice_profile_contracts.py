@@ -28,6 +28,26 @@ class SpeechVoiceProfile(Contract):
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
     engine_hints: EngineHintMap | None = None
+    starter_voice_id: str | None = Field(default=None, pattern=r"^vctk-p[0-9]{3}$")
+
+
+class StarterSpeechVoice(Contract):
+    id: str = Field(pattern=r"^vctk-p[0-9]{3}$")
+    name: str = Field(min_length=1, max_length=120)
+    language: Literal["en"] = "en"
+    accent: str = Field(min_length=1, max_length=120)
+    transcript: str = Field(min_length=1, max_length=2000)
+    duration_seconds: float = Field(ge=3, le=10)
+    sample_rate_hz: int = Field(ge=16000, le=96000)
+    audio_url: str = Field(pattern=r"^/api/voice-profiles/starter-voices/vctk-p[0-9]{3}/audio$")
+    source_url: Literal["https://datashare.ed.ac.uk/handle/10283/3443"]
+    license_name: Literal["CC BY 4.0"]
+    license_url: Literal["https://creativecommons.org/licenses/by/4.0/"]
+    attribution: str = Field(min_length=1, max_length=1000)
+
+
+class StarterSpeechVoicesResponse(Contract):
+    voices: list[StarterSpeechVoice]
 
 
 class SpeechVoiceProfilesResponse(Contract):
@@ -76,4 +96,6 @@ VOICE_PROFILE_CLIENT_MODELS: list[type[BaseModel]] = [
     SpeechCloneTrialRequest,
     SpeechCloneTrialResponse,
     SpeechCloneEngineStatus,
+    StarterSpeechVoice,
+    StarterSpeechVoicesResponse,
 ]

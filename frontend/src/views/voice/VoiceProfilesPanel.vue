@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import * as profilesApi from '../../api/voiceProfiles'
 import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
 import { useDialogA11y } from '../../composables/useDialogA11y'
+import StarterSpeechVoices from './StarterSpeechVoices.vue'
+import SpeechAudioPreview from './SpeechAudioPreview.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const emit = defineEmits<{ activity: [message: string] }>()
@@ -18,9 +20,12 @@ const filteredProfiles = computed(() => {
   return profiles.value.filter(profile => `${profile.name} ${profile.notes ?? ''}`.toLocaleLowerCase().includes(query))
 })
 const loading = ref(false)
+const engineLoading = ref(false)
 const saving = ref(false)
 const cloning = ref(false)
 const deleting = ref(false)
+const importingId = ref('')
+const starterCatalogExpanded = ref<boolean | null>(null)
 const error = ref('')
 const notice = ref('')
 const engine = ref<SpeechCloneEngineStatus | null>(null)
@@ -34,7 +39,12 @@ const file = ref<File | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const nameInput = ref<HTMLInputElement | null>(null)
 const trialText = ref('')
+const trialTextInput = ref<HTMLTextAreaElement | null>(null)
 const trialResult = ref<SpeechCloneTrialResponse | null>(null)
+const trialAudioUrl = computed(() => {
+  const result = trialResult.value
+  return result && (result.status === 'completed' || result.status === 'mock_completed') ? profilesApi.speechTrialAudioUrl(result.trial_id) : null
+})
 const setupHints = computed(() => [...new Set([...(engine.value?.install_hints ?? []), ...(trialResult.value?.install_hints ?? [])])])
 const deleteTarget = ref<SpeechVoiceProfile | null>(null)
 const deleteDialog = ref<HTMLElement | null>(null)
@@ -55,44 +65,54 @@ let loadController: AbortController | null = null
 let createController: AbortController | null = null
 let deleteController: AbortController | null = null
 let trialController: AbortController | null = null
+let importController: AbortController | null = null
 
 const activity = computed(() => {
   if (saving.value) return t('speechWorkspace.createPending')
+  if (importingId.value) return t('speechWorkspace.starters.importPending')
   if (deleting.value) return t('speechWorkspace.deletePending')
   if (cloning.value) return t('speechWorkspace.trialPending')
   if (loading.value) return t('speechWorkspace.loadPending')
-  return error.value || engineError.value
+  return error.value || engineError.value || (engineLoading.value ? t('speechWorkspace.enginePending') : '')
 })
 watch(activity, message => { if (alive) emit('activity', message) }, { immediate: true })
 
 async function refresh() {
-  if (loading.value || saving.value || deleting.value || !alive) return
+  if (loading.value || engineLoading.value || saving.value || deleting.value || importingId.value || !alive) return
   const controller = new AbortController()
   loadController = controller
   loading.value = true
+  engineLoading.value = true
   error.value = ''
   engineError.value = ''
   try {
-    const [profileResponse, engineResponse] = await Promise.allSettled([
-      profilesApi.listSpeechVoiceProfiles(controller.signal),
-      profilesApi.getSpeechCloneEngine(controller.signal),
-    ])
-    if (!alive || controller.signal.aborted) return
-    if (profileResponse.status === 'fulfilled') {
-      profiles.value = profileResponse.value
+    const isCurrent = () => alive && loadController === controller && !controller.signal.aborted
+    const profileRequest = profilesApi.listSpeechVoiceProfiles(controller.signal).then(response => {
+      if (!isCurrent()) return
+      profiles.value = response
       if (!profiles.value.some(profile => profile.id === selectedId.value)) selectProfile(profiles.value[0]?.id ?? '')
-    } else error.value = t('voiceProfiles.err.load')
-    if (engineResponse.status === 'fulfilled') engine.value = engineResponse.value
-    else { engine.value = null; engineError.value = t('speechWorkspace.engineLoadError') }
+    }).catch(() => {
+      if (isCurrent()) error.value = t('voiceProfiles.err.load')
+    }).finally(() => {
+      if (isCurrent()) loading.value = false
+    })
+    const engineRequest = profilesApi.getSpeechCloneEngine(controller.signal).then(response => {
+      if (isCurrent()) engine.value = response
+    }).catch(() => {
+      if (isCurrent()) { engine.value = null; engineError.value = t('speechWorkspace.engineLoadError') }
+    }).finally(() => {
+      if (isCurrent()) engineLoading.value = false
+    })
+    await Promise.allSettled([profileRequest, engineRequest])
   } finally {
-    if (alive && loadController === controller) { loading.value = false; loadController = null }
+    if (alive && loadController === controller) { loading.value = false; engineLoading.value = false; loadController = null }
   }
 }
 
 function selectProfile(id: string) {
   if (id && !profiles.value.some(profile => profile.id === id)) return
+  ++selectionGeneration
   if (id !== selectedId.value) {
-    ++selectionGeneration
     ++trialGeneration
     trialController?.abort()
     trialController = null
@@ -106,8 +126,18 @@ function selectProfile(id: string) {
   createOpen.value = false
 }
 
+async function selectStarterProfile(id: string) {
+  if (!alive || !profiles.value.some(profile => profile.id === id)) return
+  selectProfile(id)
+  starterCatalogExpanded.value = false
+  const generation = selectionGeneration
+  await nextTick()
+  if (alive && props.active && !createOpen.value && generation === selectionGeneration && selectedId.value === id) trialTextInput.value?.focus()
+}
+
 async function openCreate() {
   if (loading.value || !alive) return
+  ++selectionGeneration
   createVisited.value = true
   createOpen.value = true
   error.value = ''
@@ -121,7 +151,7 @@ function onFilePicked(event: Event) {
 }
 
 async function onCreate() {
-  if (saving.value || loading.value || !alive) return
+  if (saving.value || loading.value || importingId.value || !alive) return
   error.value = ''
   notice.value = ''
   if (!consent.value) { error.value = t('voiceProfiles.err.consent'); return }
@@ -147,6 +177,29 @@ async function onCreate() {
     if (alive && !controller.signal.aborted) error.value = t('voiceProfiles.err.create')
   } finally {
     if (alive && createController === controller) { saving.value = false; createController = null }
+  }
+}
+
+async function importStarter(id: string) {
+  if (!alive || loading.value || saving.value || deleting.value || importingId.value) return
+  const controller = new AbortController()
+  const generation = selectionGeneration
+  const draftWasOpen = createOpen.value
+  importController = controller
+  importingId.value = id
+  error.value = ''
+  notice.value = ''
+  try {
+    const imported = await profilesApi.importStarterSpeechVoice(id, controller.signal)
+    if (!alive || controller.signal.aborted) return
+    if (imported.starter_voice_id !== id) throw new TypeError('Starter import identifier mismatch')
+    profiles.value = [...profiles.value.filter(profile => profile.id !== imported.id), imported]
+    if (selectionGeneration === generation && !draftWasOpen && !createOpen.value) void selectStarterProfile(imported.id)
+    notice.value = t('speechWorkspace.starters.imported')
+  } catch {
+    if (alive && !controller.signal.aborted) error.value = t('speechWorkspace.starters.importError')
+  } finally {
+    if (alive && importController === controller) { importingId.value = ''; importController = null }
   }
 }
 
@@ -218,6 +271,7 @@ onBeforeUnmount(() => {
   ++trialGeneration
   ++selectionGeneration
   loadController?.abort(); createController?.abort(); deleteController?.abort(); trialController?.abort()
+  importController?.abort()
 })
 </script>
 
@@ -237,7 +291,7 @@ onBeforeUnmount(() => {
         <li v-for="profile in filteredProfiles" :key="profile.id">
           <button type="button" :aria-label="profile.name" :aria-pressed="selectedId === profile.id" class="w-full rounded-lg border px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-accent1" :class="selectedId === profile.id ? 'border-accent1 bg-accent1/10' : 'border-transparent hover:bg-panel-2'" @click="selectProfile(profile.id)">
             <span class="block truncate text-sm font-medium text-text">{{ profile.name }}</span>
-            <span class="mt-1 block text-xs text-text-dim">{{ profile.consent_confirmed ? t('voiceProfiles.consentOk') : t('voiceProfiles.consentMissing') }}</span>
+            <span class="mt-1 block text-xs text-text-dim">{{ !profile.consent_confirmed ? t('voiceProfiles.consentMissing') : profile.starter_voice_id ? t('speechWorkspace.licensedReference') : t('voiceProfiles.consentOk') }}</span>
           </button>
         </li>
       </ul>
@@ -247,6 +301,7 @@ onBeforeUnmount(() => {
     <div class="min-w-0 space-y-4">
       <p v-if="error" role="alert" class="rounded-lg border border-status-failed/40 bg-status-failed/10 px-4 py-3 text-sm text-status-failed">{{ error }}</p>
       <p v-if="notice" role="status" class="rounded-lg border border-status-done/30 bg-status-done/5 px-4 py-3 text-sm text-status-done">{{ notice }}</p>
+      <StarterSpeechVoices v-model:expanded="starterCatalogExpanded" :profiles="profiles" :active="active" :disabled="loading || saving || deleting" :importing-id="importingId" @import="importStarter" @select="selectStarterProfile" />
 
       <form v-if="createVisited" v-show="createOpen" :aria-label="t('speechWorkspace.createTitle')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onCreate">
         <div class="flex items-start justify-between gap-3">
@@ -258,7 +313,7 @@ onBeforeUnmount(() => {
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.audioLabel') }}</span><input ref="fileInput" type="file" accept=".wav,.flac,audio/wav,audio/flac" :aria-label="t('voiceProfiles.audioLabel')" :disabled="saving" class="block w-full text-sm text-text-dim file:mr-3 file:rounded-lg file:border-0 file:bg-panel-2 file:px-3 file:py-2 file:text-sm file:text-text focus-visible:outline-2 focus-visible:outline-accent1" @change="onFilePicked" /></label>
         <label class="flex items-start gap-2 text-sm text-text"><input v-model="consent" type="checkbox" :aria-label="t('voiceProfiles.consentLabel')" :disabled="saving" class="mt-1 focus-visible:outline-2 focus-visible:outline-accent1" /><span>{{ t('voiceProfiles.consentLabel') }}</span></label>
         <p v-if="!consent" class="text-xs text-text-dim">{{ t('voiceProfiles.err.consent') }}</p>
-        <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="saving || !consent">{{ saving ? t('speechWorkspace.createPending') : t('voiceProfiles.create') }}</button>
+        <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="saving || !!importingId || !consent">{{ saving ? t('speechWorkspace.createPending') : t('voiceProfiles.create') }}</button>
       </form>
 
       <form v-show="!createOpen" :aria-label="t('speechWorkspace.synthesis')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onTrial">
@@ -267,21 +322,27 @@ onBeforeUnmount(() => {
           <button v-if="selectedProfile" type="button" :disabled="deleting || loading" class="rounded-lg border border-border px-3 py-1.5 text-xs text-text-dim hover:border-status-failed hover:text-status-failed focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="requestDelete">{{ t('speechWorkspace.deleteProfile') }}</button>
         </div>
         <template v-if="selectedProfile">
-          <p class="text-xs" :class="selectedProfile.consent_confirmed ? 'text-text-dim' : 'text-status-failed'">{{ selectedProfile.consent_confirmed ? t('voiceProfiles.consentOk') : t('voiceProfiles.consentMissing') }}</p>
+          <p class="text-xs" :class="selectedProfile.consent_confirmed ? 'text-text-dim' : 'text-status-failed'">{{ !selectedProfile.consent_confirmed ? t('voiceProfiles.consentMissing') : selectedProfile.starter_voice_id ? t('speechWorkspace.licensedReference') : t('voiceProfiles.consentOk') }}</p>
           <p v-if="selectedProfile.notes" class="whitespace-pre-wrap break-words text-sm text-text-dim">{{ selectedProfile.notes }}</p>
-          <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
+          <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea ref="trialTextInput" v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
           <p v-if="!selectedProfile.consent_confirmed" class="text-xs text-status-failed">{{ t('speechWorkspace.consentRequired') }}</p>
           <p v-else-if="cloning" role="status" class="text-xs text-text-dim">{{ t('speechWorkspace.trialPendingHelp') }}</p>
           <p v-else-if="deleting && deleteTarget?.id === selectedId" class="text-xs text-text-dim">{{ t('speechWorkspace.deletePending') }}</p>
           <p v-else-if="!trialText.trim()" class="text-xs text-text-dim">{{ t('voiceProfiles.err.trialText') }}</p>
           <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="cloning || !selectedProfile.consent_confirmed || !trialText.trim() || deleting && deleteTarget?.id === selectedId">{{ cloning ? t('speechWorkspace.trialPending') : t('voiceProfiles.trialRun') }}</button>
-          <p v-if="trialResult?.output_path && (trialResult.status === 'completed' || trialResult.status === 'mock_completed')" class="rounded-lg border border-border bg-panel-2 p-3 text-sm text-text-dim">{{ t('speechWorkspace.playbackUnavailable') }}</p>
+          <div v-if="trialAudioUrl" data-speech-trial class="space-y-3 rounded-lg border border-border bg-panel-2 p-3">
+            <p class="text-sm text-text-dim">{{ t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.trialMock' : 'speechWorkspace.trialCompleted') }}</p>
+            <SpeechAudioPreview :src="trialAudioUrl" :label="t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.mockTrialAudio' : 'speechWorkspace.trialAudio')" :active="active && !createOpen" />
+            <a :href="trialAudioUrl" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('speechWorkspace.downloadTrial') }}</a>
+          </div>
+          <p v-else-if="trialResult?.output_path && (trialResult.status === 'completed' || trialResult.status === 'mock_completed')" class="rounded-lg border border-border bg-panel-2 p-3 text-sm text-text-dim">{{ t('speechWorkspace.playbackUnavailable') }}</p>
         </template>
         <p v-else class="text-sm text-text-dim">{{ t('speechWorkspace.selectOrCreate') }}</p>
       </form>
 
       <section class="rounded-xl border border-border bg-panel p-4" :aria-label="t('speechWorkspace.engineStatus')">
-        <div class="flex items-start justify-between gap-3"><h3 class="text-sm font-semibold text-text">{{ t('speechWorkspace.engineStatus') }}</h3><button type="button" :disabled="loading || saving || deleting" class="text-xs text-text-dim hover:text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="refresh">{{ t('speechWorkspace.refresh') }}</button></div>
+        <div class="flex items-start justify-between gap-3"><h3 class="text-sm font-semibold text-text">{{ t('speechWorkspace.engineStatus') }}</h3><button type="button" :disabled="loading || engineLoading || saving || deleting || !!importingId" class="text-xs text-text-dim hover:text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="refresh">{{ t('speechWorkspace.refresh') }}</button></div>
+        <p v-if="engineLoading" role="status" class="mt-3 text-xs text-text-dim">{{ t('speechWorkspace.enginePending') }}</p>
         <dl class="mt-3 grid gap-3 text-xs sm:grid-cols-3">
           <div><dt class="text-text-dim">{{ t('speechWorkspace.engineInstalled') }}</dt><dd class="mt-1 font-medium text-text">{{ engine ? (engine.installed ? t('speechWorkspace.installed') : t('speechWorkspace.missing')) : t('speechWorkspace.unknown') }}</dd></div>
           <div><dt class="text-text-dim">{{ t('speechWorkspace.engineMock') }}</dt><dd class="mt-1 font-medium text-text">{{ engine ? (engine.mock ? t('speechWorkspace.enabled') : t('speechWorkspace.disabled')) : t('speechWorkspace.unknown') }}</dd></div>
