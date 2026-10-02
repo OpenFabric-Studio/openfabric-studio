@@ -1,15 +1,18 @@
-"""HTTP tests for audiobook stub API."""
+"""HTTP tests for audiobook synthesis + export (mock speech path)."""
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
+import wave
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 from fastapi import FastAPI
 
-from app import audiobooks, voice_profiles
+from app import audiobooks, speech_clone, voice_profiles
 from app.api import routes_audiobooks, routes_voice_profiles
 
 
@@ -18,12 +21,26 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.profiles_root = Path(self.temporary.name) / "voice-profiles"
         self.books_root = Path(self.temporary.name) / "audiobooks"
+        self.trials = Path(self.temporary.name) / "trials"
         self.profiles_root.mkdir()
         self.books_root.mkdir()
+        self.trials.mkdir()
         self.profiles_patch = patch.object(voice_profiles, "PROFILES_ROOT", self.profiles_root)
         self.books_patch = patch.object(audiobooks, "BOOKS_ROOT", self.books_root)
+        self.trials_patch = patch.object(speech_clone, "TRIALS_ROOT", self.trials)
+        self.engine_patch = patch.object(
+            speech_clone, "ENGINE_DIR", Path(self.temporary.name) / "missing-engine"
+        )
         self.profiles_patch.start()
         self.books_patch.start()
+        self.trials_patch.start()
+        self.engine_patch.start()
+        self._env = {
+            "OPENFABRIC_SPEECH_CLONE_MOCK": os.environ.get("OPENFABRIC_SPEECH_CLONE_MOCK"),
+            "OPENFABRIC_AUDIOBOOK_SYNC": os.environ.get("OPENFABRIC_AUDIOBOOK_SYNC"),
+        }
+        os.environ["OPENFABRIC_SPEECH_CLONE_MOCK"] = "1"
+        os.environ["OPENFABRIC_AUDIOBOOK_SYNC"] = "1"
         app = FastAPI()
         app.include_router(routes_voice_profiles.router)
         app.include_router(routes_audiobooks.router)
@@ -35,6 +52,13 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         self.profiles_patch.stop()
         self.books_patch.stop()
+        self.trials_patch.stop()
+        self.engine_patch.stop()
+        for key, value in self._env.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
         self.temporary.cleanup()
 
     async def _profile(self) -> str:
@@ -46,7 +70,7 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]
 
-    async def test_create_book_queues_chapter_jobs(self) -> None:
+    async def test_create_book_synthesizes_chapters_and_export(self) -> None:
         profile_id = await self._profile()
         created = await self.client.post(
             "/api/audiobooks",
@@ -61,24 +85,39 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(created.status_code, 200, created.text)
         payload = created.json()
-        self.assertEqual(payload["book"]["title"], "Demo Book")
-        self.assertEqual(payload["book"]["status"], "queued")
-        self.assertEqual(payload["book"]["chapter_count"], 2)
-        self.assertEqual(len(payload["jobs"]), 2)
-        self.assertEqual(payload["jobs"][0]["status"], "queued")
-        self.assertEqual(payload["jobs"][0]["chapter_index"], 0)
+        book_id = payload["book"]["id"]
+        # Sync worker runs during POST, so book should already be done.
+        book = await self.client.get(f"/api/audiobooks/{book_id}")
+        self.assertEqual(book.status_code, 200, book.text)
+        self.assertEqual(book.json()["status"], "done", book.text)
+        self.assertTrue(book.json()["export_path"])
+        self.assertTrue(Path(book.json()["export_path"]).is_file())
 
-        listed = await self.client.get("/api/audiobooks")
-        self.assertEqual(listed.status_code, 200, listed.text)
-        self.assertEqual(len(listed.json()["books"]), 1)
-
-        jobs = await self.client.get(f"/api/audiobooks/{payload['book']['id']}/jobs")
+        jobs = await self.client.get(f"/api/audiobooks/{book_id}/jobs")
         self.assertEqual(jobs.status_code, 200, jobs.text)
-        self.assertEqual(len(jobs.json()["jobs"]), 2)
+        job_list = jobs.json()["jobs"]
+        self.assertEqual(len(job_list), 2)
+        for job in job_list:
+            self.assertEqual(job["status"], "done", job)
+            self.assertTrue(job["output_path"])
+            self.assertTrue(Path(job["output_path"]).is_file())
+            self.assertGreater(Path(job["output_path"]).stat().st_size, 44)
 
-        all_jobs = await self.client.get("/api/audiobooks/jobs")
-        self.assertEqual(all_jobs.status_code, 200, all_jobs.text)
-        self.assertEqual(len(all_jobs.json()["jobs"]), 2)
+        export = await self.client.get(f"/api/audiobooks/{book_id}/export")
+        self.assertEqual(export.status_code, 200, export.text)
+        self.assertTrue(export.content.startswith(b"RIFF"))
+        self.assertIn("audio/wav", export.headers.get("content-type", ""))
+
+        chapter = await self.client.get(f"/api/audiobooks/{book_id}/chapters/0/audio")
+        self.assertEqual(chapter.status_code, 200, chapter.text)
+        self.assertTrue(chapter.content.startswith(b"RIFF"))
+
+        # Concatenated export should be longer than a single silent chapter.
+        with wave.open(str(Path(book.json()["export_path"])), "rb") as handle:
+            export_frames = handle.getnframes()
+        with wave.open(job_list[0]["output_path"], "rb") as handle:
+            chapter_frames = handle.getnframes()
+        self.assertGreaterEqual(export_frames, chapter_frames * 2)
 
     async def test_create_requires_existing_consented_profile(self) -> None:
         missing = await self.client.post(
@@ -90,3 +129,57 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertEqual(missing.status_code, 404, missing.text)
+
+    async def test_rejects_oversized_chapter_text(self) -> None:
+        profile_id = await self._profile()
+        huge = "x" * (audiobooks.MAX_CHAPTER_CHARS + 1)
+        response = await self.client.post(
+            "/api/audiobooks",
+            json={
+                "title": "Too long",
+                "profile_id": profile_id,
+                "chapters": [{"text": huge}],
+            },
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+
+    async def test_retry_failed_chapters(self) -> None:
+        profile_id = await self._profile()
+        # First create succeeds under mock.
+        created = await self.client.post(
+            "/api/audiobooks",
+            json={
+                "title": "Retry Book",
+                "profile_id": profile_id,
+                "chapters": [{"title": "Only", "text": "Hello."}],
+            },
+        )
+        self.assertEqual(created.status_code, 200, created.text)
+        book_id = created.json()["book"]["id"]
+        # Force a failed job and clear export, then retry under mock.
+        with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+            audiobooks._ensure_schema(connection)
+            connection.execute(
+                """
+                UPDATE audiobook_jobs
+                SET status = 'failed', detail = 'forced', output_path = NULL
+                WHERE book_id = ?
+                """,
+                (book_id,),
+            )
+            connection.execute(
+                """
+                UPDATE audiobook_books
+                SET status = 'failed', export_path = NULL
+                WHERE id = ?
+                """,
+                (book_id,),
+            )
+            connection.commit()
+
+        retried = await self.client.post(f"/api/audiobooks/{book_id}/retry")
+        self.assertEqual(retried.status_code, 200, retried.text)
+        book = await self.client.get(f"/api/audiobooks/{book_id}")
+        self.assertEqual(book.json()["status"], "done", book.text)
+        export = await self.client.get(f"/api/audiobooks/{book_id}/export")
+        self.assertEqual(export.status_code, 200, export.text)

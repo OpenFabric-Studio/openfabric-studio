@@ -150,7 +150,10 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         fake_payload = b"RIFF" + (b"\x00" * 4) + b"WAVE" + b"fmt " + (b"\x00" * 50)
 
         def _fake_synth(**kwargs):
-            out = speech_clone.trials_root() / f"{uuid.uuid4().hex}.wav"
+            out = Path(kwargs["output_path"]) if kwargs.get("output_path") is not None else (
+                speech_clone.trials_root() / f"{uuid.uuid4().hex}.wav"
+            )
+            out.parent.mkdir(parents=True, exist_ok=True)
             out.write_bytes(fake_payload)
             return out
 

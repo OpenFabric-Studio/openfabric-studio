@@ -8,7 +8,7 @@
 
 ---
 
-## Current baseline (2026-10-02, Phase B wiring)
+## Current baseline (2026-10-02, Phase C audiobooks)
 
 | Piece | State |
 |-------|--------|
@@ -16,7 +16,7 @@
 | `POST /api/speech-clone/trials` | Detect + mock + real HTTP invoke via GPT-SoVITS `api.py` (`POST /` @ `:9880`) |
 | Engine statuses | `engine_not_installed` / `api_unavailable` / `completed` / `failed` / `mock_completed` |
 | Seed-VC | Singing only |
-| Audiobooks | Stub API; no concat export yet |
+| Audiobooks | Phase C: serial chapter synth + ffmpeg export + download + basic UI |
 | GPT-SoVITS checkout | Optional `external/gpt-sovits` via `./setup_speech.sh` |
 | GPT-SoVITS weights | **Not** downloaded by OpenFabric — manual (see setup_speech.sh output) |
 
@@ -65,12 +65,12 @@ cd "$OPENFABRIC_GPT_SOVITS_DIR" && source .venv/bin/activate && python api.py -a
 
 ### Phase C — Audiobook v1
 
-1. **Stub (this pass):** `POST /api/audiobooks` creates a book + one queued job per chapter (text from paste or chapter list). `GET` list books / jobs. No synthesis yet.
-2. **Worker:** for each chapter job, call speech-clone worker (same engine as trials); write per-chapter WAV.
-3. **Export:** concatenate chapter WAVs (ffmpeg) → single audiobook file; expose download. Pause / retry failed chapters.
-4. **UI (follow-up):** Audiobook panel — title, profile, chapter paste or `.txt` upload, job list, export button.
+1. **Stub:** `POST /api/audiobooks` creates a book + one queued job per chapter. `GET` list books / jobs. **Done.**
+2. **Worker:** for each chapter job, call speech-clone worker (same engine as trials); write per-chapter WAV under `DATA_DIR/audiobooks/<book_id>/chapters/`. **Done** (serial thread; `OPENFABRIC_AUDIOBOOK_SYNC=1` for tests).
+3. **Export:** concatenate chapter WAVs (ffmpeg) → `export.wav`; `GET /api/audiobooks/{id}/export` + chapter audio. Retry failed chapters via `POST .../retry`. **Done** (pause deferred).
+4. **UI:** Audiobook panel on Voice page — title, profile, chapter paste, job list, download. **Done** (no `.txt` upload yet).
 
-Chapter limits (v1): reasonable text caps per chapter; queue serially on one GPU to avoid OOM.
+Chapter limits (v1): ≤20k chars/chapter, ≤100 chapters; queue serially on one worker to avoid OOM.
 
 ### Phase D — Hardening (after real synth works)
 
@@ -97,7 +97,7 @@ Chapter limits (v1): reasonable text caps per chapter; queue serially on one GPU
 | A | Detect + mock paths tested; missing engine returns clean 501; plan + NOTICE OK |
 | B | Profile + text → real WAV with user-installed GPT-SoVITS |
 | C stub | Create book from chapters; list jobs (`queued`) |
-| C full | Chapters synthesize + concatenated export plays |
+| C full | Chapters synthesize + concatenated export plays (**this pass**, mock + live) |
 
 ---
 

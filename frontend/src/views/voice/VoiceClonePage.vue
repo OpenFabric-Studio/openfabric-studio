@@ -15,6 +15,7 @@ import { emptyVoiceReviewState, voiceWorkspaceSteps, type VoiceWorkspaceStep } f
 import { voiceStepFacts } from './voiceProgress'
 import VoiceJobSummary from './VoiceJobSummary.vue'
 import VoiceProfilesPanel from './VoiceProfilesPanel.vue'
+import AudiobooksPanel from './AudiobooksPanel.vue'
 
 const { t } = useI18n()
 
@@ -361,6 +362,8 @@ onBeforeUnmount(() => {
     </div>
 
     <VoiceProfilesPanel />
+
+    <AudiobooksPanel />
 
     <p v-if="error" class="rounded-lg border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-sm text-status-failed">
       {{ error }}

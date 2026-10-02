@@ -10,6 +10,7 @@ import os
 import struct
 import uuid
 import wave
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urljoin
@@ -126,17 +127,9 @@ def _write_silent_wav(path: Path, *, duration_s: float = 0.25, rate: int = 16000
         handle.writeframes(struct.pack("<" + "h" * frames, *([0] * frames)))
 
 
-def _mock_synthesize(*, profile_id: str, text: str) -> tuple[str, Path]:
-    trial_id = uuid.uuid4().hex
-    _ = (profile_id, text)
-    out = trials_root() / f"{trial_id}.wav"
-    _write_silent_wav(out)
-    return trial_id, out
-
-
-def _resolve_prompt_text(body: SpeechCloneTrialRequest, notes: str) -> str:
-    if body.prompt_text and body.prompt_text.strip():
-        return body.prompt_text.strip()
+def _resolve_prompt_text(prompt_text: str | None, notes: str) -> str:
+    if prompt_text and prompt_text.strip():
+        return prompt_text.strip()
     if notes.strip():
         return notes.strip()
     return "Reference audio."
@@ -153,9 +146,10 @@ def _synthesize_via_api(
     prompt_language: str,
     text: str,
     text_language: str,
+    output_path: Path | None = None,
 ) -> Path:
-    trial_id = uuid.uuid4().hex
-    out = trials_root() / f"{trial_id}.wav"
+    out = Path(output_path) if output_path is not None else trials_root() / f"{uuid.uuid4().hex}.wav"
+    out.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "refer_wav_path": refer_wav_path,
         "prompt_text": prompt_text,
@@ -185,6 +179,104 @@ def _synthesize_via_api(
     return out
 
 
+@dataclass(frozen=True)
+class SynthesisOutcome:
+    """Shared result for speech trials and audiobook chapter jobs."""
+
+    status: Literal[
+        "engine_not_installed",
+        "engine_ready",
+        "api_unavailable",
+        "mock_completed",
+        "completed",
+        "failed",
+    ]
+    detail: str
+    output_path: Path | None = None
+    install_hints: list[str] = field(default_factory=list)
+
+
+def synthesize_to_path(
+    *,
+    profile_id: str,
+    text: str,
+    output_path: Path,
+    prompt_text: str | None = None,
+    prompt_language: str | None = None,
+    text_language: str | None = None,
+    require_consent: bool = True,
+) -> SynthesisOutcome:
+    """Synthesize talking speech into ``output_path`` (mock, API, or structured failure).
+
+    Used by speech trials and audiobook chapter workers. Always re-reads the
+    profile so consent cannot be skipped after enqueue.
+    """
+    profile = voice_profiles.get_profile(profile_id)
+    if require_consent and not profile.consent_confirmed:
+        raise voice_profiles.VoiceProfileError("consent_required", 403)
+    cleaned = text.strip()
+    if not cleaned:
+        raise voice_profiles.VoiceProfileError("text_required")
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if mock_enabled():
+        _write_silent_wav(output_path)
+        return SynthesisOutcome(
+            status="mock_completed",
+            detail="Dry-run speech clone wrote a silent placeholder WAV (OPENFABRIC_SPEECH_CLONE_MOCK).",
+            output_path=output_path,
+        )
+
+    root = resolve_engine_root()
+    if root is None:
+        return SynthesisOutcome(
+            status="engine_not_installed",
+            detail=(
+                "GPT-SoVITS speech engine is not installed or OPENFABRIC_GPT_SOVITS_DIR "
+                "does not point at a valid checkout."
+            ),
+            install_hints=list(INSTALL_HINTS),
+        )
+
+    if not api_reachable():
+        return SynthesisOutcome(
+            status="api_unavailable",
+            detail=(
+                f"GPT-SoVITS checkout detected at {root}, but the local API at "
+                f"{api_base_url()} is not reachable. Start api.py (see install hints) "
+                "after pretrained weights are in place."
+            ),
+            install_hints=list(INSTALL_HINTS),
+        )
+
+    resolved_prompt = _resolve_prompt_text(prompt_text, profile.notes)
+    prompt_language_value = (prompt_language or "en").strip() or "en"
+    text_language_value = (text_language or "en").strip() or "en"
+    refer = str(Path(profile.reference_audio_path).resolve())
+    try:
+        produced = _synthesize_via_api(
+            refer_wav_path=refer,
+            prompt_text=resolved_prompt,
+            prompt_language=prompt_language_value,
+            text=cleaned,
+            text_language=text_language_value,
+            output_path=output_path,
+        )
+        return SynthesisOutcome(
+            status="completed",
+            detail=f"Synthesized via GPT-SoVITS api.py at {api_base_url()}.",
+            output_path=produced,
+        )
+    except Exception as exc:  # noqa: BLE001 — surface engine errors as structured failed status
+        return SynthesisOutcome(
+            status="failed",
+            detail=f"GPT-SoVITS synthesis failed: {exc}",
+            install_hints=list(INSTALL_HINTS),
+        )
+
+
 def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
     profile = voice_profiles.get_profile(body.profile_id)
     if not profile.consent_confirmed:
@@ -193,79 +285,25 @@ def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
     if not text:
         raise voice_profiles.VoiceProfileError("text_required")
 
-    if mock_enabled():
-        trial_id, out = _mock_synthesize(profile_id=body.profile_id, text=text)
-        return SpeechCloneTrialResponse(
-            status="mock_completed",
-            detail="Dry-run speech clone wrote a silent placeholder WAV (OPENFABRIC_SPEECH_CLONE_MOCK).",
-            engine=body.engine,
-            profile_id=body.profile_id,
-            install_hints=[],
-            trial_id=trial_id,
-            output_path=str(out),
-        )
-
-    root = resolve_engine_root()
-    if root is None:
-        return SpeechCloneTrialResponse(
-            status="engine_not_installed",
-            detail=(
-                "GPT-SoVITS speech engine is not installed or OPENFABRIC_GPT_SOVITS_DIR "
-                "does not point at a valid checkout."
-            ),
-            engine=body.engine,
-            profile_id=body.profile_id,
-            install_hints=list(INSTALL_HINTS),
-            trial_id=None,
-            output_path=None,
-        )
-
-    if not api_reachable():
-        return SpeechCloneTrialResponse(
-            status="api_unavailable",
-            detail=(
-                f"GPT-SoVITS checkout detected at {root}, but the local API at "
-                f"{api_base_url()} is not reachable. Start api.py (see install hints) "
-                "after pretrained weights are in place."
-            ),
-            engine=body.engine,
-            profile_id=body.profile_id,
-            install_hints=list(INSTALL_HINTS),
-            trial_id=None,
-            output_path=None,
-        )
-
-    prompt_text = _resolve_prompt_text(body, profile.notes)
-    prompt_language = (body.prompt_language or "en").strip() or "en"
-    text_language = (body.text_language or "en").strip() or "en"
-    refer = str(Path(profile.reference_audio_path).resolve())
-    try:
-        out = _synthesize_via_api(
-            refer_wav_path=refer,
-            prompt_text=prompt_text,
-            prompt_language=prompt_language,
-            text=text,
-            text_language=text_language,
-        )
-    except Exception as exc:  # noqa: BLE001 — surface engine errors as structured failed status
-        return SpeechCloneTrialResponse(
-            status="failed",
-            detail=f"GPT-SoVITS synthesis failed: {exc}",
-            engine=body.engine,
-            profile_id=body.profile_id,
-            install_hints=list(INSTALL_HINTS),
-            trial_id=None,
-            output_path=None,
-        )
-
+    trial_id = uuid.uuid4().hex
+    out = trials_root() / f"{trial_id}.wav"
+    outcome = synthesize_to_path(
+        profile_id=body.profile_id,
+        text=text,
+        output_path=out,
+        prompt_text=body.prompt_text,
+        prompt_language=body.prompt_language,
+        text_language=body.text_language,
+        require_consent=True,
+    )
     return SpeechCloneTrialResponse(
-        status="completed",
-        detail=f"Synthesized via GPT-SoVITS api.py at {api_base_url()}.",
+        status=outcome.status,
+        detail=outcome.detail,
         engine=body.engine,
         profile_id=body.profile_id,
-        install_hints=[],
-        trial_id=out.stem,
-        output_path=str(out),
+        install_hints=list(outcome.install_hints),
+        trial_id=trial_id if outcome.output_path is not None else None,
+        output_path=str(outcome.output_path) if outcome.output_path is not None else None,
     )
 
 

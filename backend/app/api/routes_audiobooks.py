@@ -1,7 +1,8 @@
-"""REST API for audiobook books and chapter speech jobs (stub synthesis)."""
+"""REST API for audiobook books, chapter speech jobs, and export download."""
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from .. import audiobooks, voice_profiles
 from ..audiobook_contracts import (
@@ -54,3 +55,34 @@ def list_audiobook_jobs(book_id: str) -> AudiobookJobsResponse:
     except audiobooks.AudiobookError as exc:
         _raise(exc)
         raise  # pragma: no cover
+
+
+@router.post("/{book_id}/retry", response_model=AudiobookBook)
+def retry_audiobook(book_id: str) -> AudiobookBook:
+    try:
+        return audiobooks.retry_failed(book_id)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise  # pragma: no cover
+
+
+@router.get("/{book_id}/export")
+def download_audiobook_export(book_id: str) -> FileResponse:
+    try:
+        path = audiobooks.export_path_for(book_id)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise  # pragma: no cover
+    book = audiobooks.get_book(book_id)
+    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in book.title).strip() or "audiobook"
+    return FileResponse(path, media_type="audio/wav", filename=f"{safe}.wav")
+
+
+@router.get("/{book_id}/chapters/{chapter_index}/audio")
+def download_chapter_audio(book_id: str, chapter_index: int) -> FileResponse:
+    try:
+        path = audiobooks.chapter_audio_path(book_id, chapter_index)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise  # pragma: no cover
+    return FileResponse(path, media_type="audio/wav", filename=f"chapter-{chapter_index:04d}.wav")

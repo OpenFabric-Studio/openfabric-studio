@@ -12,13 +12,13 @@ AudiobookBookStatus = Literal["draft", "queued", "running", "done", "failed"]
 
 class AudiobookChapterInput(Contract):
     title: str = Field(default="", max_length=200)
-    text: str = Field(min_length=1, max_length=100_000)
+    text: str = Field(min_length=1, max_length=20_000)
 
 
 class CreateAudiobookRequest(Contract):
     title: str = Field(min_length=1, max_length=200)
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
-    chapters: list[AudiobookChapterInput] = Field(min_length=1, max_length=500)
+    chapters: list[AudiobookChapterInput] = Field(min_length=1, max_length=100)
 
 
 class AudiobookJob(Contract):

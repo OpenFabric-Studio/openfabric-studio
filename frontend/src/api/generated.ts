@@ -6969,7 +6969,7 @@ const schemas = {
         "type": "string"
       },
       "text": {
-        "maxLength": 100000,
+        "maxLength": 20000,
         "minLength": 1,
         "title": "Text",
         "type": "string"
@@ -7000,7 +7000,7 @@ const schemas = {
         "items": {
           "$ref": "#/$defs/AudiobookChapterInput"
         },
-        "maxItems": 500,
+        "maxItems": 100,
         "minItems": 1,
         "title": "Chapters",
         "type": "array"
