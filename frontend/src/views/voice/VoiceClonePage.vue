@@ -14,6 +14,7 @@ import { useVoiceSession } from './useVoiceSession'
 import { emptyVoiceReviewState, voiceWorkspaceSteps, type VoiceWorkspaceStep } from './voiceWorkspace'
 import { voiceStepFacts } from './voiceProgress'
 import VoiceJobSummary from './VoiceJobSummary.vue'
+import VoiceProfilesPanel from './VoiceProfilesPanel.vue'
 
 const { t } = useI18n()
 
@@ -358,6 +359,8 @@ onBeforeUnmount(() => {
       <h1 class="text-2xl font-semibold text-text">{{ t('voiceClone.title') }}</h1>
       <p class="mt-2 text-sm text-text-dim">{{ t('voiceClone.intro') }}</p>
     </div>
+
+    <VoiceProfilesPanel />
 
     <p v-if="error" class="rounded-lg border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-sm text-status-failed">
       {{ error }}

@@ -47,6 +47,7 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **ACE-Step 1.5** | Text/style music generation, covers, section edits |
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
+| **Speech profiles** | Consent-backed reference clips for talking / audiobook (GPT-SoVITS planned) |
 | **Video Studio** | Shot lists / LTX-oriented video workflow (experimental) |
 | **Demucs / DAW** | Stems and multitrack timeline |
 
@@ -81,6 +82,14 @@ cd openfabric-studio
 Desktop packaging is experimental; CI packaging runs only on tags / manual dispatch to save Actions minutes.
 
 ---
+
+
+
+## Talking / audiobook path
+
+Singing voice cloning uses **Seed-VC** today.
+
+Talking and audiobook cloning is planned via **[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)** (MIT). OpenFabric stores consent-backed speech **voice profiles** (`/api/voice-profiles`) and exposes a scaffold trial endpoint (`POST /api/speech-clone/trials`) that returns `engine_not_installed` until you install GPT-SoVITS yourself. Model weights are not downloaded by this repo.
 
 ## License and liability
 

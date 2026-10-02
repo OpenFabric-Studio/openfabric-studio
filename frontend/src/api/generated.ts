@@ -378,6 +378,12 @@ export type OrchestratorStatusResponse = {
   "models": ModelStates
 }
 
+export type PatchSpeechVoiceProfileRequest = {
+  "name"?: (string | null)
+  "notes"?: (string | null)
+  "consent_confirmed"?: (boolean | null)
+}
+
 export type PlanRequest = {
   "track_id": number
 }
@@ -581,6 +587,35 @@ export type ShotRequest = {
   "start_sec"?: number
   "seconds"?: number
   "prompt"?: string
+}
+
+export type SpeechCloneTrialRequest = {
+  "profile_id": string
+  "text": string
+  "engine"?: "speech" | "gpt-sovits"
+}
+
+export type SpeechCloneTrialResponse = {
+  "status": "engine_not_installed"
+  "detail": string
+  "engine": "speech" | "gpt-sovits"
+  "profile_id": string
+  "install_hints": Array<string>
+}
+
+export type SpeechVoiceProfile = {
+  "id": string
+  "name": string
+  "consent_confirmed": boolean
+  "reference_audio_path": string
+  "notes"?: string
+  "created_at": string
+  "updated_at": string
+  "engine_hints"?: (Record<string, JsonValue> | null)
+}
+
+export type SpeechVoiceProfilesResponse = {
+  "profiles": Array<SpeechVoiceProfile>
 }
 
 export type StemAudioExportResponse = {
@@ -6535,6 +6570,210 @@ const schemas = {
     "title": "LibraryPickResponse",
     "type": "object"
   },
+  "SpeechVoiceProfile": {
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "consent_confirmed": {
+        "title": "Consent Confirmed",
+        "type": "boolean"
+      },
+      "reference_audio_path": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "title": "Reference Audio Path",
+        "type": "string"
+      },
+      "notes": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Notes",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      },
+      "engine_hints": {
+        "anyOf": [
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/JsonValue"
+            },
+            "type": "object"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine Hints"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "consent_confirmed",
+      "reference_audio_path",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "SpeechVoiceProfile",
+    "type": "object"
+  },
+  "SpeechVoiceProfilesResponse": {
+    "properties": {
+      "profiles": {
+        "items": {
+          "$ref": "#/$defs/SpeechVoiceProfile"
+        },
+        "title": "Profiles",
+        "type": "array"
+      }
+    },
+    "required": [
+      "profiles"
+    ],
+    "title": "SpeechVoiceProfilesResponse",
+    "type": "object"
+  },
+  "PatchSpeechVoiceProfileRequest": {
+    "properties": {
+      "name": {
+        "anyOf": [
+          {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Name"
+      },
+      "notes": {
+        "anyOf": [
+          {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Notes"
+      },
+      "consent_confirmed": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Consent Confirmed"
+      }
+    },
+    "title": "PatchSpeechVoiceProfileRequest",
+    "type": "object"
+  },
+  "SpeechCloneTrialRequest": {
+    "properties": {
+      "profile_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 8000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "engine": {
+        "default": "gpt-sovits",
+        "enum": [
+          "speech",
+          "gpt-sovits"
+        ],
+        "title": "Engine",
+        "type": "string"
+      }
+    },
+    "required": [
+      "profile_id",
+      "text"
+    ],
+    "title": "SpeechCloneTrialRequest",
+    "type": "object"
+  },
+  "SpeechCloneTrialResponse": {
+    "properties": {
+      "status": {
+        "const": "engine_not_installed",
+        "title": "Status",
+        "type": "string"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "engine": {
+        "enum": [
+          "speech",
+          "gpt-sovits"
+        ],
+        "title": "Engine",
+        "type": "string"
+      },
+      "profile_id": {
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "install_hints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Install Hints",
+        "type": "array"
+      }
+    },
+    "required": [
+      "status",
+      "detail",
+      "engine",
+      "profile_id",
+      "install_hints"
+    ],
+    "title": "SpeechCloneTrialResponse",
+    "type": "object"
+  },
   "ArtistSettings": {
     "additionalProperties": false,
     "properties": {
@@ -9954,6 +10193,46 @@ function isLibraryPickResponse(value: unknown): value is LibraryPickResponse {
 }
 export function parseLibraryPickResponse(value: unknown): LibraryPickResponse {
   if (!isLibraryPickResponse(value)) throw new TypeError("Invalid LibraryPickResponse response")
+  return value
+}
+
+function isSpeechVoiceProfile(value: unknown): value is SpeechVoiceProfile {
+  return decodeSchema(schemas.SpeechVoiceProfile, value, schemas)
+}
+export function parseSpeechVoiceProfile(value: unknown): SpeechVoiceProfile {
+  if (!isSpeechVoiceProfile(value)) throw new TypeError("Invalid SpeechVoiceProfile response")
+  return value
+}
+
+function isSpeechVoiceProfilesResponse(value: unknown): value is SpeechVoiceProfilesResponse {
+  return decodeSchema(schemas.SpeechVoiceProfilesResponse, value, schemas)
+}
+export function parseSpeechVoiceProfilesResponse(value: unknown): SpeechVoiceProfilesResponse {
+  if (!isSpeechVoiceProfilesResponse(value)) throw new TypeError("Invalid SpeechVoiceProfilesResponse response")
+  return value
+}
+
+function isPatchSpeechVoiceProfileRequest(value: unknown): value is PatchSpeechVoiceProfileRequest {
+  return decodeSchema(schemas.PatchSpeechVoiceProfileRequest, value, schemas)
+}
+export function parsePatchSpeechVoiceProfileRequest(value: unknown): PatchSpeechVoiceProfileRequest {
+  if (!isPatchSpeechVoiceProfileRequest(value)) throw new TypeError("Invalid PatchSpeechVoiceProfileRequest response")
+  return value
+}
+
+function isSpeechCloneTrialRequest(value: unknown): value is SpeechCloneTrialRequest {
+  return decodeSchema(schemas.SpeechCloneTrialRequest, value, schemas)
+}
+export function parseSpeechCloneTrialRequest(value: unknown): SpeechCloneTrialRequest {
+  if (!isSpeechCloneTrialRequest(value)) throw new TypeError("Invalid SpeechCloneTrialRequest response")
+  return value
+}
+
+function isSpeechCloneTrialResponse(value: unknown): value is SpeechCloneTrialResponse {
+  return decodeSchema(schemas.SpeechCloneTrialResponse, value, schemas)
+}
+export function parseSpeechCloneTrialResponse(value: unknown): SpeechCloneTrialResponse {
+  if (!isSpeechCloneTrialResponse(value)) throw new TypeError("Invalid SpeechCloneTrialResponse response")
   return value
 }
 
