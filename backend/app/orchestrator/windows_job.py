@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Callable
 from typing import Protocol
 
-NAME_PATTERN = r'Local\\RemiqoraNative_[0-9a-f]{32}'
+NAME_PATTERN = r'Local\\OpenFabricNative_[0-9a-f]{32}'
 KILL_ON_JOB_CLOSE = 0x2000
 
 
@@ -129,7 +129,7 @@ class WindowsJob:
     @classmethod
     def create(cls, api: JobApi | None = None) -> WindowsJob:
         native = api if api is not None else CtypesJobApi()
-        name = 'Local\\RemiqoraNative_' + uuid.uuid4().hex
+        name = 'Local\\OpenFabricNative_' + uuid.uuid4().hex
         handle = checked_handle(native.create(name))
         try:
             native.set_kill_on_close(handle)

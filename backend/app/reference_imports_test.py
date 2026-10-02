@@ -35,7 +35,7 @@ class ReferenceBoundaryTests(unittest.IsolatedAsyncioTestCase):
                             on_identity: Callable[[refs.WorkerIdentity], None] | None = None) -> asyncio.subprocess.Process:
                 identity = refs.WorkerIdentity(pid=123, token='a' * 32, receipt=str(receipt_path))
                 receipt_path.write_text(json.dumps({'pid': 123, 'token': 'a' * 32, 'returncode': 0,
-                                                   'job_name': 'Local\\RemiqoraNative_' + 'b' * 32}))
+                                                   'job_name': 'Local\\OpenFabricNative_' + 'b' * 32}))
                 if on_identity is not None:
                     on_identity(identity)
                 return process
@@ -99,7 +99,7 @@ class ReferenceBoundaryTests(unittest.IsolatedAsyncioTestCase):
             (workspace / 'probe.json').write_text('{"worker":null}')
             receipt = workspace / ('receipt-' + 'd' * 32 + '.json')
             proof = {'pid': 456, 'token': 'e' * 32, 'returncode': 0,
-                     'job_name': 'Local\\RemiqoraNative_' + 'f' * 32}
+                     'job_name': 'Local\\OpenFabricNative_' + 'f' * 32}
             receipt.write_text(json.dumps(proof))
             with patch.object(refs, 'terminate_verified', AsyncMock(return_value=False)) as terminate:
                 await refs.recover()

@@ -18,7 +18,7 @@ The Windows baseline prebuilt engine requires CUDA-capable hardware and driver 5
 
 ## Data folders and existing installations
 
-The fork has app ID `io.github.mchosc.remiqora`, its own Electron preferences, and `OpenFabric Studio-mchosc-*` installer names. **The default data root remains `Remiqora`:** `%LOCALAPPDATA%\Remiqora` on Windows, `~/Library/Application Support/Remiqora` on macOS, or `$XDG_DATA_HOME/Remiqora` (normally `~/.local/share/Remiqora`) on Linux.
+The app ID is `io.github.openfabric.studio` (see `electron-builder.yml`), with its own Electron preferences and OpenFabric Studio installer names. **Default data root is `OpenFabricStudio`:** `%LOCALAPPDATA%\OpenFabricStudio` on Windows, `~/Library/Application Support/OpenFabricStudio` on macOS, or `$XDG_DATA_HOME/OpenFabricStudio` (normally `~/.local/share/OpenFabricStudio`) on Linux. Libraries created by upstream Remiqora (`Remiqora` folder names) are separate; choose that folder explicitly during setup only if you intend to reuse it.
 
 An upstream custom-folder selection does not transfer to the fork’s preferences automatically. Back up the library, stop the upstream app, and explicitly choose the existing folder during fork setup if you intend to reuse it. Choose a separate folder for independent testing. **Never run upstream and fork processes that write the same library at the same time.** The different desktop identity does not isolate shared databases or engines.
 
@@ -30,7 +30,7 @@ Use Node.js 22.12 or newer. From a fresh checkout:
 
 ```bash
 git clone https://github.com/OpenFabric-Studio/openfabric-studio.git
-cd remiqora/frontend
+cd openfabric-studio/frontend
 npm ci
 npm run build
 cd ../desktop
@@ -53,7 +53,7 @@ npm ci
 npm run dist
 ```
 
-Outputs live under `desktop/dist/` with `Remiqora-mchosc-*` names. Build macOS packages on macOS. `npm run dist:dir` creates an unpacked application for testing.
+Outputs live under `desktop/dist/` with OpenFabric Studio package names. Build macOS packages on macOS. `npm run dist:dir` creates an unpacked application for testing.
 
 The build runs the frontend’s strict type check/build, copies backend sources, frontend assets and the ACE-Step/model-download patches into `resources/`, and refuses to package detected `.env`, databases or virtualenvs. Linux `.env.setup` proposals are excluded. It does not bundle model weights. Builds are unsigned and can trigger platform security prompts.
 
@@ -81,11 +81,11 @@ The local `model-manager-resume` update applies [yue-model-resume.patch](../exte
 
 | Variable | Effect |
 | --- | --- |
-| `REMIQORA_HOME` | Override the default setup root |
-| `REMIQORA_USER_DATA` | Isolate Electron’s saved preferences |
-| `REMIQORA_SKIP_COMPONENTS` | Skip listed setup components, e.g. `ace-step,demucs,weights` |
-| `REMIQORA_LANG` | Force setup language: `en` or `ru` |
-| `REMIQORA_DEVTOOLS` | Open source-run DevTools |
+| `OPENFABRIC_HOME` | Override the default setup root |
+| `OPENFABRIC_USER_DATA` | Isolate Electron’s saved preferences |
+| `OPENFABRIC_SKIP_COMPONENTS` | Skip listed setup components, e.g. `ace-step,demucs,weights` |
+| `OPENFABRIC_LANG` | Force setup language (`en`) |
+| `OPENFABRIC_DEVTOOLS` | Open source-run DevTools |
 
 `npm test` uses Node’s test runner and an offline Python 3 harness for downloader/setup/lifecycle behavior. Set `PYTHON_BIN` if Python is not available as `python3` (`python` on Windows). Linux script tests use fake tools and are skipped on Windows. Tests use temporary configuration/data/engine paths and do not download GPU weights. Follow [AGENTS.md](../AGENTS.md) and the isolated full checks in [fork maintenance](../docs/fork-maintenance.md).
 

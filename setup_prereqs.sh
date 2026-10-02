@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the developer toolchain Remiqora's other scripts need, via
+# Installs the developer toolchain OpenFabric's other scripts need, via
 # Homebrew (https://brew.sh). Windows equivalent: setup_prereqs.ps1.
 #
 # NOT covered here, on purpose:

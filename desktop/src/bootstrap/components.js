@@ -238,7 +238,7 @@ function buildComponents({ L, manifest, platform, resources }) {
     network: false,
     version: modelManagerVersion,
     async verify() {
-      const marker = await fsp.readFile(path.join(L.yue2, 'tools', '.remiqora-resume-version'), 'utf8').catch(() => '');
+      const marker = await fsp.readFile(path.join(L.yue2, 'tools', '.openfabric-resume-version'), 'utf8').catch(() => '');
       const script = await fsp.readFile(path.join(L.yue2, 'tools', 'model_manager_v2.py')).catch(() => null);
       return script !== null && marker === `${modelManagerVersion}:${sha256(script)}`
         && await isGitPatchApplied(modelManagerPatch, L.yue2);
@@ -246,7 +246,7 @@ function buildComponents({ L, manifest, platform, resources }) {
     async install() {
       if (!(await isGitPatchApplied(modelManagerPatch, L.yue2))) await applyGitPatch(modelManagerPatch, L.yue2);
       const script = await fsp.readFile(path.join(L.yue2, 'tools', 'model_manager_v2.py'));
-      const marker = path.join(L.yue2, 'tools', '.remiqora-resume-version');
+      const marker = path.join(L.yue2, 'tools', '.openfabric-resume-version');
       const temporary = `${marker}.${crypto.randomUUID()}.tmp`;
       try {
         await fsp.writeFile(temporary, `${modelManagerVersion}:${sha256(script)}`, { flag: 'wx' });
@@ -261,11 +261,11 @@ function buildComponents({ L, manifest, platform, resources }) {
     version: aceVersion,
     verify: async () => {
       await recoverAceStepSource(L.aceStep);
-      return (await fsp.readFile(path.join(L.aceStep, '.remiqora-patched'), 'utf8').catch(() => '')).trim() === aceVersion
+      return (await fsp.readFile(path.join(L.aceStep, '.openfabric-patched'), 'utf8').catch(() => '')).trim() === aceVersion
         && (await exists(path.join(L.aceStep, '.venv')));
     },
     async install(ctx, report) {
-      const marker = path.join(L.aceStep, '.remiqora-patched');
+      const marker = path.join(L.aceStep, '.openfabric-patched');
       await recoverAceStepSource(L.aceStep);
       const wanted = aceVersion;
       const patched = (await exists(marker)) && (await fsp.readFile(marker, 'utf8')).trim() === wanted;
@@ -276,7 +276,7 @@ function buildComponents({ L, manifest, platform, resources }) {
         await fsp.rm(tmp, { recursive: true, force: true });
         await extract(archive, tmp, { stripComponents: 1 });
         await applyGitPatch(await fsp.readFile(resources.acePatch, 'utf8'), tmp);
-        await fsp.writeFile(path.join(tmp, '.remiqora-patched'), wanted);
+        await fsp.writeFile(path.join(tmp, '.openfabric-patched'), wanted);
         await replaceAceStepSource(L.aceStep, tmp);
         await fsp.rm(archive, { force: true });
       }

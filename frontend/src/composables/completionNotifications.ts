@@ -1,7 +1,7 @@
 import { reactive } from 'vue'
 import { isObject } from '../api/schemaValidation'
 import { i18n } from '../i18n'
-const KEY = 'remiqora_generation_notifications'
+const KEY = 'openfabric_generation_notifications'
 const MAX_IDS = 10000
 export const completionNotifications = reactive({ enabled: false, seen: [] as string[], pending: [] as string[], unread: [] as string[], read: [] as string[], status: '' as '' | 'unsupported' | 'denied' | 'unavailable' })
 function ids(value: unknown): string[] {
@@ -33,7 +33,7 @@ async function serialize(work: () => Promise<void>): Promise<void> {
   const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
   if (!locks) { await work(); return }
   let started = false
-  try { await locks.request('remiqora-completion-notifications', async () => { started = true; await work() }) }
+  try { await locks.request('openfabric-completion-notifications', async () => { started = true; await work() }) }
   catch { if (!started) await work() }
 }
 function write(): void {
@@ -47,7 +47,7 @@ function onStorage(event: StorageEvent) { if (event.key === KEY || event.key ===
 export function startCompletionPreferenceSync(): void { if (!syncing) { syncing = true; window.addEventListener('storage', onStorage) } }
 export function stopCompletionPreferenceSync(): void { syncing = false; window.removeEventListener('storage', onStorage) }
 export async function notificationCapability(): Promise<boolean> {
-  const bridge = window.remiqoraNotifications
+  const bridge = window.openfabricNotifications
   if (bridge) {
     try { const response = await bridge.capability(); return isObject(response) && response.supported === true } catch { return false }
   }
@@ -57,7 +57,7 @@ export async function enableCompletionNotifications(enabled: boolean): Promise<b
   completionNotifications.status = ''
   if (!enabled) { completionNotifications.enabled = false; await persist(false); return false }
   if (!await notificationCapability()) { completionNotifications.enabled = false; completionNotifications.status = 'unsupported'; await persist(false); return false }
-  if (!window.remiqoraNotifications) {
+  if (!window.openfabricNotifications) {
     try {
       const permission = Notification.permission === 'default' ? await Notification.requestPermission() : Notification.permission
       if (permission !== 'granted') { completionNotifications.status = 'denied'; completionNotifications.enabled = false; await persist(false); return false }
@@ -85,7 +85,7 @@ export async function notifyGenerationComplete(id: string, title: string): Promi
     if (!observed || !completionNotifications.enabled) return
     const body = title.slice(0, 500); const notificationTitle = i18n.global.t('generationWorkspace.notificationTitle').slice(0, 120)
     try {
-      const bridge = window.remiqoraNotifications
+      const bridge = window.openfabricNotifications
       if (bridge) { const response = await bridge.notify({ title: notificationTitle, body }); if (!isObject(response) || response.shown !== true) completionNotifications.status = 'unavailable' }
       else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') new Notification(notificationTitle, { body, tag: id })
       else completionNotifications.status = 'denied'

@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
 function setupFixture(t) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'remiqora-linux-setup-'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-linux-setup-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.copyFileSync(path.join(__dirname, '..', '..', 'setup_linux.sh'), path.join(root, 'setup_linux.sh'));
   fs.mkdirSync(path.join(root, 'backend'));

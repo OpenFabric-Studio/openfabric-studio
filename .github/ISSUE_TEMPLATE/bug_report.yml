@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Thanks for the report! Issues can be written in English or Russian.
-        For questions and "how do I…", use this [fork's issues](https://github.com/mchosc/remiqora/issues).
+        For questions and "how do I…", use OpenFabric Studio [issues](https://github.com/OpenFabric-Studio/openfabric-studio/issues).
         Never upload secrets, private recordings or unsanitized logs.
   - type: dropdown
     id: area
@@ -66,7 +66,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Remiqora version
+      label: OpenFabric version
       description: The commit you are on — run `git rev-parse --short HEAD` in the repository folder.
       placeholder: "e.g. 10107d1"
   - type: textarea

@@ -29,7 +29,7 @@
 
 - [x] Review final diff and obtain focused independent code review. Fix material findings with regression coverage.
 - [x] Run `npm test` and `npm run build` in `frontend/`.
-- [x] Run backend unittest discovery using temporary `REMIQORA_CONFIG`, `REMIQORA_DATA_DIR` and `SEED_VC_DIR` paths, then generated-contract drift check and strict mypy on linux/darwin/win32 using the workflow's module list.
+- [x] Run backend unittest discovery using temporary `OPENFABRIC_CONFIG`, `OPENFABRIC_DATA_DIR` and `SEED_VC_DIR` paths, then generated-contract drift check and strict mypy on linux/darwin/win32 using the workflow's module list.
 - [x] Verify compatibility patches against a temporary copy of installed vendor source without loading models; do not claim real GPU inference coverage from this check.
 - [x] Review changed paths for real data, model cache, generated artifact drift and accidental changes.
 - [ ] Commit and push the verified topic branch to the fork, check hosted CI, and report the branch, actual validation and runtime limitations.

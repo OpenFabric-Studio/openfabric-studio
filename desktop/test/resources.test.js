@@ -7,7 +7,7 @@ const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 
 test('prepared desktop includes native helper patches at their runtime paths', async (t) => {
-  const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'remiqora-packaging-'));
+  const fixture = await fs.mkdtemp(path.join(os.tmpdir(), 'openfabric-packaging-'));
   t.after(() => fs.rm(fixture, { recursive: true, force: true }));
   const repo = path.resolve(__dirname, '..', '..');
   const script = path.join(fixture, 'desktop', 'scripts', 'prepare-resources.js');

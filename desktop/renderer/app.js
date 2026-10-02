@@ -1,7 +1,7 @@
 'use strict';
 // First-run screen: checks, download progress, problems, hand-over to the app.
 (() => {
-  const api = window.remiqora;
+  const api = window.openfabric;
   const view = document.getElementById('view');
   const live = document.getElementById('live');
   const stepsEl = document.getElementById('steps');

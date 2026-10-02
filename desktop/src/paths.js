@@ -38,7 +38,7 @@ function resourcePaths(isPackaged) {
 
 /** Default data root. Models and generated audio are large, so it is per-user and never inside the install dir. */
 function defaultDataRoot() {
-  const home = process.env.OPENFABRIC_HOME || process.env.REMIQORA_HOME;
+  const home = process.env.OPENFABRIC_HOME;
   if (home) return path.resolve(home);
   const folder = 'OpenFabricStudio';
   switch (process.platform) {

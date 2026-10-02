@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ===================================================
-echo             Remiqora - Development Launcher
+echo             OpenFabric - Development Launcher
 echo ===================================================
 echo.
 
@@ -25,11 +25,11 @@ if not exist "frontend\node_modules" (
 
 :: 3. Launch Backend
 echo [Launcher] Starting Backend on http://127.0.0.1:9000 ...
-start "Remiqora Backend" cmd /c "cd /d "%~dp0backend" && call run.bat"
+start "OpenFabric Backend" cmd /c "cd /d "%~dp0backend" && call run.bat"
 
 :: 4. Launch Frontend Dev Server
 echo [Launcher] Starting Frontend Dev Server on http://localhost:5173 ...
-start "Remiqora Frontend" cmd /c "cd /d "%~dp0frontend" && npm run dev"
+start "OpenFabric Frontend" cmd /c "cd /d "%~dp0frontend" && npm run dev"
 
 :: 5. Wait for servers to spin up and open browser
 echo [Launcher] Opening browser in 3 seconds...

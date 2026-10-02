@@ -41,7 +41,7 @@ function currentDraft(workspace: ReturnType<typeof useVideoWorkspace>) {
 }
 it('cancels an active job without trying to save or discarding a recovered draft', async () => {
   project.job = { id: 'd'.repeat(32), status: 'running', operation: 'preview' }
-  sessionStorage.setItem(`remiqora:video-draft:${project.id}`, JSON.stringify({ revision: 1, direction: 'Keep my recovered edit', shots: project.shots?.map(({ variants: _variants, approved_variant_id: _approval, ...shot }) => shot) }))
+  sessionStorage.setItem(`openfabric:video-draft:${project.id}`, JSON.stringify({ revision: 1, direction: 'Keep my recovered edit', shots: project.shots?.map(({ variants: _variants, approved_variant_id: _approval, ...shot }) => shot) }))
   const workspace = await mount()
   expect(workspace.dirty.value).toBe(true)
   await workspace.cancel()
@@ -50,7 +50,7 @@ it('cancels an active job without trying to save or discarding a recovered draft
   expect(workspace.project.value?.job?.status).toBe('cancelled')
   expect(currentDraft(workspace).direction).toBe('Keep my recovered edit')
   expect(workspace.dirty.value).toBe(true)
-  expect(JSON.parse(sessionStorage.getItem(`remiqora:video-draft:${project.id}`) || '{}')).toMatchObject({ revision: 2, direction: 'Keep my recovered edit' })
+  expect(JSON.parse(sessionStorage.getItem(`openfabric:video-draft:${project.id}`) || '{}')).toMatchObject({ revision: 2, direction: 'Keep my recovered edit' })
 })
 it('selects an existing shot after undo removes the selected newly added shot', async () => {
   const workspace = await mount()
@@ -129,13 +129,13 @@ it('keeps unsaved changes and blocks analysis when the save fails', async () => 
   expect(workspace.acting.value).toBe(false)
 })
 it('discards a malformed browser draft while retaining the saved storyboard', async () => {
-  sessionStorage.setItem(`remiqora:video-draft:${project.id}`, JSON.stringify({ revision: 1, seed: 'not a number', shots: [] }))
+  sessionStorage.setItem(`openfabric:video-draft:${project.id}`, JSON.stringify({ revision: 1, seed: 'not a number', shots: [] }))
   const workspace = await mount()
   expect(workspace.dirty.value).toBe(false)
   expect(currentDraft(workspace).shots).toHaveLength(2)
 })
 it('recovers a partial browser draft with saved shots and explicit backend defaults', async () => {
-  sessionStorage.setItem(`remiqora:video-draft:${project.id}`, JSON.stringify({ revision: 1, name: 'Recovered name', settings: { cfg_scale: 4 }, export_settings: { quality: 'high' } }))
+  sessionStorage.setItem(`openfabric:video-draft:${project.id}`, JSON.stringify({ revision: 1, name: 'Recovered name', settings: { cfg_scale: 4 }, export_settings: { quality: 'high' } }))
   const workspace = await mount()
   expect(workspace.dirty.value).toBe(true)
   expect(currentDraft(workspace).name).toBe('Recovered name')
@@ -147,7 +147,7 @@ it('selects a recoverable draft shot when the first saved shot was removed local
   const second = project.shots?.[1]
   if (!second) throw new Error('Missing saved shot')
   const { variants: _variants, approved_variant_id: _approval, ...shot } = second
-  sessionStorage.setItem(`remiqora:video-draft:${project.id}`, JSON.stringify({ revision: 1, shots: [shot] }))
+  sessionStorage.setItem(`openfabric:video-draft:${project.id}`, JSON.stringify({ revision: 1, shots: [shot] }))
   const workspace = await mount()
   expect(workspace.selectedShot.value?.id).toBe(second.id)
   expect(workspace.selectedPreviewIds.value).toEqual([second.id])
@@ -181,7 +181,7 @@ it('removes the selected project and its browser draft while retaining the sourc
   const workspace = await mount()
   workspace.step.value = 'storyboard'
   workspace.addShot()
-  expect(sessionStorage.getItem(`remiqora:video-draft:${project.id}`)).not.toBeNull()
+  expect(sessionStorage.getItem(`openfabric:video-draft:${project.id}`)).not.toBeNull()
   expect(await workspace.removeProject(project.id)).toBe(true)
   expect(api.deleteVideoProject).toHaveBeenCalledWith(project.id, expect.any(AbortSignal))
   expect(workspace.projects.value).toEqual([])
@@ -192,7 +192,7 @@ it('removes the selected project and its browser draft while retaining the sourc
   expect(workspace.selectedPreviewIds.value).toEqual([])
   expect(workspace.undoStack.value).toEqual([])
   expect(workspace.dirty.value).toBe(false)
-  expect(sessionStorage.getItem(`remiqora:video-draft:${project.id}`)).toBeNull()
+  expect(sessionStorage.getItem(`openfabric:video-draft:${project.id}`)).toBeNull()
   expect(workspace.tracks.value).toEqual([videoTrack])
   await vi.advanceTimersByTimeAsync(600)
   expect(api.updateVideoProject).not.toHaveBeenCalled()
@@ -200,7 +200,7 @@ it('removes the selected project and its browser draft while retaining the sourc
 it('removes a different project without saving or replacing the selected dirty draft', async () => {
   const second = videoProjectFixture('e'.repeat(32))
   vi.mocked(api.listVideoProjects).mockResolvedValueOnce({ projects: [project, second] })
-  sessionStorage.setItem(`remiqora:video-draft:${second.id}`, JSON.stringify({ revision: 1, name: 'Other recovered draft' }))
+  sessionStorage.setItem(`openfabric:video-draft:${second.id}`, JSON.stringify({ revision: 1, name: 'Other recovered draft' }))
   const workspace = await mount()
   currentDraft(workspace).direction = 'Keep the selected edit'
   workspace.step.value = 'preview'
@@ -211,8 +211,8 @@ it('removes a different project without saving or replacing the selected dirty d
   expect(workspace.dirty.value).toBe(true)
   expect(workspace.step.value).toBe('preview')
   expect(api.updateVideoProject).not.toHaveBeenCalled()
-  expect(sessionStorage.getItem(`remiqora:video-draft:${second.id}`)).toBeNull()
-  expect(sessionStorage.getItem(`remiqora:video-draft:${project.id}`)).not.toBeNull()
+  expect(sessionStorage.getItem(`openfabric:video-draft:${second.id}`)).toBeNull()
+  expect(sessionStorage.getItem(`openfabric:video-draft:${project.id}`)).not.toBeNull()
 })
 it('retains the selected project and recovered edits when deletion fails', async () => {
   const workspace = await mount()
@@ -225,7 +225,7 @@ it('retains the selected project and recovered edits when deletion fails', async
   expect(workspace.dirty.value).toBe(true)
   expect(workspace.error.value).toBe('storage_failed')
   expect(workspace.readOnly.value).toBe(false)
-  expect(sessionStorage.getItem(`remiqora:video-draft:${project.id}`)).not.toBeNull()
+  expect(sessionStorage.getItem(`openfabric:video-draft:${project.id}`)).not.toBeNull()
   expect(await workspace.save()).toBe(true)
 })
 it('blocks deletion of a queued or running project and unknown identities', async () => {

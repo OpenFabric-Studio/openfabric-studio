@@ -76,7 +76,7 @@ class AnalysisError(Exception):
 
 
 def _marker(kind: Literal['beat', 'onset', 'section'], seconds: float, confidence: float, label: str = '') -> VideoMarker:
-    return VideoMarker(id=uuid.uuid5(uuid.NAMESPACE_URL, f'remiqora:video:{kind}:{seconds:.6f}').hex,
+    return VideoMarker(id=uuid.uuid5(uuid.NAMESPACE_URL, f'openfabric:video:{kind}:{seconds:.6f}').hex,
         time_sec=seconds, kind=kind, confidence=min(.95, max(0, confidence)), label=label)
 
 

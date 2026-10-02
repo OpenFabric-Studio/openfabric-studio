@@ -103,7 +103,7 @@ async function onLoadDataset() {
 }
 
 // Bulk browser upload: ACE-Step's own dataset API only scans a server-local
-// folder path, so files picked/dropped here first go to Remiqora's own
+// folder path, so files picked/dropped here first go to OpenFabric's own
 // backend, which drops them under ACE_STEP_DIR/datasets/<name>/ (a location
 // the scan endpoint is already allowed to read) and hands back that path.
 const fileInput = ref<HTMLInputElement | null>(null)

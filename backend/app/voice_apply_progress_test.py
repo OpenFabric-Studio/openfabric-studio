@@ -14,7 +14,7 @@ from app.voice_progress import VoiceProgressTracker
 
 class ApplyProgressTests(unittest.TestCase):
     def event(self, phase: str, current: int = 0, total: int = 0, at: float = 1) -> str:
-        return 'REMIQORA_PROGRESS ' + json.dumps({'phase': phase, 'current': current, 'total': total, 'at': at})
+        return 'OPENFABRIC_PROGRESS ' + json.dumps({'phase': phase, 'current': current, 'total': total, 'at': at})
 
     def test_measured_chunk_eta_excludes_loading_analysis_and_first_chunk(self) -> None:
         tracker = VoiceProgressTracker.create('apply', '', now=1)
@@ -33,10 +33,10 @@ class ApplyProgressTests(unittest.TestCase):
         self.assertIsNone(parse_event('100% 30/30 [00:01]'))
 
     def test_invalid_events_cannot_change_phase_or_counts(self) -> None:
-        invalid = ['REMIQORA_PROGRESS nope', self.event('training'), self.event('converting', 4, 3),
+        invalid = ['OPENFABRIC_PROGRESS nope', self.event('training'), self.event('converting', 4, 3),
                    self.event('converting', -1, 3), self.event('loading', 0, 2),
-                   self.event('converting', 0, 100001), 'REMIQORA_PROGRESS ' + 'x' * 20000,
-                   'REMIQORA_PROGRESS {"phase":"converting","current":true,"total":3,"at":1}']
+                   self.event('converting', 0, 100001), 'OPENFABRIC_PROGRESS ' + 'x' * 20000,
+                   'OPENFABRIC_PROGRESS {"phase":"converting","current":true,"total":3,"at":1}']
         invalid.extend([self.event('loading', at=float('nan')), self.event('loading', at=float('inf'))])
         for value in invalid:
             with self.subTest(value=value[:80]):
@@ -113,7 +113,7 @@ class ApplyWatcherTests(unittest.IsolatedAsyncioTestCase):
             job.timing.start(now=2)
             job.timing.phase('loading', total=0, unit='tasks', now=2)
             def line(current: int, at: int) -> str:
-                return 'REMIQORA_PROGRESS ' + json.dumps({'phase': 'converting', 'current': current, 'total': 8, 'at': at}) + '\n'
+                return 'OPENFABRIC_PROGRESS ' + json.dumps({'phase': 'converting', 'current': current, 'total': 8, 'at': at}) + '\n'
             (root / 'convert.log').write_text(line(0, 10) + 'noise\n' * 20000 + line(1, 100) + line(2, 110) + line(3, 120))
             stop = asyncio.Event()
             stop.set()
@@ -130,7 +130,7 @@ class ApplyWatcherTests(unittest.IsolatedAsyncioTestCase):
             root = Path(temporary)
             job = voice_build.ApplyJob(voice_id='a' * 32, track_id=1)
             job.phase = 'loading'
-            (root / 'convert.log').write_text('REMIQORA_PROGRESS ' + json.dumps(
+            (root / 'convert.log').write_text('OPENFABRIC_PROGRESS ' + json.dumps(
                 {'phase': 'converting', 'current': 8, 'total': 8, 'at': job.timing.progress.queued_at - 10}) + '\n')
             stop = asyncio.Event()
             stop.set()

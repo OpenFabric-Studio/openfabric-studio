@@ -123,7 +123,7 @@ def setup(engine: Path, dotenv: Path) -> None:
     source = engine / CONFIG_RELATIVE
     if sha256_file(source) != CONFIG_SHA256:
         raise ValueError('config_integrity_failed')
-    model_directory = engine / 'remiqora-models' / MODEL_REVISION
+    model_directory = engine / 'openfabric-models' / MODEL_REVISION
     checkpoint = model_directory / 'MelBandRoformer.ckpt'
     config = model_directory / 'config.yaml'
     print(f'Preparing verified vocal weights ({CHECKPOINT_SIZE / 1024**3:.2f} GiB).', flush=True)

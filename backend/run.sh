@@ -15,5 +15,5 @@ if [[ ! -x ".venv/bin/python3" ]]; then
     .venv/bin/pip install -r requirements.txt
 fi
 
-echo "Starting Remiqora backend on http://127.0.0.1:9000"
+echo "Starting OpenFabric backend on http://127.0.0.1:9000"
 exec .venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 9000

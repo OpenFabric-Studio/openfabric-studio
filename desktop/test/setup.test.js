@@ -14,7 +14,7 @@ const { layout, PLATFORM } = require('../src/paths');
 const { backendEnv } = require('../src/server');
 const { ensureWritableDir } = require('../src/config');
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'remiqora-setup-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-setup-'));
 const req = manifest.requirements;
 
 test('ACE recovery retains conflicting checkpoint trees', async () => {
@@ -84,7 +84,7 @@ test('ACE version and verification include source commit and exact patch hash', 
   const component = () => buildComponents({ L, manifest, platform: 'darwin-arm64', resources }).find((c) => c.id === 'ace-step');
   const first = component();
   fs.mkdirSync(path.join(L.aceStep, '.venv'), { recursive: true });
-  fs.writeFileSync(path.join(L.aceStep, '.remiqora-patched'), 'obsolete-marker');
+  fs.writeFileSync(path.join(L.aceStep, '.openfabric-patched'), 'obsolete-marker');
   assert.equal(await first.verify(), false);
   assert.ok(first.version.includes(manifest.aceStep.commit));
   fs.writeFileSync(patch, 'second patch');
@@ -265,8 +265,8 @@ test('the backend keeps its port between starts so localStorage survives, and mo
 test('the backend environment points every path at the data root', () => {
   const L = layout(tmp(), 'win32-x64', manifest);
   const env = backendEnv({ L, manifest, platform: 'win32-x64' });
-  assert.equal(env.REMIQORA_DATA_DIR, L.data);
-  assert.equal(env.REMIQORA_LOG_DIR, L.logs);
+  assert.equal(env.OPENFABRIC_DATA_DIR, L.data);
+  assert.equal(env.OPENFABRIC_LOG_DIR, L.logs);
   assert.equal(env.YUE2_DIR, L.yue2);
   assert.equal(env.HF_HOME, L.hfHome, 'model caches stay inside the chosen folder');
   assert.equal(env.TORCH_HOME, L.torchHome);

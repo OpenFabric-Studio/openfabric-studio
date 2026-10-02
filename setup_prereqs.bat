@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ===================================================
-echo   Remiqora - prerequisite toolchain installer
+echo   OpenFabric - prerequisite toolchain installer
 echo ===================================================
 echo.
 

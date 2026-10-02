@@ -38,7 +38,7 @@ The user approved the review's eleven fixes and requested strict engineering gui
 
 ## Verification commands
 
-- Backend: `python -m unittest discover -s app -p '*_test.py' -v` from `backend`, with the declared test requirements installed and temporary `REMIQORA_CONFIG`/`REMIQORA_DATA_DIR`.
+- Backend: `python -m unittest discover -s app -p '*_test.py' -v` from `backend`, with the declared test requirements installed and temporary `OPENFABRIC_CONFIG`/`OPENFABRIC_DATA_DIR`.
 - Frontend: `npm test` and `npm run build` from `frontend`.
 - Desktop: `npm test` from `desktop`.
 - Contracts: run the generation script in check mode once introduced.

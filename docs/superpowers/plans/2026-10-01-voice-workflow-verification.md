@@ -4,7 +4,7 @@ Completed in the existing checkout without commits. Existing unrelated work was 
 
 ## Actual checks
 
-- Backend: 239 tests passed using `/tmp/remiqora-review-env.9vBA33/venv/bin/python -m unittest discover -s app -p '*_test.py' -q` with isolated `REMIQORA_CONFIG` and `REMIQORA_DATA_DIR`.
+- Backend: 239 tests passed using `/tmp/openfabric-review-env.9vBA33/venv/bin/python -m unittest discover -s app -p '*_test.py' -q` with isolated `OPENFABRIC_CONFIG` and `OPENFABRIC_DATA_DIR`.
 - Frontend: 142 tests passed; `npm run build` passed the explicit strict-type policy, Vue/TypeScript check and production bundle.
 - Desktop: 27 existing startup/installer tests passed.
 - Strict mypy: the 20-file CI scope passed, including coverage, preparation, contracts and the RoFormer setup helper. This is a scoped check, not a claim that the entire legacy backend is checked.

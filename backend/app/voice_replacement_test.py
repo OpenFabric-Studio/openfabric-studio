@@ -609,8 +609,8 @@ class VoiceReplacementCrashTests(unittest.TestCase):
                     f'  await v._spawn([{sys.executable!r},"-c",{child!r}],cwd=Path({str(root)!r}),log_name="cpu",slot=v.ApplyJob(voice_id="a"*32,track_id=1).slot)\n'
                     'asyncio.run(main())')
             env = os.environ.copy()
-            env['REMIQORA_CONFIG'] = str(root / 'config.json')
-            env['REMIQORA_DATA_DIR'] = str(root / 'data')
+            env['OPENFABRIC_CONFIG'] = str(root / 'config.json')
+            env['OPENFABRIC_DATA_DIR'] = str(root / 'data')
             parent = subprocess.Popen([sys.executable, '-c', code], env=env)
             pid: int | None = None
             try:

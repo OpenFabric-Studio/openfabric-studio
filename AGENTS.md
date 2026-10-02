@@ -1,4 +1,4 @@
-# Working on Remiqora
+# Working on OpenFabric Studio
 
 Act as a senior technical and business partner. Be direct, skeptical, and evidence-driven. Distinguish verified facts, assumptions, inferences, and unknowns. Inspect the repository and authoritative source code before guessing APIs or changing architecture.
 
@@ -58,7 +58,7 @@ Act as a senior technical and business partner. Be direct, skeptical, and eviden
 ## Required checks
 
 - Frontend: `npm test` and `npm run build` from `frontend/`. The build runs strict TypeScript and rejects explicit `any`, chained assertions, and TypeScript suppressions.
-- Backend: install `backend/requirements-test.txt`, then run `python -m unittest discover -s app -p '*_test.py' -v` from `backend/`. Always point `REMIQORA_CONFIG` and `REMIQORA_DATA_DIR` at temporary paths first.
+- Backend: install `backend/requirements-test.txt`, then run `python -m unittest discover -s app -p '*_test.py' -v` from `backend/`. Always point `OPENFABRIC_CONFIG` and `OPENFABRIC_DATA_DIR` at temporary paths first.
 - Contracts: `python backend/scripts/generate_contracts.py --check` from the repository root. Regenerate after changing a shared Pydantic model; never hand-edit `frontend/src/api/generated.ts`.
 - Python core: run the strict mypy platform loop in `.github/workflows/ci.yml` for Linux, macOS and Windows typing paths. Its checked scope includes contracts, storage/job ownership, voice preparation/comparison/DSP helpers, vendor compatibility, and contract generation. Accurate soundfile declarations live under `backend/typings`; expand checked legacy coverage without pretending this is a whole-backend check.
 - Desktop: `npm test` from `desktop/` when shared backend startup, packaging, or file layout changes.

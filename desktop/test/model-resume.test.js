@@ -9,7 +9,7 @@ const { execFile } = require('node:child_process');
 const { applyGitPatch } = require('../src/bootstrap/patch');
 
 test('pinned YuE model manager resumes verified content and serializes recovery and cleanup', async (t) => {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'remiqora-model-resume-'));
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openfabric-model-resume-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   await fs.mkdir(path.join(root, 'tools'));
   await fs.copyFile(path.join(__dirname, 'fixtures', 'model_manager_v2.py'), path.join(root, 'tools', 'model_manager_v2.py'));

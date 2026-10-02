@@ -2,13 +2,13 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 // Completion preferences are managed by the app; the main process validates each request and reports delivery.
-contextBridge.exposeInMainWorld('remiqoraNotifications', {
+contextBridge.exposeInMainWorld('openfabricNotifications', {
   capability: () => ipcRenderer.invoke('notifications:capability'),
   notify: (payload) => ipcRenderer.invoke('notifications:notify', payload),
 });
 
 // The first-run screen gets a small, explicit API. It has no access to Node or to the file system.
-contextBridge.exposeInMainWorld('remiqora', {
+contextBridge.exposeInMainWorld('openfabric', {
   context: () => ipcRenderer.invoke('setup:context'),
   checks: (dir) => ipcRenderer.invoke('setup:checks', dir),
   chooseFolder: () => ipcRenderer.invoke('setup:choose-folder'),

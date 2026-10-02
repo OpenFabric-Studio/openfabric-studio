@@ -2,7 +2,7 @@ import { computed, ref, watch } from 'vue'
 
 export const PAGE_SIZES = [5, 10, 25, 50] as const
 export type PageSize = typeof PAGE_SIZES[number]
-const STORAGE_KEY = 'remiqora.pageSize'
+const STORAGE_KEY = 'openfabric.pageSize'
 function isPageSize(size: number): size is PageSize { return PAGE_SIZES.some(value => value === size) }
 function storedSize(): PageSize {
   try { const size = Number(localStorage.getItem(STORAGE_KEY)); if (isPageSize(size)) return size } catch { /* Storage can be unavailable. */ }

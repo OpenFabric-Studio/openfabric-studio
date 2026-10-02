@@ -53,7 +53,7 @@ def _status() -> dict:
     return status
 
 
-_PICK_SCRIPT = 'POSIX path of (choose folder with prompt "Choose the Remiqora library folder")'
+_PICK_SCRIPT = 'POSIX path of (choose folder with prompt "Choose the OpenFabric library folder")'
 
 
 @router.get("/library", response_model=LibraryStatusResponse)

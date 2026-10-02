@@ -15,7 +15,7 @@ import { createPollingLoop, type PollContext, type PollingLoop } from '../compos
 
 const POLL_MS = 3000
 const HEALTH_MS = 15000
-const LEGACY_INFLIGHT_KEY = 'remiqora_ace_inflight'
+const LEGACY_INFLIGHT_KEY = 'openfabric_ace_inflight'
 const healthLoops = new WeakMap<object, PollingLoop>()
 const jobLoops = new WeakMap<object, PollingLoop>()
 const inventoryControllers = new WeakMap<object, AbortController>()

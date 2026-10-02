@@ -59,7 +59,7 @@ _SELECTION_BEFORE = '''        if pretrained_ckpt_path is None:
             assert os.path.exists(pretrained_ckpt_path), f"Pretrained checkpoint {pretrained_ckpt_path} not found"
             latest_checkpoint = pretrained_ckpt_path
 '''
-_SELECTION_AFTER = '''        # Remiqora: continuation is explicit; a fresh build never discovers old weights.
+_SELECTION_AFTER = '''        # OpenFabric: continuation is explicit; a fresh build never discovers old weights.
         if resume:
             latest_checkpoint = pretrained_ckpt_path or os.path.join(self.log_dir, "resume.pth")
             if not os.path.isfile(latest_checkpoint):
@@ -100,7 +100,7 @@ _SAVE_BEFORE = '''            if self.iters >= self.max_steps:
                     for cp in checkpoints[:-2]:
                         os.remove(cp)
 '''
-_SAVE_AFTER = '''            # Remiqora: save before stopping, retaining comparison milestones.
+_SAVE_AFTER = '''            # OpenFabric: save before stopping, retaining comparison milestones.
             if self.iters % self.save_interval == 0 or self.iters in (200, 500, 1000) or self.iters >= self.max_steps:
                 self._save_training_state()
             if self.iters >= self.max_steps:
@@ -120,11 +120,11 @@ _STATE_METHOD = '''    def _save_training_state(self):
             torch.save(state, os.path.join(self.log_dir, f'step_{self.iters}.pth'))
 
 '''
-_PROGRESS_HELPERS = '''def _remiqora_progress(phase, current=0, total=0):
+_PROGRESS_HELPERS = '''def _openfabric_progress(phase, current=0, total=0):
     import json
-    print("REMIQORA_PROGRESS " + json.dumps({'phase': phase, 'current': current, 'total': total, 'at': time.time()}), flush=True)
+    print("OPENFABRIC_PROGRESS " + json.dumps({'phase': phase, 'current': current, 'total': total, 'at': time.time()}), flush=True)
 
-def _remiqora_chunk_count(frames, window, overlap):
+def _openfabric_chunk_count(frames, window, overlap):
     # The first chunk covers window frames; subsequent chunks retain overlap.
     if window <= overlap or frames <= 0:
         raise ValueError("invalid_source_window")
@@ -172,9 +172,9 @@ _CONVERSION_LOOP_BEFORE = '''    max_source_window = max_context_window - mel2.s
             processed_frames += vc_target.size(2) - overlap_frame_len
 '''
 _CONVERSION_LOOP_AFTER = '''    max_source_window = max_context_window - mel2.size(2)
-    _remiqora_total_chunks = _remiqora_chunk_count(cond.size(1), max_source_window, overlap_frame_len)
-    _remiqora_completed_chunks = 0
-    _remiqora_progress('converting', 0, _remiqora_total_chunks)
+    _openfabric_total_chunks = _openfabric_chunk_count(cond.size(1), max_source_window, overlap_frame_len)
+    _openfabric_completed_chunks = 0
+    _openfabric_progress('converting', 0, _openfabric_total_chunks)
     # split source condition (cond) into chunks
     processed_frames = 0
     generated_wave_chunks = []
@@ -196,28 +196,28 @@ _CONVERSION_LOOP_AFTER = '''    max_source_window = max_context_window - mel2.si
             if is_last_chunk:
                 output_wave = vc_wave[0].cpu().numpy()
                 generated_wave_chunks.append(output_wave)
-                _remiqora_completed_chunks += 1
-                _remiqora_progress('converting', _remiqora_completed_chunks, _remiqora_total_chunks)
+                _openfabric_completed_chunks += 1
+                _openfabric_progress('converting', _openfabric_completed_chunks, _openfabric_total_chunks)
                 break
             output_wave = vc_wave[0, :-overlap_wave_len].cpu().numpy()
             generated_wave_chunks.append(output_wave)
-            _remiqora_completed_chunks += 1
-            _remiqora_progress('converting', _remiqora_completed_chunks, _remiqora_total_chunks)
+            _openfabric_completed_chunks += 1
+            _openfabric_progress('converting', _openfabric_completed_chunks, _openfabric_total_chunks)
             previous_chunk = vc_wave[0, -overlap_wave_len:]
             processed_frames += vc_target.size(2) - overlap_frame_len
         elif is_last_chunk:
             output_wave = crossfade(previous_chunk.cpu().numpy(), vc_wave[0].cpu().numpy(), overlap_wave_len)
             generated_wave_chunks.append(output_wave)
-            _remiqora_completed_chunks += 1
-            _remiqora_progress('converting', _remiqora_completed_chunks, _remiqora_total_chunks)
+            _openfabric_completed_chunks += 1
+            _openfabric_progress('converting', _openfabric_completed_chunks, _openfabric_total_chunks)
             processed_frames += vc_target.size(2) - overlap_frame_len
             break
         else:
             output_wave = crossfade(previous_chunk.cpu().numpy(), vc_wave[0, :-overlap_wave_len].cpu().numpy(),
                                     overlap_wave_len)
             generated_wave_chunks.append(output_wave)
-            _remiqora_completed_chunks += 1
-            _remiqora_progress('converting', _remiqora_completed_chunks, _remiqora_total_chunks)
+            _openfabric_completed_chunks += 1
+            _openfabric_progress('converting', _openfabric_completed_chunks, _openfabric_total_chunks)
             previous_chunk = vc_wave[0, -overlap_wave_len:]
             processed_frames += vc_target.size(2) - overlap_frame_len
 '''
@@ -245,7 +245,7 @@ PATCHES: tuple[SourcePatch, ...] = (
     SourcePatch('inference.py', 'seed_before_inference', '''def main(args):
     model, semantic_fn, f0_fn, vocoder_fn, campplus_model, mel_fn, mel_fn_args = load_models(args)''',
                 '''def main(args):
-    # Remiqora: reproducible noise draws for like-for-like listening trials.
+    # OpenFabric: reproducible noise draws for like-for-like listening trials.
     if not 0 <= args.seed <= 2**32 - 1:
         raise ValueError("invalid_seed")
     random.seed(args.seed)
@@ -259,9 +259,9 @@ PATCHES: tuple[SourcePatch, ...] = (
     SourcePatch('inference.py', 'progress_helpers', '@torch.no_grad()\ndef main(args):',
                 _PROGRESS_HELPERS + '@torch.no_grad()\ndef main(args):'),
     SourcePatch('inference.py', 'progress_loading', 'def load_models(args):\n    global fp16',
-                "def load_models(args):\n    _remiqora_progress('loading')\n    global fp16"),
+                "def load_models(args):\n    _openfabric_progress('loading')\n    global fp16"),
     SourcePatch('inference.py', 'progress_analyzing', "    sr = mel_fn_args['sampling_rate']",
-                "    _remiqora_progress('analyzing')\n    sr = mel_fn_args['sampling_rate']"),
+                "    _openfabric_progress('analyzing')\n    sr = mel_fn_args['sampling_rate']"),
     SourcePatch('inference.py', 'progress_chunks', _CONVERSION_LOOP_BEFORE, _CONVERSION_LOOP_AFTER),
 )
 

@@ -11,7 +11,7 @@ PYTHON_BIN="python3"
 command -v python3.12 >/dev/null 2>&1 && PYTHON_BIN="python3.12"
 
 echo "==================================================="
-echo "            Remiqora - Development Launcher"
+echo "            OpenFabric - Development Launcher"
 echo "==================================================="
 echo ""
 

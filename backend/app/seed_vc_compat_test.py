@@ -234,10 +234,10 @@ class CompatibilityTests(unittest.TestCase):
     def test_progress_chunk_total_matches_independent_overlap_loop(self):
         self.apply()
         tree = ast.parse((self.engine / 'inference.py').read_text())
-        count_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_remiqora_chunk_count')
+        count_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_openfabric_chunk_count')
         namespace: dict[str, object] = {}
         exec(compile(ast.Module(body=[count_fn], type_ignores=[]), '<vendor-progress>', 'exec'), namespace)
-        count = namespace['_remiqora_chunk_count']
+        count = namespace['_openfabric_chunk_count']
         self.assertTrue(callable(count))
         for window in [17, 100, 1720]:
             for frames in [1, window, window + 1, 2 * window, 20000]:
@@ -255,17 +255,17 @@ class CompatibilityTests(unittest.TestCase):
         self.apply()
         source = (self.engine / 'inference.py').read_text()
         self.assertIn("'at': time.time()", source)
-        self.assertLess(source.index("_remiqora_progress('loading')"), source.index('= load_models(args)'))
-        self.assertLess(source.index('= load_models(args)'), source.index("_remiqora_progress('analyzing')"))
+        self.assertLess(source.index("_openfabric_progress('loading')"), source.index('= load_models(args)'))
+        self.assertLess(source.index('= load_models(args)'), source.index("_openfabric_progress('analyzing')"))
         # Every branch publishes the output before it reports completion,
         # including the first/final short chunk and the overlapping final one.
         tree = ast.parse(source)
         main = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
         loop = next(node for node in main.body if isinstance(node, ast.While) and 'processed_frames' in ast.unparse(node.test))
         completions = [node for node in ast.walk(loop) if isinstance(node, ast.Call)
-                       and isinstance(node.func, ast.Name) and node.func.id == '_remiqora_progress']
+                       and isinstance(node.func, ast.Name) and node.func.id == '_openfabric_progress']
         self.assertEqual(len(completions), 4)
-        self.assertEqual(source.count("_remiqora_completed_chunks += 1"), 4)
+        self.assertEqual(source.count("_openfabric_completed_chunks += 1"), 4)
 
     def test_unknown_chunk_loop_rejects_before_partial_edits(self):
         inference = self.engine / 'inference.py'

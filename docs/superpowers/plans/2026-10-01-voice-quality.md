@@ -38,10 +38,10 @@
 ## Verification commands
 
 ```sh
-REMIQORA_CONFIG=/tmp/remiqora-review-env.9vBA33/voice-config.json REMIQORA_DATA_DIR=/tmp/remiqora-review-env.9vBA33/voice-library /tmp/remiqora-review-env.9vBA33/venv/bin/python -m unittest discover -s app -p '*_test.py'
+OPENFABRIC_CONFIG=/tmp/openfabric-review-env.9vBA33/voice-config.json OPENFABRIC_DATA_DIR=/tmp/openfabric-review-env.9vBA33/voice-library /tmp/openfabric-review-env.9vBA33/venv/bin/python -m unittest discover -s app -p '*_test.py'
 ```
 
-Run from `backend/`. Run `npm test` and `npm run build` from `frontend/`, `npm test` from `desktop/`, and `/tmp/remiqora-review-env.9vBA33/venv/bin/python backend/scripts/generate_contracts.py --check` from the repository root. Run the strict Python command in CI, adding new self-contained typed core modules as they pass.
+Run from `backend/`. Run `npm test` and `npm run build` from `frontend/`, `npm test` from `desktop/`, and `/tmp/openfabric-review-env.9vBA33/venv/bin/python backend/scripts/generate_contracts.py --check` from the repository root. Run the strict Python command in CI, adding new self-contained typed core modules as they pass.
 
 ## Verified implementation — 2026-10-01
 

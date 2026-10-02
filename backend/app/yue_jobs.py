@@ -335,7 +335,7 @@ async def _worker(job_id: str) -> None:
             _store(job)
             _native_requested.add(job_id)
             options = _json.validate_json(job.request.options.model_dump_json(exclude_none=True))
-            options['remiqora_run_id'] = job_id
+            options['openfabric_run_id'] = job_id
             result = await _native_json('/v1/tasks/run', {'model': 'yue2', 'request': {
                 'lyrics': job.request.lyrics, 'seed': job.request.seed, 'options': options}})
             _native_requested.discard(job_id)

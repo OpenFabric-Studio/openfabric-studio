@@ -342,13 +342,13 @@ function stopUsing() {
 
 onMounted(() => {
   poll.start()
-  window.addEventListener('remiqora-voice', syncActive)
+  window.addEventListener('openfabric-voice', syncActive)
   window.addEventListener('storage', syncActive)
 })
 onBeforeUnmount(() => {
   alive = false
   poll.stop()
-  window.removeEventListener('remiqora-voice', syncActive)
+  window.removeEventListener('openfabric-voice', syncActive)
   window.removeEventListener('storage', syncActive)
 })
 </script>

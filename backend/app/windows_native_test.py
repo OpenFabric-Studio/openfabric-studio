@@ -54,7 +54,7 @@ class WindowsJobTests(unittest.TestCase):
              patch('app.orchestrator.windows_job.ctypes.get_last_error', return_value=5, create=True), \
              patch('app.orchestrator.windows_job.ctypes.WinError', return_value=error, create=True), \
              self.assertRaises(OSError) as failure:
-            native.open('Local\\RemiqoraNative_' + 'a' * 32)
+            native.open('Local\\OpenFabricNative_' + 'a' * 32)
         self.assertIs(failure.exception, error)
 
     def test_open_job_prototype_enables_private_last_error_tracking(self) -> None:
@@ -102,7 +102,7 @@ class WindowsProcessTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             process = ManagedProcess(ProcessSpec(name='fixture', cwd=Path(directory), cmd=['engine', '--flag']))
             job = Mock()
-            job.name = 'Local\\RemiqoraNative_' + 'a' * 32
+            job.name = 'Local\\OpenFabricNative_' + 'a' * 32
             with patch('app.orchestrator.process.IS_WINDOWS', True), \
                  patch('app.orchestrator.process.LOG_DIR', Path(directory)), \
                  patch('app.orchestrator.process.WindowsJob.create', return_value=job), \
@@ -136,7 +136,7 @@ class WindowsToolOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_tool_job_exists_before_wrapper_creation_and_is_registered(self) -> None:
         from app import job_lifecycle, video_process
         job = Mock()
-        job.name = 'Local\\RemiqoraNative_' + 'b' * 32
+        job.name = 'Local\\OpenFabricNative_' + 'b' * 32
         proc = Mock()
         proc.pid = 42
         proc.returncode = 0
@@ -194,7 +194,7 @@ class WindowsToolOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_cancelled_tool_creation_is_drained_before_ownership_is_released(self) -> None:
         from app import job_lifecycle, video_process
         job = Mock()
-        job.name = 'Local\\RemiqoraNative_' + 'c' * 32
+        job.name = 'Local\\OpenFabricNative_' + 'c' * 32
         job.active_processes.return_value = 0
         proc = Mock()
         proc.pid = 42
@@ -223,7 +223,7 @@ class WindowsToolOwnershipTests(unittest.IsolatedAsyncioTestCase):
     async def test_repeated_cancellation_while_creating_tool_still_drains_created_job(self) -> None:
         from app import job_lifecycle, video_process
         job = Mock()
-        job.name = 'Local\\RemiqoraNative_' + 'e' * 32
+        job.name = 'Local\\OpenFabricNative_' + 'e' * 32
         job.active_processes.return_value = 0
         proc = Mock()
         proc.pid = 43
@@ -309,7 +309,7 @@ class WindowsToolSupervisorTests(unittest.TestCase):
     def test_tool_assigns_job_before_child_spawn_and_kills_orphans_after_exit(self) -> None:
         from app import video_process
         job = Mock()
-        job.name = 'Local\\RemiqoraNative_' + 'd' * 32
+        job.name = 'Local\\OpenFabricNative_' + 'd' * 32
         events: list[str] = []
         job.assign_current.side_effect = lambda: events.append('assigned')
         job.terminate.side_effect = lambda code=1: events.append('terminated')
@@ -352,7 +352,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
         job.active_processes.side_effect = [2, 0]
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / 'receipt.json'
-            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\RemiqoraNative_' + 'b' * 32 + '"}')
+            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\OpenFabricNative_' + 'b' * 32 + '"}')
             identity = video_process.WorkerIdentity(pid=42, token='a' * 32, receipt=str(receipt))
             with patch('app.video_process.sys.platform', 'win32'), \
                  patch('app.job_lifecycle.spawn_process', new=AsyncMock()), \
@@ -366,7 +366,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
         from app import video_process
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / 'receipt.json'
-            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\RemiqoraNative_' + 'b' * 32 + '"}')
+            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\OpenFabricNative_' + 'b' * 32 + '"}')
             identity = video_process.WorkerIdentity(pid=42, token='a' * 32, receipt=str(receipt))
             for error_code, expected in ((2, True), (5, False), (87, False)):
                 error = OSError('native open failure')
@@ -385,7 +385,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
         job.active_processes.side_effect = [OSError('accounting failed'), 0]
         with tempfile.TemporaryDirectory() as directory:
             receipt = Path(directory) / 'receipt.json'
-            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\RemiqoraNative_' + 'c' * 32 + '"}')
+            receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\OpenFabricNative_' + 'c' * 32 + '"}')
             identity = video_process.WorkerIdentity(pid=42, token='a' * 32, receipt=str(receipt))
             with patch('app.video_process.sys.platform', 'win32'), \
                  patch('app.job_lifecycle.spawn_process', new=AsyncMock()), \
@@ -406,7 +406,7 @@ class WindowsKernelTests(unittest.TestCase):
         self.assertTrue(getattr(native._open, '_flags_') & getattr(ctypes, '_FUNCFLAG_USE_LASTERROR'))
         ctypes.set_last_error(5)
         with self.assertRaises(OSError) as failure:
-            native.open('Local\\RemiqoraNative_' + uuid.uuid4().hex)
+            native.open('Local\\OpenFabricNative_' + uuid.uuid4().hex)
         self.assertEqual(failure.exception.winerror, 2)
 
     def test_native_launcher_exit_terminates_orphaned_grandchild(self) -> None:

@@ -18,7 +18,7 @@ Compressed uploads can decode into much larger audio and stem files. Leave suffi
 
 Advanced settings lists the DiT models reported by the installed ACE server. The native inventory also includes language-model objects with load metadata. The app validates that response and extracts their names without discarding the DiT choices. It shows loading, empty-inventory and retry states when retrieval fails. An ACE process marked **running** can still have its weights unloaded until initialization or a generation request.
 
-After updating this code, restart the Remiqora API process to load the new replacement routes, then refresh the browser. The frontend development server applies UI changes automatically; a packaged/static frontend needs rebuilding with `npm run build` in `frontend/`.
+After updating this code, restart the OpenFabric API process to load the new replacement routes, then refresh the browser. The frontend development server applies UI changes automatically; a packaged/static frontend needs rebuilding with `npm run build` in `frontend/`.
 
 ## Verification limits
 

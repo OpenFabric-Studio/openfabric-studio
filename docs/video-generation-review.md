@@ -1,6 +1,6 @@
 # Video generation review — 2026-10-01
 
-Scope: current Remiqora frontend, backend job/assembly pipeline, installed MLX engine, and authoritative upstream documentation. This review changes documentation only. No GPU generations, model installations, weight downloads, or changes to the user's library were performed.
+Scope: current OpenFabric Studio frontend, backend job/assembly pipeline, installed MLX engine, and authoritative upstream documentation. This review changes documentation only. No GPU generations, model installations, weight downloads, or changes to the user's library were performed.
 
 Recommendation: repair job ownership, recovery, media validation, and engine settings first. Then introduce a saved project with a short preview and per-shot iteration. Test reference-image conditioning and musical timing before spending more compute on larger renders or another model.
 
@@ -28,7 +28,7 @@ Evidence: `backend/app/video_jobs.py:967`, `:861`, `:1081`, `:1448`; `backend/ap
 
 ### P1: advertised tiling does not protect A2V generation
 
-Remiqora passes `--tile-frames 2` for long/large shots and `--tile-spatial 2` for the largest size. The installed A2V CLI does not forward tile configuration to its pipeline, and the overridden A2V implementation bypasses its parent's tiled transformer wrappers. The flags are parsed but do not provide the stated memory protection.
+OpenFabric Studio passes `--tile-frames 2` for long/large shots and `--tile-spatial 2` for the largest size. The installed A2V CLI does not forward tile configuration to its pipeline, and the overridden A2V implementation bypasses its parent's tiled transformer wrappers. The flags are parsed but do not provide the stated memory protection.
 
 Fix both integration layers with a tracked, compatibility-checked change and behavioral tests, or restrict settings that rely on this protection. Establish actual hardware limits with measured inference. No OOM threshold was measured in this review.
 

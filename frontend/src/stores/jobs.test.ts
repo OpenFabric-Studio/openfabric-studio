@@ -65,7 +65,7 @@ const voiceProgress: VoiceJobProgress = { job_id: 'apply-17', kind: 'apply', sta
 
 describe('backend ACE ownership', () => {
   it('adopts old browser-owned jobs once before discarding their local records', async () => {
-    localStorage.setItem('remiqora_ace_inflight', JSON.stringify([{ id: 'task-1', title: 'Old task', lyrics: 'words', audioFormat: 'wav', batchSize: 2, createdAt: 100, params: { prompt: 'folk' } }]))
+    localStorage.setItem('openfabric_ace_inflight', JSON.stringify([{ id: 'task-1', title: 'Old task', lyrics: 'words', audioFormat: 'wav', batchSize: 2, createdAt: 100, params: { prompt: 'folk' } }]))
     vi.mocked(aceApi.adoptLegacyJob).mockResolvedValue(completed)
     vi.mocked(aceApi.listJobs).mockResolvedValue([completed])
     vi.mocked(tracksApi.listTracks).mockResolvedValue([saved])
@@ -74,29 +74,29 @@ describe('backend ACE ownership', () => {
     await store.loadHistory()
     expect(aceApi.adoptLegacyJob).toHaveBeenCalledTimes(1)
     expect(aceApi.adoptLegacyJob).toHaveBeenCalledWith({ task_id: 'task-1', title: 'Old task', voice_id: null, track_ids: [], params: { prompt: 'folk', audio_format: 'wav', batch_size: 2, lyrics: 'words' } })
-    expect(localStorage.getItem('remiqora_ace_inflight')).toBeNull()
+    expect(localStorage.getItem('openfabric_ace_inflight')).toBeNull()
   })
 
   it('retains every original legacy record when any adoption fails', async () => {
     const original = JSON.stringify([{ id: 'task-1', params: {}, title: 'Old task' }, { id: 'task-2', params: {}, title: 'Other task' }])
-    localStorage.setItem('remiqora_ace_inflight', original)
+    localStorage.setItem('openfabric_ace_inflight', original)
     vi.mocked(aceApi.adoptLegacyJob).mockResolvedValueOnce(completed).mockRejectedValueOnce(new Error('offline'))
     const store = useAceStepStore()
     await store.loadHistory()
-    expect(localStorage.getItem('remiqora_ace_inflight')).toBe(original)
+    expect(localStorage.getItem('openfabric_ace_inflight')).toBe(original)
     expect(store.historyError).toBe('offline')
   })
 
   it('retains malformed legacy candidate IDs without submitting an adoption', async () => {
     const original = JSON.stringify([{ id: 'task-1', params: {}, title: 'Old task', dbIds: [-1] }])
-    localStorage.setItem('remiqora_ace_inflight', original)
+    localStorage.setItem('openfabric_ace_inflight', original)
     vi.mocked(aceApi.adoptLegacyJob).mockResolvedValue(completed)
     vi.mocked(aceApi.listJobs).mockResolvedValue([completed])
     vi.mocked(tracksApi.listTracks).mockResolvedValue([saved])
     const store = useAceStepStore()
     await store.loadHistory()
     expect(aceApi.adoptLegacyJob).not.toHaveBeenCalled()
-    expect(localStorage.getItem('remiqora_ace_inflight')).toBe(original)
+    expect(localStorage.getItem('openfabric_ace_inflight')).toBe(original)
     expect(store.historyError).toBeTruthy()
   })
 

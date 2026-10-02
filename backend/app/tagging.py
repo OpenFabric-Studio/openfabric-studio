@@ -107,7 +107,7 @@ def _bounded_text(value: str, max_bytes: int = 4096) -> str:
 def build_tags(track: SavedTrack, version: AudioVersion, artist: str,
                options: TaggedDownloadOptions, previous_comment: str = "") -> dict[str, str]:
     title = _bounded_text(" ".join(track.title.split()), 2048) or "Untitled"
-    tags = {"title": title, "artist": artist, "album": (options.album or title).strip(), "encoded_by": "Remiqora"}
+    tags = {"title": title, "artist": artist, "album": (options.album or title).strip(), "encoded_by": "OpenFabric"}
     try:
         tags["date"] = datetime.fromisoformat(track.created_at.replace("Z", "+00:00")).date().isoformat()
     except ValueError:
@@ -129,11 +129,11 @@ def build_tags(track: SavedTrack, version: AudioVersion, artist: str,
     if track.model in {"ace_step", "yue2"}:
         label = MODELS[track.model].label
         tags.update({"AI_GENERATED": "true", "GENERATOR": label})
-        notes.append(f"Generated with Remiqora ({label})")
+        notes.append(f"Generated with OpenFabric ({label})")
         if track.model == "yue2":
             notes.append("Check the terms of the exact model weights used")
     elif track.model == "editor":
-        notes.append("Mixed in the Remiqora editor")
+        notes.append("Mixed in the OpenFabric editor")
     if track.seed is not None:
         tags["SEED"] = str(track.seed)
         notes.append(f"seed={track.seed}")
@@ -248,7 +248,7 @@ async def _prepare(identifier: str, track_id: int, version_id: str | None,
             track, version, source = _selected(track_id, version_id, export_id)
             artist = artist_settings.get_settings().artist
             ffmpeg, ffprobe = tool("ffmpeg"), tool("ffprobe")
-            directory = Path(tempfile.mkdtemp(prefix="remiqora-tagged-", dir=_TEMP_ROOT))
+            directory = Path(tempfile.mkdtemp(prefix="openfabric-tagged-", dir=_TEMP_ROOT))
             # Snapshot with owned, cancellable IO before launching an external
             # decoder. Concurrent source edits cannot silently change selection.
             digest = await hash_file(source)

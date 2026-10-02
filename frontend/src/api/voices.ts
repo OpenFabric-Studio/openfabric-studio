@@ -18,7 +18,7 @@ export type VoiceRecording = VoiceProfile['recordings'][number]
 export type VoiceExtractReport = NonNullable<VoiceProfile['extract_report']>
 export type ApplyStatus = ApplyStatusResponse
 
-const STORAGE_KEY = 'remiqora_voice_id'
+const STORAGE_KEY = 'openfabric_voice_id'
 const ACTIVE: VoiceStatus[] = ['queued', 'extracting', 'cleaning', 'preparing', 'merging', 'training']
 
 export function isVoiceActive(status: string | undefined): boolean {
@@ -51,7 +51,7 @@ export function setActiveVoiceId(id: string | null): void {
   } catch {
     // private browsing
   }
-  window.dispatchEvent(new Event('remiqora-voice'))
+  window.dispatchEvent(new Event('openfabric-voice'))
 }
 
 export async function listVoices(signal?: AbortSignal): Promise<VoiceProfile[]> {

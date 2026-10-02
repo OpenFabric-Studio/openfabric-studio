@@ -44,12 +44,12 @@ function onExternalChange() {
 
 onMounted(() => {
   poll.start()
-  window.addEventListener('remiqora-voice', onExternalChange)
+  window.addEventListener('openfabric-voice', onExternalChange)
   window.addEventListener('storage', onExternalChange)
 })
 onBeforeUnmount(() => {
   poll.stop()
-  window.removeEventListener('remiqora-voice', onExternalChange)
+  window.removeEventListener('openfabric-voice', onExternalChange)
   window.removeEventListener('storage', onExternalChange)
 })
 </script>

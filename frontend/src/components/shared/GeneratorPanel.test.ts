@@ -7,7 +7,7 @@ import { i18n, setLocale } from '../../i18n'
 let app: App | undefined
 let mounts = 0
 let unmounts = 0
-const storageKey = 'remiqora:ace-generator-panel'
+const storageKey = 'openfabric:ace-generator-panel'
 
 beforeEach(() => { localStorage.clear(); setLocale('en'); mounts = 0; unmounts = 0 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); document.documentElement.style.removeProperty('--app-header-height'); vi.restoreAllMocks(); vi.unstubAllGlobals() })

@@ -30,7 +30,6 @@ it('shows friendly engine names in history and preset rows, including untitled h
 })
 it.each<{ locale: LocaleCode; historyLabel: string; presetsLabel: string; historySearch: string; presetSearch: string }>([
   { locale: 'en', historyLabel: 'History', presetsLabel: 'Saved presets', historySearch: 'Search lyrics, style or title', presetSearch: 'Search saved preset names' },
-  { locale: 'ru', historyLabel: 'История', presetsLabel: 'Сохранённые пресеты', historySearch: 'Поиск по тексту, стилю или названию', presetSearch: 'Поиск по именам сохранённых пресетов' },
 ])('describes the active search scope in $locale', async ({ locale, historyLabel, presetsLabel, historySearch, presetSearch }) => {
   setLocale(locale)
   const container = await mount()

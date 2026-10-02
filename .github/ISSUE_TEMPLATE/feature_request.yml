@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         Issues can be written in English or Russian.
-        Check the [fork roadmap](https://github.com/mchosc/remiqora/blob/master/ROADMAP.md) and describe a concrete workflow need.
+        Check the [roadmap](https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/ROADMAP.md) and describe a concrete workflow need.
   - type: textarea
     id: problem
     attributes:

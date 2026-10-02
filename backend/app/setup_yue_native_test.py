@@ -46,7 +46,7 @@ class NativeSourcePatchTests(unittest.TestCase):
                 apply_patches(source)
                 ar = (source / 'src/models/yue2/ar_runtime.cpp').read_text()
                 session = (source / 'src/models/yue2/session.cpp').read_text()
-                self.assertIn('RemiqoraProgressRun progress(request.options)', session)
+                self.assertIn('OpenFabricProgressRun progress(request.options)', session)
                 self.assertIn('release_compute_workspace();', ar)
                 self.assertIn('return steps == s && graph != nullptr;', ar)
                 release = ar.split('void release_compute_workspace()', 1)[1].split('~PrefixStateGraph()', 1)[0]
@@ -67,36 +67,36 @@ class NativeSourcePatchTests(unittest.TestCase):
             source_fixture(source, PINS[0])
             apply_patches(source)
             probe = source / 'probe.cpp'
-            probe.write_text('''#include "engine/models/yue2/remiqora_progress.h"
+            probe.write_text('''#include "engine/models/yue2/openfabric_progress.h"
 #include <iostream>
 #include <thread>
 #include <condition_variable>
 #include <atomic>
 #include <vector>
 using namespace engine::models::yue2;
-std::string read() { std::ifstream f(std::getenv("REMIQORA_YUE2_PROGRESS_PATH")); return {std::istreambuf_iterator<char>(f), {}}; }
+std::string read() { std::ifstream f(std::getenv("OPENFABRIC_YUE2_PROGRESS_PATH")); return {std::istreambuf_iterator<char>(f), {}}; }
 int main() {
-    { RemiqoraProgressRun invalid({{"remiqora_run_id", "bad"}}); remiqora_set_progress(RemiqoraProgressPhase::Semantic, 32); }
+    { OpenFabricProgressRun invalid({{"openfabric_run_id", "bad"}}); openfabric_set_progress(OpenFabricProgressPhase::Semantic, 32); }
     if (!read().empty()) return 2;
     std::mutex mutex; std::condition_variable ready; bool entered=false, release=false;
     std::thread foreign([&] {
-        RemiqoraProgressRun old({{"remiqora_run_id", std::string(32,'a')}});
-        remiqora_set_progress(RemiqoraProgressPhase::Semantic, 32);
+        OpenFabricProgressRun old({{"openfabric_run_id", std::string(32,'a')}});
+        openfabric_set_progress(OpenFabricProgressPhase::Semantic, 32);
         { std::lock_guard<std::mutex> lock(mutex); entered=true; } ready.notify_one();
         { std::unique_lock<std::mutex> lock(mutex); ready.wait(lock,[&] { return release; }); }
-        remiqora_advance_progress(64, true);
+        openfabric_advance_progress(64, true);
     });
     { std::unique_lock<std::mutex> lock(mutex); ready.wait(lock,[&] { return entered; }); }
     std::cout << read() << '\\n';
     {
-        RemiqoraProgressRun active({{"remiqora_run_id", std::string(32,'b')}});
-        remiqora_set_progress(RemiqoraProgressPhase::Acoustic,0,4);
+        OpenFabricProgressRun active({{"openfabric_run_id", std::string(32,'b')}});
+        openfabric_set_progress(OpenFabricProgressPhase::Acoustic,0,4);
         { std::lock_guard<std::mutex> lock(mutex); release=true; } ready.notify_one(); foreign.join();
         std::cout << read() << '\\n';
-        remiqora_advance_progress(4,true);
-        remiqora_set_progress(RemiqoraProgressPhase::Done,1,1);
+        openfabric_advance_progress(4,true);
+        openfabric_set_progress(OpenFabricProgressPhase::Done,1,1);
     }
-    remiqora_advance_progress(32,true);
+    openfabric_advance_progress(32,true);
     std::cout << read() << '\\n';
     std::atomic<bool> observing(true); std::vector<std::string> snapshots;
     std::thread observer([&] {
@@ -106,10 +106,10 @@ int main() {
         }
     });
     {
-        RemiqoraProgressRun active({{"remiqora_run_id", std::string(32,'c')}});
-        remiqora_set_progress(RemiqoraProgressPhase::Semantic,0);
-        if (remiqora_total_work(100000001,1).has_value()) return 3;
-        for (int i=1; i<=512; ++i) remiqora_advance_progress(i,true);
+        OpenFabricProgressRun active({{"openfabric_run_id", std::string(32,'c')}});
+        openfabric_set_progress(OpenFabricProgressPhase::Semantic,0);
+        if (openfabric_total_work(100000001,1).has_value()) return 3;
+        for (int i=1; i<=512; ++i) openfabric_advance_progress(i,true);
     }
     observing.store(false); observer.join();
     for (const auto & snapshot : snapshots) std::cout << snapshot << '\\n';
@@ -118,7 +118,7 @@ int main() {
             binary = source / ('probe.exe' if os.name == 'nt' else 'probe')
             compiled = subprocess.run([compiler, '-std=c++17', '-D_POSIX_C_SOURCE=200809L', '-pthread', '-I', str(source / 'include'), str(probe), '-o', str(binary)], capture_output=True, text=True)
             self.assertEqual(compiled.returncode, 0, compiled.stderr)
-            environment = {**os.environ, 'REMIQORA_YUE2_PROGRESS_PATH': str(source / 'progress.json')}
+            environment = {**os.environ, 'OPENFABRIC_YUE2_PROGRESS_PATH': str(source / 'progress.json')}
             result = subprocess.run([str(binary)], env=environment, check=True, capture_output=True, text=True)
             states = [json.loads(line) for line in result.stdout.splitlines()]
             self.assertEqual(states[0]['run_id'], 'a' * 32)

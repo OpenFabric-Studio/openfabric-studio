@@ -18,7 +18,7 @@ const EXTERNAL = {
 const SETUP_PAGE = path.join(__dirname, '..', 'renderer', 'index.html');
 
 // Tests point the app at throwaway folders.
-if (process.env.OPENFABRIC_USER_DATA || process.env.REMIQORA_USER_DATA) app.setPath('userData', process.env.OPENFABRIC_USER_DATA || process.env.REMIQORA_USER_DATA);
+if (process.env.OPENFABRIC_USER_DATA) app.setPath('userData', process.env.OPENFABRIC_USER_DATA);
 
 let win = null;
 let ctx = null;
@@ -34,7 +34,7 @@ function buildContext(dataRoot) {
     platform: PLATFORM,
     resources: resourcePaths(app.isPackaged),
     // Test switch: skip the multi-gigabyte components, e.g. OPENFABRIC_SKIP_COMPONENTS=ace-step,demucs,weights
-    skip: (process.env.OPENFABRIC_SKIP_COMPONENTS || process.env.REMIQORA_SKIP_COMPONENTS || '').split(',').map((s) => s.trim()).filter(Boolean),
+    skip: (process.env.OPENFABRIC_SKIP_COMPONENTS || '').split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
 
@@ -66,7 +66,7 @@ function createWindow() {
       if (/^https?:\/\//.test(url)) shell.openExternal(url);
     }
   });
-  if (!app.isPackaged && (process.env.OPENFABRIC_DEVTOOLS || process.env.REMIQORA_DEVTOOLS)) win.webContents.openDevTools({ mode: 'detach' });
+  if (!app.isPackaged && process.env.OPENFABRIC_DEVTOOLS) win.webContents.openDevTools({ mode: 'detach' });
 }
 
 function showSetup(query = {}) {
@@ -118,8 +118,8 @@ function registerIpc() {
       version: app.getVersion(),
       platform: PLATFORM,
       // Every preferred language, like the app itself: Russian anywhere in the list selects Russian.
-      // OPENFABRIC_LANG=en|ru forces the language (screenshots, trying another language on this machine).
-      languages: (process.env.OPENFABRIC_LANG || process.env.REMIQORA_LANG) ? [process.env.OPENFABRIC_LANG || process.env.REMIQORA_LANG] : [app.getLocale(), ...app.getPreferredSystemLanguages()],
+      // OPENFABRIC_LANG=en forces English UI labels in the bootstrap shell when set.
+      languages: process.env.OPENFABRIC_LANG ? [process.env.OPENFABRIC_LANG] : [app.getLocale(), ...app.getPreferredSystemLanguages()],
       dataRoot: ctx.L.root,
       plan,
       totalBytes: plan.filter((c) => !c.done && !c.skipped).reduce((sum, c) => sum + c.weight, 0),
@@ -133,7 +133,7 @@ function registerIpc() {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
     const picked = r.filePaths[0];
-    return ['remiqora', 'openfabricstudio', 'openfabric-studio'].includes(path.basename(picked).toLowerCase().replace(/[\s_]/g, '')) ? picked : path.join(picked, 'OpenFabricStudio');
+    return ['remiqora', 'openfabric', 'openfabricstudio', 'openfabric-studio'].includes(path.basename(picked).toLowerCase().replace(/[\s_]/g, '')) ? picked : path.join(picked, 'OpenFabricStudio');
   });
   ipcMain.handle('setup:set-root', async (_e, dir) => {
     try {

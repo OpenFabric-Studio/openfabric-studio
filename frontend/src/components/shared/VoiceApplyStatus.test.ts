@@ -79,11 +79,3 @@ it('does not blame the GPU when the job is queued without a reported blocker', a
   expect(node.textContent).toContain('Waiting to start voice conversion')
   expect(node.textContent).not.toContain('GPU')
 })
-it('translates queue reasons and phases in Russian', async () => {
-  setLocale('ru')
-  const node = mount({ ...progress, status: 'queued', phase: 'waiting_gpu', queue_reason: 'voice_conversion', queue_label: 'Singer' }); await settle()
-  expect(node.textContent).toContain('Ожидание замены голоса: Singer')
-  expect(node.textContent).not.toContain('voiceClone.')
-  current.value = { ...progress, phase: 'analyzing' }; await settle()
-  expect(node.textContent).toContain('Анализ вокала')
-})

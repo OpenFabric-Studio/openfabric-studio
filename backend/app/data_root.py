@@ -2,8 +2,7 @@
 
 Songs, voices, videos, singing models, logs, and the catalog database live
 here. The choice is stored outside that folder, in
-~/.openfabric-studio/config.json (legacy ~/.remiqora/config.json is still
-read if present), so moving it does not lose the pointer. ACE-Step's trainer
+~/.openfabric-studio/config.json, so moving it does not lose the pointer. ACE-Step's trainer
 only accepts files inside its own checkout, so LoRA datasets and ACE weights
 stay there.
 """
@@ -34,9 +33,9 @@ _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 _CONFIG_LOCK = threading.RLock()
 _MIGRATION_LOCK = threading.RLock()
-_JOURNAL = ".remiqora-migration.json"
-_SOURCE_JOURNAL = ".remiqora-migration-source.json"
-_BACKUPS = ".remiqora-migration"
+_JOURNAL = ".openfabric-migration.json"
+_SOURCE_JOURNAL = ".openfabric-migration-source.json"
+_BACKUPS = ".openfabric-migration"
 _LAYOUT = (
     ("files", "tracks"),
     ("voices", "voices"),
@@ -62,14 +61,10 @@ def _env_first(*names: str) -> str | None:
 
 
 def config_path() -> Path:
-    override = _env_first("OPENFABRIC_CONFIG", "REMIQORA_CONFIG")
+    override = _env_first("OPENFABRIC_CONFIG")
     if override:
         return Path(override)
-    openfabric = Path.home() / ".openfabric-studio" / "config.json"
-    legacy = Path.home() / ".remiqora" / "config.json"
-    if openfabric.is_file() or not legacy.is_file():
-        return openfabric
-    return legacy
+    return Path.home() / ".openfabric-studio" / "config.json"
 
 
 def read_config() -> dict[str, JsonValue]:
@@ -147,7 +142,7 @@ def validate_data_dir(raw: str, blocked: list[Path]) -> Path:
             raise DataDirError("inside_engine")
     try:
         path.mkdir(parents=True, exist_ok=True)
-        probe = path / ".remiqora-write-test"
+        probe = path / ".openfabric-write-test"
         probe.write_text("ok", encoding="utf-8")
         probe.unlink()
     except OSError as exc:

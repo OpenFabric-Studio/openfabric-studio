@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useOrchestratorStore } from '../../stores/orchestrator'
 import { MODEL_LABELS, MODEL_ROUTES, useModelSwitch } from '../../composables/useModelSwitch'
-import { setLocale, currentLocale, type LocaleCode } from '../../i18n'
 import type { ModelId, ModelRuntimeStatus } from '../../types'
 import HelpModal from './HelpModal.vue'
 
@@ -26,18 +25,6 @@ onMounted(() => {
   window.addEventListener('resize', measureHeader)
 })
 onBeforeUnmount(() => { headerObserver?.disconnect(); window.removeEventListener('resize', measureHeader); document.documentElement.style.removeProperty('--app-header-height') })
-
-const LOCALES: { code: LocaleCode; label: string }[] = [
-  { code: 'ru', label: 'Русский' },
-  { code: 'en', label: 'English' },
-]
-
-function onLocaleChange(e: Event) {
-  if (!(e.target instanceof HTMLSelectElement)) return
-  const value = e.target.value
-  const choice = LOCALES.find((locale) => locale.code === value)
-  if (choice) setLocale(choice.code)
-}
 
 const MODEL_IDS: ModelId[] = ['ace_step', 'yue2']
 
@@ -76,11 +63,11 @@ async function onSelect(id: ModelId) {
       <router-link to="/" class="flex items-center gap-2 text-text">
         <span class="accent-gradient flex h-6 w-6 shrink-0 items-center justify-center rounded-md">
           <svg viewBox="0 0 32 32" width="16" height="16" aria-hidden="true">
-            <text x="16" y="23" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="21" fill="white">R</text>
+            <text x="16" y="23" text-anchor="middle" font-family="Inter, system-ui, sans-serif" font-weight="800" font-size="21" fill="white">O</text>
           </svg>
         </span>
         <span class="flex flex-col leading-tight">
-          <span class="text-lg font-semibold">Remiqora</span>
+          <span class="text-lg font-semibold">OpenFabric Studio</span>
           <span class="text-[10px] text-text-dim">{{ t('header.tagline') }}</span>
         </span>
       </router-link>
@@ -135,14 +122,6 @@ async function onSelect(id: ModelId) {
           <span>{{ MODEL_LABELS[id] }}</span>
           <span class="text-xs text-text-dim">{{ t(STATUS_LABEL_KEYS[statusOf(id)]) }}</span>
         </button>
-        <select
-          :aria-label="t('common.language')"
-          class="rounded-lg border border-border bg-panel-2 px-2 py-2 text-sm text-text"
-          :value="currentLocale()"
-          @change="onLocaleChange"
-        >
-          <option v-for="loc in LOCALES" :key="loc.code" :value="loc.code">{{ loc.label }}</option>
-        </select>
       </nav>
     </div>
     <p v-if="orchestrator.switchError" class="border-t border-status-failed/30 bg-status-failed/10 px-4 py-2 text-xs whitespace-pre-line text-status-failed sm:px-6">

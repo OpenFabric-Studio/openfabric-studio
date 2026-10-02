@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 
 echo ===================================================
-echo             Remiqora - Production Launcher
+echo             OpenFabric - Production Launcher
 echo ===================================================
 echo.
 

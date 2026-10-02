@@ -389,7 +389,7 @@ async def _measure_selected(path: Path, document: PreparationDocument, job: Prep
             raise asyncio.CancelledError()
         if inputs:
             # One interpreter and one pYIN warm-up for all independent passages.
-            with tempfile.TemporaryDirectory(prefix='remiqora-coverage-') as temporary:
+            with tempfile.TemporaryDirectory(prefix='openfabric-coverage-') as temporary:
                 manifest = Path(temporary) / 'inputs.json'
                 manifest.write_text(CoverageBatchInput(inputs=inputs).model_dump_json(), encoding='utf-8')
                 log_name = f'voice_coverage_{path.name}_{uuid.uuid4().hex}'

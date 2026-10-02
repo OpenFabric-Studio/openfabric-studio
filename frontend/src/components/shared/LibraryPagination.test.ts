@@ -78,7 +78,7 @@ it('applies favorites before pagination and resets when favorites or sort change
  expect(player(2)).not.toBeNull()
 })
 it.each(['0', '-1', 'NaN', '7', 'Infinity'])('rejects unsupported persisted page size %s', async value => {
- localStorage.setItem('remiqora.pageSize', value); await mount('yue')
+ localStorage.setItem('openfabric.pageSize', value); await mount('yue')
  expect(document.querySelectorAll('[data-player]')).toHaveLength(5)
 })
 it('remembers a supported page size across mounts', async () => {
@@ -87,7 +87,7 @@ it('remembers a supported page size across mounts', async () => {
  if (!select) throw new Error('Missing page size')
  select.value = '10'; select.dispatchEvent(new Event('change', { bubbles: true })); await flush()
  expect(document.querySelectorAll('[data-player]')).toHaveLength(10)
- expect(localStorage.getItem('remiqora.pageSize')).toBe('10')
+ expect(localStorage.getItem('openfabric.pageSize')).toBe('10')
  app?.unmount(); document.body.replaceChildren(); await mount('yue', 12)
  expect(document.querySelectorAll('[data-player]')).toHaveLength(10)
 })

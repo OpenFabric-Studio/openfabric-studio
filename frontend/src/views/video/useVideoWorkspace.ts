@@ -29,7 +29,7 @@ function snapshot(draft: VideoDraft, revision: number): UpdateVideoProjectReques
   return { revision, name: draft.name, mode: draft.mode, direction: draft.direction, seed: draft.seed, settings: { ...draft.settings }, export_settings: { ...draft.export_settings },
     shots: draft.shots.map((shot) => ({ ...shot })), markers: draft.markers.map((marker) => ({ ...marker })), overlays: draft.overlays.map((overlay) => ({ ...overlay })) }
 }
-const draftKey = (id: string) => `remiqora:video-draft:${id}`
+const draftKey = (id: string) => `openfabric:video-draft:${id}`
 function restoreDraft(project: VideoProject): VideoDraft | null {
   try {
     const raw = sessionStorage.getItem(draftKey(project.id))

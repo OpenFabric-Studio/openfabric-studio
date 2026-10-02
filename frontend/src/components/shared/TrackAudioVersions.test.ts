@@ -282,16 +282,6 @@ it('keeps one playback owner across main players', async () => {
   expect(second.querySelector('button[aria-label="Pause"]')).not.toBeNull()
 })
 
-it('translates the file controls and selected download label in Russian', async () => {
-  setLocale('ru'); exportsForOriginal()
-  const node = mount(); await settle()
-  const originalButton = button(node, 'Оригинал'); originalButton.click(); await settle()
-  expect(node.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Формат прослушивания')
-  expect(node.textContent).toContain('Исходник · WAV')
-  expect(node.querySelector('a[download]')?.textContent).toContain('Скачать выбранное аудио (WAV)')
-  expect(node.textContent).not.toContain('trackAudio.')
-})
-
 const conversionProgress: VoiceJobProgress = { job_id: 'apply-42', kind: 'apply', status: 'queued', queued_at: 100, observed_at: 200, phase: 'waiting_gpu', queue_reason: 'voice_training', queue_label: 'SackJo22', phase_total: 0 }
 it('keeps every active conversion and its queue reason visible while Original plays', async () => {
   vi.useFakeTimers(); vi.setSystemTime(200_000)

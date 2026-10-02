@@ -37,7 +37,7 @@ def _env_path(name: str, default: str) -> Path:
 
 
 def _env_path_prefer(*names: str, default: str) -> Path:
-    """Prefer OPENFABRIC_* then REMIQORA_* (or any listed names) then default."""
+    """Read the first set OPENFABRIC_* path env var, else default."""
     for name in names:
         value = os.getenv(name)
         if value:
@@ -268,21 +268,20 @@ MODELS: dict[str, ModelDefinition] = {
 }
 
 # Shared storage for songs, voices, videos, models, logs, and the catalog.
-# A folder chosen in the app overrides OPENFABRIC_DATA_DIR / REMIQORA_DATA_DIR
-# on the next start. The desktop app points OPENFABRIC_LOG_DIR (and legacy
-# REMIQORA_LOG_DIR) at its own logs folder. A source checkout keeps logs inside
+# A folder chosen in the app overrides OPENFABRIC_DATA_DIR
+# on the next start. The desktop app points OPENFABRIC_LOG_DIR
+# at its own logs folder. A source checkout keeps logs inside
 # the data folder.
 _DEFAULT_DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 DATA_DIR = resolve_data_dir(
-    _env_path_prefer("OPENFABRIC_DATA_DIR", "REMIQORA_DATA_DIR", default=str(_DEFAULT_DATA_DIR))
+    _env_path_prefer("OPENFABRIC_DATA_DIR", default=str(_DEFAULT_DATA_DIR))
 )
 if YUE2_PROGRESS_AVAILABLE:
     progress = str(DATA_DIR / 'yue2-progress.json')
     MODELS['yue2'].processes[0].env['OPENFABRIC_YUE2_PROGRESS_PATH'] = progress
-    MODELS['yue2'].processes[0].env['REMIQORA_YUE2_PROGRESS_PATH'] = progress
 _LEGACY_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 LOG_DIR = _env_path_prefer(
-    "OPENFABRIC_LOG_DIR", "REMIQORA_LOG_DIR", default=str(DATA_DIR / "logs")
+    "OPENFABRIC_LOG_DIR", default=str(DATA_DIR / "logs")
 )
 LOG_TAIL_LINES = 40
 

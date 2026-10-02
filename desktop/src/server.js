@@ -54,8 +54,6 @@ function backendEnv({ L, manifest, platform }) {
     CUDA_BIN_DIR: L.yue2Bin,
     OPENFABRIC_DATA_DIR: L.data,
     OPENFABRIC_LOG_DIR: L.logs,
-    REMIQORA_DATA_DIR: L.data,
-    REMIQORA_LOG_DIR: L.logs,
   });
 }
 

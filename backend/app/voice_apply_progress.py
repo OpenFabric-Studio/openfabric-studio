@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from .voice_progress import VoiceProgressTracker
 
-PREFIX = 'REMIQORA_PROGRESS '
+PREFIX = 'OPENFABRIC_PROGRESS '
 _MAX_LINE = 4096
 _READ_BYTES = 32768
 

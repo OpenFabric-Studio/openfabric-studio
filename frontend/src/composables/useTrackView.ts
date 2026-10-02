@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-const STORAGE_KEY = 'remiqora_track_view'
+const STORAGE_KEY = 'openfabric_track_view'
 export type TrackView = 'cards' | 'list'
 
 const view = ref<TrackView>(readView())

@@ -28,33 +28,3 @@ export const trackAudioEn = {
     worker_identity_unverified: 'The export worker could not be verified. Check the backend log before retrying.',
   },
 }
-export const trackAudioRu = {
-  variant: 'Вариант №{index}', analysisHint: 'Стемы и MIDI используют основную версию записи; переключение прослушивания не меняет их исходник.', initialVoice: 'Первый голос: {name}', initialVoiceGeneric: 'Первый голос применён', title: 'Версии аудио', original: 'Оригинал', unknownVoice: 'Прежний голос', refresh: 'Обновить',
-  originalMissing: 'Оригинал этой старой записи недоступен. Существующие версии можно слушать и экспортировать.',
-  downloadSource: 'Скачать эту версию', manage: 'Голоса и экспорт', voice: 'Клонированный голос', noVoices: 'Сначала создайте голос',
-  playbackFormat: 'Формат прослушивания', source: 'Исходник', sourceFormat: 'Исходник · {format}', selectedAudio: 'Выбрано аудио: {selection}', downloadSelected: 'Скачать выбранное аудио ({format})',
-  voicesUnavailable: 'Не удалось загрузить голоса. Нажмите Обновить и повторите.', voiceHint: 'Каждая версия голоса использует оригинал. Прежние версии сохраняются.', addVoice: 'Добавить версию голоса',
-  format: 'Формат экспорта', export: 'Создать экспорт', settings: 'Настройки кодирования',
-  exportHint: 'Экспорт использует настройки на момент запуска. Повышение качества не восстановит утраченные детали исходника.',
-  compression: 'Сжатие {level}', retry: 'Повторить', mono: 'Моно', stereo: 'Стерео',
-  progress: {
-    elapsed: 'Прошло: {time}', remaining: 'Осталось на текущий этап', measuring: 'Измеряем…', waitingEstimate: 'Оценка появится после начала этапа', stageProgress: 'Прогресс текущего этапа замены голоса', cancelVoice: 'Отменить замену голоса на {name}',
-    phase: { preparing: 'Подготовка аудио', separating: 'Разделение вокала и инструментов', loading: 'Загрузка модели голоса', analyzing: 'Анализ вокала', converting: 'Замена голоса', mixing: 'Сведение и сохранение аудио', complete: 'Замена голоса завершена' },
-    queue: { queued: 'Ожидание начала замены голоса', voice_training: 'Ожидание обучения голоса', voice_conversion: 'Ожидание замены голоса', voice_preparation: 'Ожидание подготовки голоса', stem_separation: 'Ожидание разделения стемов', video_generation: 'Ожидание генерации видео', gpu_busy: 'Ожидание GPU' },
-    count: { chunks: '{current} / {total} фрагментов аудио', files: '{current} / {total} файлов', samples: '{current} / {total} образцов', steps: '{current} / {total} шагов', tasks: '{current} / {total} задач' },
-  },
-  errors: {
-    unknown: 'Не удалось выполнить действие с аудио. Обновите и повторите.',
-    original_audio_missing: 'Оригинал недоступен. Без него безопасно создать другой голос нельзя.',
-    audio_version_unavailable: 'Эта версия аудио недоступна.', source_unavailable: 'Исходное аудио недоступно.',
-    not_ready: 'Этот голос ещё не готов.', audio_version_missing: 'Эта версия аудио больше не существует.', audio_version_storage_failed: 'Не удалось сохранить версию аудио. Проверьте папку библиотеки.', voice_not_ready: 'Этот голос ещё не готов.', voice_missing: 'Этот голос больше не существует.',
-    audio_version_busy: 'Версия занята. Подождите и повторите.', track_busy: 'Эта запись удаляется.',
-    cancelled: 'Отменено.', interrupted: 'Замена голоса прервана. Повторите запуск.',
-    export_interrupted: 'Экспорт прерван. Повторите запуск.', encode_failed: 'Ошибка кодирования. Проверьте FFmpeg и повторите.',
-    export_modified: 'Сохранённый экспорт изменился. Создайте новый экспорт этой версии.', invalid_audio: 'Экспорт не прошёл проверку аудио.', source_changed: 'Исходник изменился при кодировании. Обновите и повторите.',
-    export_write_failed: 'Не удалось сохранить экспорт. Проверьте папку библиотеки.', settings_invalid: 'Не удалось прочитать настройки кодирования. Откройте Настройки.',
-    convert_failed: 'Ошибка замены голоса. Проверьте модель и повторите.',
-    apply_cleanup_failed: 'Не удалось безопасно остановить замену. Перед повтором проверьте журнал сервера.',
-    worker_identity_unverified: 'Не удалось проверить процесс экспорта. Перед повтором проверьте журнал сервера.',
-  },
-}

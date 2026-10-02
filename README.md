@@ -1,5 +1,3 @@
-<p align="right"><b>English</b> · <a href="README.ru.md">Русский</a></p>
-
 <p align="center">
   <img src="frontend/public/favicon.svg" width="88" height="88" alt="OpenFabric Studio">
 </p>
@@ -51,22 +49,21 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **Video Studio** | Shot lists / LTX-oriented video workflow (experimental) |
 | **Demucs / DAW** | Stems and multitrack timeline |
 
-UI languages: English / Russian. Brand palette: near-black + indigo (`#4F46E5` / `#6366F1`).
+UI language: English. Brand palette: near-black + indigo (`#4F46E5` / `#6366F1`).
 
 ---
 
 ## Environment variables
 
-Prefer **`OPENFABRIC_*`**. Legacy **`REMIQORA_*`** names are still read as fallbacks:
+Use **`OPENFABRIC_*`** names (see `backend/.env.example`):
 
-| Canonical | Legacy alias |
-|-----------|--------------|
-| `OPENFABRIC_DATA_DIR` | `REMIQORA_DATA_DIR` |
-| `OPENFABRIC_LOG_DIR` | `REMIQORA_LOG_DIR` |
-| `OPENFABRIC_CONFIG` | `REMIQORA_CONFIG` |
-| `OPENFABRIC_HOME` | `REMIQORA_HOME` |
-
-See `backend/.env.example`.
+| Variable | Purpose |
+|----------|---------|
+| `OPENFABRIC_DATA_DIR` | Library / data root |
+| `OPENFABRIC_LOG_DIR` | Log directory |
+| `OPENFABRIC_CONFIG` | Path to `config.json` |
+| `OPENFABRIC_HOME` | Desktop install home (Electron) |
+| `OPENFABRIC_GPT_SOVITS_DIR` | Optional GPT-SoVITS checkout |
 
 ---
 

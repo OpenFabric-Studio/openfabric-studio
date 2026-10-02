@@ -29,7 +29,7 @@ Owner: audio implementation agent. Files: `frontend/src/audio/mixerEngine.ts`, `
 Owner: backend implementation agent. Files: new typed tagging/settings modules and tests, `api/routes_tracks.py`, `routes_audio_exports.py`, `routes_audio_versions.py`, `routes_settings.py`, `db.py`/settings storage as appropriate, `main.py`, `scripts/generate_contracts.py` and generated contract artifacts. Parent owns frontend API parsers and Settings integration after contract handoff.
 
 - [x] Add failing regressions for artist validation/persistence, the exact selected version/export, Unicode metadata, stream-copy equivalence, constrained paths, failure/cancellation/timeouts and temporary-file cleanup.
-- [x] Run isolated tests with temporary `REMIQORA_CONFIG`, `REMIQORA_DATA_DIR` and `SEED_VC_DIR`.
+- [x] Run isolated tests with temporary `OPENFABRIC_CONFIG`, `OPENFABRIC_DATA_DIR` and `SEED_VC_DIR`.
 - [x] Implement typed metadata and version/export-specific tagged responses without changing stored audio or existing endpoints.
 - [x] Regenerate contracts; verify tests and strict Python typing. Extend CI's checked scope for new typed modules.
 

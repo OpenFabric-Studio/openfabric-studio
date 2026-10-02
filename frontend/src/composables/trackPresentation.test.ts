@@ -9,7 +9,7 @@ it.each([NaN, Infinity, -Infinity, 9e99])('keeps invalid dates readable for %s',
 it('uses localized relative calendar dates and keeps the exact tooltip', () => {
  vi.useFakeTimers(); vi.setSystemTime(new Date(2026, 9, 1, 12)); setLocale('en')
  expect(formatCreated(new Date(2026, 8, 30, 23).getTime()).label).toContain('Yesterday')
- setLocale('ru'); expect(formatCreated(Date.now()).label).toContain('Сегодня')
+ setLocale('en'); expect(formatCreated(Date.now()).label).toContain('Today')
  expect(formatCreated(new Date(2025, 9, 1).getTime()).label).toContain('2025')
 })
 it('keeps full short titles and case, and truncates long single phrases without storing a new title', () => {

@@ -1,4 +1,4 @@
-"""Local singing voices: recordings stay under the Remiqora data directory."""
+"""Local singing voices: recordings stay under the OpenFabric data directory."""
 from __future__ import annotations
 
 import shutil

@@ -7,7 +7,7 @@ const path = require('node:path');
 const { applyGitPatch } = require('../src/bootstrap/patch');
 
 const tree = (files) => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'remiqora-patch-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-patch-'));
   for (const [name, text] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.writeFileSync(path.join(dir, name), text);

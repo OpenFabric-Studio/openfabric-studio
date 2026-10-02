@@ -32,7 +32,7 @@ function serve({ ranges = true, failFirst = 0, slow = false } = {}) {
   return new Promise((resolve) => server.listen(0, '127.0.0.1', () => resolve({ server, seen, url: `http://127.0.0.1:${server.address().port}/f.bin` })));
 }
 
-const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'remiqora-dl-'));
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-dl-'));
 
 test('downloads a file and verifies its sha256', async (t) => {
   const { server, url } = await serve();

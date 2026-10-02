@@ -1,6 +1,6 @@
 import { isRecord } from '../api/nativeValidation'
 
-const CLOCK_KEY = 'remiqora_voice_clock'
+const CLOCK_KEY = 'openfabric_voice_clock'
 
 export interface VoiceClock {
   startedAt: number
@@ -52,7 +52,7 @@ export function forgetVoiceClock(trackId: number) {
   writeClocks(all)
 }
 
-const USED_KEY = 'remiqora_voice_used'
+const USED_KEY = 'openfabric_voice_used'
 
 interface UsedVoice { voiceId: string; voiceName: string }
 

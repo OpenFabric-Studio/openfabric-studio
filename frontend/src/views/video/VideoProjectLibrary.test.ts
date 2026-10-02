@@ -121,10 +121,11 @@ it('resets pagination for search and status, and shows an empty result message',
   expect(document.body.textContent).toContain('No projects match your search or status filter')
 })
 
-it('translates project deletion and its scope in Russian', async () => {
-  setLocale('ru'); const saved = project(1)
+
+it('confirms deletion in English and keeps the source song', async () => {
+  const saved = project(1)
   await mount([saved]); remove(saved.id).click()
-  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Исходная песня сохраняется'))
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('The source song is kept'))
   expect(confirm).toHaveBeenCalledWith(expect.stringContaining(saved.name))
   expect(document.body.textContent).not.toContain('videoWorkspace.')
 })

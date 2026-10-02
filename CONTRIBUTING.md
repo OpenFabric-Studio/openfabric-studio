@@ -1,4 +1,4 @@
-# Contributing to Remiqora
+# Contributing to OpenFabric
 
 This repository, [OpenFabric-Studio/openfabric-studio](https://github.com/OpenFabric-Studio/openfabric-studio), is a maintained
 fork of [inikolax/remiqora](https://github.com/inikolax/remiqora), originally created

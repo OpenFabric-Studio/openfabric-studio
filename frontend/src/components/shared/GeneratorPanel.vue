@@ -12,7 +12,7 @@ const panelId = useId()
 const panel = ref<HTMLElement | null>(null)
 const heading = ref<HTMLElement | null>(null)
 const showButton = ref<HTMLButtonElement | null>(null)
-const storageKey = 'remiqora:ace-generator-panel'
+const storageKey = 'openfabric:ace-generator-panel'
 interface PanelPosition { x: number; y: number }
 interface PanelDrag {
   pointerId: number

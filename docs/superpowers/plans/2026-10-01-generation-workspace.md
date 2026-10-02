@@ -69,7 +69,7 @@ Files: new typed reference-import/preparation modules/routes/UI/tests and setup 
 
 - [x] Review each subsystem for the design requirements and code quality; resolve gaps before marking complete.
 - [x] Run `npm test` and `npm run build` in frontend; `npm test` in desktop.
-- [x] With temporary REMIQORA_CONFIG, REMIQORA_DATA_DIR and SEED_VC_DIR, run backend unit discovery and generated contract check.
+- [x] With temporary OPENFABRIC_CONFIG, OPENFABRIC_DATA_DIR and SEED_VC_DIR, run backend unit discovery and generated contract check.
 - [x] Extend/run the CI strict mypy platform loop for every new maintained backend module.
 - [x] Review final diff for lost features, unsafe boundary types, unowned work, lossy provenance, branding or private-data changes.
 - [x] Document actual checks and any unverified native hardware/model behavior. Leave changes reviewable on the feature branch without commits/pushes.

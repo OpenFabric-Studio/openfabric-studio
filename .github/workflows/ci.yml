@@ -34,8 +34,6 @@ jobs:
         env:
           OPENFABRIC_CONFIG: ${{ runner.temp }}/openfabric-native/config.json
           OPENFABRIC_DATA_DIR: ${{ runner.temp }}/openfabric-native/library
-          REMIQORA_CONFIG: ${{ runner.temp }}/openfabric-native/config.json
-          REMIQORA_DATA_DIR: ${{ runner.temp }}/openfabric-native/library
           SEED_VC_DIR: ${{ runner.temp }}/openfabric-native/engine
 
   desktop:
@@ -82,8 +80,6 @@ jobs:
           printf '%s\n' \
             "OPENFABRIC_CONFIG=$RUNNER_TEMP/openfabric-test-config.json" \
             "OPENFABRIC_DATA_DIR=$RUNNER_TEMP/openfabric-test-library" \
-            "REMIQORA_CONFIG=$RUNNER_TEMP/openfabric-test-config.json" \
-            "REMIQORA_DATA_DIR=$RUNNER_TEMP/openfabric-test-library" \
             "SEED_VC_DIR=$RUNNER_TEMP/openfabric-test-seed-vc" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v7
         with:

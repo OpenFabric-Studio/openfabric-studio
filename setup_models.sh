@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Clones ACE-Step-1.5, applies Remiqora's small patch on top (see
+# Clones ACE-Step-1.5, applies OpenFabric's small patch on top (see
 # external/patches/README.md) and runs 'uv sync' for it; installs YuE2
 # (audiocpp_server) from audio.cpp's own prebuilt macOS/Metal release - no
 # compiler needed, see the --from-source flag below for the alternative;
@@ -104,7 +104,7 @@ init_repo() {
         git clone "$repo_url" "$dir" >&2 || return 1
     fi
 
-    local marker_file="$dir/.remiqora-setup-done"
+    local marker_file="$dir/.openfabric-setup-done"
     if [[ ! -f "$marker_file" ]]; then
         (
             cd "$dir" || exit 1
@@ -160,7 +160,7 @@ AUDIOCPP_RELEASE_SHA256="a5995233c4e28297600c474eed24b734a3ff8f00393147915112b2b
 AUDIOCPP_DIR="$EXTERNAL_DIR/audio.cpp"
 
 install_prebuilt_yue2() {
-    local marker_file="$AUDIOCPP_DIR/.remiqora-release-${AUDIOCPP_RELEASE_TAG}.done"
+    local marker_file="$AUDIOCPP_DIR/.openfabric-release-${AUDIOCPP_RELEASE_TAG}.done"
     if [[ -f "$marker_file" ]]; then
         echo "Already installed ($AUDIOCPP_RELEASE_TAG), skipping."
         return 0

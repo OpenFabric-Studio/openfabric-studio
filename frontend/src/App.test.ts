@@ -11,6 +11,6 @@ let app: VueApp | undefined
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); completionNotifications.unread = [] })
 it('shows and clears the unread completion count in the document title', async () => {
   setLocale('en'); const container = document.body.appendChild(document.createElement('div')); app = createApp(App).use(i18n); app.component('RouterView', defineComponent({ render: () => null })); app.mount(container)
-  completionNotifications.unread = ['ace:a', 'yue:b']; await nextTick(); expect(document.title).toMatch(/^\(2\) Remiqora/)
-  markGenerationsRead(); await nextTick(); expect(document.title).toMatch(/^Remiqora/)
+  completionNotifications.unread = ['ace:a', 'yue:b']; await nextTick(); expect(document.title).toMatch(/^\(2\) OpenFabric/)
+  markGenerationsRead(); await nextTick(); expect(document.title).toMatch(/^OpenFabric/)
 })

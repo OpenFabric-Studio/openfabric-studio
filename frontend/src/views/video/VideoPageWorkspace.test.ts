@@ -200,7 +200,7 @@ it('admits only one preview while rapid clicks wait for an in-flight save', asyn
   expect(api.previewVideoProject).toHaveBeenCalledTimes(1)
 })
 it('uses the new revision for further edits restored from the browser draft', async () => {
-  sessionStorage.setItem(`remiqora:video-draft:${project.id}`, JSON.stringify({ revision: 1, name: project.name, shots: project.shots?.map(({ variants: _variants, approved_variant_id: _approval, ...shot }) => shot) }))
+  sessionStorage.setItem(`openfabric:video-draft:${project.id}`, JSON.stringify({ revision: 1, name: project.name, shots: project.shots?.map(({ variants: _variants, approved_variant_id: _approval, ...shot }) => shot) }))
   await mount()
   button('3 Storyboard').click()
   await flush()

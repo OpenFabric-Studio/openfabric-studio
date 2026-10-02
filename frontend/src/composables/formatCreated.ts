@@ -10,7 +10,7 @@ export function formatCreated(timestamp: number): { label: string; full: string 
  if (!Number.isFinite(timestamp)) return { label: '—', full: '—' }
  const when = new Date(timestamp), now = new Date()
  if (!Number.isFinite(when.getTime())) return { label: '—', full: '—' }
- const locale = i18n.global.locale.value === 'ru' ? 'ru-RU' : 'en-US'
+ const locale = 'en-US'
  const ordinal = (date: Date) => Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / 86400000
  const difference = ordinal(when) - ordinal(now)
  const day = difference === 0 || difference === -1

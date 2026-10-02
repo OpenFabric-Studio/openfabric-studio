@@ -39,7 +39,7 @@ COMMON_SOURCE_HASHES = {
     'src/models/yue2/ar_runtime.cpp': '57559321a93217513e742a09a84f2aa27ab583f85891b3a8aaa6cb56b05a0ae6',
     'src/models/yue2/nar_runtime.cpp': '850c34913556ee84d77109f837943e23f9c19857c5fa2c2315c4e0a8559763ca',
     'src/models/yue2/pipeline.cpp': 'b6b3e88f879834794e021513a5d2ecd8bf19e6d868d665c9af756e2ee1a83ae4',
-    'include/engine/models/yue2/remiqora_progress.h': 'e8a1456d85d2a6bd144bcda43b5dc4d3c0bea73c84c635b6802cceeb288721cf',
+    'include/engine/models/yue2/openfabric_progress.h': 'e8a1456d85d2a6bd144bcda43b5dc4d3c0bea73c84c635b6802cceeb288721cf',
 }
 SESSION_SOURCE_HASHES = {
     SOURCE_COMMIT: '6615b4794285600f489b16d9cf406711b88e5466122efab84eb140cbd675bb89',
@@ -132,7 +132,7 @@ def prepare_source(workspace: Path, commit: str, source: Path | None = None) -> 
     if source is not None and workspace.is_relative_to(source.resolve()):
         raise ValueError('native_workspace_inside_source')
     destination = workspace / 'source'
-    marker = workspace / '.remiqora-native-source.json'
+    marker = workspace / '.openfabric-native-source.json'
     if workspace.exists() and any(workspace.iterdir()):
         if not marker.is_file() or marker.stat().st_size > 65536:
             raise ValueError('native_workspace_not_owned')
@@ -161,11 +161,11 @@ def create_manifest(binary: Path, source_commit: str, backend: Backend) -> Nativ
         raise ValueError('unsupported_native_source')
     verify_patch_identity()
     return NativeBuildManifest(1, source_commit, backend, sha256_file(binary), PATCH_IDENTITIES,
-                               1, True, 'remiqora_run_id', ('acoustic', 'decode'))
+                               1, True, 'openfabric_run_id', ('acoustic', 'decode'))
 
 
 def manifest_path(binary: Path) -> Path:
-    return binary.with_name(binary.name + '.remiqora.json')
+    return binary.with_name(binary.name + '.openfabric.json')
 
 
 def write_manifest(binary: Path, manifest: NativeBuildManifest) -> None:
@@ -189,7 +189,7 @@ def read_build_manifest(binary: Path) -> NativeBuildManifest:
         raise ValueError('invalid_native_build_manifest')
     typed_backend: Backend = 'cpu' if backend == 'cpu' else 'metal' if backend == 'metal' else 'cuda'
     expected = NativeBuildManifest(1, commit, typed_backend, digest, PATCH_IDENTITIES,
-                                   1, True, 'remiqora_run_id', ('acoustic', 'decode'))
+                                   1, True, 'openfabric_run_id', ('acoustic', 'decode'))
     # JSON arrays and dataclass tuples use the same wire representation.
     if raw != json.loads(json.dumps(asdict(expected))):
         raise ValueError('invalid_native_build_manifest')
@@ -203,7 +203,7 @@ def cmake_command(source: Path, build: Path, backend: Backend, commit: str,
                   tls: Tls = 'bundled', boringssl_archive: Path | None = None) -> list[str]:
     version = '0.8.1' if commit == RELEASE_COMMIT else 'dev'
     command = ['cmake', '-S', str(source), '-B', str(build), '-G', 'Ninja', '-DCMAKE_BUILD_TYPE=Release',
-            f'-DAUDIOCPP_VERSION={version}+remiqora.native1', '-DAUDIOCPP_MODEL_SET=custom',
+            f'-DAUDIOCPP_VERSION={version}+openfabric.native1', '-DAUDIOCPP_MODEL_SET=custom',
             '-DAUDIOCPP_MODELS=yue2,sheetsage2,muscriptor', '-DAUDIOCPP_BUILD_SERVER_FRONTENDS=OFF',
             '-DAUDIOCPP_BUILD_NATIVE_MODEL_MANAGER=ON', '-DENGINE_ENABLE_OPENMP=OFF', '-DGGML_OPENMP=OFF',
             '-DENGINE_ENABLE_NATIVE_CPU=OFF', '-DENGINE_ENABLE_HIP=OFF', '-DENGINE_ENABLE_VULKAN=OFF',

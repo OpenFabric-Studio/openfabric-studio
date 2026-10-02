@@ -1,7 +1,7 @@
 // Full end-to-end test of an INSTALLED desktop app (manual, Windows + NVIDIA GPU, about 46 GB and 25 minutes).
 //
 //   npm i --no-save playwright            (only the package is needed, no browsers)
-//   set E2E_EXE=<install dir>/Remiqora.exe   and   set E2E_ROOT=<empty folder on a big drive>
+//   set E2E_EXE=<install dir>/OpenFabric.exe   and   set E2E_ROOT=<empty folder on a big drive>
 //   set PHASE=setup      then: node test/e2e/full.js    first run with every component, no skips (deletes E2E_ROOT first)
 //   set PHASE=generate   then: node test/e2e/full.js    YuE2 + MIDI + ACE-Step + Demucs, quit, restart
 //
@@ -22,7 +22,7 @@ const HOME = path.join(ROOT, 'home');
 const USER = path.join(ROOT, 'user');
 // every process started from the test home (uv, python, audiocpp_server) has this in its path
 const NEEDLE = HOME;
-const OUT = process.env.E2E_REPORT ? path.resolve(process.env.E2E_REPORT) : path.join(require('node:os').tmpdir(), 'remiqora-e2e-report');
+const OUT = process.env.E2E_REPORT ? path.resolve(process.env.E2E_REPORT) : path.join(require('node:os').tmpdir(), 'openfabric-e2e-report');
 const EXE = process.env.E2E_EXE;
 const RESULTS = path.join(OUT, `results-${PHASE}.json`);
 fs.mkdirSync(OUT, { recursive: true });
@@ -35,9 +35,9 @@ const results = {};
 const save = () => fs.writeFileSync(RESULTS, JSON.stringify(results, null, 2));
 
 function launchEnv() {
-  const env = { ...process.env, REMIQORA_HOME: HOME, REMIQORA_USER_DATA: USER };
+  const env = { ...process.env, OPENFABRIC_HOME: HOME, OPENFABRIC_USER_DATA: USER };
   delete env.ELECTRON_RUN_AS_NODE;
-  delete env.REMIQORA_SKIP_COMPONENTS;
+  delete env.OPENFABRIC_SKIP_COMPONENTS;
   return env;
 }
 async function launch() {
@@ -82,7 +82,7 @@ function psLines(command) {
 function procsUnder(needle) {
   // never match this very PowerShell (its command line contains the needle)
   const own = psLines(`Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $PID -and (($_.ExecutablePath -like '*${needle}*') -or ($_.CommandLine -like '*${needle}*')) } | ForEach-Object { $_.Name + ' (' + $_.ProcessId + ')' }`);
-  const app = psLines("Get-Process Remiqora -ErrorAction SilentlyContinue | ForEach-Object { 'Remiqora (' + $_.Id + ')' }");
+  const app = psLines("Get-Process OpenFabric -ErrorAction SilentlyContinue | ForEach-Object { 'OpenFabric (' + $_.Id + ')' }");
   return [...own, ...app];
 }
 async function portFree(port) { try { await fetch(`http://127.0.0.1:${port}/`, { signal: AbortSignal.timeout(1500) }); return false; } catch { return true; } }
@@ -150,7 +150,7 @@ async function setupPhase() {
   results.files = {
     uv: exists('tools/uv/uv.exe'), ffmpeg: exists('tools/ffmpeg'), engine: exists('engines/YuE2/build/windows-cuda-release/bin/audiocpp_server.exe'),
     aceCheckpoints: ['acestep-v15-turbo', 'acestep-5Hz-lm-1.7B', 'vae'].every((d) => exists('engines/ACE-Step-1.5/checkpoints/' + d)), demucsModelCached: exists('cache/huggingface') || exists('cache/torch'),
-    aceStepPatched: exists('engines/ACE-Step-1.5/.remiqora-patched'), aceVenv: exists('engines/ACE-Step-1.5/.venv'), demucsVenv: exists('engines/Demucs/.venv'),
+    aceStepPatched: exists('engines/ACE-Step-1.5/.openfabric-patched'), aceVenv: exists('engines/ACE-Step-1.5/.venv'), demucsVenv: exists('engines/Demucs/.venv'),
     weights: ['Yue2-3B-GGUF', 'SheetSage2-GGUF', 'MuScriptor-Small-GGUF'].map((m) => `${m}:${exists('engines/YuE2/models/' + m)}`).join(' '),
   };
   results.sizes = { total: gb(dirSize(HOME)), models: gb(dirSize(path.join(HOME, 'engines/YuE2/models'))), aceStep: gb(dirSize(path.join(HOME, 'engines/ACE-Step-1.5'))), demucs: gb(dirSize(path.join(HOME, 'engines/Demucs'))), pythonAndCache: gb(dirSize(path.join(HOME, 'tools')) + dirSize(path.join(HOME, 'cache'))) };

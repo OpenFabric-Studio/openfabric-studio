@@ -1,4 +1,4 @@
-"""Library folder moves, without touching the real Remiqora library."""
+"""Library folder moves, without touching the real OpenFabric library."""
 from __future__ import annotations
 
 import json
@@ -99,7 +99,7 @@ class DataRootTests(unittest.TestCase):
             self._library(original)
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(first)}), encoding="utf-8")
-            with patch.dict(os.environ, {"REMIQORA_CONFIG": str(cfg)}):
+            with patch.dict(os.environ, {"OPENFABRIC_CONFIG": str(cfg)}):
                 self.assertEqual(resolve_data_dir(original), first)
                 save_data_dir(second)
                 self.assertEqual(resolve_data_dir(original), second)
@@ -141,7 +141,7 @@ class DataRootTests(unittest.TestCase):
             with patch.object(data_root, "rewrite_text_prefixes", side_effect=KeyboardInterrupt):
                 with self.assertRaises(KeyboardInterrupt):
                     migrate_library(src, dest)
-            with patch.dict(os.environ, {"REMIQORA_CONFIG": str(cfg)}):
+            with patch.dict(os.environ, {"OPENFABRIC_CONFIG": str(cfg)}):
                 self.assertEqual(resolve_data_dir(src), dest)
             with sqlite3.connect(dest / "aicollector.db") as connection:
                 audio = connection.execute("SELECT audio_path FROM tracks").fetchone()[0]
@@ -219,7 +219,7 @@ class DataRootTests(unittest.TestCase):
                     migrate_library(src, dest)
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(dest), "active_data_dir": str(src)}), encoding="utf-8")
-            with patch.dict(os.environ, {"REMIQORA_CONFIG": str(cfg)}):
+            with patch.dict(os.environ, {"OPENFABRIC_CONFIG": str(cfg)}):
                 self.assertEqual(resolve_data_dir(src), dest)
             self.assertTrue((dest / "files" / "song.wav").is_file())
             self.assertFalse((dest / data_root._JOURNAL).exists())
@@ -233,7 +233,7 @@ class DataRootTests(unittest.TestCase):
             (dest / "files" / "song.wav").write_bytes(b"existing")
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(dest)}), encoding="utf-8")
-            with patch.dict(os.environ, {"REMIQORA_CONFIG": str(cfg)}):
+            with patch.dict(os.environ, {"OPENFABRIC_CONFIG": str(cfg)}):
                 self.assertEqual(resolve_data_dir(src), dest)
             self.assertEqual((src / "files" / "song.wav").read_bytes(), b"audio")
             self.assertEqual((dest / "files" / "song.wav").read_bytes(), b"existing")
@@ -263,7 +263,7 @@ class DataRootTests(unittest.TestCase):
                     migrate_library(src, first)
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(second), "active_data_dir": str(src)}), encoding="utf-8")
-            with patch.dict(os.environ, {"REMIQORA_CONFIG": str(cfg)}):
+            with patch.dict(os.environ, {"OPENFABRIC_CONFIG": str(cfg)}):
                 self.assertEqual(resolve_data_dir(src), second)
             self.assertTrue((second / "files" / "song.wav").is_file())
             self.assertFalse(has_library(first))
@@ -425,7 +425,7 @@ class DataRootTests(unittest.TestCase):
             self.assertNotIn(str(src.resolve()), config)
 
     def test_resolve_uses_a_temp_config_and_leaves_the_home_config_alone(self) -> None:
-        home = Path.home() / ".remiqora" / "config.json"
+        home = Path.home() / ".openfabric" / "config.json"
         existed = home.exists()
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -434,15 +434,15 @@ class DataRootTests(unittest.TestCase):
             (src / "files").mkdir(parents=True)
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(dest)}), encoding="utf-8")
-            previous = os.environ.get("REMIQORA_CONFIG")
-            os.environ["REMIQORA_CONFIG"] = str(cfg)
+            previous = os.environ.get("OPENFABRIC_CONFIG")
+            os.environ["OPENFABRIC_CONFIG"] = str(cfg)
             try:
                 chosen = resolve_data_dir(src)
             finally:
                 if previous is None:
-                    os.environ.pop("REMIQORA_CONFIG", None)
+                    os.environ.pop("OPENFABRIC_CONFIG", None)
                 else:
-                    os.environ["REMIQORA_CONFIG"] = previous
+                    os.environ["OPENFABRIC_CONFIG"] = previous
             self.assertEqual(chosen.resolve(), dest.resolve())
             self.assertTrue((dest / "files").is_dir())
             self.assertFalse((src / "files").exists())
@@ -457,15 +457,15 @@ class DataRootTests(unittest.TestCase):
             (dest / "models").mkdir(parents=True)
             cfg = root / "config.json"
             cfg.write_text(json.dumps({"data_dir": str(dest), "error": ""}), encoding="utf-8")
-            previous = os.environ.get("REMIQORA_CONFIG")
-            os.environ["REMIQORA_CONFIG"] = str(cfg)
+            previous = os.environ.get("OPENFABRIC_CONFIG")
+            os.environ["OPENFABRIC_CONFIG"] = str(cfg)
             try:
                 chosen = resolve_data_dir(src)
             finally:
                 if previous is None:
-                    os.environ.pop("REMIQORA_CONFIG", None)
+                    os.environ.pop("OPENFABRIC_CONFIG", None)
                 else:
-                    os.environ["REMIQORA_CONFIG"] = previous
+                    os.environ["OPENFABRIC_CONFIG"] = previous
             self.assertEqual(chosen.resolve(), src.resolve())
             self.assertTrue((src / "files").is_dir())
             saved = json.loads(cfg.read_text(encoding="utf-8"))
@@ -554,20 +554,20 @@ class DataRootTests(unittest.TestCase):
             root = Path(tmp).resolve()
             cfg = root / "config.json"
             cfg.write_text("{}", encoding="utf-8")
-            previous = os.environ.get("REMIQORA_CONFIG")
-            os.environ["REMIQORA_CONFIG"] = str(cfg)
+            previous = os.environ.get("OPENFABRIC_CONFIG")
+            os.environ["OPENFABRIC_CONFIG"] = str(cfg)
             try:
                 status = library_status(root / "data")
             finally:
                 if previous is None:
-                    os.environ.pop("REMIQORA_CONFIG", None)
+                    os.environ.pop("OPENFABRIC_CONFIG", None)
                 else:
-                    os.environ["REMIQORA_CONFIG"] = previous
+                    os.environ["OPENFABRIC_CONFIG"] = previous
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
                 ["tracks", "voices", "videos", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:
-        self.assertEqual(parse_chosen_folder("/Users/example/Music/Remiqora/\n"), "/Users/example/Music/Remiqora")
+        self.assertEqual(parse_chosen_folder("/Users/example/Music/OpenFabric/\n"), "/Users/example/Music/OpenFabric")
         self.assertEqual(parse_chosen_folder("/"), "/")
