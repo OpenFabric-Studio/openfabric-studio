@@ -1,6 +1,9 @@
 import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
+import { videoExperienceEn } from './videoExperience'
+import { videoDirectionEn } from './videoDirection'
+import { videoLibraryEn } from './videoLibrary'
 import { audiobookWorkspaceEn } from './audiobookWorkspace'
 import { speechWorkspaceEn } from './speechWorkspace'
 import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
@@ -16,6 +19,9 @@ export default {
   appNavigation: appNavigationEn,
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,
+  videoExperience: videoExperienceEn,
+  videoDirection: videoDirectionEn,
+  videoLibrary: videoLibraryEn,
   audiobookWorkspace: audiobookWorkspaceEn,
   speechWorkspace: speechWorkspaceEn,
   singingWorkspace: singingWorkspaceEn, voiceStudio: voiceStudioEn,

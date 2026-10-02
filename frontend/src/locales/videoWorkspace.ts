@@ -1,4 +1,5 @@
 export const videoErrorsEn = {
+  model_fingerprint_uses_file_metadata: 'Model identity uses file metadata; file contents have not been verified.',
   project_delete_failed: 'Could not delete this project. Retry when the backend is available.',
   image_tools_unavailable: 'Timed text tools are unavailable. Install Pillow in the backend environment or turn off timed text.',
   source_missing: 'The source song is unavailable. Restore the audio file or create a project with an available song.',

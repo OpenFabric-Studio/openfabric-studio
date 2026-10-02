@@ -20,9 +20,9 @@ function project(index: number, status: VideoProjectJob['status'] | 'draft' = 'd
 beforeEach(() => { setLocale('en'); busy = ref(false); opened.length = 0; removed.length = 0; beginDelete = () => {}; confirm.mockReset().mockReturnValue(false); vi.stubGlobal('confirm', confirm) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals(); setLocale('en') })
 async function settle() { for (let i = 0; i < 4; i++) await nextTick() }
-async function mount(projects: VideoProject[], selectedId: string | null = null) {
+async function mount(projects: VideoProject[], selectedId: string | null = null, compact = false) {
   rows = ref(projects)
-  app = createApp({ render: () => h(VideoProjectLibrary, { projects: rows.value, selectedId, busy: busy.value, onOpen: (id: string) => opened.push(id), onDelete: (id: string) => { removed.push(id); beginDelete() } }) }).use(i18n)
+  app = createApp({ render: () => h(VideoProjectLibrary, { projects: rows.value, selectedId, compact, busy: busy.value, onOpen: (id: string) => opened.push(id), onDelete: (id: string) => { removed.push(id); beginDelete() } }) }).use(i18n)
   app.mount(document.body.appendChild(document.createElement('div'))); await settle()
 }
 function row(id: string): HTMLElement {
@@ -31,6 +31,8 @@ function row(id: string): HTMLElement {
   return target
 }
 function remove(id: string): HTMLButtonElement {
+  const details = row(id).querySelector('details')
+  if (details) details.open = true
   const button = row(id).querySelector<HTMLButtonElement>('[data-delete-project]')
   if (!button) throw new Error('Missing delete action')
   return button
@@ -185,4 +187,69 @@ it('leaves moved user focus alone when deletion fails', async () => {
   if (!search) throw new Error('Missing search')
   search.focus(); busy.value = false; await settle()
   expect(document.activeElement).toBe(search)
+})
+
+it('opens a project from its concise source-and-status row and puts secondary actions in a closed disclosure', async () => {
+  const saved = { ...project(1, 'ready'), file_url: '/video.mp4', poster_url: '/poster.jpg' }
+  await mount([saved], saved.id, true)
+  const action = open(saved.id)
+  expect(action.getAttribute('aria-label')).toBe('Open Project 1')
+  expect(action.textContent).toContain('Project 1')
+  expect(action.textContent).toContain('Test song')
+  expect(action.textContent).toContain('0:30')
+  expect(action.textContent).toContain('Ready')
+  expect(action.textContent).toContain('Selected project')
+  const details = row(saved.id).querySelector('details')
+  expect(details?.open).toBe(false)
+  expect(details?.querySelector('summary')?.getAttribute('aria-label')).toBe('Project actions for Project 1')
+  expect(details?.querySelector('a')?.getAttribute('href')).toBe('/video.mp4')
+  expect(details?.querySelector('[data-delete-project]')).not.toBeNull()
+  expect(row(saved.id).querySelector('video')).toBeNull()
+  expect(row(saved.id).querySelector('img')?.getAttribute('alt')).toBe('')
+  action.click()
+  expect(opened).toEqual([saved.id])
+})
+
+it('shows source-change status on the row without obscuring the saved song or project state', async () => {
+  const saved = { ...project(1, 'ready'), source_changed: true }
+  await mount([saved])
+  expect(open(saved.id).textContent).toContain('Source changed')
+  expect(open(saved.id).textContent).toContain('Test song')
+  expect(open(saved.id).textContent).toContain('Ready')
+})
+
+it('prevents duplicate confirmed deletion before the parent busy prop updates', async () => {
+  const saved = project(1)
+  await mount([saved]); confirm.mockReturnValue(true)
+  const initiating = remove(saved.id)
+  initiating.click(); initiating.click()
+  expect(confirm).toHaveBeenCalledTimes(1)
+  expect(removed).toEqual([saved.id])
+  await settle()
+  initiating.click()
+  expect(removed).toEqual([saved.id, saved.id])
+})
+
+it('restores visible disclosure focus if failed deletion finds the initiating actions closed', async () => {
+  const saved = project(1)
+  await mount([saved])
+  const initiating = await startFocusedDeletion(saved.id)
+  const details = row(saved.id).querySelector('details')
+  if (!details) throw new Error('Missing project actions')
+  initiating.disabled = false; initiating.blur(); initiating.disabled = true
+  details.open = false
+  busy.value = false; await settle()
+  expect(document.activeElement).toBe(details.querySelector('summary'))
+})
+
+it('keeps focus on the user-selected actions summary when pending deletion fails', async () => {
+  const saved = project(1)
+  await mount([saved])
+  await startFocusedDeletion(saved.id)
+  const details = row(saved.id).querySelector('details')
+  const summary = details?.querySelector('summary')
+  if (!details || !summary) throw new Error('Missing project actions')
+  details.open = false; summary.focus()
+  busy.value = false; await settle()
+  expect(document.activeElement).toBe(summary)
 })

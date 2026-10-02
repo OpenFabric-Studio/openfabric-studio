@@ -125,7 +125,7 @@ it('keeps unsaved changes and blocks analysis when the save fails', async () => 
   expect(api.analyzeVideoProject).not.toHaveBeenCalled()
   expect(workspace.dirty.value).toBe(true)
   expect(currentDraft(workspace).direction).toBe('Recover this scene')
-  expect(workspace.saveError.value).toBe('fixture save failed')
+  expect(workspace.saveError.value).toBe('unknown')
   expect(workspace.acting.value).toBe(false)
 })
 it('discards a malformed browser draft while retaining the saved storyboard', async () => {

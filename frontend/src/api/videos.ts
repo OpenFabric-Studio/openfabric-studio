@@ -27,14 +27,9 @@ export function isVideoActive(status: string | undefined): boolean {
   return ACTIVE.some((candidate) => candidate === status)
 }
 
-export function videoErrorText(code: string, detail = ''): string {
-  const translate = i18n.global.t
-  if (code) {
-    const key = `video.err.${code}`
-    const message = String(translate(key))
-    if (message !== key) return detail ? `${message} ${detail}` : message
-  }
-  return detail || code || String(translate('video.err.unknown'))
+export function videoErrorText(code: string, _detail = ''): string {
+  const key = `video.err.${code}`
+  return String(i18n.global.t(code && i18n.global.te(key) ? key : 'video.err.unknown'))
 }
 
 export function listVideos(): Promise<{ videos: VideoJob[] }> {
@@ -101,9 +96,7 @@ export async function deleteVideo(id: string): Promise<void> {
 }
 
 export function videoRequestError(err: unknown): string {
-  if (err instanceof ApiError) return videoErrorText(err.message)
-  if (err instanceof Error) return err.message
-  return videoErrorText('')
+  return err instanceof ApiError && i18n.global.te(`video.err.${err.message}`) ? err.message : 'unknown'
 }
 
 function projectPath(id: string): string {

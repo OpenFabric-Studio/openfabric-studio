@@ -9,6 +9,7 @@ import * as api from '../../api/videos'
 import * as tracks from '../../api/tracks'
 import type { VideoProject } from '../../api/contracts'
 import { videoProjectFixture, videoTrack, videoReadinessFixture } from './videoFixtures'
+import { claimPlayback, releasePlaybackIfCurrent } from '../../composables/audioPlayback'
 
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), listTracks: vi.fn() }))
 vi.mock('../../api/videos', async (original) => ({ ...await original<typeof import('../../api/videos')>(), listVideoProjects: vi.fn(), getVideoProject: vi.fn(), deleteVideoProject: vi.fn(), listVideos: vi.fn(), otherWorkBusy: vi.fn(), videoReadiness: vi.fn(), createVideoProject: vi.fn(), updateVideoProject: vi.fn(), analyzeVideoProject: vi.fn(), previewVideoProject: vi.fn(), renderVideoProject: vi.fn(), exportVideoProject: vi.fn(), uploadVideoReference: vi.fn() }))
@@ -16,6 +17,7 @@ let app: App | undefined
 let project: VideoProject
 beforeEach(() => {
   vi.useFakeTimers()
+  vi.stubGlobal('innerWidth', 1440)
   project = videoProjectFixture()
   vi.mocked(tracks.listTracks).mockResolvedValue([videoTrack])
   vi.mocked(api.listVideos).mockResolvedValue({ videos: [] })
@@ -52,21 +54,136 @@ it('shows the numbered project progression and an audio source player', async ()
   expect(document.querySelector('audio')?.getAttribute('src')).toBe('/api/tracks/1/audio')
 })
 
-it('toggles the project manager beside the selector and shows the library above the wizard', async () => {
+it('keeps a compact project library beside the workspace without a duplicate selector', async () => {
   await mount()
-  const manager = button('Manage projects')
-  expect(manager.closest('header')).not.toBeNull()
-  expect(manager.getAttribute('aria-expanded')).toBe('false')
-  expect(document.querySelector('[data-video-project-library]')).toBeNull()
-  manager.click(); await flush()
-  expect(manager.getAttribute('aria-expanded')).toBe('true')
   const library = document.querySelector('[data-video-project-library]')
-  const wizard = document.querySelector('[role=tablist]')
-  if (!library || !wizard) throw new Error('Missing manager or wizard')
-  expect(library.compareDocumentPosition(wizard) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  expect([...document.querySelectorAll('details > summary')].some(element => element.textContent?.includes('Project library'))).toBe(false)
-  manager.click(); await flush()
-  expect(document.querySelector('[data-video-project-library]')).toBeNull()
+  expect(library).not.toBeNull()
+  expect(library?.closest('aside')).not.toBeNull()
+  expect(library?.closest('details')?.open).toBe(true)
+  expect(document.querySelector('header select')).toBeNull()
+  expect(document.querySelector('[data-video-workspace-main]')).not.toBeNull()
+})
+
+it('separates new-project song selection and cancels without changing the current draft', async () => {
+  await mount(); button('3 Storyboard').click(); await flush()
+  const prompt = document.querySelector<HTMLTextAreaElement>('[data-testid=video-shot-prompt]')
+  if (!prompt) throw new Error('Missing prompt')
+  prompt.value = 'Keep my unfinished scene'; prompt.dispatchEvent(new Event('input', { bubbles: true })); await flush()
+  button('New video project').click(); await flush()
+  expect(document.querySelector('[data-new-video-project]')).not.toBeNull()
+  expect(button('2 Direction').disabled).toBe(true)
+  expect(document.querySelector('[data-new-video-project] input[maxlength="120"]')).toBeNull()
+  button('Back to current project').click(); await flush()
+  expect(document.querySelector('[data-new-video-project]')).toBeNull()
+  expect(document.querySelector<HTMLTextAreaElement>('[data-testid=video-shot-prompt]')?.value).toBe('Keep my unfinished scene')
+  expect(api.createVideoProject).not.toHaveBeenCalled()
+})
+
+it('pauses and releases source playback before new-project creation hides the player', async () => {
+  await mount()
+  const source = document.querySelector('audio')
+  if (!source) throw new Error('Missing source player')
+  const pause = vi.spyOn(source, 'pause')
+  claimPlayback(source)
+  button('New video project').click(); await flush()
+  expect(pause).toHaveBeenCalledTimes(1)
+  const nextPlayer = document.createElement('audio')
+  claimPlayback(nextPlayer)
+  expect(pause).toHaveBeenCalledTimes(1)
+  releasePlaybackIfCurrent(nextPlayer)
+  expect(source.isConnected).toBe(false)
+})
+
+it('pauses and releases source playback before selected-project deletion hides the player', async () => {
+  vi.stubGlobal('confirm', vi.fn(() => true))
+  vi.mocked(api.deleteVideoProject).mockResolvedValue(undefined)
+  await mount()
+  const source = document.querySelector('audio')
+  if (!source) throw new Error('Missing source player')
+  const pause = vi.spyOn(source, 'pause')
+  claimPlayback(source)
+  document.querySelector<HTMLButtonElement>('[data-delete-project]')?.click(); await flush()
+  expect(pause).toHaveBeenCalledTimes(1)
+  expect(source.isConnected).toBe(false)
+  expect(document.querySelector('[data-new-video-project]')).not.toBeNull()
+  const nextPlayer = document.createElement('audio')
+  claimPlayback(nextPlayer)
+  expect(pause).toHaveBeenCalledTimes(1)
+  releasePlaybackIfCurrent(nextPlayer)
+})
+
+it('keeps user-moved focus when another project finishes loading', async () => {
+  const other = { ...videoProjectFixture('e'.repeat(32)), name: 'Other video' }
+  vi.mocked(api.listVideoProjects).mockResolvedValue({ projects: [project, other] })
+  let finish: ((row: VideoProject) => void) | undefined
+  vi.mocked(api.getVideoProject).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await mount()
+  const open = document.querySelector<HTMLButtonElement>(`[data-open-project="${other.id}"]`)
+  if (!open) throw new Error('Missing project action')
+  open.focus(); open.click(); await flush()
+  const movedFocus = button('2 Direction'); movedFocus.focus()
+  if (!finish) throw new Error('Missing pending project fetch')
+  finish(other); await flush()
+  expect(document.activeElement).toBe(movedFocus)
+  expect(document.querySelector('[data-testid=video-global-status]')?.textContent).toContain('Other video')
+})
+
+it('keeps later stages unavailable until a new project exists', async () => {
+  vi.mocked(api.listVideoProjects).mockResolvedValueOnce({ projects: [] })
+  await mount()
+  for (const tab of document.querySelectorAll<HTMLButtonElement>('[role=tab]')) expect(tab.disabled).toBe(tab.id !== 'video-step-song')
+  button('1 Song').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await flush()
+  expect(button('1 Song').getAttribute('aria-selected')).toBe('true')
+  expect(document.querySelector('[data-new-video-project]')).not.toBeNull()
+})
+
+it('explains a changed source and opens recovery without silently replacing the project', async () => {
+  project.source_changed = true
+  await mount()
+  const warning = document.querySelector('[data-video-source-warning]')
+  expect(warning?.textContent).toContain('song changed')
+  warning?.querySelector<HTMLButtonElement>('button')?.click(); await flush()
+  expect(document.querySelector('[data-new-video-project]')).not.toBeNull()
+  expect(document.querySelector('[data-testid=video-global-status]')?.textContent).toContain(project.name)
+  expect(api.createVideoProject).not.toHaveBeenCalled()
+})
+
+it('moves focus to the next panel heading after an in-panel continue action', async () => {
+  await mount()
+  const next = button('Continue to direction'); next.focus(); next.click(); await flush()
+  expect(document.activeElement?.id).toBe('video-panel-heading')
+  expect(document.activeElement?.textContent).toContain('visual direction')
+})
+
+it('focuses Direction after creating a project from the song chooser', async () => {
+  vi.mocked(api.createVideoProject).mockResolvedValueOnce(videoProjectFixture('e'.repeat(32)))
+  await mount(); button('New video project').click(); await flush()
+  const create = button('Create a new project'); create.focus(); create.click(); await flush()
+  expect(document.querySelector('[data-new-video-project]')).toBeNull()
+  expect(document.activeElement?.id).toBe('video-panel-heading')
+  expect(button('2 Direction').getAttribute('aria-selected')).toBe('true')
+})
+
+it('allows an image-based shot with an invalid stored description to be repaired without losing typing focus', async () => {
+  project.mode = 'cover'
+  if (!project.shots?.[0]) throw new Error('Missing shot fixture')
+  project.shots[0].prompt = ' '
+  await mount(); button('3 Storyboard').click(); await flush()
+  const repair = document.querySelector<HTMLTextAreaElement>('[data-video-shot-description-repair]')
+  if (!repair) throw new Error('Missing image shot repair')
+  repair.focus(); repair.value = 'My cover shot'; repair.dispatchEvent(new Event('input', { bubbles: true })); await flush()
+  expect(document.querySelector('[data-video-shot-description-repair]')).toBe(repair)
+  expect(document.activeElement).toBe(repair)
+  expect(document.body.textContent).toContain('does not change image motion')
+  expect([...document.querySelectorAll('[role=alert]')].some(alert => alert.textContent?.includes('Write a scene description'))).toBe(false)
+})
+
+it('shows distinct render and approved-export explanations with an approval blocker', async () => {
+  await mount(); button('5 Export').click(); await flush()
+  expect(document.querySelector('[data-video-render-action]')?.textContent).toContain('Generates missing shots')
+  expect(document.querySelector('[data-video-export-action]')?.textContent).toContain('Uses only the clips you approved')
+  expect(document.querySelector('[data-video-export-action]')?.textContent).toContain('Approve every shot')
+  expect(button('Export approved clips').disabled).toBe(true)
 })
 
 it('deletes only the named confirmed project and keeps cancellation silent', async () => {
@@ -74,7 +191,7 @@ it('deletes only the named confirmed project and keeps cancellation silent', asy
   vi.mocked(api.listVideoProjects).mockResolvedValue({ projects: [project, other] })
   vi.mocked(api.deleteVideoProject).mockResolvedValue(undefined)
   const confirm = vi.fn(() => false); vi.stubGlobal('confirm', confirm)
-  await mount(); button('Manage projects').click(); await flush()
+  await mount(); await flush()
   const row = document.querySelector(`[data-video-project="${other.id}"]`)
   const remove = row?.querySelector<HTMLButtonElement>('[data-delete-project]')
   if (!remove) throw new Error('Missing project deletion')
@@ -90,18 +207,18 @@ it('deletes only the named confirmed project and keeps cancellation silent', asy
 it('shows a stable deletion failure and leaves its project available', async () => {
   vi.stubGlobal('confirm', vi.fn(() => true))
   vi.mocked(api.deleteVideoProject).mockRejectedValue(new Error('/private/project/path'))
-  await mount(); button('Manage projects').click(); await flush()
+  await mount(); await flush()
   document.querySelector<HTMLButtonElement>('[data-delete-project]')?.click(); await flush()
   expect(document.querySelector(`[data-video-project="${project.id}"]`)).not.toBeNull()
   expect([...document.querySelectorAll('[role=alert]')].map(element => element.textContent).join(' ')).toContain('Could not delete this project')
   expect(document.body.textContent).not.toContain('/private/project/path')
 })
 
-it('keeps the manager open with an empty message after deleting its last project', async () => {
+it('keeps the library available with an empty message after deleting its last project', async () => {
   vi.stubGlobal('confirm', vi.fn(() => true))
   vi.mocked(api.deleteVideoProject).mockResolvedValue(undefined)
   await mount(); button('3 Storyboard').click(); await flush()
-  button('Manage projects').click(); await flush()
+  await flush()
   document.querySelector<HTMLButtonElement>('[data-delete-project]')?.click(); await flush()
   expect(document.querySelector('[data-video-project-library]')).not.toBeNull()
   expect(document.body.textContent).toContain('No saved video projects yet')
@@ -120,7 +237,7 @@ it('disables manager and row actions until a deletion settles', async () => {
   let finish: () => void = () => { throw new Error('Not initialized') }
   vi.stubGlobal('confirm', vi.fn(() => true))
   vi.mocked(api.deleteVideoProject).mockReturnValueOnce(new Promise<void>(resolve => { finish = resolve }))
-  await mount(); const manager = button('Manage projects'); manager.click(); await flush()
+  await mount(); const manager = button('New video project'); await flush()
   document.querySelector<HTMLButtonElement>('[data-delete-project]')?.click(); await flush()
   expect(manager.disabled).toBe(true)
   expect(document.querySelector<HTMLButtonElement>('[data-open-project]')?.disabled).toBe(true)
@@ -265,18 +382,17 @@ it('keeps missing text support from breaking a full render while allowing a plai
   includeText.click(); await flush()
   expect(button('Render missing shots and assemble').disabled).toBe(false)
 })
-it('disables ignored generation options and reference influence in an image-based mode', async () => {
+it('omits ignored generation options and reference influence in an image-based mode', async () => {
   project.mode = 'cover'
   await mount()
   button('2 Direction').click(); await flush()
   for (const name of ['Shared visual direction', 'Generation model', 'Denoise steps', 'Refine steps', 'Avoid in generated scenes']) {
     const input = [...document.querySelectorAll('label')].find((label) => label.textContent?.trim().startsWith(name))?.querySelector('input,select,textarea')
-    expect(input, name).not.toBeNull()
-    expect(input?.matches(':disabled'), name).toBe(true)
+    expect(input, name).toBeUndefined()
   }
   button('3 Storyboard').click(); await flush()
   const influence = [...document.querySelectorAll('label')].find((label) => label.textContent?.includes('Reference influence'))?.querySelector('input')
-  expect(influence?.disabled).toBe(true)
+  expect(influence).toBeUndefined()
   expect(document.body.textContent).toContain('first uploaded image')
 })
 it('disables audio analysis and shows its missing dependency guidance', async () => {
@@ -292,8 +408,9 @@ it('disables audio analysis and shows its missing dependency guidance', async ()
 it('gates project creation and image upload when FFmpeg tools are missing', async () => {
   vi.mocked(api.videoReadiness).mockResolvedValue({ ...videoReadinessFixture, ffmpeg_ready: false })
   await mount()
-  button('1 Song').click(); await flush()
+  button('New video project').click(); await flush()
   expect(button('Create a new project').disabled).toBe(true)
+  button('Back to current project').click(); await flush()
   button('2 Direction').click(); await flush()
   expect(document.querySelector<HTMLInputElement>('input[type=file]')?.disabled).toBe(true)
 })
