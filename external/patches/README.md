@@ -59,8 +59,8 @@ workspace after synchronizing the backend. It retains prefix state buffers
 needed by the acoustic solver and makes cleanup idempotent.
 
 `yue-progress.patch` publishes optional per-request telemetry. The request must
-provide `options.remiqora_run_id` as 32 lowercase hexadecimal characters, and
-the process must have `REMIQORA_YUE2_PROGRESS_PATH` set. Invalid identities and
+provide `options.openfabric_run_id` as 32 lowercase hexadecimal characters, and
+the process must have `OPENFABRIC_YUE2_PROGRESS_PATH` set. Invalid identities and
 telemetry failures leave generation running. Exclusive temporary creation and
 atomic replacement keep readers from seeing partial JSON; a generation token
 rejects publishers left over from older requests, including foreign threads.
@@ -102,7 +102,7 @@ also require their platform toolchains. Optional frontend submodules remain
 disabled; GGML and SentencePiece are already vendored in the pinned source.
 
 The build includes YuE2, SheetSage2, MuScriptor and native model management,
-which upstream requires for Remiqora's `--ui-management` and model-load API.
+which upstream requires for OpenFabric Studio's `--ui-management` and model-load API.
 By default CMake fetches and SHA256-verifies upstream's pinned BoringSSL
 `0.20260813.0` source archive. For offline builds, pass
 `--boringssl-archive /path/to/archive.tar.gz`; upstream still verifies its
@@ -110,7 +110,7 @@ digest. `--tls system` instead requires installed OpenSSL development libraries.
 No dependency or license setting is changed on the host.
 
 After a successful build, the helper prints `YUE2_SERVER_BIN` and writes
-`audiocpp_server[.exe].remiqora.json` beside the binary. That manifest binds the
+`audiocpp_server[.exe].openfabric.json` beside the binary. That manifest binds the
 binary SHA256, exact source pin, complete patch identities, selected backend
 and progress schema. App configuration validates it before enabling native
 progress. Failed rebuilds remove the old manifest; moving a binary requires
@@ -125,6 +125,12 @@ CPU build compiled on macOS arm64 and started an isolated server with the
 app's flags; `/health`, model listing, `--version` and `--list-devices` worked
 without weights. CUDA, Metal, Windows compilation and generated audio quality
 remain unverified. A CPU compile does not measure GPU quality.
+
+The OpenFabric progress rename changes the patch and patched-source identities.
+Use a new isolated workspace when rebuilding; existing owned workspaces and
+manifests with the previous identity are intentionally rejected. The rename is
+covered by offline source/hash checks for both pins and the C++ progress probe.
+The complete engine build has not been repeated after this rename.
 
 ## Regenerating a patch
 

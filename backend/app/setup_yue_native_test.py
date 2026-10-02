@@ -36,6 +36,20 @@ def apply_patches(destination: Path) -> None:
 
 
 class NativeSourcePatchTests(unittest.TestCase):
+    def test_build_helper_identity_matches_complete_patched_source_for_both_pins(self) -> None:
+        from scripts import setup_yue_native as helper
+        helper.verify_patch_identity()
+        for pin in PINS:
+            with self.subTest(pin=pin), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory)
+                source_fixture(source, pin)
+                apply_patches(source)
+                expected = {**helper.COMMON_SOURCE_HASHES, 'src/models/yue2/session.cpp': helper.SESSION_SOURCE_HASHES[pin]}
+                for name, digest in expected.items():
+                    with self.subTest(file=name):
+                        self.assertTrue((source / name).is_file(), name)
+                        self.assertEqual(helper.sha256_file(source / name), digest, name)
+
     def test_complete_patches_apply_to_both_pinned_native_sources(self) -> None:
         self.assertTrue((PATCHES / 'yue-progress.patch').is_file(), 'Reproducible native progress patch must exist')
         self.assertTrue((PATCHES / 'yue-workspace-release.patch').is_file(), 'Workspace release patch must exist')

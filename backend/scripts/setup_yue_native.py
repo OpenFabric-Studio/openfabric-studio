@@ -33,17 +33,17 @@ class PatchIdentity:
 
 PATCH_IDENTITIES = (
     PatchIdentity('yue-workspace-release.patch', '188d512e892ab02fbc20487d1ba58112b2b53b8860858434119c455e12876cda'),
-    PatchIdentity('yue-progress.patch', 'cbd32963d195160641112f8b3d428cde02140b99da864ad92bf2fac898ac7bde'),
+    PatchIdentity('yue-progress.patch', '43f6d52b6e3ceb898e72d3cd3a7fc6f8a1278a566f7da363c89036db31df99b5'),
 )
 COMMON_SOURCE_HASHES = {
-    'src/models/yue2/ar_runtime.cpp': '57559321a93217513e742a09a84f2aa27ab583f85891b3a8aaa6cb56b05a0ae6',
-    'src/models/yue2/nar_runtime.cpp': '850c34913556ee84d77109f837943e23f9c19857c5fa2c2315c4e0a8559763ca',
-    'src/models/yue2/pipeline.cpp': 'b6b3e88f879834794e021513a5d2ecd8bf19e6d868d665c9af756e2ee1a83ae4',
-    'include/engine/models/yue2/openfabric_progress.h': 'e8a1456d85d2a6bd144bcda43b5dc4d3c0bea73c84c635b6802cceeb288721cf',
+    'src/models/yue2/ar_runtime.cpp': '6f37b9f597e8728b8fdf3573a6ed4ce3d52678556347b76d9a675872c58ff92f',
+    'src/models/yue2/nar_runtime.cpp': '053d77291c8a009976f66b5400fee9637554fbcd14a20c4564d51b9de1e63add',
+    'src/models/yue2/pipeline.cpp': 'abf733f4951c9a1ed670c1bf92540feee7ef93ef4d6cd5a33b1b274bfec0a0d6',
+    'include/engine/models/yue2/openfabric_progress.h': '19c6f403b200a824fc1f2b7e21bffeebc1d5ec980ca8461848733c44c47ac0d6',
 }
 SESSION_SOURCE_HASHES = {
-    SOURCE_COMMIT: '6615b4794285600f489b16d9cf406711b88e5466122efab84eb140cbd675bb89',
-    RELEASE_COMMIT: 'd813bf385fda6fa8d6932ab2e676d6cc0d020933833419c8ddcc2c84a9dc7321',
+    SOURCE_COMMIT: '5cbf220bc28a2dce3ed210fdd9d0f44925952e43613a0f462c109aec257161e5',
+    RELEASE_COMMIT: '7b62686fb074d9e4c02fc5d1bf5e52ee6b1409130d01ca10fc1dee77d2d1667a',
 }
 
 
