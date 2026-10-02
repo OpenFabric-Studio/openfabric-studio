@@ -1,0 +1,389 @@
+--- a/tools/model_manager_v2.py
++++ b/tools/model_manager_v2.py
+@@ -2,6 +2,10 @@
+ from __future__ import annotations
+ 
+ import argparse
++from contextlib import contextmanager
++import hashlib
++import re
++import errno
+ from concurrent.futures import ThreadPoolExecutor
+ import json
+ import os
+@@ -10,9 +14,10 @@
+ import tempfile
+ import threading
+ import time
+-from dataclasses import dataclass, replace
++from dataclasses import asdict, dataclass, replace
+ from pathlib import Path
+ from typing import Any
++from typing import Callable, Iterator
+ from urllib.error import HTTPError
+ from urllib.parse import quote
+ from urllib.request import Request, urlopen
+@@ -339,7 +344,7 @@
+             return RemoteFileInfo(
+                 size=int(size) if size else None,
+                 revision=response.headers.get("X-Repo-Commit", ""),
+-                etag=response.headers.get("ETag", "").strip('"'),
++                etag=response.headers.get("X-Linked-Etag", response.headers.get("ETag", "")).strip('"'),
+             )
+     except HTTPError as error:
+         if package.download.get("gated") is True and error.code in (401, 403):
+@@ -351,50 +356,200 @@
+     return cancel_file is not None and cancel_file.is_file()
+ 
+ 
++@dataclass(frozen=True)
++class DownloadIdentity:
++    source: str
++    url: str
++    etag: str
++    size: int | None
++
++
++@contextmanager
++def writer_lock(path: Path, cancel_file: Path | None = None) -> Iterator[None]:
++    """OS-owned locks survive process termination without stale lock ownership."""
++    path.parent.mkdir(parents=True, exist_ok=True)
++    with path.open("a+b") as handle:
++        if os.name == "nt":
++            import msvcrt
++            if handle.seek(0, 2) == 0:
++                handle.write(b"0")
++                handle.flush()
++        else:
++            import fcntl
++        while True:
++            if cancellation_requested(cancel_file):
++                raise InstallCancelled("download cancelled by user")
++            try:
++                if os.name == "nt":
++                    handle.seek(0)
++                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
++                else:
++                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
++                break
++            except OSError as error:
++                if error.errno not in (errno.EAGAIN, errno.EACCES):
++                    raise
++                time.sleep(0.1)
++        try:
++            yield
++        finally:
++            if os.name == "nt":
++                handle.seek(0)
++                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
++            else:
++                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
++
++
++def atomic_download_identity(path: Path, identity: DownloadIdentity) -> None:
++    temporary: Path | None = None
++    try:
++        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as handle:
++            temporary = Path(handle.name)
++            json.dump(asdict(identity), handle, sort_keys=True)
++            handle.flush()
++            os.fsync(handle.fileno())
++        temporary.replace(path)
++    finally:
++        if temporary is not None:
++            temporary.unlink(missing_ok=True)
++
++
++def content_digest(info: RemoteFileInfo) -> tuple[str, str]:
++    etag = info.etag.strip('"').lower()
++    if re.fullmatch(r"[0-9a-f]{64}", etag):
++        return "sha256", etag
++    if re.fullmatch(r"[0-9a-f]{40}", etag):
++        return "git-sha1", etag
++    raise ManagerError("remote content has no supported immutable digest; refusing an unverified model download")
++
++
++def verified_download(path: Path, info: RemoteFileInfo) -> bool:
++    if not path.is_file() or (info.size is not None and path.stat().st_size != info.size):
++        return False
++    algorithm, expected = content_digest(info)
++    digest = hashlib.sha256() if algorithm == "sha256" else hashlib.sha1()
++    if algorithm == "git-sha1":
++        digest.update(f"blob {path.stat().st_size}\0".encode("ascii"))
++    with path.open("rb") as handle:
++        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
++            digest.update(chunk)
++    return digest.hexdigest() == expected
++
++
+ def download_file(
+     package: PackageRecord,
+     remote_path: str,
+     output_path: Path,
+-    progress=None,
++    progress: Callable[[int, int | None], None] | None = None,
+     cancel_file: Path | None = None,
+ ) -> None:
++    lock = output_path.parent / (".remiqora-lock-" + hashlib.sha256(output_path.name.encode()).hexdigest())
++    with writer_lock(lock, cancel_file):
++        _download_file(package, remote_path, output_path, progress, cancel_file)
++
++
++def _download_file(
++    package: PackageRecord,
++    remote_path: str,
++    output_path: Path,
++    progress: Callable[[int, int | None], None] | None,
++    cancel_file: Path | None,
++) -> None:
+     repo = package.download["repo"]
+-    request = Request(download_url(package, remote_path), headers=http_headers(package_source(package)))
++    info = check_remote_file(package, remote_path)
++    content_digest(info)  # A length alone never establishes model identity.
++    resolved = package
++    if info.revision:
++        resolved = replace(package, download={**package.download, "revision": info.revision})
++    identity = DownloadIdentity(package_source(package), download_url(resolved, remote_path), info.etag, info.size)
++    sidecar = output_path.with_name(output_path.name + ".remiqora-download.json")
++    try:
++        saved = json.loads(sidecar.read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        saved = None
++    have = output_path.stat().st_size if output_path.is_file() and saved == asdict(identity) else 0
++    if have and verified_download(output_path, info):
++        if progress is not None:
++            progress(have, have)
++        return
++    if info.size is not None and have >= info.size:
++        have = 0  # Equal-sized corruption cannot be accepted through HTTP 416.
++    output_path.parent.mkdir(parents=True, exist_ok=True)
++    if not have:
++        # Invalidate old bytes before publishing a new identity. Interruption cannot label old data as new.
++        with output_path.open("wb"):
++            pass
++    atomic_download_identity(sidecar, identity)
++    headers = http_headers(package_source(package))
++    headers["If-Match"] = '"' + info.etag.strip('"') + '"'
++    if have:
++        headers["Range"] = f"bytes={have}-"
++    request = Request(identity.url, headers=headers)
+     try:
+         with urlopen(request, timeout=300) as response:
++            status = getattr(response, "status", 200)
+             expected_header = response.headers.get("Content-Length")
+-            expected = int(expected_header) if expected_header is not None else None
+-            output_path.parent.mkdir(parents=True, exist_ok=True)
++            if expected_header is not None and not expected_header.isdigit():
++                raise ManagerError("invalid download Content-Length")
++            response_length = int(expected_header) if expected_header is not None else None
++            expected = info.size
+             total = 0
+-            last_report = 0
+-            with output_path.open("wb") as handle:
++            mode = "wb"
++            if status == 206:
++                match = re.fullmatch(r"bytes ([0-9]+)-([0-9]+)/([0-9]+)", response.headers.get("Content-Range", ""))
++                if match is None:
++                    raise ManagerError("invalid resume Content-Range")
++                start, end, size = (int(part) for part in match.groups())
++                if start != have or end < start or end >= size or (info.size is not None and size != info.size) or (response_length is not None and response_length != end - start + 1):
++                    raise ManagerError("inconsistent resume Content-Range")
++                expected = size
++                total = have
++                mode = "ab" if have else "wb"
++            elif status != 200:
++                raise ManagerError(f"unexpected download status: {status}")
++            elif info.size is not None and response_length is not None and response_length != info.size:
++                raise ManagerError("download size differs from verified identity")
++            elif expected is None:
++                expected = response_length
++            last_report = total
++            if progress is not None:
++                progress(total, expected)
++            with output_path.open(mode) as handle:
+                 while True:
+                     if cancellation_requested(cancel_file):
+                         raise InstallCancelled("download cancelled by user")
+                     chunk = response.read(1024 * 1024)
+                     if not chunk:
+                         break
++                    if expected is not None and total + len(chunk) > expected:
++                        raise ManagerError("download exceeds verified remote size")
+                     handle.write(chunk)
+                     total += len(chunk)
+                     if progress is not None and total - last_report >= 8 * 1024 * 1024:
+                         progress(total, expected)
+                         last_report = total
+-            if progress is not None:
+-                progress(total, expected)
+             if cancellation_requested(cancel_file):
+                 raise InstallCancelled("download cancelled by user")
+             if expected is not None and total != expected:
+                 raise ManagerError(f"downloaded size mismatch for {output_path}: {total} != {expected}")
++            if not verified_download(output_path, info):
++                sidecar.unlink(missing_ok=True)
++                raise ManagerError(f"downloaded content digest mismatch for {output_path}")
++            if progress is not None:
++                progress(total, expected)
+     except HTTPError as error:
++        if error.code == 416 and have:
++            match = re.fullmatch(r"bytes \*/([0-9]+)", error.headers.get("Content-Range", ""))
++            if match is not None and int(match.group(1)) == have and verified_download(output_path, info):
++                if progress is not None:
++                    progress(have, have)
++                return
++            raise ManagerError("resume range rejected; partial content is not a verified complete model") from error
+         if package.download.get("gated") is True and error.code in (401, 403):
+-            raise ManagerError(
+-                f"{repo}/{remote_path} requires accepted Hugging Face access and a valid HF token"
+-            ) from error
++            raise ManagerError(f"{repo}/{remote_path} requires accepted Hugging Face access and a valid HF token") from error
+         if package_kind(package) == "modelscope_snapshot" and error.code in (401, 403):
+             raise ManagerError(f"{repo}/{remote_path} requires ModelScope access to this repo") from error
+-        raise ManagerError(
+-            f"failed to download {repo}/{remote_path}: HTTP {error.code}{source_override_hint(package)}"
+-        ) from error
++        raise ManagerError(f"failed to download {repo}/{remote_path}: HTTP {error.code}{source_override_hint(package)}") from error
+ 
+ 
+ def ensure_snapshot_package(package: PackageRecord) -> None:
+@@ -476,7 +631,18 @@
+     return reusable
+ 
+ 
++def package_writer_lock(package: PackageRecord, models_root: Path) -> Path:
++    target = str(validate_relative_path(package.target_directory, "target_directory"))
++    return models_root / (".remiqora-lock-" + hashlib.sha256(target.encode()).hexdigest())
++
++
+ def install_package(package: PackageRecord, records: list[PackageRecord], args: argparse.Namespace) -> None:
++    cancel_file = Path(args.cancel_file) if getattr(args, "cancel_file", "") else None
++    with writer_lock(package_writer_lock(package, Path(args.models_root)), cancel_file):
++        _install_package(package, records, args)
++
++
++def _install_package(package: PackageRecord, records: list[PackageRecord], args: argparse.Namespace) -> None:
+     ensure_snapshot_package(package)
+     target_dir = validate_relative_path(package.target_directory, "target_directory")
+     models_root = Path(args.models_root)
+@@ -500,28 +666,39 @@
+ 
+     if args.dry_run or args.check:
+         return
++    # Keep the upstream target-prefix cleanup contract while giving this package a stable resume location.
++    package_key = hashlib.sha256(package.id.encode()).hexdigest()[:16]
++    staging = models_root / f".{package.target_directory.replace('/', '_')}.{package_key}.partial"
++    remote_files = {remote: check_remote_file(package, remote) for remote, _output in full_plan}
++    for info in remote_files.values():
++        content_digest(info)
++    revisions = {info.revision for info in remote_files.values() if info.revision}
++    if len(revisions) > 1:
++        raise ManagerError("remote repository changed while resolving model identity; retry installation")
++    resolved_package = replace(package, download={**package.download, "revision": next(iter(revisions))}) if revisions else package
+     existing_outputs = [output for _remote, output in plan if output.exists()]
+     if existing_outputs and not args.overwrite:
+         if len(existing_outputs) == len(plan) and all(output.is_file() for output in existing_outputs):
++            if not package_manifest_path(package, models_root).is_file():
++                if not all(verified_download(output, remote_files[remote]) for remote, output in full_plan):
++                    raise ManagerError("existing model files have no verified package manifest")
++                write_package_manifest(package, models_root, next(iter(revisions), package_revision(package)), remote_files)
++            shutil.rmtree(staging, ignore_errors=True)
+             print(f"already installed {package.id} -> {final_dir}")
+             return
+         reusable = reusable_package_outputs(package, records, models_root)
+-        conflicts = [output for output in existing_outputs if output not in reusable]
++        recovered = {output for remote, output in plan if staging.is_dir() and output in existing_outputs and verified_download(output, remote_files[remote])}
++        conflicts = [output for output in existing_outputs if output not in reusable and output not in recovered]
+         if conflicts:
+             raise ManagerError(f"some package files already exist in: {final_dir} (use --overwrite)")
+-        plan = [(remote, output) for remote, output in plan if output not in reusable]
++        plan = [(remote, output) for remote, output in plan if output not in reusable and output not in recovered]
+     models_root.mkdir(parents=True, exist_ok=True)
+-    staging = Path(tempfile.mkdtemp(prefix=f".{package.target_directory.replace('/', '_')}.", dir=models_root))
++    staging.mkdir(parents=True, exist_ok=True)
+     cancel_file = Path(args.cancel_file) if getattr(args, "cancel_file", "") else None
+     try:
+         if cancellation_requested(cancel_file):
+             raise InstallCancelled("download cancelled by user")
+         progress_enabled = bool(getattr(args, "progress", False))
+-        remote_files: dict[str, RemoteFileInfo] = {}
+-        if progress_enabled:
+-            remote_files = {remote: check_remote_file(package, remote) for remote, _output in plan}
+-        elif plan:
+-            remote_files[plan[0][0]] = check_remote_file(package, plan[0][0])
+         expected_sizes = [remote_files[remote].size for remote, _output in plan] if progress_enabled else []
+         total_expected = sum(size for size in expected_sizes if size is not None)
+         if any(size is None for size in expected_sizes):
+@@ -540,7 +717,7 @@
+             destination = staging / output.relative_to(final_dir)
+             if progress_enabled:
+                 download_file(
+-                    package,
++                    resolved_package,
+                     remote,
+                     destination,
+                     lambda file_bytes, _expected, base=completed: emit_progress(base + file_bytes),
+@@ -549,7 +726,7 @@
+                 completed += destination.stat().st_size
+                 emit_progress(completed)
+             else:
+-                download_file(package, remote, destination, cancel_file=cancel_file)
++                download_file(resolved_package, remote, destination, cancel_file=cancel_file)
+         if cancellation_requested(cancel_file):
+             raise InstallCancelled("download cancelled by user")
+         # Record every package-owned file, including sidecars reused from a
+@@ -558,30 +735,24 @@
+         for remote, _output in full_plan:
+             if remote not in remote_files:
+                 remote_files[remote] = check_remote_file(package, remote)
+-        if not final_dir.exists():
+-            final_dir.parent.mkdir(parents=True, exist_ok=True)
+-            staging.rename(final_dir)
+-        else:
+-            # Precision variants commonly share one target directory. Merge the
+-            # fully downloaded staging tree so Q8 and F16/BF16 can coexist. An
+-            # overwrite replaces only this package's files, preserving siblings.
+-            for staged_file in sorted(path for path in staging.rglob("*") if path.is_file()):
+-                relative = staged_file.relative_to(staging)
+-                destination = final_dir / relative
+-                destination.parent.mkdir(parents=True, exist_ok=True)
+-                if destination.exists():
+-                    if not args.overwrite:
+-                        raise ManagerError(f"package file already exists: {destination} (use --overwrite)")
+-                    destination.unlink()
+-                staged_file.replace(destination)
+-            shutil.rmtree(staging)
++        # Promote only package files; identity metadata and locks stay in staging.
++        # Each replacement is atomic. Interrupted promotion is recovered through content digests.
++        for remote, output in plan:
++            staged_file = staging / output.relative_to(final_dir)
++            if not verified_download(staged_file, remote_files[remote]):
++                raise ManagerError(f"model content changed before promotion: {remote}")
++            output.parent.mkdir(parents=True, exist_ok=True)
++            if output.exists() and not args.overwrite:
++                raise ManagerError(f"package file already exists: {output} (use --overwrite)")
++            staged_file.replace(output)
+         resolved_revision = next(
+             (info.revision for info in remote_files.values() if info.revision),
+             package_revision(package),
+         )
+         write_package_manifest(package, models_root, resolved_revision, remote_files)
++        shutil.rmtree(staging)
+     except Exception:
+-        shutil.rmtree(staging, ignore_errors=True)
++        # Keep all partial and completed staging files after errors or cancellation.
+         raise
+     print(f"installed {package.id} -> {final_dir}")
+ 
+@@ -619,6 +790,11 @@
+ 
+ 
+ def clean_partial_package(package: PackageRecord, args: argparse.Namespace) -> None:
++    with writer_lock(package_writer_lock(package, Path(args.models_root))):
++        _clean_partial_package(package, args)
++
++
++def _clean_partial_package(package: PackageRecord, args: argparse.Namespace) -> None:
+     models_root = Path(args.models_root).resolve()
+     models_root.mkdir(parents=True, exist_ok=True)
+     prefix = f".{package.target_directory.replace('/', '_')}."

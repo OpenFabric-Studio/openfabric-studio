@@ -1,0 +1,325 @@
+--- a/src/models/yue2/ar_runtime.cpp
++++ b/src/models/yue2/ar_runtime.cpp
+@@ -1,3 +1,4 @@
+ #include "engine/models/yue2/ar_runtime.h"
++#include "engine/models/yue2/remiqora_progress.h"
+ 
+ #include "engine/framework/core/backend.h"
+@@ -712,4 +713,5 @@
+             sample_ms += engine::debug::elapsed_ms(sample_start);
+             if (token == window.stop_token) {
++                remiqora_advance_progress(static_cast<int64_t>(emitted.size()), true);
+                 engine::debug::timing_log_scalar("yue2.ar.generate.sample_ms", sample_ms);
+                 engine::debug::timing_log_scalar("yue2.ar.generate.decode_ms", decode_ms);
+@@ -721,4 +723,5 @@
+             }
+             emitted.push_back(token);
++            remiqora_advance_progress(static_cast<int64_t>(emitted.size()));
+             if (static_cast<int64_t>(emitted.size()) >= window.max_tokens) {
+                 break;
+@@ -745,4 +748,5 @@
+         }
+         engine::debug::timing_log_scalar("yue2.ar.generate.sample_ms", sample_ms);
++        remiqora_advance_progress(static_cast<int64_t>(emitted.size()), true);
+         engine::debug::timing_log_scalar("yue2.ar.generate.decode_ms", decode_ms);
+         engine::debug::timing_log_scalar("yue2.ar.generate.refill_prefill_ms", refill_prefill_ms);
+@@ -805,4 +809,5 @@
+             sample_ms += engine::debug::elapsed_ms(sample_start);
+             if (token == window.stop_token) {
++                remiqora_advance_progress(static_cast<int64_t>(emitted.size()), true);
+                 engine::debug::timing_log_scalar("yue2.ar.cfg.sample_ms", sample_ms);
+                 engine::debug::timing_log_scalar("yue2.ar.cfg.decode_batched_ms", decode_batched_ms);
+@@ -812,4 +817,5 @@
+             }
+             emitted.push_back(token);
++            remiqora_advance_progress(static_cast<int64_t>(emitted.size()));
+             if (static_cast<int64_t>(emitted.size()) >= window.max_tokens) {
+                 break;
+@@ -826,4 +832,5 @@
+         }
+         engine::debug::timing_log_scalar("yue2.ar.cfg.sample_ms", sample_ms);
++        remiqora_advance_progress(static_cast<int64_t>(emitted.size()), true);
+         engine::debug::timing_log_scalar("yue2.ar.cfg.decode_batched_ms", decode_batched_ms);
+         engine::debug::timing_log_scalar("yue2.ar.cfg.emitted_tokens", emitted.size());
+--- a/src/models/yue2/nar_runtime.cpp
++++ b/src/models/yue2/nar_runtime.cpp
+@@ -1,3 +1,4 @@
+ #include "engine/models/yue2/nar_runtime.h"
++#include "engine/models/yue2/remiqora_progress.h"
+ 
+ #include "engine/framework/core/backend.h"
+@@ -597,5 +598,6 @@
+         const Yue2ArDevicePrefixState & ar_state,
+         const std::vector<float> & noise,
+-        int64_t ode_steps) {
++        int64_t ode_steps,
++        int64_t progress_offset) {
+         auto state = noise;
+         const auto & config = assets->config.model;
+@@ -615,4 +617,5 @@
+                 state[i] -= second[i] * dt;
+             }
++            remiqora_advance_progress(progress_offset + step + 1, true);
+         }
+         return state;
+@@ -630,4 +633,5 @@
+         const auto & config = assets->config.model;
+         const auto ranges = chunk_ranges(static_cast<int64_t>(codec.size()), static_cast<int64_t>(prefix.size()), context);
++        remiqora_set_progress(RemiqoraProgressPhase::Acoustic, 0, remiqora_total_work(ranges.size(), ode_steps));
+         engine::debug::timing_log_scalar("yue2.nar.synthesize.codec_tokens", codec.size());
+         engine::debug::timing_log_scalar("yue2.nar.synthesize.chunks", ranges.size());
+@@ -650,4 +654,5 @@
+         double prefill_ms = 0.0;
+         double solve_ms = 0.0;
++        int64_t completed_chunks = 0;
+         for (const auto & [begin, end] : ranges) {
+             std::vector<int32_t> ar_tokens = prefix;
+@@ -667,5 +672,6 @@
+             prefill_ms += engine::debug::elapsed_ms(prefill_start);
+             const auto solve_start = Clock::now();
+-            auto chunk = solve_chunk(ar_state, noise, ode_steps);
++            auto chunk = solve_chunk(ar_state, noise, ode_steps, completed_chunks * ode_steps);
++            ++completed_chunks;
+             solve_ms += engine::debug::elapsed_ms(solve_start);
+             out.insert(out.end(), chunk.begin(), chunk.end());
+--- a/src/models/yue2/pipeline.cpp
++++ b/src/models/yue2/pipeline.cpp
+@@ -5,4 +5,5 @@
+ #include "engine/models/yue2/ar_runtime.h"
+ #include "engine/models/yue2/nar_runtime.h"
++#include "engine/models/yue2/remiqora_progress.h"
+ 
+ #include <algorithm>
+@@ -164,4 +165,5 @@
+         if (request.cot != Yue2CotMode::Off && request.abc.empty()) {
+             ensure_ar();
++            remiqora_set_progress(RemiqoraProgressPhase::Planning, 0);
+             const auto abc_start = Clock::now();
+             out.plan.abc_ids = ar->generate(out.plan.prefix, abc_window(request.generation), request.seed);
+@@ -176,4 +178,5 @@
+         }
+         ensure_ar();
++        remiqora_set_progress(RemiqoraProgressPhase::Semantic, 0);
+         const auto neg = negative_prefix(request, tokenizer, out.plan.abc_ids);
+         out.tokens = ar->generate_cfg(
+@@ -225,4 +228,6 @@
+             throw std::runtime_error("Yue2 VAE tile configuration is invalid");
+         }
++        const int64_t tile_count = (frames + core_frames - 1) / core_frames;
++        remiqora_set_progress(RemiqoraProgressPhase::Decode, 0, tile_count);
+         engine::debug::timing_log_scalar("yue2.vae_decode.latent_frames", frames);
+ 
+@@ -242,4 +247,5 @@
+             const auto decode_start = Clock::now();
+             auto audio = vae->decode(make_planar_tile(0, frames), 1, frames).front();
++            remiqora_advance_progress(1, true);
+             engine::debug::timing_log_scalar("yue2.vae_decode.tiles", 1);
+             engine::debug::timing_log_scalar("yue2.vae_decode.tile_decode_ms", engine::debug::elapsed_ms(decode_start));
+@@ -264,4 +270,5 @@
+             const auto tile_decode_start = Clock::now();
+             auto tile_audio = vae->decode(make_planar_tile(left, right), 1, right - left).front();
++            remiqora_advance_progress(start / core_frames + 1, true);
+             tile_decode_ms += engine::debug::elapsed_ms(tile_decode_start);
+             const int64_t out_start = start * ratio;
+--- a/src/models/yue2/session.cpp
++++ b/src/models/yue2/session.cpp
+@@ -1,3 +1,4 @@
+ #include "engine/models/yue2/session.h"
++#include "engine/models/yue2/remiqora_progress.h"
+ 
+ #include "engine/framework/debug/profiler.h"
+@@ -251,4 +252,5 @@
+     const auto wall_start = Clock::now();
+     const auto parsed = parse_yue2_request(request, assets_->config.generation);
++    RemiqoraProgressRun progress(request.options);
+     runtime::TaskResult result;
+     auto run_result = pipeline_->run(parsed);
+@@ -268,4 +270,5 @@
+     }
+     engine::debug::timing_log_scalar("session.wall_ms", engine::debug::elapsed_ms(wall_start, Clock::now()));
++    remiqora_set_progress(RemiqoraProgressPhase::Done, 1, 1);
+     return result;
+ }
+--- /dev/null
++++ b/include/engine/models/yue2/remiqora_progress.h
+@@ -0,0 +1,180 @@
++#pragma once
++#include <algorithm>
++#include <chrono>
++#include <cstdint>
++#include <cstdlib>
++#include <filesystem>
++#include <fstream>
++#include <mutex>
++#include <optional>
++#include <sstream>
++#include <string>
++#include <unordered_map>
++#include <system_error>
++#include <cerrno>
++#include <fcntl.h>
++#ifdef _WIN32
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#include <io.h>
++#include <process.h>
++#include <sys/stat.h>
++#else
++#include <unistd.h>
++#endif
++
++namespace engine::models::yue2 {
++// Optional telemetry belongs to the synchronous inference thread. New valid
++// requests invalidate every older publisher, including a foreign thread still
++// completing an earlier request. Sampling and audio values are never changed.
++enum class RemiqoraProgressPhase { Planning, Semantic, Acoustic, Decode, Done };
++struct RemiqoraProgressContext {
++    bool enabled = false;
++    uint64_t generation = 0;
++    std::string run_id;
++    std::filesystem::path destination;
++    int64_t started_ms = 0;
++    int64_t phase_started_ms = 0;
++    int64_t updated_ms = 0;
++    RemiqoraProgressPhase phase = RemiqoraProgressPhase::Planning;
++    int64_t current = 0;
++    std::optional<int64_t> total;
++};
++inline thread_local RemiqoraProgressContext remiqora_progress_context;
++inline std::mutex remiqora_progress_mutex;
++inline uint64_t remiqora_progress_generation = 0;
++inline uint64_t remiqora_progress_publication = 0;
++constexpr int64_t remiqora_progress_count_limit = 100000000;
++
++inline const char * remiqora_phase_name(RemiqoraProgressPhase phase) noexcept {
++    switch (phase) {
++        case RemiqoraProgressPhase::Planning: return "planning";
++        case RemiqoraProgressPhase::Semantic: return "semantic";
++        case RemiqoraProgressPhase::Acoustic: return "acoustic";
++        case RemiqoraProgressPhase::Decode: return "decode";
++        case RemiqoraProgressPhase::Done: return "done";
++    }
++    return "planning";
++}
++inline bool remiqora_valid_run_id(const std::string & value) noexcept {
++    return value.size() == 32 && std::all_of(value.begin(), value.end(), [](char c) {
++        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
++    });
++}
++inline int64_t remiqora_now_ms() noexcept {
++    return std::max<int64_t>(0, std::chrono::duration_cast<std::chrono::milliseconds>(
++        std::chrono::system_clock::now().time_since_epoch()).count());
++}
++inline std::optional<int64_t> remiqora_total_work(uint64_t items, int64_t steps) noexcept {
++    if (items == 0 || steps <= 0 || steps > remiqora_progress_count_limit ||
++        items > static_cast<uint64_t>(remiqora_progress_count_limit / steps)) return std::nullopt;
++    return static_cast<int64_t>(items) * steps;
++}
++inline void remiqora_atomic_progress(const std::filesystem::path & destination, const std::string & content) {
++#ifdef _WIN32
++    const auto pid = _getpid();
++#else
++    const auto pid = getpid();
++#endif
++    auto temporary = destination;
++    temporary += "." + std::to_string(pid) + "." + std::to_string(++remiqora_progress_publication) + ".tmp";
++#ifdef _WIN32
++    const int descriptor = _wopen(temporary.c_str(), _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
++#else
++    // POSIX O_CREAT|O_EXCL already refuses existing symlinks. O_NOFOLLOW
++    // is an additional platform extension, hidden by strict POSIX on macOS.
++    int flags = O_WRONLY | O_CREAT | O_EXCL;
++#ifdef O_NOFOLLOW
++    flags |= O_NOFOLLOW;
++#endif
++    const int descriptor = open(temporary.c_str(), flags, 0600);
++#endif
++    if (descriptor < 0) return;
++    bool complete = true;
++    size_t offset = 0;
++    while (offset < content.size()) {
++#ifdef _WIN32
++        const auto written = _write(descriptor, content.data() + offset, static_cast<unsigned int>(content.size() - offset));
++#else
++        const auto written = write(descriptor, content.data() + offset, content.size() - offset);
++#endif
++        if (written < 0 && errno == EINTR) continue;
++        if (written <= 0) { complete = false; break; }
++        offset += static_cast<size_t>(written);
++    }
++#ifdef _WIN32
++    if (_close(descriptor) != 0) complete = false;
++    if (complete) complete = MoveFileExW(temporary.c_str(), destination.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
++#else
++    if (close(descriptor) != 0) complete = false;
++    if (complete) complete = rename(temporary.c_str(), destination.c_str()) == 0;
++#endif
++    std::error_code ignored;
++    std::filesystem::remove(temporary, ignored);
++}
++inline void remiqora_publish_progress_locked() {
++    auto & context = remiqora_progress_context;
++    if (!context.enabled || context.generation != remiqora_progress_generation) return;
++    context.updated_ms = std::max(context.updated_ms, remiqora_now_ms());
++    std::ostringstream json;
++    json << "{\"run_id\":\"" << context.run_id
++         << "\",\"phase\":\"" << remiqora_phase_name(context.phase)
++         << "\",\"current\":" << context.current << ",\"total\":";
++    if (context.total.has_value()) json << *context.total; else json << "null";
++    json << ",\"started_ms\":" << context.started_ms
++         << ",\"phase_started_ms\":" << context.phase_started_ms
++         << ",\"updated_ms\":" << context.updated_ms << "}";
++    remiqora_atomic_progress(context.destination, json.str());
++}
++inline void remiqora_set_progress(RemiqoraProgressPhase phase, int64_t current, std::optional<int64_t> total = std::nullopt) noexcept {
++    try {
++        auto & context = remiqora_progress_context;
++        if (!context.enabled || current < 0 || current > remiqora_progress_count_limit ||
++            (total.has_value() && (*total < 1 || *total > remiqora_progress_count_limit || current > *total))) return;
++        std::lock_guard<std::mutex> guard(remiqora_progress_mutex);
++        if (context.generation != remiqora_progress_generation) return;
++        context.phase_started_ms = std::max(context.updated_ms, remiqora_now_ms());
++        context.phase = phase;
++        context.current = current;
++        context.total = total;
++        remiqora_publish_progress_locked();
++    } catch (...) { /* A telemetry failure must not fail generation. */ }
++}
++inline void remiqora_advance_progress(int64_t current, bool force = false) noexcept {
++    if (!force && current % 32 != 0) return;
++    try {
++        auto & context = remiqora_progress_context;
++        if (!context.enabled || current < context.current || current > remiqora_progress_count_limit ||
++            (context.total.has_value() && current > *context.total)) return;
++        std::lock_guard<std::mutex> guard(remiqora_progress_mutex);
++        if (context.generation != remiqora_progress_generation) return;
++        context.current = current;
++        remiqora_publish_progress_locked();
++    } catch (...) { /* Telemetry stays optional. */ }
++}
++class RemiqoraProgressRun {
++public:
++    explicit RemiqoraProgressRun(const std::unordered_map<std::string, std::string> & options) noexcept {
++        auto & context = remiqora_progress_context;
++        context.enabled = false;
++        try {
++            const auto run = options.find("remiqora_run_id");
++            const char * path = std::getenv("REMIQORA_YUE2_PROGRESS_PATH");
++            if (run == options.end() || !remiqora_valid_run_id(run->second) || path == nullptr || *path == '\0') return;
++            std::lock_guard<std::mutex> guard(remiqora_progress_mutex);
++            context = {};
++            context.run_id = run->second;
++            context.destination = std::filesystem::u8path(path);
++            context.generation = ++remiqora_progress_generation;
++            context.started_ms = context.phase_started_ms = context.updated_ms = remiqora_now_ms();
++            context.enabled = true;
++            remiqora_publish_progress_locked();
++        } catch (...) { context.enabled = false; }
++    }
++    RemiqoraProgressRun(const RemiqoraProgressRun &) = delete;
++    RemiqoraProgressRun & operator=(const RemiqoraProgressRun &) = delete;
++    ~RemiqoraProgressRun() { remiqora_progress_context.enabled = false; }
++};
++}  // namespace engine::models::yue2

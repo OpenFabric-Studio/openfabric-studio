@@ -1,0 +1,100 @@
+name: CI
+
+# Lean triggers: PRs to main/master + pushes to main/master only (not every branch).
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Windows native ownership tests: manual / workflow_call only (saves minutes on every PR).
+  native-process-windows:
+    name: Windows native process ownership
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'workflow_call'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - run: python -m pip install python-dotenv httpx pydantic
+      - name: Verify real Windows job termination and parent death
+        run: python -m unittest app.windows_native_test -v
+        working-directory: backend
+        env:
+          OPENFABRIC_CONFIG: ${{ runner.temp }}/openfabric-native/config.json
+          OPENFABRIC_DATA_DIR: ${{ runner.temp }}/openfabric-native/library
+          REMIQORA_CONFIG: ${{ runner.temp }}/openfabric-native/config.json
+          REMIQORA_DATA_DIR: ${{ runner.temp }}/openfabric-native/library
+          SEED_VC_DIR: ${{ runner.temp }}/openfabric-native/engine
+
+  desktop:
+    name: Desktop (unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+      # Unit tests do not launch Electron; avoid its binary download here.
+      - run: npm ci --ignore-scripts
+      - run: npm test
+
+  frontend:
+    name: Frontend (types, behavioral tests, build)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    name: Backend (regressions and contract drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Isolate test configuration, library and engine
+        run: |
+          printf '%s\n' \
+            "OPENFABRIC_CONFIG=$RUNNER_TEMP/openfabric-test-config.json" \
+            "OPENFABRIC_DATA_DIR=$RUNNER_TEMP/openfabric-test-library" \
+            "REMIQORA_CONFIG=$RUNNER_TEMP/openfabric-test-config.json" \
+            "REMIQORA_DATA_DIR=$RUNNER_TEMP/openfabric-test-library" \
+            "SEED_VC_DIR=$RUNNER_TEMP/openfabric-test-seed-vc" >> "$GITHUB_ENV"
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - run: pip install -r backend/requirements-test.txt
+      - run: python backend/scripts/generate_contracts.py --check
+      # Default CI: mypy on linux only (multi-platform on release / dispatch via desktop workflow).
+      - name: Strict Python types (Linux)
+        run: |
+          python -m mypy --strict --follow-imports=silent app/contracts.py app/client_contracts.py app/generation_contracts.py app/generation_library.py app/api/routes_generation_library.py app/yue_contracts.py app/yue_jobs.py app/api/routes_yue_jobs.py app/api/routes_stem_exports.py app/native_yue.py app/native_artifacts.py app/main.py app/config.py app/orchestrator/state.py app/orchestrator/manager.py app/orchestrator/process.py app/orchestrator/windows_job.py app/orchestrator/windows_supervisor.py app/orchestrator/posix_supervisor.py app/api/routes_proxy.py app/api/routes_ace_jobs.py app/reference_melody.py app/reference_contracts.py app/reference_imports.py app/reference_tools.py app/api/routes_references.py app/atomic_files.py app/data_root.py app/ace_jobs.py app/audio_version_contracts.py app/audio_version_store.py app/audio_versions.py app/audio_encoding.py app/audio_exports.py app/artist_settings.py app/tagging.py app/tagging_genres.py app/track_activity.py app/api/tagged_download_response.py app/api/routes_audio_versions.py app/api/routes_audio_exports.py app/api/routes_audio_settings.py app/job_lifecycle.py app/resource_admission.py app/track_view.py app/voice_contracts.py app/voice_progress.py app/gpu_lease.py app/voice_apply_progress.py app/voice_comparisons.py app/voice_separation.py app/voice_artifacts.py app/voice_preparation.py app/voice_coverage.py app/prep_vocal.py app/clean_vocal.py app/seed_vc_compat.py app/voice_measure.py app/voice_download.py app/voice_replacement.py app/video_contracts.py app/video_projects.py app/video_media.py app/video_process.py app/video_render.py app/video_text.py app/video_io.py app/video_engine.py app/video_analysis.py app/api/routes_voice_trials.py scripts/generate_contracts.py scripts/setup_yue_native.py scripts/setup_roformer.py scripts/setup_video.py scripts/run_video.py --platform linux
+        working-directory: backend
+      - run: python -m unittest discover -s app -p '*_test.py' -v
+        working-directory: backend

@@ -1,0 +1,297 @@
+'use strict';
+// First-run screen: checks, download progress, problems, hand-over to the app.
+(() => {
+  const api = window.remiqora;
+  const view = document.getElementById('view');
+  const live = document.getElementById('live');
+  const stepsEl = document.getElementById('steps');
+  const params = new URLSearchParams(location.search);
+
+  let locale = 'en';
+  let ctx = null;
+  let rows = {};          // component id -> { status, done, total, note, weight }
+  let paused = false;
+  let samples = [];       // [time, overall bytes] for speed and ETA
+
+  const fill = (s, vars) => s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? ''));
+  const t = (key, vars = {}) => {
+    const v = window.STRINGS[locale][key] ?? window.STRINGS.en[key] ?? key;
+    return Array.isArray(v) ? v.map((s) => fill(s, vars)) : fill(v, vars);
+  };
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const $ = (sel) => view.querySelector(sel);
+
+  const ICON = {
+    ok: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M7.5 12.5l3 3 6-6.5"/></svg>',
+    err: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 7v6M12 16.5v.5"/></svg>',
+    run: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 7v5l3 2"/></svg>',
+    wait: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>',
+  };
+  const icon = (kind) => `<span class="ico ${kind === 'wait' ? '' : kind}">${ICON[kind]}</span>`;
+
+  const nf = (digits) => new Intl.NumberFormat(locale, { maximumFractionDigits: digits, minimumFractionDigits: digits });
+  function fmtBytes(n) {
+    return n >= 1e9 ? `${nf(1).format(n / 1e9)} ${t('unit.gb')}` : `${nf(0).format(n / 1e6)} ${t('unit.mb')}`;
+  }
+  function fmtEta(sec) {
+    return sec >= 90 ? `${Math.ceil(sec / 60)} ${t('unit.min')}` : `${Math.max(5, Math.round(sec / 5) * 5)} ${t('unit.sec')}`;
+  }
+
+  function setSteps(current, state) {
+    const names = ['check', 'download', 'done'];
+    stepsEl.innerHTML = names.map((name, i) => {
+      const n = i + 1;
+      const cls = n < current ? 'done' : n === current && state === 'bad' ? 'bad' : '';
+      const cur = n === current ? ' aria-current="step"' : '';
+      return `<li class="${cls}"${cur}>${esc(t('steps.' + name))}</li>`;
+    }).join('');
+  }
+
+  /** Replaces the whole view once per state; progress updates afterwards only touch existing nodes. */
+  function render(html, title) {
+    view.innerHTML = html;
+    live.textContent = title;
+    const h1 = view.querySelector('h1');
+    if (h1) { h1.tabIndex = -1; h1.focus({ preventScroll: true }); }
+  }
+
+  function bind(selector, handler) {
+    const el = $(selector);
+    if (el) el.addEventListener('click', handler);
+  }
+
+  // ---------- 1. checks ----------
+  async function runChecksAndShow() {
+    setSteps(1);
+    render(`<h1>${esc(t('check.title'))}</h1><p class="lead">${esc(t('check.lead'))}</p><ul class="rows" aria-busy="true"></ul>`, t('check.title'));
+    const result = await api.checks(ctx.dataRoot);
+    if (result.blocking) return showProblem(result);
+    showCheckResult(result);
+  }
+
+  function checkRow(item) {
+    let detail = '';
+    if (item.id === 'gpu') detail = item.vramMiB ? `${item.name}, ${Math.round(item.vramMiB / 1024)} ${t('unit.gb')}` : item.name;
+    if (item.id === 'driver') detail = t('row.driver.detail', { v: item.driver, r: item.required });
+    if (item.id === 'disk') detail = t('row.disk.detail', { free: fmtBytes(item.freeBytes), req: fmtBytes(item.requiredBytes) });
+    if (item.id === 'network') detail = item.required === false ? t('row.network.not-needed') : item.ok ? t('row.network.ok') : t('row.network.bad');
+    if (item.id === 'platform') detail = item.platform;
+    return `<li>${icon(item.ok ? 'ok' : 'err')}<span class="name">${esc(t('row.' + item.id))}</span><span class="state">${esc(detail)}</span></li>`;
+  }
+
+  function folderBlock() {
+    return `<div class="folder"><span class="lbl">${esc(t('folder.label'))}</span><span class="path" id="path">${esc(ctx.dataRoot)}</span><button type="button" class="btn quiet" id="change">${esc(t('folder.change'))}</button></div>`;
+  }
+
+  function showCheckResult(result) {
+    render(`
+      <h1>${esc(t('check.title'))}</h1>
+      <p class="lead">${esc(t('check.lead'))}</p>
+      <ul class="rows">${result.items.map((i) => checkRow(i)).join('')}</ul>
+      ${folderBlock()}
+      <p class="note">${esc(t('check.note', { size: fmtBytes(ctx.totalBytes) }))}</p>
+      <div class="actions"><button type="button" class="btn primary" id="start">${esc(t('btn.start'))}</button></div>`, t('check.title'));
+    bind('#start', startDownload);
+    bind('#change', chooseFolder);
+  }
+
+  async function chooseFolder() {
+    const dir = await api.chooseFolder();
+    if (!dir) return;
+    const res = await api.setRoot(dir);
+    if (!res.ok) { live.textContent = res.message; return; }
+    ctx = await api.context();
+    runChecksAndShow();
+  }
+
+  // ---------- problems ----------
+  function showProblem(result) {
+    const b = result.blocking;
+    const vars = {
+      v: b.gpu ? b.gpu.driver : '', r: b.required ?? '', gpu: b.gpu ? b.gpu.name : '',
+      free: b.free !== undefined ? fmtBytes(b.free) : '', req: b.required && b.code === 'no-disk' ? fmtBytes(b.required) : '',
+    };
+    const steps = t(`p.${b.code}.steps`, vars);
+    const primary = {
+      'no-gpu': ['btn.drivers', () => api.openExternal('nvidia-drivers')],
+      'old-driver': ['btn.drivers', () => api.openExternal('nvidia-drivers')],
+      'old-gpu': ['btn.report', () => api.openExternal('issues')],
+      'unsupported-platform': ['btn.report', () => api.openExternal('issues')],
+      'no-disk': ['btn.folder', chooseFolder],
+      offline: ['btn.recheck', runChecksAndShow],
+    }[b.code];
+    const showRecheck = b.code !== 'offline';
+    setSteps(1, 'bad');
+    render(`
+      <h1>${esc(t(`p.${b.code}.title`, vars))}</h1>
+      <p class="lead">${esc(t(`p.${b.code}.lead`, vars))}</p>
+      ${steps.length ? `<ol class="steplist">${steps.map((s) => `<li>${esc(s)}</li>`).join('')}</ol>` : ''}
+      <details><summary>${esc(t('error.details'))}</summary><pre>${esc(JSON.stringify(result, null, 2))}</pre></details>
+      <div class="actions">
+        <button type="button" class="btn primary" id="primary">${esc(t(primary[0]))}</button>
+        ${showRecheck ? `<button type="button" class="btn" id="recheck">${esc(t('btn.recheck'))}</button>` : ''}
+      </div>`, t(`p.${b.code}.title`, vars));
+    bind('#primary', primary[1]);
+    bind('#recheck', runChecksAndShow);
+  }
+
+  // ---------- 2. download ----------
+  function initRows() {
+    rows = {};
+    for (const c of ctx.plan) rows[c.id] = { status: c.done ? 'done' : 'queued', done: 0, total: 0, note: '', weight: c.done || c.skipped ? 0 : c.weight };
+    samples = [];
+    paused = false;
+  }
+
+  function startDownload() {
+    initRows();
+    setSteps(2);
+    render(`
+      <h1>${esc(t('download.title'))}</h1>
+      <p class="lead">${esc(t('download.lead'))}</p>
+      <div class="bigbar">
+        <div class="top"><span class="pct" id="pct">0%</span><span class="meta" id="meta"></span></div>
+        <div class="track" role="progressbar" aria-label="${esc(t('download.title'))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="bigtrack"><i id="bigfill"></i></div>
+      </div>
+      <ul class="rows" id="comps">${ctx.plan.map((c) => `<li id="row-${c.id}"><span class="ico-slot"></span><span class="name">${esc(t('comp.' + c.id))}</span><span class="state"></span><div class="track thin" role="progressbar" aria-label="${esc(t('comp.' + c.id))}" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><i></i></div><div class="note-line" hidden></div></li>`).join('')}</ul>
+      <div class="actions"><button type="button" class="btn" id="pause">${esc(t('btn.pause'))}</button><button type="button" class="btn quiet" id="logs">${esc(t('btn.logs'))}</button></div>`, t('download.title'));
+    for (const c of ctx.plan) renderRow(c.id);
+    renderOverall();
+    bind('#pause', togglePause);
+    bind('#logs', () => api.openLogs());
+    api.start();
+  }
+
+  function togglePause() {
+    const btn = $('#pause');
+    if (!paused) { btn.disabled = true; api.pause(); return; } // the "paused" event finishes the switch
+    paused = false;
+    btn.textContent = t('btn.pause');
+    api.start();
+    renderOverall();
+  }
+
+  const fraction = (r) => (r.status === 'done' ? 1 : r.total > 0 ? Math.min(1, r.done / r.total) : 0);
+
+  function renderRow(id) {
+    const r = rows[id];
+    const li = document.getElementById(`row-${id}`);
+    if (!li) return;
+    const slot = li.querySelector('.ico, .ico-slot');
+    const state = li.querySelector('.state');
+    const bar = li.querySelector('.track');
+    const noteLine = li.querySelector('.note-line');
+    const size = fmtBytes(r.weight);
+    const kind = { done: 'ok', running: 'run', error: 'err' }[r.status] || 'wait';
+    slot.outerHTML = icon(kind);
+    if (r.status === 'done') state.textContent = `${t('status.done')}, ${size}`;
+    else if (r.status === 'skipped') state.textContent = t('status.skipped');
+    else if (r.status === 'error') state.textContent = t('status.error');
+    else if (r.status === 'running') state.textContent = r.total > 0 ? `${Math.round(fraction(r) * 100)}%, ${size}` : `${t('status.working')}, ${size}`;
+    else state.textContent = `${t('status.queued')}, ${size}`;
+
+    const running = r.status === 'running';
+    bar.hidden = !(running && r.total > 0);
+    if (!bar.hidden) {
+      bar.firstElementChild.style.width = `${fraction(r) * 100}%`;
+      bar.setAttribute('aria-valuenow', String(Math.round(fraction(r) * 100)));
+    }
+    noteLine.hidden = !(running && r.note);
+    if (!noteLine.hidden) noteLine.textContent = r.note;
+  }
+
+  function renderOverall() {
+    const totalWeight = Object.values(rows).reduce((a, r) => a + r.weight, 0) || 1;
+    const bytes = Object.values(rows).reduce((a, r) => a + r.weight * fraction(r), 0);
+    const pct = Math.min(100, Math.round((bytes / totalWeight) * 100));
+    const now = Date.now();
+    samples.push([now, bytes]);
+    samples = samples.filter(([time]) => now - time < 8000);
+    let speed = 0;
+    if (samples.length > 1) {
+      const [t0, b0] = samples[0];
+      if (now - t0 > 1500) speed = ((bytes - b0) / (now - t0)) * 1000;
+    }
+    const parts = [t('meta.progress', { done: fmtBytes(bytes), total: fmtBytes(totalWeight) })];
+    if (paused) parts.push(t('meta.paused'));
+    else if (speed > 1e5) parts.push(t('meta.speed', { speed: fmtBytes(speed) }), t('meta.eta', { eta: fmtEta((totalWeight - bytes) / speed) }));
+    const pctEl = $('#pct');
+    if (!pctEl) return;
+    pctEl.textContent = `${pct}%`;
+    $('#bigfill').style.width = `${pct}%`;
+    $('#bigtrack').setAttribute('aria-valuenow', String(pct));
+    $('#meta').textContent = parts.join(' · ');
+  }
+
+  // ---------- 3. done, failure, start ----------
+  function showDone(complete) {
+    setSteps(3);
+    render(`
+      <h1>${esc(t('done.title'))}</h1>
+      <p class="lead">${esc(t('done.lead'))}</p>
+      <ul class="rows">${ctx.plan.map((c) => `<li>${icon(rows[c.id] && rows[c.id].status === 'skipped' ? 'wait' : 'ok')}<span class="name">${esc(t('comp.' + c.id))}</span><span class="state">${esc(rows[c.id] && rows[c.id].status === 'skipped' ? t('status.skipped') : t('status.done'))}</span></li>`).join('')}</ul>
+      ${complete ? '' : `<p class="note">${esc(t('done.partial'))}</p>`}
+      <p class="note">${esc(t('done.note'))}</p>
+      <div class="actions"><button type="button" class="btn primary" id="open">${esc(t('btn.open'))}</button><button type="button" class="btn quiet" id="data">${esc(t('btn.showdata'))}</button></div>`, t('done.title'));
+    bind('#open', () => api.launch());
+    bind('#data', () => api.showData());
+  }
+
+  function showFailure(message, componentId) {
+    setSteps(2, 'bad');
+    const comp = componentId ? t('comp.' + componentId) : '';
+    render(`
+      <h1>${esc(t('error.title'))}</h1>
+      <p class="lead">${esc(t('error.lead', { comp }))}</p>
+      <details open><summary>${esc(t('error.details'))}</summary><pre>${esc(message)}</pre></details>
+      <div class="actions"><button type="button" class="btn primary" id="retry">${esc(t('btn.retry'))}</button><button type="button" class="btn" id="logs">${esc(t('btn.logs'))}</button><button type="button" class="btn quiet" id="report">${esc(t('btn.report'))}</button></div>`, t('error.title'));
+    bind('#retry', startDownload);
+    bind('#logs', () => api.openLogs());
+    bind('#report', () => api.openExternal('issues'));
+  }
+
+  function showStarting() {
+    setSteps(3);
+    render(`<h1>${esc(t('starting.title'))}</h1><p class="lead">${esc(t('starting.lead'))}</p><div class="spinner" role="presentation"></div>`, t('starting.title'));
+  }
+
+  function showCrashed(message) {
+    setSteps(3, 'bad');
+    render(`
+      <h1>${esc(t('crashed.title'))}</h1>
+      <p class="lead">${esc(t('crashed.lead'))}</p>
+      <details open><summary>${esc(t('error.details'))}</summary><pre>${esc(message)}</pre></details>
+      <div class="actions"><button type="button" class="btn primary" id="retry">${esc(t('btn.retry'))}</button><button type="button" class="btn" id="logs">${esc(t('btn.logs'))}</button><button type="button" class="btn quiet" id="report">${esc(t('btn.report'))}</button></div>`, t('crashed.title'));
+    bind('#retry', () => api.launch());
+    bind('#logs', () => api.openLogs());
+    bind('#report', () => api.openExternal('issues'));
+  }
+
+  function onEvent(ev) {
+    if (ev.type === 'component' && rows[ev.id]) {
+      const r = rows[ev.id];
+      r.status = ev.status;
+      if (ev.done !== undefined) { r.done = ev.done; r.total = ev.total; }
+      if (ev.note) r.note = ev.note;
+      if (ev.status === 'done') { r.done = r.total = 1; r.note = ''; }
+      renderRow(ev.id);
+      renderOverall();
+    } else if (ev.type === 'finished') showDone(ev.complete);
+    else if (ev.type === 'paused') {
+      paused = true;
+      const btn = $('#pause');
+      if (btn) { btn.disabled = false; btn.textContent = t('btn.resume'); }
+      renderOverall();
+    } else if (ev.type === 'failed') showFailure(ev.message, ev.componentId);
+    else if (ev.type === 'starting') showStarting();
+  }
+
+  (async function init() {
+    ctx = await api.context();
+    locale = ctx.languages.some((lang) => String(lang).toLowerCase().startsWith('ru')) ? 'ru' : 'en';
+    document.documentElement.lang = locale;
+    api.onEvent(onEvent);
+    if (params.get('state') === 'crashed') return showCrashed(params.get('message') || '');
+    runChecksAndShow();
+  })();
+})();

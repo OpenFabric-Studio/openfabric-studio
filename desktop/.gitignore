@@ -1,0 +1,6 @@
+node_modules/
+dist/
+# copied from backend/, frontend/dist and external/patches by scripts/prepare-resources.js
+resources/
+# throwaway data root used when running from a source checkout
+.dev-home/

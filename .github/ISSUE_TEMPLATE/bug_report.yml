@@ -1,0 +1,84 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Issues can be written in English or Russian.
+        For questions and "how do I…", use this [fork's issues](https://github.com/mchosc/remiqora/issues).
+        Never upload secrets, private recordings or unsanitized logs.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Where does it happen?
+      options:
+        - ACE-Step generation
+        - YuE2 generation
+        - Voice preparation / cloning / replacement
+        - Audio versions / playback / export settings
+        - Video studio
+        - Library / favorites / data folders
+        - Stem separation (Demucs)
+        - MIDI transcription (MuScriptor)
+        - SheetSage2
+        - LoRA training
+        - Editor / DAW
+        - Install / setup scripts
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead? Screenshots are welcome.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 10/11
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (not officially supported)
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: GPU / chip and memory
+      placeholder: "e.g. RTX 4080 16 GB, or MacBook Air M5 24 GB"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Remiqora version
+      description: The commit you are on — run `git rev-parse --short HEAD` in the repository folder.
+      placeholder: "e.g. 10107d1"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant terminal output or logs from your configured data folder. Trim to the relevant part and remove tokens, private paths and recording details.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched the existing issues and didn't find this one.
+          required: true

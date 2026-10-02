@@ -1,0 +1,15 @@
+# Inference-only imports verified at MSST 84b1eac0887756b4f1a9d7a1ff49105939749ed2.
+# Full upstream requirements also install CUDA kernels, GUI and training tools.
+torch==2.14.1
+numpy==2.5.3
+librosa==1.0.0
+soundfile==0.14.0
+tqdm==4.70.1
+ml-collections==1.1.0
+omegaconf==2.3.1
+PyYAML==6.0.3
+matplotlib==3.11.2
+beartype==0.22.9
+einops==0.8.2
+packaging==26.3
+rotary-embedding-torch==0.9.1

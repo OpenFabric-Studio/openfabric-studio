@@ -1,0 +1,5 @@
+# Dependabot disabled for OpenFabric Studio to avoid Actions-minute burn from
+# dependency PRs triggering CI. Re-enable weekly updates when the org has
+# budget and CI is stable — prefer open-pull-requests-limit: 1 and grouped updates.
+version: 2
+updates: []

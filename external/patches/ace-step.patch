@@ -1,0 +1,741 @@
+diff --git a/acestep/api/http/cancel_task_route.py b/acestep/api/http/cancel_task_route.py
+new file mode 100644
+index 0000000..94cf5e8
+--- /dev/null
++++ b/acestep/api/http/cancel_task_route.py
+@@ -0,0 +1,107 @@
++"""HTTP route for cancelling a queued or in-flight generation task."""
++
++from __future__ import annotations
++
++from typing import Any, Callable, Dict, Optional
++
++from fastapi import FastAPI, Header, Request
++
++from acestep.generation_cancellation import request_cancel
++
++
++def register_cancel_task_route(
++    app: FastAPI,
++    verify_token_from_request: Callable[[dict, Optional[str]], Optional[str]],
++    wrap_response: Callable[..., Dict[str, Any]],
++    store: Any,
++) -> None:
++    """Register the ``/cancel_task`` endpoint.
++
++    Args:
++        app: FastAPI app instance to register the route on.
++        verify_token_from_request: Auth validator matching ``/release_task``.
++        wrap_response: Response envelope builder preserving client contract.
++        store: In-memory job store with ``get(task_id)``/``mark_cancelled(task_id)``.
++    """
++
++    @app.post("/cancel_task")
++    async def cancel_task_endpoint(request: Request, authorization: Optional[str] = Header(None)):
++        """Cancel one task by ID.
++
++        A still-queued task is marked cancelled immediately so it never
++        starts. A running task has its cancellation event set: the
++        generation loop notices at its next checkpoint (next LM token, or
++        after the current diffusion pass) and unwinds cleanly instead of
++        completing.
++        """
++
++        content_type = (request.headers.get("content-type") or "").lower()
++        if "json" in content_type:
++            body = await request.json()
++        else:
++            form = await request.form()
++            body = {key: value for key, value in form.items()}
++
++        verify_token_from_request(body, authorization)
++        task_id = body.get("task_id")
++        if not task_id:
++            return wrap_response(None, code=400, error="task_id is required")
++
++        record = store.get(task_id)
++        if record is None:
++            return wrap_response(None, code=404, error="Task not found")
++
++        if record.status in ("succeeded", "failed", "cancelled"):
++            return wrap_response({"task_id": task_id, "status": record.status})
++
++        was_queued = record.status == "queued"
++        request_cancel(task_id)
++        if was_queued:
++            # Never picked up by a worker yet -- mark cancelled directly so
++            # polling clients see it right away. If a worker races and
++            # dequeues it anyway, run_one_job_runtime re-checks the
++            # cancellation event before doing any real work.
++            store.mark_cancelled(task_id)
++            return wrap_response({"task_id": task_id, "status": "cancelled"})
++
++        return wrap_response({"task_id": task_id, "status": "cancelling"})
++
++
++def register_cancel_all_tasks_route(
++    app: FastAPI,
++    verify_token_from_request: Callable[[dict, Optional[str]], Optional[str]],
++    wrap_response: Callable[..., Dict[str, Any]],
++    store: Any,
++) -> None:
++    """Register the ``/cancel_all_tasks`` endpoint.
++
++    Cancels every queued or running job in one call -- same per-job logic as
++    ``/cancel_task``, just looped over ``store.get_active_ids()``.
++    """
++
++    @app.post("/cancel_all_tasks")
++    async def cancel_all_tasks_endpoint(request: Request, authorization: Optional[str] = Header(None)):
++        content_type = (request.headers.get("content-type") or "").lower()
++        if "json" in content_type:
++            try:
++                body = await request.json()
++            except Exception:
++                body = {}
++        else:
++            form = await request.form()
++            body = {key: value for key, value in form.items()}
++
++        verify_token_from_request(body, authorization)
++
++        cancelled = []
++        for task_id in store.get_active_ids():
++            record = store.get(task_id)
++            if record is None or record.status in ("succeeded", "failed", "cancelled"):
++                continue
++            was_queued = record.status == "queued"
++            request_cancel(task_id)
++            if was_queued:
++                store.mark_cancelled(task_id)
++            cancelled.append({"task_id": task_id, "status": "cancelled" if was_queued else "cancelling"})
++
++        return wrap_response({"cancelled": cancelled, "count": len(cancelled)})
+diff --git a/acestep/api/http/release_task_route.py b/acestep/api/http/release_task_route.py
+index 4422deb..ebd0277 100644
+--- a/acestep/api/http/release_task_route.py
++++ b/acestep/api/http/release_task_route.py
+@@ -9,6 +9,7 @@ from typing import Any, Callable, Dict, Optional
+ from fastapi import FastAPI, Header, HTTPException, Request
+ 
+ from acestep.api.http.release_task_request_parser import parse_release_task_request
++from acestep.generation_cancellation import register as register_cancellation
+ 
+ 
+ def register_release_task_route(
+@@ -64,6 +65,7 @@ def register_release_task_route(
+         )
+ 
+         record = store.create()
++        register_cancellation(record.job_id)
+         queue_ref: asyncio.Queue = app.state.job_queue
+         if queue_ref.full():
+             for temp_path in temp_files:
+diff --git a/acestep/api/job_execution_runtime.py b/acestep/api/job_execution_runtime.py
+index 7ece907..f4ee0dd 100644
+--- a/acestep/api/job_execution_runtime.py
++++ b/acestep/api/job_execution_runtime.py
+@@ -7,6 +7,13 @@ import time
+ import traceback
+ from typing import Any, Awaitable, Callable
+ 
++from acestep.generation_cancellation import (
++    GenerationCancelledError,
++    bind_current,
++    is_cancel_requested,
++    unregister as unregister_cancellation,
++)
++
+ 
+ async def run_one_job_runtime(
+     *,
+@@ -47,6 +54,22 @@ async def run_one_job_runtime(
+     job_store = app_state.job_store
+     executor = app_state.executor
+ 
++    if is_cancel_requested(job_id):
++        log_fn(f"[API Server] Job {job_id} was cancelled before starting")
++        job_store.mark_cancelled(job_id)
++        update_terminal_job_cache_fn(
++            app_state=app_state,
++            store=store,
++            job_id=job_id,
++            result=None,
++            status="cancelled",
++            map_status=map_status,
++            result_key_prefix=result_key_prefix,
++            result_expire_seconds=result_expire_seconds,
++        )
++        unregister_cancellation(job_id)
++        return
++
+     await ensure_models_initialized_fn(app_state)
+     job_store.mark_running(job_id)
+     update_progress_job_cache_fn(
+@@ -66,16 +89,20 @@ async def run_one_job_runtime(
+     def _blocking_generate() -> dict[str, Any]:
+         # Selection may load a model on demand (download + init, blocking for
+         # seconds to minutes), so it runs here in the executor thread — never
+-        # on the event loop.
+-        nonlocal selected_handler
+-        selected_handler, selected_model_name = select_generation_handler_fn(
+-            app_state=app_state,
+-            requested_model=req.model,
+-            get_model_name=get_model_name,
+-            job_id=job_id,
+-            log_fn=log_fn,
+-        )
+-        return build_blocking_result_fn(selected_handler, selected_model_name)
++        # on the event loop. Binding the cancellation event here makes it
++        # visible to check_cancelled() calls anywhere deeper in this thread's
++        # call stack (LM token loops, diffusion call site) without having to
++        # thread a token through every intermediate function signature.
++        with bind_current(job_id):
++            nonlocal selected_handler
++            selected_handler, selected_model_name = select_generation_handler_fn(
++                app_state=app_state,
++                requested_model=req.model,
++                get_model_name=get_model_name,
++                job_id=job_id,
++                log_fn=log_fn,
++            )
++            return build_blocking_result_fn(selected_handler, selected_model_name)
+ 
+     t0 = time.time()
+     try:
+@@ -92,6 +119,19 @@ async def run_one_job_runtime(
+             result_key_prefix=result_key_prefix,
+             result_expire_seconds=result_expire_seconds,
+         )
++    except GenerationCancelledError:
++        log_fn(f"[API Server] Job {job_id} cancelled by user")
++        job_store.mark_cancelled(job_id)
++        update_terminal_job_cache_fn(
++            app_state=app_state,
++            store=store,
++            job_id=job_id,
++            result=None,
++            status="cancelled",
++            map_status=map_status,
++            result_key_prefix=result_key_prefix,
++            result_expire_seconds=result_expire_seconds,
++        )
+     except Exception as exc:
+         error_traceback = traceback.format_exc()
+         log_fn(f"[API Server] Job {job_id} FAILED: {exc}")
+@@ -118,6 +158,7 @@ async def run_one_job_runtime(
+                     torch.mps.empty_cache()
+         except Exception:
+             pass
++        unregister_cancellation(job_id)
+         dt = max(0.0, time.time() - t0)
+         async with app_state.stats_lock:
+             app_state.recent_durations.append(dt)
+diff --git a/acestep/api/job_generation_runtime.py b/acestep/api/job_generation_runtime.py
+index dd7c20f..19fe86b 100644
+--- a/acestep/api/job_generation_runtime.py
++++ b/acestep/api/job_generation_runtime.py
+@@ -4,6 +4,8 @@ from __future__ import annotations
+ 
+ from typing import Any, Callable
+ 
++from acestep.generation_cancellation import check_cancelled
++
+ 
+ def run_generation_with_optional_sequential_cover_mode(
+     *,
+@@ -75,6 +77,7 @@ def run_generation_with_optional_sequential_cover_mode(
+     aggregated_result = None
+     all_audios = []
+     for run_idx in range(sequential_runs):
++        check_cancelled()
+         if sequential_runs > 1:
+             log_fn(f"[API Server] Job {job_id}: Sequential cover run {run_idx + 1}/{sequential_runs}")
+         if sequential_runs > 1:
+diff --git a/acestep/api/jobs/store.py b/acestep/api/jobs/store.py
+index 85ba322..b109138 100644
+--- a/acestep/api/jobs/store.py
++++ b/acestep/api/jobs/store.py
+@@ -12,7 +12,7 @@ from threading import Lock
+ from typing import Any, Dict, Literal, Optional
+ from uuid import uuid4
+ 
+-JobStatus = Literal["queued", "running", "succeeded", "failed"]
++JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
+ 
+ 
+ @dataclass
+@@ -111,6 +111,13 @@ class _JobStore:
+         with self._lock:
+             return self._jobs.get(job_id)
+ 
++    def get_active_ids(self) -> list:
++        """Return job IDs currently queued or running, oldest first."""
++        with self._lock:
++            active = [r for r in self._jobs.values() if r.status in ("queued", "running")]
++        active.sort(key=lambda r: r.created_at)
++        return [r.job_id for r in active]
++
+     def mark_running(self, job_id: str) -> None:
+         """Mark a queued job as running and set timestamps/progress."""
+         with self._lock:
+@@ -145,6 +152,24 @@ class _JobStore:
+             record.stage = "failed"
+             record.updated_at = time.time()
+ 
++    def mark_cancelled(self, job_id: str, error: str = "Cancelled by user") -> bool:
++        """Mark a job as cancelled unless it already reached a terminal state.
++
++        Returns False (no-op) if the job is unknown or already
++        succeeded/failed/cancelled, so callers don't clobber a real result.
++        """
++        with self._lock:
++            record = self._jobs.get(job_id)
++            if record is None or record.status in ("succeeded", "failed", "cancelled"):
++                return False
++            record.status = "cancelled"
++            record.finished_at = time.time()
++            record.result = None
++            record.error = error
++            record.stage = "cancelled"
++            record.updated_at = time.time()
++            return True
++
+     def update_progress(self, job_id: str, progress: float, stage: Optional[str] = None) -> None:
+         """Update progress and optional stage for an existing job."""
+         with self._lock:
+@@ -165,7 +190,7 @@ class _JobStore:
+         with self._lock:
+             to_remove = []
+             for job_id, record in self._jobs.items():
+-                if record.status in ("succeeded", "failed"):
++                if record.status in ("succeeded", "failed", "cancelled"):
+                     finish_time = record.finished_at or record.created_at
+                     if now - finish_time > max_age:
+                         to_remove.append(job_id)
+@@ -185,6 +210,7 @@ class _JobStore:
+                 "running": 0,
+                 "succeeded": 0,
+                 "failed": 0,
++                "cancelled": 0,
+             }
+             for record in self._jobs.values():
+                 if record.status in stats:
+diff --git a/acestep/api/jobs/worker_loops.py b/acestep/api/jobs/worker_loops.py
+index 3cbad01..56570f3 100644
+--- a/acestep/api/jobs/worker_loops.py
++++ b/acestep/api/jobs/worker_loops.py
+@@ -38,7 +38,7 @@ async def process_queue_item(
+         if rec and rec.progress_queue:
+             if rec.status == "succeeded" and rec.result:
+                 await rec.progress_queue.put({"type": "result", "result": rec.result})
+-            elif rec.status == "failed":
++            elif rec.status in ("failed", "cancelled"):
+                 await rec.progress_queue.put({"type": "error", "content": rec.error or "Generation failed"})
+             await rec.progress_queue.put({"type": "done"})
+         if rec and rec.done_event:
+diff --git a/acestep/api/route_setup.py b/acestep/api/route_setup.py
+index 74fa874..47eb9cf 100644
+--- a/acestep/api/route_setup.py
++++ b/acestep/api/route_setup.py
+@@ -10,6 +10,10 @@ from fastapi.middleware.cors import CORSMiddleware
+ from starlette.datastructures import UploadFile as StarletteUploadFile
+ 
+ from acestep.api.http.audio_route import register_audio_route
++from acestep.api.http.cancel_task_route import (
++    register_cancel_all_tasks_route,
++    register_cancel_task_route,
++)
+ from acestep.api.http.lora_routes import register_lora_routes
+ from acestep.api.http.model_service_routes import register_model_service_routes
+ from acestep.api.http.query_result_route import register_query_result_route
+@@ -157,3 +161,17 @@ def configure_api_routes(
+         task_timeout_seconds=task_timeout_seconds,
+         log_buffer=log_buffer,
+     )
++
++    register_cancel_task_route(
++        app=app,
++        verify_token_from_request=verify_token_from_request,
++        wrap_response=wrap_response,
++        store=store,
++    )
++
++    register_cancel_all_tasks_route(
++        app=app,
++        verify_token_from_request=verify_token_from_request,
++        wrap_response=wrap_response,
++        store=store,
++    )
+diff --git a/acestep/api/server_utils.py b/acestep/api/server_utils.py
+index b7df2ba..e03a496 100644
+--- a/acestep/api/server_utils.py
++++ b/acestep/api/server_utils.py
+@@ -7,7 +7,7 @@ import re
+ from typing import Optional
+ 
+ 
+-STATUS_MAP = {"queued": 0, "running": 0, "succeeded": 1, "failed": 2}
++STATUS_MAP = {"queued": 0, "running": 0, "succeeded": 1, "failed": 2, "cancelled": 2}
+ 
+ 
+ def parse_description_hints(description: str) -> tuple[Optional[str], bool]:
+diff --git a/acestep/api/train_api_lokr_start_route.py b/acestep/api/train_api_lokr_start_route.py
+index fe39a6d..7ff81ec 100644
+--- a/acestep/api/train_api_lokr_start_route.py
++++ b/acestep/api/train_api_lokr_start_route.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import gc
+ import os
+ import re
+ import threading
+@@ -9,6 +10,7 @@ import time
+ from typing import Any, Callable, Dict, Optional
+ from uuid import uuid4
+ 
++import torch
+ from fastapi import Depends, FastAPI, HTTPException
+ from loguru import logger
+ 
+@@ -160,6 +162,14 @@ def register_lokr_training_start_route(
+                 cm = training_state.pop("_component_manager", None)
+                 if cm is not None:
+                     cm.restore()
++                # See the LoRA start route for why this is needed: PyTorch's
++                # caching allocator doesn't release freed CUDA blocks back to
++                # the driver on its own once training's optimizer/gradient
++                # state goes out of scope.
++                training_state.pop("trainer", None)
++                gc.collect()
++                if torch.cuda.is_available():
++                    torch.cuda.empty_cache()
+ 
+         threading.Thread(target=_runner, daemon=True).start()
+         return wrap_response(
+diff --git a/acestep/api/train_api_lora_start_route.py b/acestep/api/train_api_lora_start_route.py
+index 0c84fa9..da17bae 100644
+--- a/acestep/api/train_api_lora_start_route.py
++++ b/acestep/api/train_api_lora_start_route.py
+@@ -2,6 +2,7 @@
+ 
+ from __future__ import annotations
+ 
++import gc
+ import os
+ import re
+ import threading
+@@ -9,6 +10,7 @@ import time
+ from typing import Any, Callable, Dict, Optional
+ from uuid import uuid4
+ 
++import torch
+ from fastapi import Depends, FastAPI, HTTPException
+ from loguru import logger
+ 
+@@ -140,6 +142,17 @@ def register_lora_training_start_route(
+                 cm = training_state.pop("_component_manager", None)
+                 if cm is not None:
+                     cm.restore()
++                # Training drops its optimizer/gradient/Lightning-module
++                # references here, but PyTorch's caching allocator doesn't
++                # hand freed CUDA blocks back to the driver on its own --
++                # nvidia-smi keeps showing several GB "used" long after the
++                # run ends unless this runs. gc.collect() first so any
++                # reference cycles (e.g. the Lightning trainer) actually get
++                # torn down before emptying the cache.
++                training_state.pop("trainer", None)
++                gc.collect()
++                if torch.cuda.is_available():
++                    torch.cuda.empty_cache()
+ 
+         threading.Thread(target=_runner, daemon=True).start()
+         return wrap_response(
+diff --git a/acestep/api_server.py b/acestep/api_server.py
+index 5f62206..349b3bb 100644
+--- a/acestep/api_server.py
++++ b/acestep/api_server.py
+@@ -2,6 +2,7 @@
+ 
+ Endpoints:
+ - POST /release_task          Create music generation task
++- POST /cancel_task           Cancel a queued or in-flight generation task
+ - POST /query_result          Batch query task results
+ - POST /create_random_sample  Generate random music parameters via LLM
+ - POST /format_input          Format and enhance lyrics/caption via LLM
+diff --git a/acestep/core/generation/handler/generate_music_execute.py b/acestep/core/generation/handler/generate_music_execute.py
+index 574a94c..3506b00 100644
+--- a/acestep/core/generation/handler/generate_music_execute.py
++++ b/acestep/core/generation/handler/generate_music_execute.py
+@@ -6,6 +6,8 @@ from typing import Any, Dict, List, Optional, Sequence
+ 
+ from loguru import logger
+ 
++from acestep.generation_cancellation import check_cancelled
++
+ # Maximum wall-clock seconds to wait for service_generate before declaring a hang.
+ # Generous default: most generations finish in 30-120s, but large batches on slow
+ # GPUs can take several minutes.  Override via ACESTEP_GENERATION_TIMEOUT env var.
+@@ -60,6 +62,7 @@ class GenerateMusicExecuteMixin:
+         diffusion loop becomes a recoverable ``TimeoutError`` instead of a
+         permanent UI freeze.
+         """
++        check_cancelled()
+         infer_steps_for_progress = len(timesteps) if timesteps else inference_steps
+         progress_desc = f"Generating music (batch size: {actual_batch_size})..."
+         progress(0.52, desc=progress_desc)
+@@ -159,6 +162,12 @@ class GenerateMusicExecuteMixin:
+             if "exc" in _error:
+                 raise _error["exc"]
+ 
++            # Diffusion itself isn't interruptible mid-pass (it's a short,
++            # fixed number of steps run on a plain child thread), but a
++            # cancellation requested while it was running should still stop
++            # the job here rather than let it proceed to save/return audio.
++            check_cancelled()
++
+         finally:
+             if stop_event is not None:
+                 stop_event.set()
+diff --git a/acestep/generation_cancellation.py b/acestep/generation_cancellation.py
+new file mode 100644
+index 0000000..12f126e
+--- /dev/null
++++ b/acestep/generation_cancellation.py
+@@ -0,0 +1,91 @@
++"""Cooperative cancellation primitives for in-flight generation jobs.
++
++Generation runs synchronously on a worker thread (see
++``acestep.api.job_execution_runtime``). There is no safe way to kill that
++thread from the outside, so cancellation is cooperative: the thread running
++a job binds its ``threading.Event`` as "current" for that thread, and deep
++call sites (LM token-generation loops, the diffusion call site) poll
++``check_cancelled()`` and raise :class:`GenerationCancelledError` when the
++event is set. This keeps cancellation out of function signatures across the
++many layers between the API route and the actual sampling loops.
++"""
++
++from __future__ import annotations
++
++import threading
++from typing import Dict, Optional
++
++
++class GenerationCancelledError(Exception):
++    """Raised from within a generation call stack once cancellation fires."""
++
++
++_lock = threading.Lock()
++_events: Dict[str, threading.Event] = {}
++_current = threading.local()
++
++
++def register(job_id: str) -> threading.Event:
++    """Create (or reset) the cancellation event for a newly created job."""
++
++    event = threading.Event()
++    with _lock:
++        _events[job_id] = event
++    return event
++
++
++def unregister(job_id: str) -> None:
++    """Drop the cancellation event once a job reaches a terminal state."""
++
++    with _lock:
++        _events.pop(job_id, None)
++
++
++def request_cancel(job_id: str) -> bool:
++    """Signal cancellation for ``job_id``. Returns False if it is unknown."""
++
++    with _lock:
++        event = _events.get(job_id)
++    if event is None:
++        return False
++    event.set()
++    return True
++
++
++def is_cancel_requested(job_id: str) -> bool:
++    """Non-raising check for whether cancellation was requested."""
++
++    with _lock:
++        event = _events.get(job_id)
++    return bool(event and event.is_set())
++
++
++class bind_current:
++    """Context manager binding ``job_id``'s event as current for this thread."""
++
++    def __init__(self, job_id: str) -> None:
++        with _lock:
++            self._event = _events.get(job_id)
++        self._previous: Optional[threading.Event] = None
++
++    def __enter__(self) -> "bind_current":
++        self._previous = getattr(_current, "event", None)
++        _current.event = self._event
++        return self
++
++    def __exit__(self, exc_type, exc, tb) -> bool:
++        _current.event = self._previous
++        return False
++
++
++def check_cancelled() -> None:
++    """Raise :class:`GenerationCancelledError` if the current job was cancelled.
++
++    Safe to call from anywhere: outside of a ``bind_current`` block (e.g. on
++    the asyncio event loop thread, or in tests) there is no current event and
++    this is a no-op.
++    """
++
++    event = getattr(_current, "event", None)
++    if event is not None and event.is_set():
++        raise GenerationCancelledError("Generation cancelled by user")
+diff --git a/acestep/llm_inference.py b/acestep/llm_inference.py
+index 3690af5..a7a49df 100644
+--- a/acestep/llm_inference.py
++++ b/acestep/llm_inference.py
+@@ -18,6 +18,7 @@ from loguru import logger
+ from tqdm import tqdm
+ from transformers import AutoTokenizer, AutoModelForCausalLM
+ from transformers.generation.streamers import BaseStreamer
++from transformers.generation.stopping_criteria import StoppingCriteria, StoppingCriteriaList
+ from transformers.generation.logits_process import (
+     LogitsProcessorList,
+     RepetitionPenaltyLogitsProcessor,
+@@ -26,6 +27,7 @@ from acestep.llm_backend_compat import get_vllm_preflight_warning
+ from acestep.constrained_logits_processor import MetadataConstrainedLogitsProcessor
+ from acestep.constants import DEFAULT_LM_INSTRUCTION, DEFAULT_LM_UNDERSTAND_INSTRUCTION, DEFAULT_LM_INSPIRED_INSTRUCTION, DEFAULT_LM_REWRITE_INSTRUCTION, DURATION_MIN, DURATION_MAX
+ from acestep.gpu_config import get_lm_gpu_memory_ratio, get_gpu_memory_gb, get_lm_model_size, get_global_gpu_config
++from acestep.generation_cancellation import check_cancelled
+ 
+ # Minimum free VRAM (GB) required to attempt vLLM initialization.
+ # vLLM's KV cache allocator adapts to available memory, so we only need a
+@@ -45,6 +47,24 @@ def _warn_if_prerelease_python():
+         )
+ 
+ 
++class _CancellationStoppingCriteria(StoppingCriteria):
++    """Stops ``model.generate()`` early once the current job was cancelled.
++
++    HF's ``generate()`` has no hook to raise mid-loop, only to stop; the
++    caller re-checks ``check_cancelled()`` right after ``generate()``
++    returns to turn an early stop into a raised
++    ``GenerationCancelledError`` instead of silently returning truncated
++    output as if it were a normal result.
++    """
++
++    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor, **kwargs) -> bool:
++        try:
++            check_cancelled()
++        except Exception:
++            return True
++        return False
++
++
+ class LLMHandler:
+     """5Hz LM Handler for audio code generation"""
+ 
+@@ -1110,9 +1130,11 @@ class LLMHandler:
+                         top_k=top_k if top_k is not None and top_k > 0 else None,
+                         top_p=top_p if top_p is not None and 0.0 < top_p < 1.0 else None,
+                         logits_processor=logits_processor if len(logits_processor) > 0 else None,
++                        stopping_criteria=StoppingCriteriaList([_CancellationStoppingCriteria()]),
+                         pad_token_id=self.llm_tokenizer.pad_token_id or self.llm_tokenizer.eos_token_id,
+                         streamer=None,
+                     )
++                check_cancelled()
+ 
+         # Decode the generated tokens
+         # outputs is a tensor with shape [batch_size, seq_len], extract first sequence
+@@ -2563,6 +2585,8 @@ class LLMHandler:
+ 
+         with torch.inference_mode():
+             for step in tqdm(range(max_new_tokens), desc="LLM Constrained Decoding", unit="token", disable=self.disable_tqdm):
++                check_cancelled()
++
+                 # Forward pass
+                 outputs = self._forward_pass(model, generated_ids, model_kwargs, past_key_values, use_cache)
+ 
+@@ -2677,6 +2701,8 @@ class LLMHandler:
+ 
+         with torch.inference_mode():
+             for step in tqdm(range(max_new_tokens), desc="LLM CFG Generation", unit="token", disable=self.disable_tqdm):
++                check_cancelled()
++
+                 # Forward pass for the entire batch (conditional + unconditional)
+                 outputs = self._forward_pass(model, generated_ids, model_kwargs, past_key_values, use_cache)
+ 
+diff --git a/start_api_server.bat b/start_api_server.bat
+index 68c39e1..dcb7dd1 100644
+--- a/start_api_server.bat
++++ b/start_api_server.bat
+@@ -3,6 +3,13 @@ setlocal enabledelayedexpansion
+ REM ACE-Step REST API Server Launcher
+ REM This script launches the REST API server for ACE-Step
+ 
++REM Force UTF-8 stdio. Without this, nano-vllm's KV-cache log line (which
++REM contains a literal "x" multiplication sign) crashes with
++REM UnicodeEncodeError on non-English Windows consoles (e.g. cp1251 for
++REM Russian locale) the moment vLLM tries to log it, silently falling back
++REM to the much slower plain-PyTorch LM backend.
++set PYTHONUTF8=1
++
+ REM ==================== Configuration ====================
+ REM Uncomment and modify the parameters below as needed
+ 
+@@ -31,7 +38,7 @@ REM set ACESTEP_INIT_LLM=false
+ 
+ REM LM model path (optional, only used when LLM is enabled)
+ REM Available models: acestep-5Hz-lm-0.6B, acestep-5Hz-lm-1.7B, acestep-5Hz-lm-4B
+-REM set LM_MODEL_PATH=--lm-model-path acestep-5Hz-lm-0.6B
++set LM_MODEL_PATH=--lm-model-path acestep-5Hz-lm-1.7B
+ 
+ REM Update check on startup (set to false to disable)
+ set CHECK_UPDATE=true
+diff --git a/stop_acestep.bat b/stop_acestep.bat
+new file mode 100644
+index 0000000..0071d9e
+--- /dev/null
++++ b/stop_acestep.bat
+@@ -0,0 +1,35 @@
++@echo off
++setlocal enabledelayedexpansion
++REM ACE-Step Server Stopper
++REM Stops any ACE-Step server (Gradio UI / REST API) listening on the
++REM ports used by start_api_server.bat, start_gradio_ui.bat or run_acestep_1.5.bat
++
++REM ==================== Configuration ====================
++set PORTS=7860 8001
++
++REM ==================== Stop ====================
++set FOUND=0
++
++for %%P in (%PORTS%) do (
++    for /f "tokens=5" %%A in ('netstat -ano ^| findstr /R /C:":%%P .*LISTENING"') do (
++        set "PID=%%A"
++        if not "!PID!"=="0" (
++            echo Stopping ACE-Step process on port %%P ^(PID !PID!^)...
++            taskkill /PID !PID! /T /F >nul 2>&1
++            if !ERRORLEVEL! EQU 0 (
++                echo   Done.
++                set FOUND=1
++            ) else (
++                echo   Failed to stop PID !PID!.
++            )
++        )
++    )
++)
++
++if "!FOUND!"=="0" (
++    echo No ACE-Step server found listening on ports: %PORTS%
++)
++
++echo.
++pause
++endlocal

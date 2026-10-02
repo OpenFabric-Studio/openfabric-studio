@@ -1,0 +1,28 @@
+OpenFabric Studio
+=================
+
+This is an independent MIT-licensed project maintained under the OpenFabric-Studio
+organization. It is not the upstream Remiqora project.
+
+Provenance
+----------
+OpenFabric Studio is derived from:
+
+  - mchosc/remiqora — https://github.com/mchosc/remiqora
+    (maintained fork that this tree was copied from)
+
+  - inikolax/remiqora — https://github.com/inikolax/remiqora
+    Original Remiqora by Nikolay Cherkashin (inikolax)
+    MIT License — Copyright (c) 2026 Nikolay Cherkashin (inikolax)
+
+The MIT copyright notice and permission text from the original Remiqora LICENSE
+are preserved in the LICENSE file of this repository. New OpenFabric Studio work
+is also offered under the MIT License.
+
+Third-party engines and models
+------------------------------
+Bundled or downloaded engines, patches under external/patches/, Seed-VC
+compatibility excerpts (see backend/app/fixtures/COPYING.seed-vc), FFmpeg
+builds, and model weights (including YuE2 weights under CC BY-NC where
+applicable) have their own licenses. Review those artifacts before redistribution
+or commercial use.

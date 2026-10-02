@@ -1,0 +1,660 @@
+"""Atomic local video drafts, revisions and constrained reference artifacts."""
+
+from __future__ import annotations
+import asyncio, hashlib, logging, math, os, re, shutil, tempfile, threading, uuid
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from fastapi import UploadFile
+from pydantic import Field, ValidationError
+from . import db
+from .config import DATA_DIR
+from .video_contracts import (
+    VideoContract,
+    VideoProject,
+    VideoProjectShot,
+    VideoReference,
+    VideoProjectJob,
+    CreateVideoProjectRequest,
+    UpdateVideoProjectRequest,
+    VideoRevisionRequest,
+    VideoRenderRequest,
+    VideoExportSettings,
+)
+from .video_media import tool, probe_media
+from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
+from .video_process import WorkerIdentity
+
+logger = logging.getLogger(__name__)
+_lock = threading.RLock()
+_deleting: set[str] = set()
+_reference_tasks: dict[str, dict[asyncio.Task[VideoProject], _ReferenceUploadState]] = {}
+_reference_cancelling: dict[str, int] = {}
+_ID = re.compile(r"^[0-9a-f]{32}$")
+
+
+class VideoProjectError(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass
+class _ReferenceUploadState:
+    started: bool = False
+    cancel_requested: bool = False
+
+
+class SourceIdentity(VideoContract):
+    path: str
+    sha256: str
+    size: int
+    device: int
+    inode: int
+    mtime_ns: int
+    ctime_ns: int
+
+
+class PendingExport(VideoContract):
+    path: str
+    duration_sec: float
+    width: int
+    height: int
+    fingerprint: str
+    output_sha256: str = ""
+    project_revision: int = Field(default=0, ge=0)
+
+
+class StoredVideoProject(VideoContract):
+    project: VideoProject
+    source: SourceIdentity
+    reference_paths: dict[str, str] = Field(default_factory=dict)
+    worker: WorkerIdentity | None = None
+    published_file: str = ""
+    pending_export: PendingExport | None = None
+    render_request: VideoRenderRequest | None = None
+    requested_export_settings: VideoExportSettings | None = None
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def projects_root() -> Path:
+    return DATA_DIR / "video_projects"
+
+
+def project_dir(project_id: str) -> Path:
+    if not _ID.fullmatch(project_id):
+        raise VideoProjectError("not_found")
+    root = projects_root().resolve()
+    path = root / project_id
+    if not path.resolve().is_relative_to(root):
+        raise VideoProjectError("not_found")
+    return path
+
+
+def artifact(project_id: str, relative: str) -> Path:
+    name = Path(relative)
+    root = project_dir(project_id).resolve()
+    path = (root / name).resolve()
+    if name.is_absolute() or ".." in name.parts or not path.is_relative_to(root):
+        raise VideoProjectError("not_found")
+    return path
+
+
+def atomic_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix="." + path.name + ".",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def save(document: StoredVideoProject) -> None:
+    with _lock:
+        valid = StoredVideoProject.model_validate(document.model_dump())
+        atomic_text(
+            project_dir(valid.project.id) / "project.json", valid.model_dump_json()
+        )
+
+
+def ensure_open(project_id: str) -> None:
+    with _lock:
+        if project_id in _deleting:
+            raise VideoProjectError("busy")
+
+
+def begin_delete(project_id: str) -> None:
+    with _lock:
+        ensure_open(project_id)
+        load(project_id)
+        _deleting.add(project_id)
+
+
+def finish_delete(project_id: str) -> None:
+    with _lock:
+        _deleting.discard(project_id)
+
+
+def load(project_id: str) -> StoredVideoProject:
+    path = project_dir(project_id) / "project.json"
+    try:
+        document = StoredVideoProject.model_validate_json(path.read_bytes())
+    except (OSError, ValidationError) as exc:
+        raise VideoProjectError("not_found") from exc
+    if document.project.id != project_id:
+        raise VideoProjectError("not_found")
+    return document
+
+
+def source_path(track_id: int) -> Path:
+    track = db.get_track(track_id)
+    if track is None:
+        raise VideoProjectError("no_track")
+    path = Path(track["audio_path"]).resolve()
+    if not path.is_file():
+        raise VideoProjectError("track_missing")
+    return path
+
+
+def file_hash(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def identity(path: Path) -> SourceIdentity:
+    before = path.stat()
+    digest = file_hash(path)
+    after = path.stat()
+    if (before.st_size, before.st_mtime_ns, before.st_ctime_ns, before.st_ino) != (
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+        after.st_ino,
+    ):
+        raise VideoProjectError("source_changed")
+    return SourceIdentity(
+        path=str(path),
+        sha256=digest,
+        size=after.st_size,
+        device=after.st_dev,
+        inode=after.st_ino,
+        mtime_ns=after.st_mtime_ns,
+        ctime_ns=after.st_ctime_ns,
+    )
+
+
+def source_changed(document: StoredVideoProject) -> bool:
+    try:
+        path = source_path(document.project.track_id)
+        stat = path.stat()
+    except (OSError, VideoProjectError):
+        return True
+    source = document.source
+    return str(path) != source.path or (
+        stat.st_size,
+        stat.st_dev,
+        stat.st_ino,
+        stat.st_mtime_ns,
+        stat.st_ctime_ns,
+    ) != (source.size, source.device, source.inode, source.mtime_ns, source.ctime_ns)
+
+
+def view(document: StoredVideoProject) -> VideoProject:
+    project = document.project.model_copy(deep=True)
+    project.source_changed = source_changed(document)
+    return project
+
+
+def get(project_id: str) -> VideoProject:
+    with _lock:
+        return view(load(project_id))
+
+
+def list_projects() -> list[VideoProject]:
+    root = projects_root()
+    if not root.is_dir():
+        return []
+    found: list[VideoProject] = []
+    for path in root.iterdir():
+        if not _ID.fullmatch(path.name):
+            continue
+        try:
+            found.append(get(path.name))
+        except VideoProjectError:
+            logger.warning("Skipping invalid video project %s", path.name)
+    return sorted(found, key=lambda project: project.updated_at, reverse=True)
+
+
+async def create(body: CreateVideoProjectRequest) -> VideoProject:
+    from .video_jobs import _probe_duration, VideoJobError
+
+    path = source_path(body.track_id)
+    before = path.stat()
+    try:
+        duration = await _probe_duration(path)
+    except VideoJobError as exc:
+        raise VideoProjectError(exc.code) from exc
+    except FileNotFoundError as exc:
+        raise VideoProjectError("ffmpeg_missing") from exc
+    except (OSError, TimeoutError) as exc:
+        raise VideoProjectError("processing_failed") from exc
+    if not math.isfinite(duration) or duration < 2 or duration > 21600:
+        raise VideoProjectError("bad_length")
+    from .video_io import hash_file
+
+    digest = await hash_file(path)
+    after = path.stat()
+    if (
+        before.st_size,
+        before.st_dev,
+        before.st_ino,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    ) != (
+        after.st_size,
+        after.st_dev,
+        after.st_ino,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    ):
+        raise VideoProjectError("source_changed")
+    source = SourceIdentity(
+        path=str(path),
+        sha256=digest,
+        size=after.st_size,
+        device=after.st_dev,
+        inode=after.st_ino,
+        mtime_ns=after.st_mtime_ns,
+        ctime_ns=after.st_ctime_ns,
+    )
+    track = db.get_track(body.track_id)
+    if track is None:
+        raise VideoProjectError("no_track")
+    project = VideoProject(
+        id=uuid.uuid4().hex,
+        revision=1,
+        track_id=body.track_id,
+        track_title=str(track["title"] or f"Track {body.track_id}"),
+        name=body.name,
+        mode=body.mode,
+        direction=body.direction,
+        seed=body.seed,
+        duration_sec=duration,
+        source_fingerprint=source.sha256,
+        created_at=now(),
+        updated_at=now(),
+    )
+    document = StoredVideoProject(project=project, source=source)
+    try:
+        save(document)
+    except OSError as exc:
+        raise VideoProjectError("storage_failed") from exc
+    return view(document)
+
+
+def mutate(
+    project_id: str,
+    change: Callable[[StoredVideoProject], None],
+    *,
+    revision: int | None = None,
+    busy_ok: bool = False,
+    bump: bool = True,
+) -> VideoProject:
+    with _lock:
+        if not busy_ok:
+            ensure_open(project_id)
+        document = load(project_id)
+        if revision is not None and revision != document.project.revision:
+            raise VideoProjectError("revision_conflict")
+        if (
+            not busy_ok
+            and document.project.job is not None
+            and document.project.job.status in {"queued", "running"}
+        ):
+            raise VideoProjectError("busy")
+        change(document)
+        if bump:
+            document.project.revision += 1
+        document.project.updated_at = now()
+        try:
+            save(document)
+        except OSError as exc:
+            raise VideoProjectError("storage_failed") from exc
+        return view(document)
+
+
+def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
+    def change(document: StoredVideoProject) -> None:
+        project = document.project
+        before = project.model_copy(deep=True)
+        if body.name is not None:
+            project.name = body.name
+        if body.mode is not None:
+            project.mode = body.mode
+        if body.direction is not None:
+            project.direction = body.direction
+        if body.seed is not None:
+            project.seed = body.seed
+        if body.settings is not None:
+            project.settings = body.settings
+        if body.export_settings is not None:
+            project.export_settings = body.export_settings
+        if body.overlays is not None:
+            project.overlays = body.overlays
+        if body.markers is not None:
+            project.markers = body.markers
+        if body.shots is not None:
+            old = {shot.id: shot for shot in project.shots}
+            shots: list[VideoProjectShot] = []
+            for draft in sorted(body.shots, key=lambda shot: shot.start_sec):
+                if draft.start_sec + draft.seconds > project.duration_sec + 1 / 24:
+                    raise VideoProjectError("past_end")
+                if (
+                    draft.reference_id is not None
+                    and draft.reference_id not in document.reference_paths
+                ):
+                    raise VideoProjectError("reference_not_found")
+                shot = VideoProjectShot.model_validate(draft.model_dump())
+                previous = old.get(shot.id)
+                if previous is not None:
+                    shot.variants = previous.variants
+                    if draft.model_dump(exclude={"locked"}) == previous.model_dump(
+                        exclude={"variants", "approved_variant_id", "locked"}
+                    ):
+                        shot.approved_variant_id = previous.approved_variant_id
+                shots.append(shot)
+            project.shots = shots
+        if any(
+            overlay.end_sec > project.duration_sec + 1 / 24
+            for overlay in project.overlays
+        ):
+            raise VideoProjectError("past_end")
+        if any(marker.time_sec > project.duration_sec for marker in project.markers):
+            raise VideoProjectError("past_end")
+        global_changed = (
+            project.settings,
+            project.mode,
+            project.direction,
+        ) != (before.settings, before.mode, before.direction)
+        if global_changed:
+            for shot in project.shots:
+                shot.approved_variant_id = None
+        old_shots = [
+            shot.model_dump(exclude={"variants", "approved_variant_id", "locked"})
+            for shot in before.shots
+        ]
+        new_shots = [
+            shot.model_dump(exclude={"variants", "approved_variant_id", "locked"})
+            for shot in project.shots
+        ]
+        if (
+            global_changed
+            or old_shots != new_shots
+            or project.overlays != before.overlays
+            or project.export_settings != before.export_settings
+        ):
+            project.file_url = ""
+            project.poster_url = ""
+
+    return mutate(project_id, change, revision=body.revision)
+
+
+def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    with _lock:
+        ensure_open(project_id)
+        document = load(project_id)
+        if document.project.revision != body.revision:
+            raise VideoProjectError("revision_conflict")
+        copied = document.model_copy(deep=True)
+        copied.project.id = uuid.uuid4().hex
+        copied.project.revision = 1
+        copied.project.name = copied.project.name[:110] + " (copy)"
+        copied.project.created_at = now()
+        copied.project.updated_at = now()
+        copied.project.job = None
+        copied.project.file_url = ""
+        copied.project.poster_url = ""
+        copied.worker = None
+        copied.published_file = ""
+        copied.pending_export = None
+        for shot in copied.project.shots:
+            shot.variants = []
+            shot.approved_variant_id = None
+        target = project_dir(copied.project.id)
+        try:
+            for relative in copied.reference_paths.values():
+                original = artifact(project_id, relative)
+                dest = artifact(copied.project.id, relative)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(original, dest)
+            for reference in copied.project.references:
+                reference.url = f"/api/videos/projects/{copied.project.id}/references/{reference.id}"
+            save(copied)
+        except OSError as exc:
+            shutil.rmtree(target, ignore_errors=True)
+            raise VideoProjectError("storage_failed") from exc
+        return view(copied)
+
+
+async def upload_reference(
+    project_id: str, revision: int, upload: UploadFile
+) -> VideoProject:
+    task: asyncio.Task[VideoProject] | None = None
+    state = _ReferenceUploadState()
+    try:
+        # Admission and registration share the deletion gate's lock. The owned
+        # task includes process and file cleanup even if its HTTP caller leaves.
+        with _lock:
+            ensure_open(project_id)
+            load(project_id)
+            if project_id in _reference_cancelling:
+                raise VideoProjectError("busy")
+            if any(_reference_cleanup_failed(item) for item in _reference_tasks.get(project_id, ())):
+                raise VideoProjectError("cleanup_failed")
+            task = asyncio.create_task(_upload_reference(project_id, revision, upload, state))
+            _reference_tasks.setdefault(project_id, {})[task] = state
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if task is not None and not task.done():
+            _cancel_reference(task, state)
+            await await_cleanup(asyncio.gather(task, return_exceptions=True))
+        raise
+    finally:
+        if task is None:
+            await await_cleanup(upload.close())
+        elif task.done() and not _reference_cleanup_failed(task):
+            with _lock:
+                owned = _reference_tasks.get(project_id)
+                if owned is not None:
+                    owned.pop(task, None)
+                    if not owned:
+                        _reference_tasks.pop(project_id, None)
+
+
+def _reference_cleanup_failed(task: asyncio.Task[VideoProject]) -> bool:
+    if not task.done() or task.cancelled():
+        return False
+    failure = task.exception()
+    return isinstance(failure, VideoProjectError) and failure.code == "cleanup_failed"
+
+
+def _cancel_reference(task: asyncio.Task[VideoProject], state: _ReferenceUploadState) -> None:
+    if task.done():
+        return
+    # Cancelling an unstarted Task prevents its finally from ever running.
+    # Let it enter the cleanup scope and observe the request before doing work.
+    if not state.started:
+        state.cancel_requested = True
+    elif not task.cancelling():
+        task.cancel()
+
+
+def reference_project_ids() -> set[str]:
+    with _lock:
+        return set(_reference_tasks)
+
+
+def request_reference_shutdown() -> None:
+    with _lock:
+        for owned in _reference_tasks.values():
+            for task, state in owned.items():
+                _cancel_reference(task, state)
+
+
+def request_reference_cancel(project_id: str) -> tuple[asyncio.Task[VideoProject], ...]:
+    with _lock:
+        _reference_cancelling[project_id] = _reference_cancelling.get(project_id, 0) + 1
+        owned = _reference_tasks.get(project_id, {})
+        pending = tuple(owned)
+        for task, state in owned.items():
+            _cancel_reference(task, state)
+        return pending
+
+
+async def drain_reference_uploads(
+    project_id: str, pending: tuple[asyncio.Task[VideoProject], ...]
+) -> None:
+    try:
+        results = await await_cleanup(asyncio.gather(*pending, return_exceptions=True))
+        if any(isinstance(result, VideoProjectError) and result.code == "cleanup_failed" for result in results):
+            raise VideoProjectError("cleanup_failed")
+    finally:
+        with _lock:
+            remaining = _reference_cancelling[project_id] - 1
+            if remaining:
+                _reference_cancelling[project_id] = remaining
+            else:
+                _reference_cancelling.pop(project_id)
+
+
+async def _cleanup_reference(
+    proc: asyncio.subprocess.Process | None,
+    temporary: Path | None,
+    output: Path | None,
+    published: bool,
+    upload: UploadFile,
+) -> None:
+    try:
+        try:
+            await kill_process_tree(proc)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+            if not published and output is not None:
+                output.unlink(missing_ok=True)
+        finally:
+            await upload.close()
+    except Exception as exc:
+        logger.exception("Reference upload cleanup failed")
+        raise VideoProjectError("cleanup_failed") from exc
+
+
+async def _upload_reference(
+    project_id: str, revision: int, upload: UploadFile, state: _ReferenceUploadState
+) -> VideoProject:
+    name = upload.filename or "reference"
+    reference_id = uuid.uuid4().hex
+    temporary: Path | None = None
+    output: Path | None = None
+    count = 0
+    published = False
+    proc: asyncio.subprocess.Process | None = None
+    try:
+        state.started = True
+        if state.cancel_requested:
+            raise asyncio.CancelledError
+        if len(name) > 160 or "/" in name or "\\" in name or name in {".", ".."}:
+            raise VideoProjectError("invalid_reference")
+        root = project_dir(project_id)
+        temporary = root / f".{reference_id}.upload"
+        output = artifact(project_id, f"references/{reference_id}.png")
+        with temporary.open("wb") as handle:
+            while chunk := await upload.read(65536):
+                count += len(chunk)
+                if count > 20 * 1024 * 1024:
+                    raise VideoProjectError("reference_too_large")
+                handle.write(chunk)
+        with temporary.open("rb") as reader:
+            header = reader.read(16)
+        if not (
+            header.startswith(b"\x89PNG\r\n\x1a\n")
+            or header.startswith(b"\xff\xd8\xff")
+            or header.startswith(b"RIFF")
+            and header[8:12] == b"WEBP"
+        ):
+            raise VideoProjectError("invalid_reference")
+        info = await probe_media(temporary)
+        if (
+            not 1 <= info.width <= 8192
+            or not 1 <= info.height <= 8192
+            or info.width * info.height > 16777216
+        ):
+            raise VideoProjectError("reference_too_large")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        proc = await spawn_process(
+            tool("ffmpeg"),
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            str(temporary),
+            "-frames:v",
+            "1",
+            str(output),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await communicate_process(proc, 30)
+        if proc.returncode != 0:
+            raise VideoProjectError("invalid_reference")
+
+        def change(document: StoredVideoProject) -> None:
+            if len(document.project.references) >= 6:
+                raise VideoProjectError("too_many_references")
+            document.reference_paths[reference_id] = str(output.relative_to(root))
+            document.project.references.append(
+                VideoReference(
+                    id=reference_id,
+                    name=name,
+                    bytes=count,
+                    width=info.width,
+                    height=info.height,
+                    url=f"/api/videos/projects/{project_id}/references/{reference_id}",
+                )
+            )
+
+        result = mutate(project_id, change, revision=revision)
+        published = True
+        return result
+    finally:
+        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload))
+
+
+def reference_file(project_id: str, reference_id: str) -> Path:
+    document = load(project_id)
+    relative = document.reference_paths.get(reference_id)
+    if relative is None:
+        raise VideoProjectError("not_found")
+    path = artifact(project_id, relative)
+    if not path.is_file():
+        raise VideoProjectError("not_found")
+    return path

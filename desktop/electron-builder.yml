@@ -1,0 +1,58 @@
+appId: io.github.openfabric.studio
+productName: OpenFabric Studio
+copyright: Copyright © 2026 Nikolay Cherkashin and OpenFabric Studio contributors
+directories:
+  output: dist
+  buildResources: build
+publish: null
+
+files:
+  - src/**
+  - renderer/**
+  - manifest.json
+  - package.json
+  - "!**/*.map"
+
+# The backend runs from real files (Python cannot import from an asar archive). Its own sibling layout is kept:
+# resources/backend and resources/frontend/dist.
+extraResources:
+  - from: resources/backend
+    to: backend
+  - from: resources/frontend
+    to: frontend
+  - from: resources/patches
+    to: patches
+  - from: resources/external
+    to: external
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+nsis:
+  oneClick: true            # per-user install, no administrator prompt
+  perMachine: false
+  deleteAppDataOnUninstall: false   # models and projects are the user's data, not ours to delete
+  artifactName: OpenFabric-Studio-Setup-${version}.${ext}
+  shortcutName: OpenFabric Studio
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64]
+    - target: zip
+      arch: [arm64]
+  category: public.app-category.music
+  icon: build/icon.png
+  # Experimental unsigned builds; clean-install and downloaded-build behavior
+  # must be verified for each release candidate before publishing.
+  identity: null
+  artifactName: OpenFabric-Studio-${version}-${arch}.${ext}
+
+# Linux packaging is experimental; first-run setup currently reports unsupported.
+linux:
+  target: [AppImage]
+  category: AudioVideo
+  icon: build/icon.png
+  artifactName: OpenFabric-Studio-${version}-${arch}.${ext}

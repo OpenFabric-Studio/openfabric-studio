@@ -1,0 +1,48 @@
+--- a/src/models/yue2/ar_runtime.cpp
++++ b/src/models/yue2/ar_runtime.cpp
+@@ -582,18 +582,31 @@
+             engine::debug::timing_log_scalar("yue2.ar.prefix_state.graph.build_ms", engine::debug::elapsed_ms(build_start));
+         }
+ 
++        void release_compute_workspace() {
++            ggml_backend_synchronize(owner->execution.backend());
++            if (graph != nullptr) {
++                core::release_backend_graph_resources(owner->execution.backend(), graph);
++            }
++            if (gallocr != nullptr) ggml_gallocr_free(gallocr);
++            gallocr = nullptr;
++            graph = nullptr;
++            input = positions = attention_mask = nullptr;
++            keys.clear();
++            values.clear();
++            ctx.reset();
++            std::vector<int32_t>().swap(position_values);
++            std::vector<ggml_fp16_t>().swap(mask_values);
++        }
++
+         ~PrefixStateGraph() {
+-            core::release_backend_graph_resources(owner->execution.backend(), graph);
+-            if (gallocr != nullptr) {
+-                ggml_gallocr_free(gallocr);
+-            }
++            release_compute_workspace();
+             if (state_buffer != nullptr) {
+                 ggml_backend_buffer_free(state_buffer);
+             }
+         }
+ 
+         bool matches(int64_t s) const noexcept {
+-            return steps == s;
++            return steps == s && graph != nullptr;
+         }
+ 
+         runtime::TransformerKVState run(const std::vector<int32_t> & tokens) {
+@@ -622,6 +635,8 @@
+             out.current_end = steps;
+             out.keys = key_values;
+             out.values = value_values;
++
++            release_compute_workspace();
+             return out;
+         }
+ 

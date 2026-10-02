@@ -1,0 +1,4 @@
+# Optional URL imports. Keep exact audited versions; runtime fails closed on other versions.
+# No models, global environment changes, or automatic remote solver components.
+yt-dlp==2026.8.19
+yt-dlp-ejs==0.8.0
