@@ -33,3 +33,5 @@ worktrees/
 
 # Claude Code local settings (session permissions/config, not project-relevant)
 .claude/
+
+.superpowers/
