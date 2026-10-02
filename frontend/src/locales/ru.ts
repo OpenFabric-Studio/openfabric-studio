@@ -65,6 +65,9 @@ voiceProfiles: {
     trialRun: 'Сгенерировать пробную речь',
     trialMock: 'Mock-проба записала WAV-заглушку.',
     trialReady: 'Движок найден; живой синтез ещё не подключён.',
+    trialApiDown: 'GPT-SoVITS API not running.',
+    trialCompleted: 'Speech trial completed.',
+    trialFailed: 'Speech trial failed.',
     trialMissing: 'Движок не установлен — см. подсказки ниже.',
     trialOutput: 'Файл',
     err: {

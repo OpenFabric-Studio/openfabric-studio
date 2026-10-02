@@ -122,6 +122,9 @@ async function onTrial() {
     trialResult.value = result
     if (result.status === 'mock_completed') notice.value = t('voiceProfiles.trialMock')
     else if (result.status === 'engine_ready') notice.value = t('voiceProfiles.trialReady')
+    else if (result.status === 'api_unavailable') notice.value = t('voiceProfiles.trialApiDown')
+    else if (result.status === 'completed') notice.value = t('voiceProfiles.trialCompleted')
+    else if (result.status === 'failed') notice.value = t('voiceProfiles.trialFailed')
     else if (result.status === 'engine_not_installed') notice.value = t('voiceProfiles.trialMissing')
     else notice.value = result.detail
   } catch (err) {

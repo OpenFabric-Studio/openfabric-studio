@@ -65,6 +65,9 @@ voiceProfiles: {
     trialRun: 'Generate speech trial',
     trialMock: 'Mock trial wrote a placeholder WAV.',
     trialReady: 'Engine detected; live synthesis is not wired yet.',
+    trialApiDown: 'Engine installed, but GPT-SoVITS API is not running — start api.py (see hints).',
+    trialCompleted: 'Speech trial synthesized successfully.',
+    trialFailed: 'Speech trial failed — see detail below.',
     trialMissing: 'Engine not installed — see install hints below.',
     trialOutput: 'Output',
     err: {

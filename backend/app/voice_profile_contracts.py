@@ -12,6 +12,7 @@ EngineHintMap = dict[str, JsonValue]
 SpeechCloneStatus = Literal[
     "engine_not_installed",
     "engine_ready",
+    "api_unavailable",
     "mock_completed",
     "completed",
     "failed",
@@ -43,6 +44,10 @@ class SpeechCloneTrialRequest(Contract):
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     text: str = Field(min_length=1, max_length=8000)
     engine: Literal["speech", "gpt-sovits"] = "gpt-sovits"
+    # Transcript of the reference clip for GPT-SoVITS; falls back to profile notes.
+    prompt_text: str | None = Field(default=None, max_length=2000)
+    prompt_language: str | None = Field(default=None, min_length=2, max_length=16)
+    text_language: str | None = Field(default=None, min_length=2, max_length=16)
 
 
 class SpeechCloneTrialResponse(Contract):
@@ -59,6 +64,8 @@ class SpeechCloneEngineStatus(Contract):
     installed: bool
     mock: bool
     root: str | None = None
+    api_base_url: str | None = None
+    api_reachable: bool = False
     install_hints: list[str] = Field(default_factory=list)
 
 

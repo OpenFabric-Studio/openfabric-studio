@@ -640,6 +640,8 @@ export type SpeechCloneEngineStatus = {
   "installed": boolean
   "mock": boolean
   "root"?: (string | null)
+  "api_base_url"?: (string | null)
+  "api_reachable"?: boolean
   "install_hints"?: Array<string>
 }
 
@@ -647,10 +649,13 @@ export type SpeechCloneTrialRequest = {
   "profile_id": string
   "text": string
   "engine"?: "speech" | "gpt-sovits"
+  "prompt_text"?: (string | null)
+  "prompt_language"?: (string | null)
+  "text_language"?: (string | null)
 }
 
 export type SpeechCloneTrialResponse = {
-  "status": "engine_not_installed" | "engine_ready" | "mock_completed" | "completed" | "failed"
+  "status": "engine_not_installed" | "engine_ready" | "api_unavailable" | "mock_completed" | "completed" | "failed"
   "detail": string
   "engine": "speech" | "gpt-sovits"
   "profile_id": string
@@ -6780,6 +6785,47 @@ const schemas = {
         ],
         "title": "Engine",
         "type": "string"
+      },
+      "prompt_text": {
+        "anyOf": [
+          {
+            "maxLength": 2000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Prompt Text"
+      },
+      "prompt_language": {
+        "anyOf": [
+          {
+            "maxLength": 16,
+            "minLength": 2,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Prompt Language"
+      },
+      "text_language": {
+        "anyOf": [
+          {
+            "maxLength": 16,
+            "minLength": 2,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Text Language"
       }
     },
     "required": [
@@ -6795,6 +6841,7 @@ const schemas = {
         "enum": [
           "engine_not_installed",
           "engine_ready",
+          "api_unavailable",
           "mock_completed",
           "completed",
           "failed"
@@ -6880,6 +6927,23 @@ const schemas = {
         ],
         "default": null,
         "title": "Root"
+      },
+      "api_base_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Api Base Url"
+      },
+      "api_reachable": {
+        "default": false,
+        "title": "Api Reachable",
+        "type": "boolean"
       },
       "install_hints": {
         "items": {

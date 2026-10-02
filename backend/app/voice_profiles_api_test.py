@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import patch
 
@@ -116,8 +117,10 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(body["installed"])
         self.assertFalse(body["mock"])
         self.assertIsNone(body["root"])
+        self.assertFalse(body["api_reachable"])
+        self.assertTrue(body["api_base_url"])
 
-    async def test_engine_ready_when_checkout_present(self) -> None:
+    async def test_api_unavailable_when_checkout_present_but_api_down(self) -> None:
         checkout = Path(self.temporary.name) / "gpt-sovits"
         (checkout / "GPT_SoVITS").mkdir(parents=True)
         self.engine_patch.stop()
@@ -125,10 +128,47 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         self.engine_patch.start()
         created = await self._create()
         profile_id = created.json()["id"]
-        trial = await self.client.post(
-            "/api/speech-clone/trials",
-            json={"profile_id": profile_id, "text": "Detected engine.", "engine": "gpt-sovits"},
-        )
+        with patch.object(speech_clone, "api_reachable", return_value=False):
+            trial = await self.client.post(
+                "/api/speech-clone/trials",
+                json={"profile_id": profile_id, "text": "Detected engine.", "engine": "gpt-sovits"},
+            )
         self.assertEqual(trial.status_code, 200, trial.text)
-        self.assertEqual(trial.json()["status"], "engine_ready")
+        payload = trial.json()
+        self.assertEqual(payload["status"], "api_unavailable")
         self.assertTrue(speech_clone.engine_installed())
+        self.assertIn("not reachable", payload["detail"])
+
+    async def test_completed_when_api_returns_wav(self) -> None:
+        checkout = Path(self.temporary.name) / "gpt-sovits"
+        (checkout / "GPT_SoVITS").mkdir(parents=True)
+        self.engine_patch.stop()
+        self.engine_patch = patch.object(speech_clone, "ENGINE_DIR", checkout)
+        self.engine_patch.start()
+        created = await self._create()
+        profile_id = created.json()["id"]
+        fake_payload = b"RIFF" + (b"\x00" * 4) + b"WAVE" + b"fmt " + (b"\x00" * 50)
+
+        def _fake_synth(**kwargs):
+            out = speech_clone.trials_root() / f"{uuid.uuid4().hex}.wav"
+            out.write_bytes(fake_payload)
+            return out
+
+        with patch.object(speech_clone, "api_reachable", return_value=True), patch.object(
+            speech_clone, "_synthesize_via_api", side_effect=_fake_synth
+        ):
+            trial = await self.client.post(
+                "/api/speech-clone/trials",
+                json={
+                    "profile_id": profile_id,
+                    "text": "Hello real path.",
+                    "engine": "gpt-sovits",
+                    "prompt_text": "demo",
+                    "text_language": "en",
+                },
+            )
+        self.assertEqual(trial.status_code, 200, trial.text)
+        payload = trial.json()
+        self.assertEqual(payload["status"], "completed")
+        self.assertTrue(payload["trial_id"])
+        self.assertTrue(Path(payload["output_path"]).is_file())

@@ -8,15 +8,17 @@
 
 ---
 
-## Current baseline (2026-10-02)
+## Current baseline (2026-10-02, Phase B wiring)
 
 | Piece | State |
 |-------|--------|
 | Speech voice profiles API + UI | Done (`/api/voice-profiles`, Voice page panel, consent + wav/flac) |
-| `POST /api/speech-clone/trials` | Scaffold → becoming worker interface (detect / mock / real) |
+| `POST /api/speech-clone/trials` | Detect + mock + real HTTP invoke via GPT-SoVITS `api.py` (`POST /` @ `:9880`) |
+| Engine statuses | `engine_not_installed` / `api_unavailable` / `completed` / `failed` / `mock_completed` |
 | Seed-VC | Singing only |
-| Audiobooks | Stub API in this pass; no concat export yet |
-| GPT-SoVITS weights | **Not** downloaded by OpenFabric |
+| Audiobooks | Stub API; no concat export yet |
+| GPT-SoVITS checkout | Optional `external/gpt-sovits` via `./setup_speech.sh` |
+| GPT-SoVITS weights | **Not** downloaded by OpenFabric — manual (see setup_speech.sh output) |
 
 ---
 
@@ -35,23 +37,31 @@
 
 ### Phase B — Speech trial → real WAV (needs manual model setup)
 
-1. User clones GPT-SoVITS beside the app (or sets env), runs upstream setup + downloads **their** pretrained weights.
-2. OpenFabric worker calls a stable local API (prefer GPT-SoVITS HTTP API once pinned) with:
-   - reference audio from consent-backed profile
-   - text (≤ ~8k chars per trial)
-3. Store trial WAV under `DATA_DIR/speech-clone-trials/`; return path / download URL.
-4. Minimal Voice-page UI: pick profile → paste text → Generate → play / show install hints.
+1. User runs `./setup_speech.sh` (clone + Python 3.11 venv) or sets `OPENFABRIC_GPT_SOVITS_DIR`, then downloads **their** pretrained weights (upstream README / HF).
+2. Start pinned local API from the checkout:
+   - Entrypoint: **`api.py`** (not api_v2)
+   - Bind: `python api.py -a 127.0.0.1 -p 9880 -d cpu`
+   - Override base URL with `OPENFABRIC_GPT_SOVITS_API_URL` (default `http://127.0.0.1:9880`)
+3. OpenFabric worker `POST`s JSON to `/` with:
+   - `refer_wav_path` = consent-backed profile reference audio
+   - `prompt_text` = trial `prompt_text` or profile `notes` (fallback `"Reference audio."`)
+   - `prompt_language` / `text_language` (default `en`)
+   - `text` (≤ ~8k chars per trial)
+4. Store trial WAV under `DATA_DIR/speech-clone-trials/`; return path. If checkout exists but API is down → `api_unavailable` (HTTP 200, no crash).
+5. Minimal Voice-page UI: pick profile → paste text → Generate → play / show install hints.
 
-**Manual setup (not automated here):**
+**Manual setup:**
 
 ```bash
-# Example only — user-owned checkout + weights
-git clone https://github.com/RVC-Boss/GPT-SoVITS.git external/gpt-sovits
-# follow upstream README for venv + pretrained model download
-export OPENFABRIC_GPT_SOVITS_DIR=/absolute/path/to/gpt-sovits
+./setup_speech.sh
+# then download pretrained models into external/gpt-sovits/GPT_SoVITS/pretrained_models
+# (see script footer / https://huggingface.co/lj1995/GPT-SoVITS)
+export OPENFABRIC_GPT_SOVITS_DIR=/absolute/path/to/openfabric-studio/external/gpt-sovits
+export OPENFABRIC_GPT_SOVITS_API_URL=http://127.0.0.1:9880
+cd "$OPENFABRIC_GPT_SOVITS_DIR" && source .venv/bin/activate && python api.py -a 127.0.0.1 -p 9880 -d cpu
 ```
 
-Optional later: `setup_speech.sh` that clones the repo and documents weight steps **without** fetching multi-GB blobs in CI.
+`setup_speech.sh` clones + venv + pip deps and documents weight steps **without** fetching multi-GB blobs.
 
 ### Phase C — Audiobook v1
 
@@ -101,6 +111,7 @@ Chapter limits (v1): reasonable text caps per chapter; queue serially on one GPU
 | Routes | `routes_speech_clone.py`, `routes_audiobooks.py` |
 | Store | `backend/app/audiobooks.py` |
 | UI | `VoiceProfilesPanel.vue` (+ locales) |
+| Setup (no weights) | `setup_speech.sh` |
 | Attribution | `NOTICE` |
 
 Singing voice clone remains Seed-VC; do not conflate profile IDs with Seed-VC voice workspace IDs.
