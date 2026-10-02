@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import * as projectsApi from '../../api/projects'
 import type { ProjectSummary } from '../../api/projects'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const projects = ref<ProjectSummary[]>([])
 const loading = ref(true)

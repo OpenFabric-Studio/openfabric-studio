@@ -25,6 +25,7 @@ const job = computed(() => {
   const status = props.preparation?.status === 'done' ? prep?.status ?? 'done' : props.preparation?.status ?? 'idle'
   return { kind, status, progress: prep, error: props.preparation?.error_code ?? '' }
 })
+const historical = computed(() => job.value.status === 'done' && !props.uploading && !props.review.error && !job.value.error)
 const active = computed(() => job.value.status === 'queued' || job.value.status === 'running')
 const elapsed = computed(() => voiceElapsedSeconds(job.value.progress, now.value))
 const remaining = computed(() => voicePhaseRemainingSeconds(job.value.progress, now.value))
@@ -53,7 +54,9 @@ function files(progress: VoiceJobProgress): string { return t('voiceClone.job.fi
 </script>
 
 <template>
-  <section data-voice-job-summary class="sticky z-10 space-y-3 rounded-lg border border-border bg-panel-2 p-4" style="top: calc(var(--app-header-height, 0px) + .5rem)" :aria-label="t('voiceClone.job.title')">
+  <section data-voice-job-summary class="space-y-3 rounded-lg border border-border bg-panel-2 p-4" :class="active || retryVisible ? 'sticky z-10' : ''" style="top: calc(var(--app-header-height, 0px) + .5rem)" :aria-label="t('voiceClone.job.title')">
+    <component :is="historical ? 'details' : 'div'" :key="`${job.progress?.job_id}-${job.status}`" class="space-y-3">
+    <summary v-if="historical" class="cursor-pointer text-sm text-text-dim">{{ t('singingWorkspace.history') }} · {{ t(`voiceClone.job.kind.${job.kind}`) }}</summary>
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0 flex-1"><p v-if="voice" class="break-words text-sm text-text-dim">{{ voice.name }}</p><p role="status" class="font-medium text-text">{{ uploading ? t('voiceClone.workspace.uploading') : `${t(`voiceClone.job.kind.${job.kind}`)} · ${t(`voiceClone.review.status.${job.status}`)}` }}</p></div>
       <button v-if="active && !uploading" type="button" :disabled="!!review.action" class="min-h-10 rounded-lg border border-border px-3 py-2 text-sm text-text disabled:opacity-50" @click="emit('cancel', job.kind)">{{ t('common.cancel') }}</button>
@@ -73,6 +76,7 @@ function files(progress: VoiceJobProgress): string { return t('voiceClone.job.fi
       <p v-if="active" class="text-xs text-text-dim">{{ t('voiceClone.job.estimateHint') }}</p>
     </template>
     <p v-else-if="!uploading" class="text-sm text-text-dim">{{ t(voice ? 'voiceClone.job.idle' : 'voiceClone.dropFirst') }}</p>
+    </component>
     <p v-if="job.error || review.error" role="alert" class="break-words text-sm text-status-failed">{{ review.error || voiceErrorText(job.error) }}</p>
     <p v-if="job.kind === 'build' && job.status === 'failed' && voice?.usable" class="text-xs text-text-dim">{{ t('voiceClone.previousKept') }}</p>
   </section>

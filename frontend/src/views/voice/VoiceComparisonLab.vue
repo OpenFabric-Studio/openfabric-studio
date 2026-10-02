@@ -12,6 +12,7 @@ import VoiceTrialCard from './VoiceTrialCard.vue'
 import { shortVoiceId } from './voiceLabels'
 
 const props = defineProps<{ voice: VoiceProfile; preparation: VoicePreparationResponse | null; disabled?: boolean; active: boolean; selectionDirty?: boolean }>()
+const emit = defineEmits<{ activity: [message: string] }>()
 const { t } = useI18n()
 const capture = useVoiceSession(() => props.voice.id)
 const sources = ref<VoiceTrialSource[]>([])
@@ -32,6 +33,8 @@ let sourceGeneration = 0
 const modelChoices = computed(() => props.voice.models ?? [])
 const referenceChoices = computed(() => (props.preparation?.references ?? []).filter((reference) => props.preparation?.selected_segment_ids?.includes(reference.segment_id)))
 const active = (status: string | undefined) => status === 'queued' || status === 'running'
+const activity = computed(() => error.value || (action.value || jobs.value.some(job => active(job.status)) ? t('singingWorkspace.comparisonPending') : jobs.value[0]?.status === 'failed' ? t('singingWorkspace.comparisonFailed') : ''))
+watch(activity, message => emit('activity', message), { immediate: true })
 const trialCount = computed(() => modelIds.value.length * Math.max(1, referenceIds.value.length) * steps.value.length)
 const source = computed(() => sources.value.find((item) => item.id === sourceId.value))
 const canRun = computed(() => {
@@ -141,7 +144,7 @@ onMounted(() => {
   const session = capture()
   void api.voiceSeparationOptions(session.signal).then((options) => { if (session.isCurrent()) separationOptions.value = options }).catch((cause: unknown) => { if (session.isCurrent()) error.value = errorText(cause) })
 })
-onBeforeUnmount(() => { sourceGeneration++; poll.stop() })
+onBeforeUnmount(() => { sourceGeneration++; poll.stop(); emit('activity', '') })
 </script>
 
 <template>
@@ -153,7 +156,7 @@ onBeforeUnmount(() => { sourceGeneration++; poll.stop() })
     <label class="block space-y-1 text-sm text-text"><span>{{ t('voiceClone.compare.upload') }}</span><input type="file" :disabled="!!action" accept="audio/*,.wav,.mp3,.flac,.ogg,.opus,.m4a" class="block w-full text-xs" @change="upload" /></label>
     <fieldset :disabled="!!action" class="space-y-3">
       <label class="block space-y-1 text-sm text-text"><span>{{ t('voiceClone.compare.source') }}</span><select v-model="sourceId" class="w-full rounded border border-border bg-panel-2 p-2"><option value="">{{ t('voiceClone.compare.chooseSource') }}</option><option v-for="item in sources" :key="item.id" :value="item.id">{{ item.filename }} · {{ item.duration_sec.toFixed(1) }} {{ t('common.secondsUnit') }}</option></select></label>
-      <div class="grid gap-3 sm:grid-cols-3"><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.start') }}</span><input v-model.number="startSec" type="number" min="0" step="0.1" class="w-full rounded border border-border bg-panel-2 p-2" /></label><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.duration') }}</span><input v-model.number="durationSec" type="number" min="2" max="30" step="0.1" class="w-full rounded border border-border bg-panel-2 p-2" /></label><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.seed') }}</span><input v-model.number="seed" type="number" min="0" max="4294967295" step="1" class="w-full rounded border border-border bg-panel-2 p-2" /></label></div>
+      <details class="rounded-lg border border-border p-3"><summary class="cursor-pointer text-sm text-text-dim">{{ t('singingWorkspace.comparisonSettings') }}</summary><div class="mt-3 grid gap-3 sm:grid-cols-3"><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.start') }}</span><input v-model.number="startSec" type="number" min="0" step="0.1" class="w-full rounded border border-border bg-panel-2 p-2" /></label><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.duration') }}</span><input v-model.number="durationSec" type="number" min="2" max="30" step="0.1" class="w-full rounded border border-border bg-panel-2 p-2" /></label><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.seed') }}</span><input v-model.number="seed" type="number" min="0" max="4294967295" step="1" class="w-full rounded border border-border bg-panel-2 p-2" /></label></div></details>
       <div class="flex flex-wrap gap-3"><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.compare.inputType') }}</span><select v-model="inputKind" class="block rounded border border-border bg-panel-2 p-2"><option value="song">{{ t('voiceClone.review.song') }}</option><option value="vocal">{{ t('voiceClone.review.vocal') }}</option></select></label><label class="space-y-1 text-xs text-text"><span>{{ t('voiceClone.review.separation') }}</span><select v-model="quality" class="block rounded border border-border bg-panel-2 p-2"><option v-for="option in separationOptions" :key="option.id" :value="option.id" :disabled="!option.available">{{ t(`voiceClone.review.quality.${option.id}`) }}{{ option.available ? '' : ` — ${t('voiceClone.review.unavailable')}` }}</option></select></label></div>
       <fieldset class="space-y-2"><legend class="text-sm font-medium text-text">{{ t('voiceClone.compare.models') }}</legend><label v-for="model in modelChoices" :key="model.id" class="mr-3 inline-flex items-center gap-2 text-xs text-text"><input v-model="modelIds" type="checkbox" :value="model.id" />{{ model.kind === 'base' ? `${t('voiceClone.review.referenceOnly')} · ${shortVoiceId(model.id)}` : `${t('voiceClone.review.trainedSteps', { steps: model.steps })} · ${shortVoiceId(model.id)}` }}</label></fieldset>
       <fieldset class="space-y-2"><legend class="text-sm font-medium text-text">{{ t('voiceClone.compare.references') }}</legend><p class="text-xs text-text-dim">{{ t('voiceClone.compare.referenceHint') }}</p><label v-for="reference in referenceChoices" :key="reference.id" class="block text-xs text-text"><input v-model="referenceIds" type="checkbox" :value="reference.id" class="mr-2" />{{ reference.source_filename }} · {{ reference.start_sec.toFixed(1) }}–{{ reference.end_sec.toFixed(1) }} {{ t('common.secondsUnit') }}</label></fieldset>

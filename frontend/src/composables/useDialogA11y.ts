@@ -1,8 +1,14 @@
-import { nextTick, onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, shallowReactive, watch, type Ref } from 'vue'
 
 interface OpenDialog { token: symbol; element: Ref<HTMLElement | null> }
-const dialogs: OpenDialog[] = []
+const dialogs = shallowReactive<OpenDialog[]>([])
 export function hasOpenDialog(): boolean { return dialogs.length > 0 }
+/** Tooltips and other transient UI must respect the same top-dialog owner. */
+export function isWithinActiveDialog(element: HTMLElement | null): boolean {
+  if (!dialogs.length) return true
+  const dialog = dialogs.at(-1)?.element.value
+  return Boolean(dialog && element && dialog.contains(element))
+}
 
 function controls(element: HTMLElement): HTMLElement[] {
   return [...element.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex]')].filter(control => {

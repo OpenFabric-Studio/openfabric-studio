@@ -2,8 +2,7 @@
 import { onBeforeUnmount, onMounted, watchEffect } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOrchestratorStore } from './stores/orchestrator'
-import AppHeader from './components/shared/AppHeader.vue'
-import AppFooter from './components/shared/AppFooter.vue'
+import AppShell from './components/shared/AppShell.vue'
 import { completionNotifications, startCompletionPreferenceSync, stopCompletionPreferenceSync } from './composables/completionNotifications'
 
 const orchestrator = useOrchestratorStore()
@@ -18,13 +17,11 @@ onBeforeUnmount(() => { stopCompletionPreferenceSync(); orchestrator.stopPolling
 </script>
 
 <template>
-  <AppHeader />
-  <main class="mx-auto w-full max-w-7xl flex-1 px-4 py-6 sm:px-6">
+  <AppShell>
     <router-view v-slot="{ Component }">
       <Transition name="fade" mode="out-in">
         <component :is="Component" />
       </Transition>
     </router-view>
-  </main>
-  <AppFooter />
+  </AppShell>
 </template>

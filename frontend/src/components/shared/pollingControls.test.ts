@@ -12,7 +12,7 @@ import type { VoiceProfile } from '../../api/voices'
 import StemsPanel from './StemsPanel.vue'
 import MidiPanel from './MidiPanel.vue'
 import VoiceSelect from './VoiceSelect.vue'
-import VoiceClonePage from '../../views/voice/VoiceClonePage.vue'
+import VoiceClonePage from '../../views/voice/SingingVoiceWorkspace.vue'
 import { preparedVoice } from '../../views/voice/voiceTestFixtures'
 
 vi.mock('../../api/stems', () => ({ getSeparationStatus: vi.fn(), startSeparation: vi.fn(), cancelSeparation: vi.fn(), deleteStems: vi.fn() }))
@@ -233,7 +233,7 @@ it('does not start voice-build polling after a build response arrives past unmou
   vi.mocked(voicesApi.getVoicePreparation).mockResolvedValue(preparedVoice())
   vi.mocked(voicesApi.buildVoice).mockReturnValue(request.promise)
   const { container } = await mount(VoiceClonePage)
-  await click(container, 'Build')
+  await click(container, 'Train')
   await click(container, 'Build voice')
   expect(voicesApi.buildVoice).toHaveBeenCalledTimes(1)
   unmount()

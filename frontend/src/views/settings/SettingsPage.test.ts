@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createApp, nextTick, type App, type Component } from 'vue'
+import { createApp, defineComponent, h, nextTick, type App, type Component } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import SettingsPage from './SettingsPage.vue'
 import HomeView from '../HomeView.vue'
-import AppHeader from '../../components/shared/AppHeader.vue'
+import AppSidebar from '../../components/shared/AppSidebar.vue'
 import appRouter from '../../router'
 import * as audioApi from '../../api/audioSettings'
 import { i18n, setLocale } from '../../i18n'
@@ -19,6 +19,7 @@ vi.mock('../../stores/orchestrator', () => ({ useOrchestratorStore: () => ({ sta
 vi.mock('../../composables/useModelSwitch', async (original) => ({ ...await original<typeof import('../../composables/useModelSwitch')>(), useModelSwitch: () => ({ selectModel: vi.fn() }) }))
 
 let app: App | undefined
+const ExpandedSidebar = defineComponent({ render: () => h(AppSidebar, { collapsed: false, mobile: false, active: true }) })
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); localStorage.clear(); setLocale('en')
   vi.mocked(audioApi.getAudioSettings).mockResolvedValue(audioSettingsResponse())
@@ -181,18 +182,18 @@ it('allows full long library catalog paths to wrap instead of widening the mobil
   expect(label?.classList.contains('[overflow-wrap:anywhere]')).toBe(true)
 })
 
-it('registers a lazy Settings route and highlights its translated header link', async () => {
+it('registers a lazy Settings route and highlights its translated sidebar link', async () => {
   const route = appRouter.getRoutes().find((entry) => entry.path === '/settings')
   expect(route?.name).toBe('settings'); expect(typeof route?.components?.default).toBe('function')
-  const container = await mount(AppHeader, '/settings')
+  const container = await mount(ExpandedSidebar, '/settings')
   const link = [...container.querySelectorAll('a')].find((node) => node.textContent?.trim() === 'Settings')
-  expect(link?.getAttribute('href')).toBe('/settings'); expect(link?.getAttribute('aria-current')).toBe('page'); expect(link?.classList.contains('border-accent1/60')).toBe(true)
+  expect(link?.getAttribute('href')).toBe('/settings'); expect(link?.getAttribute('aria-current')).toBe('page'); expect(link?.getAttribute('aria-label')).toBe('Settings')
 })
 
 it('opens global help while preserving all fork navigation routes', async () => {
-  const header = await mount(AppHeader, '/settings')
-  for (const path of ['/settings', '/editor', '/voice-clone', '/video']) expect(header.querySelector(`a[href="${path}"]`)).not.toBeNull()
-  const help = button(header, 'Help'); help.focus(); help.click(); await settle()
+  const sidebar = await mount(ExpandedSidebar, '/settings')
+  for (const path of ['/settings', '/editor', '/voice-clone', '/video']) expect(sidebar.querySelector(`a[href="${path}"]`)).not.toBeNull()
+  const help = button(sidebar, 'Help'); help.focus(); help.click(); await settle()
   const dialog = document.querySelector('[role="dialog"][aria-label="Using OpenFabric Studio"]')
   expect(dialog?.textContent).toContain('separate voice versions'); expect(dialog?.textContent).toContain('Video Studio')
   dialog?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); await settle()

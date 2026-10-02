@@ -17,9 +17,14 @@ export function useModelSwitch() {
   const router = useRouter()
   const orchestrator = useOrchestratorStore()
 
-  async function selectModel(id: ModelId): Promise<void> {
+  async function selectModel(id: ModelId, isCurrent: () => boolean = () => true): Promise<void> {
+    if (!isCurrent()) return
     const routeName = MODEL_ROUTES[id]
-    if (router.currentRoute.value.name !== routeName) await router.push({ name: routeName })
+    if (router.currentRoute.value.name !== routeName) {
+      const failure = await router.push({ name: routeName })
+      if (failure) return
+    }
+    if (!isCurrent() || router.currentRoute.value.name !== routeName) return
     const status = orchestrator.statuses[id]?.status ?? 'stopped'
     if (orchestrator.activeModel === id && status === 'running') return
     await orchestrator.switchModel(id)

@@ -1,0 +1,22 @@
+export const audiobookWorkspaceEn = {
+  new: 'New audiobook', back: 'Back to books', search: 'Search audiobooks', noMatches: 'No audiobooks match your search.', reload: 'Reload library',
+  intro: 'Choose a consent-backed narrator and enter your chapters. Chapter audio is saved in your library as it completes.',
+  narrator: 'Narrator', unavailableNarrator: 'Profile unavailable', noProfiles: 'Create a consent-backed speech profile in Voice Clone before creating an audiobook.',
+  chooseBook: 'Select a saved book to review its chapters, or create a new audiobook.',
+  chapterName: 'Chapter {number}', chapterTitle: 'Chapter {number} title', chapterText: 'Chapter {number} text', removeChapter: 'Remove chapter {number}',
+  chapterLimit: 'A book can contain up to 100 chapters.', draftHint: 'This draft stays available while you switch between Audiobook and Voice Clone. Create the audiobook to save it to your library.',
+  chapterMinimum: 'A book needs at least one chapter.', loadingNarrators: 'Refreshing narrators before creation…',
+  creating: 'Creating audiobook…', retrying: 'Retrying chapters…', background: 'Audiobooks processing in the background: {count}',
+  completed: '{done} of {total} chapters ready', exportHint: 'The full WAV download becomes available when all chapters and the export are complete.',
+  noJobs: 'No chapter jobs are available for this book.', reloadChapters: 'Reload chapters', playChapter: 'Play chapter: {title}',
+  chapterFailed: 'Chapter generation failed. Retry failed chapters after checking the speech engine.',
+  bookFailed: 'Audiobook generation failed: {title}',
+  mockAudio: 'This is a silent placeholder from the mock speech engine, not synthesized narration.',
+  status: { draft: 'Draft', queued: 'Queued', running: 'Generating', done: 'Audio ready', failed: 'Failed', cancelled: 'Cancelled' },
+  errors: {
+    profiles: 'Could not load narrators. Reload the library to retry.', jobs: 'Could not load chapters. Reload chapters to retry.', refresh: 'Audiobook updates stopped. Reload the library to resume.',
+    consent: 'The narrator requires confirmed consent before generating speech.', profileMissing: 'The narrator profile is unavailable. Choose a different profile.', bookMissing: 'This book is unavailable. Reload the library.',
+    nothingToRetry: 'No failed chapters are available to retry. Reload the library.', emptyChapter: 'Enter text for every chapter, or remove the empty chapter.',
+    engineMissing: 'The speech engine is not installed. Check Speech setup in Voice Clone before retrying.', apiUnavailable: 'The speech engine API is unavailable. Check Speech setup in Voice Clone before retrying.',
+  },
+}

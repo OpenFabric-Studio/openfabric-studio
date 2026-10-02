@@ -1,260 +1,305 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ApiError } from '../../api/http'
 import * as profilesApi from '../../api/voiceProfiles'
-import type { SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
+import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
+import { useDialogA11y } from '../../composables/useDialogA11y'
 
+const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
+const emit = defineEmits<{ activity: [message: string] }>()
 const { t } = useI18n()
-
+const workspace = ref<HTMLElement | null>(null)
 const profiles = ref<SpeechVoiceProfile[]>([])
+const search = ref('')
+const selectedId = ref('')
+const selectedProfile = computed(() => profiles.value.find(profile => profile.id === selectedId.value))
+const filteredProfiles = computed(() => {
+  const query = search.value.trim().toLocaleLowerCase()
+  return profiles.value.filter(profile => `${profile.name} ${profile.notes ?? ''}`.toLocaleLowerCase().includes(query))
+})
 const loading = ref(false)
 const saving = ref(false)
 const cloning = ref(false)
+const deleting = ref(false)
 const error = ref('')
 const notice = ref('')
+const engine = ref<SpeechCloneEngineStatus | null>(null)
+const engineError = ref('')
+const createVisited = ref(false)
+const createOpen = ref(false)
 const name = ref('')
 const notes = ref('')
 const consent = ref(false)
 const file = ref<File | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
-
-const trialProfileId = ref('')
+const nameInput = ref<HTMLInputElement | null>(null)
 const trialText = ref('')
 const trialResult = ref<SpeechCloneTrialResponse | null>(null)
-const engineHint = ref('')
+const setupHints = computed(() => [...new Set([...(engine.value?.install_hints ?? []), ...(trialResult.value?.install_hints ?? [])])])
+const deleteTarget = ref<SpeechVoiceProfile | null>(null)
+const deleteDialog = ref<HTMLElement | null>(null)
+useDialogA11y(deleteDialog, () => props.active && deleteTarget.value !== null, closeDelete)
+watch(() => props.active, async active => {
+  if (active) return
+  const focused = document.activeElement
+  const outside = focused instanceof HTMLElement && !workspace.value?.contains(focused) ? focused : null
+  if (!deleting.value) deleteTarget.value = null
+  await nextTick()
+  if (alive && !props.active && outside?.isConnected) outside.focus()
+})
+
+let alive = true
+let selectionGeneration = 0
+let trialGeneration = 0
+let loadController: AbortController | null = null
+let createController: AbortController | null = null
+let deleteController: AbortController | null = null
+let trialController: AbortController | null = null
+
+const activity = computed(() => {
+  if (saving.value) return t('speechWorkspace.createPending')
+  if (deleting.value) return t('speechWorkspace.deletePending')
+  if (cloning.value) return t('speechWorkspace.trialPending')
+  if (loading.value) return t('speechWorkspace.loadPending')
+  return error.value || engineError.value
+})
+watch(activity, message => { if (alive) emit('activity', message) }, { immediate: true })
 
 async function refresh() {
+  if (loading.value || saving.value || deleting.value || !alive) return
+  const controller = new AbortController()
+  loadController = controller
   loading.value = true
   error.value = ''
+  engineError.value = ''
   try {
-    profiles.value = await profilesApi.listSpeechVoiceProfiles()
-    if (!trialProfileId.value && profiles.value.length) {
-      trialProfileId.value = profiles.value[0].id
-    }
-    try {
-      const engine = await profilesApi.getSpeechCloneEngine()
-      if (engine.mock) engineHint.value = t('voiceProfiles.engineMock')
-      else if (engine.installed) engineHint.value = t('voiceProfiles.engineReady')
-      else engineHint.value = t('voiceProfiles.engineMissing')
-    } catch {
-      engineHint.value = ''
-    }
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('voiceProfiles.err.load')
+    const [profileResponse, engineResponse] = await Promise.allSettled([
+      profilesApi.listSpeechVoiceProfiles(controller.signal),
+      profilesApi.getSpeechCloneEngine(controller.signal),
+    ])
+    if (!alive || controller.signal.aborted) return
+    if (profileResponse.status === 'fulfilled') {
+      profiles.value = profileResponse.value
+      if (!profiles.value.some(profile => profile.id === selectedId.value)) selectProfile(profiles.value[0]?.id ?? '')
+    } else error.value = t('voiceProfiles.err.load')
+    if (engineResponse.status === 'fulfilled') engine.value = engineResponse.value
+    else { engine.value = null; engineError.value = t('speechWorkspace.engineLoadError') }
   } finally {
-    loading.value = false
+    if (alive && loadController === controller) { loading.value = false; loadController = null }
   }
+}
+
+function selectProfile(id: string) {
+  if (id && !profiles.value.some(profile => profile.id === id)) return
+  if (id !== selectedId.value) {
+    ++selectionGeneration
+    ++trialGeneration
+    trialController?.abort()
+    trialController = null
+    cloning.value = false
+    selectedId.value = id
+    trialResult.value = null
+    error.value = ''
+    notice.value = ''
+    if (!deleting.value) deleteTarget.value = null
+  }
+  createOpen.value = false
+}
+
+async function openCreate() {
+  if (loading.value || !alive) return
+  createVisited.value = true
+  createOpen.value = true
+  error.value = ''
+  notice.value = ''
+  await nextTick()
+  if (alive && props.active && createOpen.value) nameInput.value?.focus()
 }
 
 function onFilePicked(event: Event) {
-  const input = event.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
+  if (event.target instanceof HTMLInputElement) file.value = event.target.files?.[0] ?? null
 }
 
 async function onCreate() {
+  if (saving.value || loading.value || !alive) return
   error.value = ''
   notice.value = ''
-  if (!consent.value) {
-    error.value = t('voiceProfiles.err.consent')
-    return
-  }
-  if (!file.value) {
-    error.value = t('voiceProfiles.err.audio')
-    return
-  }
+  if (!consent.value) { error.value = t('voiceProfiles.err.consent'); return }
+  if (!file.value) { error.value = t('voiceProfiles.err.audio'); return }
   const trimmed = name.value.trim()
-  if (!trimmed) {
-    error.value = t('voiceProfiles.err.name')
-    return
-  }
+  if (!trimmed || trimmed.length > 120) { error.value = t('voiceProfiles.err.name'); return }
+  const controller = new AbortController()
+  const selection = selectionGeneration
+  createController = controller
   saving.value = true
   try {
     const created = await profilesApi.createSpeechVoiceProfile({
-      name: trimmed,
-      consentConfirmed: true,
-      audio: file.value,
-      notes: notes.value.trim() || undefined,
-    })
-    name.value = ''
-    notes.value = ''
-    consent.value = false
-    file.value = null
+      name: trimmed, consentConfirmed: true, audio: file.value, notes: notes.value.trim() || undefined,
+    }, controller.signal)
+    if (!alive || controller.signal.aborted) return
+    profiles.value = [...profiles.value.filter(profile => profile.id !== created.id), created]
+    name.value = ''; notes.value = ''; consent.value = false; file.value = null
     if (fileInput.value) fileInput.value.value = ''
+    createOpen.value = false
+    if (selection === selectionGeneration) selectProfile(created.id)
     notice.value = t('voiceProfiles.created')
-    trialProfileId.value = created.id
-    await refresh()
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('voiceProfiles.err.create')
+  } catch {
+    if (alive && !controller.signal.aborted) error.value = t('voiceProfiles.err.create')
   } finally {
-    saving.value = false
+    if (alive && createController === controller) { saving.value = false; createController = null }
   }
 }
 
-async function onDelete(profile: SpeechVoiceProfile) {
+function closeDelete() { if (!deleting.value) deleteTarget.value = null }
+function requestDelete() {
+  if (deleting.value || loading.value || !props.active || !selectedProfile.value) return
+  deleteTarget.value = selectedProfile.value
+}
+async function onDelete() {
+  if (deleting.value || loading.value || !deleteTarget.value || !alive) return
+  const target = deleteTarget.value
+  const controller = new AbortController()
+  deleteController = controller
+  deleting.value = true
   error.value = ''
+  notice.value = ''
   try {
-    await profilesApi.deleteSpeechVoiceProfile(profile.id)
+    await profilesApi.deleteSpeechVoiceProfile(target.id, controller.signal)
+    if (!alive || controller.signal.aborted) return
+    profiles.value = profiles.value.filter(profile => profile.id !== target.id)
+    if (selectedId.value === target.id) selectProfile(profiles.value[0]?.id ?? '')
+    deleteTarget.value = null
     notice.value = t('voiceProfiles.deleted')
-    if (trialProfileId.value === profile.id) trialProfileId.value = ''
-    await refresh()
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('voiceProfiles.err.delete')
+  } catch {
+    if (alive && !controller.signal.aborted) error.value = t('voiceProfiles.err.delete')
+  } finally {
+    if (alive && deleteController === controller) { deleting.value = false; deleteController = null }
   }
 }
 
 async function onTrial() {
+  if (cloning.value || !alive || deleting.value && deleteTarget.value?.id === selectedId.value) return
   error.value = ''
   notice.value = ''
   trialResult.value = null
+  const profile = selectedProfile.value
   const text = trialText.value.trim()
-  if (!trialProfileId.value) {
-    error.value = t('voiceProfiles.err.trialProfile')
-    return
-  }
-  if (!text) {
-    error.value = t('voiceProfiles.err.trialText')
-    return
-  }
+  if (!profile) { error.value = t('voiceProfiles.err.trialProfile'); return }
+  if (!profile.consent_confirmed) { error.value = t('speechWorkspace.consentRequired'); return }
+  if (!text || text.length > 8000) { error.value = t('voiceProfiles.err.trialText'); return }
+  const controller = new AbortController()
+  const generation = ++trialGeneration
+  trialController = controller
   cloning.value = true
+  const current = () => alive && !controller.signal.aborted && generation === trialGeneration && selectedId.value === profile.id
   try {
-    const result = await profilesApi.startSpeechCloneTrial(trialProfileId.value, text)
+    const result = await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal)
+    if (!current()) return
+    if (result.profile_id !== profile.id) { error.value = t('voiceProfiles.err.trial'); return }
     trialResult.value = result
-    if (result.status === 'mock_completed') notice.value = t('voiceProfiles.trialMock')
-    else if (result.status === 'engine_ready') notice.value = t('voiceProfiles.trialReady')
-    else if (result.status === 'api_unavailable') notice.value = t('voiceProfiles.trialApiDown')
-    else if (result.status === 'completed') notice.value = t('voiceProfiles.trialCompleted')
-    else if (result.status === 'failed') notice.value = t('voiceProfiles.trialFailed')
-    else if (result.status === 'engine_not_installed') notice.value = t('voiceProfiles.trialMissing')
-    else notice.value = result.detail
-  } catch (err) {
-    error.value = err instanceof ApiError ? err.message : t('voiceProfiles.err.trial')
+    switch (result.status) {
+      case 'mock_completed': notice.value = t('speechWorkspace.trialMock'); break
+      case 'completed': notice.value = t('speechWorkspace.trialCompleted'); break
+      case 'engine_ready': notice.value = t('speechWorkspace.trialEngineReady'); break
+      case 'api_unavailable': error.value = t('speechWorkspace.trialApiUnavailable'); break
+      case 'engine_not_installed': error.value = t('speechWorkspace.trialMissing'); break
+      case 'failed': error.value = t('voiceProfiles.err.trial'); break
+    }
+  } catch {
+    if (current()) error.value = t('voiceProfiles.err.trial')
   } finally {
-    cloning.value = false
+    if (current()) { cloning.value = false; trialController = null }
   }
 }
 
 onMounted(() => { void refresh() })
+onBeforeUnmount(() => {
+  alive = false
+  ++trialGeneration
+  ++selectionGeneration
+  loadController?.abort(); createController?.abort(); deleteController?.abort(); trialController?.abort()
+})
 </script>
 
 <template>
-  <section class="space-y-4 rounded-xl border border-border bg-panel p-5">
-    <div>
-      <h2 class="text-lg font-semibold text-text">{{ t('voiceProfiles.title') }}</h2>
-      <p class="mt-1 text-sm text-text-dim">{{ t('voiceProfiles.intro') }}</p>
-      <p v-if="engineHint" class="mt-1 text-xs text-text-dim">{{ engineHint }}</p>
+  <section ref="workspace" class="grid min-w-0 gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]" :aria-label="t('voiceProfiles.title')">
+    <aside class="self-start rounded-xl border border-border bg-panel p-4" :aria-label="t('speechWorkspace.library')">
+      <div class="mb-4 flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold text-text">{{ t('voiceProfiles.title') }}</h2>
+        <button type="button" :disabled="loading" class="min-h-11 shrink-0 rounded-lg bg-accent1 px-3 py-2 text-xs font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" @click="openCreate">{{ t('speechWorkspace.newProfile') }}</button>
+      </div>
+      <label class="block space-y-1">
+        <span class="text-xs text-text-dim">{{ t('speechWorkspace.search') }}</span>
+        <input v-model="search" type="search" :aria-label="t('speechWorkspace.search')" class="w-full rounded-lg border border-border bg-panel-2 px-3 py-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" />
+      </label>
+      <p v-if="loading" role="status" class="mt-4 text-sm text-text-dim">{{ t('common.loading') }}</p>
+      <ul v-if="filteredProfiles.length" class="mt-3 max-h-80 space-y-1 overflow-y-auto lg:max-h-[65vh]">
+        <li v-for="profile in filteredProfiles" :key="profile.id">
+          <button type="button" :aria-label="profile.name" :aria-pressed="selectedId === profile.id" class="w-full rounded-lg border px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-accent1" :class="selectedId === profile.id ? 'border-accent1 bg-accent1/10' : 'border-transparent hover:bg-panel-2'" @click="selectProfile(profile.id)">
+            <span class="block truncate text-sm font-medium text-text">{{ profile.name }}</span>
+            <span class="mt-1 block text-xs text-text-dim">{{ profile.consent_confirmed ? t('voiceProfiles.consentOk') : t('voiceProfiles.consentMissing') }}</span>
+          </button>
+        </li>
+      </ul>
+      <p v-else-if="!loading" class="mt-4 text-sm text-text-dim">{{ profiles.length ? t('speechWorkspace.noMatches') : t('voiceProfiles.empty') }}</p>
+    </aside>
+
+    <div class="min-w-0 space-y-4">
+      <p v-if="error" role="alert" class="rounded-lg border border-status-failed/40 bg-status-failed/10 px-4 py-3 text-sm text-status-failed">{{ error }}</p>
+      <p v-if="notice" role="status" class="rounded-lg border border-status-done/30 bg-status-done/5 px-4 py-3 text-sm text-status-done">{{ notice }}</p>
+
+      <form v-if="createVisited" v-show="createOpen" :aria-label="t('speechWorkspace.createTitle')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onCreate">
+        <div class="flex items-start justify-between gap-3">
+          <div><h2 class="text-lg font-semibold text-text">{{ t('speechWorkspace.createTitle') }}</h2><p class="mt-1 text-sm text-text-dim">{{ t('speechWorkspace.createIntro') }}</p></div>
+          <button type="button" class="rounded-lg px-2 py-1 text-sm text-text-dim hover:bg-panel-2 focus-visible:outline-2 focus-visible:outline-accent1" :disabled="saving" @click="createOpen = false">{{ t('common.close') }}</button>
+        </div>
+        <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.nameLabel') }}</span><input ref="nameInput" v-model="name" type="text" maxlength="120" :aria-label="t('voiceProfiles.nameLabel')" :placeholder="t('voiceProfiles.namePlaceholder')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
+        <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.notesLabel') }}</span><textarea v-model="notes" rows="2" maxlength="2000" :aria-label="t('voiceProfiles.notesLabel')" :placeholder="t('voiceProfiles.notesPlaceholder')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" /><span class="block text-xs text-text-dim">{{ t('speechWorkspace.notesHelp') }}</span></label>
+        <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.audioLabel') }}</span><input ref="fileInput" type="file" accept=".wav,.flac,audio/wav,audio/flac" :aria-label="t('voiceProfiles.audioLabel')" :disabled="saving" class="block w-full text-sm text-text-dim file:mr-3 file:rounded-lg file:border-0 file:bg-panel-2 file:px-3 file:py-2 file:text-sm file:text-text focus-visible:outline-2 focus-visible:outline-accent1" @change="onFilePicked" /></label>
+        <label class="flex items-start gap-2 text-sm text-text"><input v-model="consent" type="checkbox" :aria-label="t('voiceProfiles.consentLabel')" :disabled="saving" class="mt-1 focus-visible:outline-2 focus-visible:outline-accent1" /><span>{{ t('voiceProfiles.consentLabel') }}</span></label>
+        <p v-if="!consent" class="text-xs text-text-dim">{{ t('voiceProfiles.err.consent') }}</p>
+        <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="saving || !consent">{{ saving ? t('speechWorkspace.createPending') : t('voiceProfiles.create') }}</button>
+      </form>
+
+      <form v-show="!createOpen" :aria-label="t('speechWorkspace.synthesis')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onTrial">
+        <div class="flex flex-wrap items-start justify-between gap-3">
+          <div><h2 class="text-lg font-semibold text-text">{{ selectedProfile?.name ?? t('speechWorkspace.synthesis') }}</h2><p class="mt-1 text-sm text-text-dim">{{ t('speechWorkspace.synthesisIntro') }}</p></div>
+          <button v-if="selectedProfile" type="button" :disabled="deleting || loading" class="rounded-lg border border-border px-3 py-1.5 text-xs text-text-dim hover:border-status-failed hover:text-status-failed focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="requestDelete">{{ t('speechWorkspace.deleteProfile') }}</button>
+        </div>
+        <template v-if="selectedProfile">
+          <p class="text-xs" :class="selectedProfile.consent_confirmed ? 'text-text-dim' : 'text-status-failed'">{{ selectedProfile.consent_confirmed ? t('voiceProfiles.consentOk') : t('voiceProfiles.consentMissing') }}</p>
+          <p v-if="selectedProfile.notes" class="whitespace-pre-wrap break-words text-sm text-text-dim">{{ selectedProfile.notes }}</p>
+          <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
+          <p v-if="!selectedProfile.consent_confirmed" class="text-xs text-status-failed">{{ t('speechWorkspace.consentRequired') }}</p>
+          <p v-else-if="cloning" role="status" class="text-xs text-text-dim">{{ t('speechWorkspace.trialPendingHelp') }}</p>
+          <p v-else-if="deleting && deleteTarget?.id === selectedId" class="text-xs text-text-dim">{{ t('speechWorkspace.deletePending') }}</p>
+          <p v-else-if="!trialText.trim()" class="text-xs text-text-dim">{{ t('voiceProfiles.err.trialText') }}</p>
+          <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="cloning || !selectedProfile.consent_confirmed || !trialText.trim() || deleting && deleteTarget?.id === selectedId">{{ cloning ? t('speechWorkspace.trialPending') : t('voiceProfiles.trialRun') }}</button>
+          <p v-if="trialResult?.output_path && (trialResult.status === 'completed' || trialResult.status === 'mock_completed')" class="rounded-lg border border-border bg-panel-2 p-3 text-sm text-text-dim">{{ t('speechWorkspace.playbackUnavailable') }}</p>
+        </template>
+        <p v-else class="text-sm text-text-dim">{{ t('speechWorkspace.selectOrCreate') }}</p>
+      </form>
+
+      <section class="rounded-xl border border-border bg-panel p-4" :aria-label="t('speechWorkspace.engineStatus')">
+        <div class="flex items-start justify-between gap-3"><h3 class="text-sm font-semibold text-text">{{ t('speechWorkspace.engineStatus') }}</h3><button type="button" :disabled="loading || saving || deleting" class="text-xs text-text-dim hover:text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="refresh">{{ t('speechWorkspace.refresh') }}</button></div>
+        <dl class="mt-3 grid gap-3 text-xs sm:grid-cols-3">
+          <div><dt class="text-text-dim">{{ t('speechWorkspace.engineInstalled') }}</dt><dd class="mt-1 font-medium text-text">{{ engine ? (engine.installed ? t('speechWorkspace.installed') : t('speechWorkspace.missing')) : t('speechWorkspace.unknown') }}</dd></div>
+          <div><dt class="text-text-dim">{{ t('speechWorkspace.engineMock') }}</dt><dd class="mt-1 font-medium text-text">{{ engine ? (engine.mock ? t('speechWorkspace.enabled') : t('speechWorkspace.disabled')) : t('speechWorkspace.unknown') }}</dd></div>
+          <div><dt class="text-text-dim">{{ t('speechWorkspace.engineApi') }}</dt><dd class="mt-1 font-medium text-text">{{ engine?.api_reachable === undefined ? t('speechWorkspace.unknown') : (engine.api_reachable ? t('speechWorkspace.reachable') : t('speechWorkspace.unreachable')) }}</dd></div>
+        </dl>
+        <p v-if="engine?.mock" class="mt-3 text-xs text-text-dim">{{ t('speechWorkspace.mockHelp') }}</p>
+        <p v-if="engineError" role="status" class="mt-3 text-xs text-status-failed">{{ engineError }}</p>
+        <details class="mt-4 border-t border-border pt-3 text-xs text-text-dim"><summary class="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-accent1">{{ t('speechWorkspace.engineHelp') }}</summary><p class="mt-3">{{ t('speechWorkspace.engineHelpIntro') }}</p><ul v-if="setupHints.length" class="mt-2 list-disc space-y-1 break-words pl-4"><li v-for="hint in setupHints" :key="hint">{{ hint }}</li></ul></details>
+      </section>
     </div>
 
-    <p v-if="error" class="rounded-lg border border-status-failed/40 bg-status-failed/10 px-3 py-2 text-sm text-status-failed">
-      {{ error }}
-    </p>
-    <p v-if="notice" class="text-sm text-status-done">{{ notice }}</p>
-    <p v-if="loading" class="text-sm text-text-dim">{{ t('common.loading') }}</p>
-
-    <ul v-if="profiles.length" class="space-y-2">
-      <li
-        v-for="profile in profiles"
-        :key="profile.id"
-        class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-panel-2 px-3 py-2"
-      >
-        <div class="min-w-0">
-          <p class="truncate text-sm font-medium text-text">{{ profile.name }}</p>
-          <p class="text-xs text-text-dim">
-            {{ profile.consent_confirmed ? t('voiceProfiles.consentOk') : t('voiceProfiles.consentMissing') }}
-            <span v-if="profile.notes"> · {{ profile.notes }}</span>
-          </p>
-        </div>
-        <button type="button" class="text-xs text-status-failed hover:underline" @click="onDelete(profile)">
-          {{ t('common.delete') }}
-        </button>
-      </li>
-    </ul>
-    <p v-else-if="!loading" class="text-sm text-text-dim">{{ t('voiceProfiles.empty') }}</p>
-
-    <form class="space-y-3 border-t border-border pt-4" @submit.prevent="onCreate">
-      <label class="block space-y-1">
-        <span class="text-xs text-text-dim">{{ t('voiceProfiles.nameLabel') }}</span>
-        <input
-          v-model="name"
-          type="text"
-          maxlength="120"
-          class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"
-          :placeholder="t('voiceProfiles.namePlaceholder')"
-        />
-      </label>
-      <label class="block space-y-1">
-        <span class="text-xs text-text-dim">{{ t('voiceProfiles.notesLabel') }}</span>
-        <input
-          v-model="notes"
-          type="text"
-          maxlength="2000"
-          class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"
-          :placeholder="t('voiceProfiles.notesPlaceholder')"
-        />
-      </label>
-      <label class="block space-y-1">
-        <span class="text-xs text-text-dim">{{ t('voiceProfiles.audioLabel') }}</span>
-        <input
-          ref="fileInput"
-          type="file"
-          accept=".wav,.flac,audio/wav,audio/flac"
-          class="block w-full text-sm text-text-dim file:mr-3 file:rounded-lg file:border-0 file:bg-accent1 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-white"
-          @change="onFilePicked"
-        />
-      </label>
-      <label class="flex items-start gap-2 text-sm text-text">
-        <input v-model="consent" type="checkbox" class="mt-1" required />
-        <span>{{ t('voiceProfiles.consentLabel') }}</span>
-      </label>
-      <button
-        type="submit"
-        class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        :disabled="saving || !consent"
-      >
-        {{ saving ? t('common.loading') : t('voiceProfiles.create') }}
-      </button>
-    </form>
-
-    <form class="space-y-3 border-t border-border pt-4" @submit.prevent="onTrial">
-      <h3 class="text-sm font-semibold text-text">{{ t('voiceProfiles.trialTitle') }}</h3>
-      <p class="text-xs text-text-dim">{{ t('voiceProfiles.trialIntro') }}</p>
-      <label class="block space-y-1">
-        <span class="text-xs text-text-dim">{{ t('voiceProfiles.trialProfileLabel') }}</span>
-        <select
-          v-model="trialProfileId"
-          class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"
-          :disabled="!profiles.length"
-        >
-          <option disabled value="">{{ t('voiceProfiles.trialProfilePlaceholder') }}</option>
-          <option v-for="profile in profiles" :key="profile.id" :value="profile.id">
-            {{ profile.name }}
-          </option>
-        </select>
-      </label>
-      <label class="block space-y-1">
-        <span class="text-xs text-text-dim">{{ t('voiceProfiles.trialTextLabel') }}</span>
-        <textarea
-          v-model="trialText"
-          rows="3"
-          maxlength="8000"
-          class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"
-          :placeholder="t('voiceProfiles.trialTextPlaceholder')"
-        />
-      </label>
-      <button
-        type="submit"
-        class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        :disabled="cloning || !profiles.length"
-      >
-        {{ cloning ? t('common.loading') : t('voiceProfiles.trialRun') }}
-      </button>
-      <div v-if="trialResult" class="rounded-lg border border-border bg-panel-2 p-3 text-xs text-text-dim space-y-1">
-        <p><span class="font-medium text-text">{{ trialResult.status }}</span> — {{ trialResult.detail }}</p>
-        <p v-if="trialResult.output_path">{{ t('voiceProfiles.trialOutput') }}: {{ trialResult.output_path }}</p>
-        <ul v-if="trialResult.install_hints?.length" class="list-disc pl-4">
-          <li v-for="(hint, index) in trialResult.install_hints" :key="index">{{ hint }}</li>
-        </ul>
+    <div v-if="deleteTarget && active" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" @click.self="closeDelete">
+      <div ref="deleteDialog" data-voice-confirmation role="dialog" aria-modal="true" aria-labelledby="speech-delete-heading" aria-describedby="speech-delete-description" tabindex="-1" class="w-full max-w-md space-y-4 rounded-xl border border-border bg-panel p-5 shadow-2xl">
+        <h3 id="speech-delete-heading" class="break-words text-lg font-semibold text-text">{{ t('speechWorkspace.deleteConfirm', { name: deleteTarget.name }) }}</h3>
+        <p id="speech-delete-description" class="text-sm text-text-dim">{{ t('speechWorkspace.deleteDescription') }}</p>
+        <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
+        <div class="flex justify-end gap-3"><button type="button" :disabled="deleting" class="rounded-lg border border-border px-4 py-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="closeDelete">{{ t('common.cancel') }}</button><button type="button" :disabled="deleting" class="rounded-lg bg-status-failed px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-status-failed disabled:opacity-50" @click="onDelete">{{ deleting ? t('speechWorkspace.deletePending') : t('common.delete') }}</button></div>
       </div>
-    </form>
+    </div>
   </section>
 </template>

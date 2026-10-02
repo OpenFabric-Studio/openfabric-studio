@@ -1,4 +1,3 @@
-import { i18n } from '../i18n'
 export function formatClock(seconds: number | null | undefined): string {
  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return '—'
  const rounded = Math.round(seconds)

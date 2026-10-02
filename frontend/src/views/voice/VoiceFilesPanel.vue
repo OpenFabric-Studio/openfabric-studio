@@ -40,7 +40,8 @@ function durationPreset(event: Event) {
 <template>
   <section class="space-y-4">
     <div><h3 class="text-base font-semibold text-text">{{ t('voiceClone.review.title') }}</h3><p class="mt-1 text-sm text-text-dim">{{ t('voiceClone.workspace.filesIntro') }}</p></div>
-    <div class="grid gap-3 sm:grid-cols-2">
+    <details class="rounded-lg border border-border p-3"><summary class="cursor-pointer text-sm text-text-dim">{{ t('singingWorkspace.filters') }}</summary>
+    <div class="mt-3 grid gap-3 sm:grid-cols-2">
       <label class="block space-y-1 text-sm text-text"><span>{{ t('voiceClone.workspace.searchFiles') }}</span><input v-model="search" type="search" :aria-label="t('voiceClone.workspace.searchFiles')" class="w-full rounded-lg border border-border bg-panel-2 p-2" /></label>
       <label class="block space-y-1 text-sm text-text"><span>{{ t('voiceClone.workspace.sort') }}</span><select v-model="sort" :aria-label="t('voiceClone.workspace.sortFiles')" class="w-full rounded-lg border border-border bg-panel-2 p-2"><option value="name">{{ t('voiceClone.workspace.filename') }}</option><option value="size">{{ t('voiceClone.workspace.largestFirst') }}</option></select></label>
       <label class="block space-y-1 text-sm text-text"><span>{{ t('voiceClone.workspace.fileStatus') }}</span><select v-model="filter" :aria-label="t('voiceClone.workspace.fileStatus')" class="w-full rounded-lg border border-border bg-panel-2 p-2"><option value="all">{{ t('voiceClone.workspace.allFiles') }}</option><option value="enabled">{{ t('voiceClone.workspace.enabled') }}</option><option value="excluded">{{ t('voiceClone.workspace.excluded') }}</option></select></label>
@@ -48,6 +49,7 @@ function durationPreset(event: Event) {
     </div>
     <p class="text-sm text-text-dim" role="status">{{ t('voiceClone.workspace.filesCount', { visible: visible.length, total: state.sources.length, enabled: enabledCount }) }}</p>
     <div class="flex flex-wrap gap-2"><button type="button" :disabled="state.busy || !visible.length" class="rounded-lg border border-border px-3 py-2 text-sm text-text disabled:opacity-50" @click="changeVisible(true)">{{ t('voiceClone.workspace.enableVisible') }}</button><button type="button" :disabled="state.busy || !visible.length" class="rounded-lg border border-border px-3 py-2 text-sm text-text disabled:opacity-50" @click="changeVisible(false)">{{ t('voiceClone.workspace.excludeVisible') }}</button><button type="button" :disabled="state.busy || !visible.length" class="rounded-lg border border-border px-3 py-2 text-sm text-text disabled:opacity-50" @click="setKind('song')">{{ t('voiceClone.workspace.visibleSongs') }}</button><button type="button" :disabled="state.busy || !visible.length" class="rounded-lg border border-border px-3 py-2 text-sm text-text disabled:opacity-50" @click="setKind('vocal')">{{ t('voiceClone.workspace.visibleVocals') }}</button></div>
+    </details>
     <fieldset :disabled="state.busy" class="space-y-3"><legend class="mb-2 text-sm font-medium text-text">{{ t('voiceClone.review.sources') }}</legend>
       <div v-for="source in visible" :key="source.filename" class="flex flex-wrap items-center gap-3 rounded-lg bg-panel-2 p-3">
         <label class="flex min-w-0 flex-1 items-center gap-2 text-sm text-text"><input v-model="source.enabled" type="checkbox" @change="state.singerConfirmed = false" /><span class="break-all">{{ source.filename }}</span></label><span class="text-xs text-text-dim">{{ (bytes(source.filename) / 1024 / 1024).toFixed(1) }} MiB</span>

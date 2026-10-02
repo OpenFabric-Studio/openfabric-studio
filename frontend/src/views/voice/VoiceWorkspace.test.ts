@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import VoiceClonePage from './VoiceClonePage.vue'
+import VoiceClonePage from './SingingVoiceWorkspace.vue'
 import * as api from '../../api/voices'
 import { i18n, setLocale } from '../../i18n'
 import { preparedVoice, voiceProfile } from './voiceTestFixtures'
@@ -10,7 +10,7 @@ import { preparedVoice, voiceProfile } from './voiceTestFixtures'
 vi.mock('../../api/voices', async (original) => ({ ...await original<typeof import('../../api/voices')>(),
   listVoices: vi.fn(), getVoicePreparation: vi.fn(), prepareVoice: vi.fn(), selectVoiceSamples: vi.fn(),
   voiceSeparationOptions: vi.fn(), listVoiceTrialSources: vi.fn(), listVoiceComparisons: vi.fn(),
-  analyzeVoiceCoverage: vi.fn(), startVoiceComparison: vi.fn(), cancelVoicePreparation: vi.fn(),
+  deleteVoice: vi.fn(), selectVoiceModel: vi.fn(), analyzeVoiceCoverage: vi.fn(), startVoiceComparison: vi.fn(), cancelVoicePreparation: vi.fn(),
 }))
 vi.mock('../../composables/audioPlayback', async (original) => ({ ...await original<typeof import('../../composables/audioPlayback')>(), fetchAndComputePeaks: vi.fn().mockResolvedValue([0.1, 0.4]) }))
 
@@ -60,8 +60,8 @@ it('shows numbered objectives and one persisted job summary directly below every
   expect(summary?.textContent).toContain('song.wav')
   expect(summary?.textContent).toContain('0:40')
   expect(summary?.textContent).toContain('Estimating')
-  expect(button(container, 'Files').textContent).toContain('1')
-  expect(button(container, 'Build').getAttribute('data-step-state')).toBe('blocked')
+  expect(button(container, 'Sources').textContent).toContain('1')
+  expect(button(container, 'Train').getAttribute('data-step-state')).toBe('blocked')
   await click(container, 'Compare')
   expect(container.querySelector('[data-voice-job-summary]')).toBe(summary)
   expect(container.querySelectorAll('[data-voice-job-summary]')).toHaveLength(1)
@@ -90,7 +90,7 @@ it('offers coverage-only retry after automatic analysis cancellation', async () 
   vi.mocked(api.getVoicePreparation).mockResolvedValue({ ...preparedVoice(), operation: 'coverage', warnings: ['coverage_cancelled'], progress: { job_id: 'prep-job', kind: 'preparation', status: 'cancelled', queued_at: 10, finished_at: 20, observed_at: 19, phase: 'coverage' } })
   vi.mocked(api.analyzeVoiceCoverage).mockResolvedValue({ ...preparedVoice(), operation: 'coverage', status: 'queued' })
   const container = await mount()
-  await click(container, 'Build'); await click(container, 'Retry coverage analysis')
+  await click(container, 'Train'); await click(container, 'Retry coverage analysis')
   expect(api.analyzeVoiceCoverage).toHaveBeenCalledTimes(1)
   expect(api.prepareVoice).not.toHaveBeenCalled()
 })
@@ -109,14 +109,15 @@ it('shows invalidated preparation even when an older published build has timing'
 it('invalidates completed build guidance after editing a saved selection', async () => {
   vi.mocked(api.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true, job_progress: { job_id: 'build-job', kind: 'build', status: 'done', preparation_revision: 'revision-1', queued_at: 10, started_at: 11, finished_at: 20, observed_at: 19, phase: 'publishing' } }])
   const container = await mount()
-  expect(button(container, 'Build').getAttribute('data-step-state')).toBe('complete')
-  await click(container, 'Samples')
+  expect(button(container, 'Train').getAttribute('data-step-state')).toBe('complete')
+  await click(container, 'Review samples')
   input(container, 'Include segment: segment-1').click(); await settle()
-  expect(button(container, 'Build').getAttribute('data-step-state')).toBe('blocked')
+  expect(button(container, 'Train').getAttribute('data-step-state')).toBe('blocked')
   expect(button(container, 'Coverage').getAttribute('data-step-state')).toBe('blocked')
   expect(button(container, 'Compare').getAttribute('data-step-state')).toBe('blocked')
   expect(button(container, 'Next: Coverage').disabled).toBe(true)
   // Publication remains usable, but it is not completion of the unsaved draft.
+  await click(container, 'Overview')
   expect(button(container, 'Use for new songs').disabled).toBe(false)
 })
 
@@ -133,7 +134,7 @@ it('ignores a global cancel response after switching voices', async () => {
   if (!secondButton) throw new Error('Missing second voice')
   secondButton.click(); await settle()
   resolve({ ...preparedVoice(), status: 'cancelled', error_code: 'cancelled' }); await settle()
-  expect(container.querySelector('h2')?.textContent).toBe('Second voice')
+  expect(container.querySelector('[data-singing-heading]')?.textContent).toBe('Second voice')
   expect(container.querySelector('[data-voice-job-summary]')?.textContent).toContain('Audio preparation · done')
   await vi.advanceTimersByTimeAsync(10_000); await settle()
   expect(api.getVoicePreparation).toHaveBeenCalledTimes(2)
@@ -143,12 +144,12 @@ it('provides keyboard tabs and guided next without restarting preparation or los
   const container = await mount()
   expect(container.querySelectorAll('[role="tab"]')).toHaveLength(5)
   for (const tab of container.querySelectorAll('[role="tab"]')) expect(document.getElementById(tab.getAttribute('aria-controls') ?? '')).not.toBeNull()
-  await click(container, 'Next: Samples')
+  await click(container, 'Next: Review samples')
   const checkbox = input(container, 'Include segment: segment-1'); checkbox.click(); await settle()
-  await click(container, 'Files'); await click(container, 'Samples')
+  await click(container, 'Sources'); await click(container, 'Review samples')
   expect(input(container, 'Include segment: segment-1').checked).toBe(false)
   expect(api.getVoicePreparation).toHaveBeenCalledTimes(1)
-  const samplesTab = button(container, 'Samples')
+  const samplesTab = button(container, 'Review samples')
   samplesTab.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await settle()
   expect(button(container, 'Coverage').getAttribute('aria-selected')).toBe('true')
   expect(document.activeElement).toBe(button(container, 'Coverage'))
@@ -161,7 +162,7 @@ it('limits sample bulk actions to visible accepted samples and keeps cleanup ava
   preparation.segments?.push({ ...accepted, id: 'segment-3', source_filename: 'other.wav', has_cleaned: false })
   vi.mocked(api.getVoicePreparation).mockResolvedValue(preparation)
   const container = await mount()
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   await click(container, 'Clear visible selection')
   expect(input(container, 'Include segment: segment-1').checked).toBe(false)
   await change(input(container, 'Search samples'), 'other.wav')
@@ -188,7 +189,7 @@ it('lets processed samples play with the actual shared player during an active b
   const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
   vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined)
   const container = await mount()
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   const playButton = container.querySelector('[aria-label="Play"]')
   if (!(playButton instanceof HTMLButtonElement)) throw new Error('Missing actual player control')
   expect(playButton.matches(':disabled')).toBe(false)
@@ -221,7 +222,7 @@ it('pages sample bulk selection and does not alter accepted rows on another page
   preparation.selected_segment_ids = []
   vi.mocked(api.getVoicePreparation).mockResolvedValue(preparation)
   const container = await mount()
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   expect(container.querySelectorAll('[aria-label^="Include segment:"]')).toHaveLength(25)
   await click(container, 'Next page'); await click(container, 'Select visible accepted')
   expect(input(container, 'Include segment: sample-25').checked).toBe(true)
@@ -233,12 +234,12 @@ it('pages sample bulk selection and does not alter accepted rows on another page
 it('requires saving draft selection before coverage and current-reference comparison', async () => {
   vi.mocked(api.listVoiceTrialSources).mockResolvedValue([{ id: 'abcdef1234567890abcdef1234567890', filename: 'held-out.wav', duration_sec: 20 }])
   const container = await mount()
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   input(container, 'Use cleaned segment: segment-1').click(); await settle()
   await click(container, 'Coverage')
   expect(button(container, 'Analyze selected samples').disabled).toBe(true)
   expect(container.textContent).toContain('Save the sample selection')
-  await click(container, 'Build'); expect(button(container, 'Build voice').disabled).toBe(true)
+  await click(container, 'Train'); expect(button(container, 'Build voice').disabled).toBe(true)
   await click(container, 'Compare')
   expect(button(container, 'Run comparison').disabled).toBe(false)
   const reference = [...container.querySelectorAll('input')].find((item) => item.type === 'checkbox' && item.value === 'reference-1')
@@ -267,7 +268,7 @@ it('uses the existing preparation loop for coverage and ignores a response after
   await click(container, 'Coverage'); await click(container, 'Analyze selected samples')
   expect(api.analyzeVoiceCoverage).toHaveBeenCalledWith(voiceProfile().id, 'revision-1', expect.any(AbortSignal))
   const signal = vi.mocked(api.analyzeVoiceCoverage).mock.calls[0]?.[2]
-  await click(container, 'Files'); await click(container, 'Coverage')
+  await click(container, 'Sources'); await click(container, 'Coverage')
   expect(api.getVoicePreparation).toHaveBeenCalledTimes(1)
   app?.unmount(); app = undefined
   expect(signal?.aborted).toBe(true)
@@ -284,7 +285,7 @@ it('excludes legacy accepted clips outside the training duration from bulk selec
   preparation.segments?.push({ ...segment, id: 'legacy-short', duration_sec: 0.8, start_sec: 0, end_sec: 0.8 }, { ...segment, id: 'legacy-long', duration_sec: 31, start_sec: 20, end_sec: 51 })
   vi.mocked(api.getVoicePreparation).mockResolvedValue(preparation)
   const container = await mount()
-  await click(container, 'Samples'); await click(container, 'Select visible accepted')
+  await click(container, 'Review samples'); await click(container, 'Select visible accepted')
   expect(input(container, 'Include segment: legacy-short').disabled).toBe(true)
   expect(input(container, 'Include segment: legacy-short').checked).toBe(false)
   expect(input(container, 'Include segment: legacy-long').checked).toBe(false)
@@ -299,7 +300,7 @@ it('keeps the saved selection buildable when optional coverage analysis is cance
   await click(container, 'Coverage'); await click(container, 'Analyze selected samples'); await click(container, 'Cancel')
   expect(container.textContent).toContain('Coverage analysis was cancelled')
   expect(button(container, 'Analyze selected samples').disabled).toBe(false)
-  await click(container, 'Build')
+  await click(container, 'Train')
   expect(button(container, 'Build voice').disabled).toBe(false)
 })
 
@@ -324,14 +325,14 @@ it('saves a changed duration budget with the existing samples without repeating 
   expect(container.textContent).toContain('Save the new duration budget in Samples')
   await click(container, 'Coverage')
   expect(button(container, 'Analyze selected samples').disabled).toBe(true)
-  await click(container, 'Build')
+  await click(container, 'Train')
   expect(button(container, 'Build voice').disabled).toBe(true)
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   expect(button(container, 'Save selection').disabled).toBe(false)
   await click(container, 'Save selection')
   expect(api.selectVoiceSamples).toHaveBeenCalledWith(voiceProfile().id, { revision: 'revision-1', segment_ids: ['segment-1'], reference_id: 'reference-1', cleaned_segment_ids: [], max_selected_seconds: 1800 }, expect.any(AbortSignal))
   expect(api.prepareVoice).not.toHaveBeenCalled()
-  await click(container, 'Build')
+  await click(container, 'Train')
   expect(button(container, 'Build voice').disabled).toBe(false)
 })
 
@@ -346,9 +347,74 @@ it('explains an over-budget selection and keeps saving disabled until it fits', 
   const container = await mount()
   await change(select(container, 'Preparation duration'), 'custom')
   await change(input(container, 'Custom minutes (1–60)'), '1')
-  await click(container, 'Samples')
+  await click(container, 'Review samples')
   expect(container.textContent).toContain('Selection exceeds the 1.0 minute budget')
   expect(button(container, 'Save selection').disabled).toBe(true)
   input(container, 'Include segment: long-6').click(); await settle()
   expect(button(container, 'Save selection').disabled).toBe(false)
+})
+
+
+it('opens a published voice on Overview with its dry published reference', async () => {
+  vi.mocked(api.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true, trained_steps: 1000, has_preview: true }])
+  const container = await mount()
+  expect(container.querySelector('[aria-label="Overview"]')?.getAttribute('aria-selected')).toBe('true')
+  expect(container.querySelector('audio')?.getAttribute('src')).toContain('/reference/published')
+  expect(container.textContent).toContain('Dry reference recording')
+})
+
+it('does not warn about an explicitly excluded recording in the published training sources', async () => {
+  vi.mocked(api.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true, built_from: ['song.wav'], recordings: [{ filename: 'song.wav', bytes: 100 }, { filename: 'excluded.wav', bytes: 100 }] }])
+  const preparation = preparedVoice()
+  preparation.options?.sources?.push({ filename: 'excluded.wav', enabled: false, kind: 'song' })
+  vi.mocked(api.getVoicePreparation).mockResolvedValue(preparation)
+  const container = await mount()
+  await click(container, 'Train')
+  expect(container.textContent).not.toContain('These files changed after the last build')
+})
+
+it('requires a named confirmation before deleting a singing voice', async () => {
+  vi.mocked(api.deleteVoice).mockResolvedValue(undefined)
+  const container = await mount()
+  await click(container, 'Delete voice')
+  expect(api.deleteVoice).not.toHaveBeenCalled()
+  const dialog = document.querySelector('[role="dialog"]')
+  expect(dialog?.textContent).toContain('My voice')
+  const cancel = dialog?.querySelector('button')
+  if (!(cancel instanceof HTMLButtonElement)) throw new Error('Missing cancel')
+  cancel.click(); await settle()
+  expect(api.deleteVoice).not.toHaveBeenCalled()
+  await click(container, 'Delete voice')
+  const confirm = document.querySelector('[role="dialog"] [data-confirm-delete]')
+  if (!(confirm instanceof HTMLButtonElement)) throw new Error('Missing confirm')
+  confirm.click(); await settle()
+  expect(api.deleteVoice).toHaveBeenCalledTimes(1)
+})
+
+it('collapses historical completed job details while keeping active work expanded', async () => {
+  vi.mocked(api.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true }])
+  const container = await mount()
+  const history = container.querySelector('[data-voice-job-summary] details')
+  expect(history).toBeInstanceOf(HTMLDetailsElement)
+  expect(history?.hasAttribute('open')).toBe(false)
+})
+
+it('opens a running coverage job at Coverage without letting polling hijack a chosen stage', async () => {
+  vi.mocked(api.getVoicePreparation).mockResolvedValue({ ...preparedVoice(), status: 'running', operation: 'coverage' })
+  const container = await mount()
+  expect(button(container, 'Coverage').getAttribute('aria-selected')).toBe('true')
+  await click(container, 'Sources')
+  await vi.advanceTimersByTimeAsync(2000); await settle()
+  expect(button(container, 'Sources').getAttribute('aria-selected')).toBe('true')
+})
+
+it('selects the published model from Overview and changes its paired reference', async () => {
+  const singer = { ...voiceProfile(), usable: true, status: 'ready' as const }
+  vi.mocked(api.listVoices).mockResolvedValue([singer])
+  vi.mocked(api.selectVoiceModel).mockResolvedValue({ ...singer, active_model_id: 'trained-200', trained_steps: 200 })
+  const container = await mount()
+  await change(select(container, 'Active model for new songs'), 'trained-200')
+  expect(api.selectVoiceModel).toHaveBeenCalledWith(singer.id, 'trained-200', expect.any(AbortSignal))
+  expect(select(container, 'Active model for new songs').value).toBe('trained-200')
+  expect(container.querySelector('audio')?.getAttribute('src')).toContain('model=trained-200')
 })

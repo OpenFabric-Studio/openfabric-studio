@@ -5,8 +5,7 @@ import App from './App.vue'
 import { i18n, setLocale } from './i18n'
 import { completionNotifications, markGenerationsRead } from './composables/completionNotifications'
 vi.mock('./stores/orchestrator', () => ({ useOrchestratorStore: () => ({ startPolling: vi.fn(), stopPolling: vi.fn() }) }))
-vi.mock('./components/shared/AppHeader.vue', () => ({ default: defineComponent({ render: () => h('div') }) }))
-vi.mock('./components/shared/AppFooter.vue', () => ({ default: defineComponent({ render: () => h('div') }) }))
+vi.mock('./components/shared/AppShell.vue', () => ({ default: defineComponent({ render() { return h('div', this.$slots.default?.()) } }) }))
 let app: VueApp | undefined
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); completionNotifications.unread = [] })
 it('shows and clears the unread completion count in the document title', async () => {

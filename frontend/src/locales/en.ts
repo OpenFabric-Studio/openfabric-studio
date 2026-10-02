@@ -1,3 +1,9 @@
+import { appNavigationEn } from './appNavigation'
+import { homeOverviewEn } from './homeOverview'
+import { musicWorkspaceEn } from './musicWorkspace'
+import { audiobookWorkspaceEn } from './audiobookWorkspace'
+import { speechWorkspaceEn } from './speechWorkspace'
+import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
 import { referenceWorkspaceEn } from './referenceWorkspace'
 import { generationWorkspaceEn } from './generationWorkspace'
 import { videoWorkspaceEn, videoErrorsEn } from './videoWorkspace'
@@ -7,6 +13,12 @@ import { trackFavoritesEn } from './trackFavorites'
 import { upstreamLibraryEn } from './upstreamLibrary'
 import { upstreamWorkspaceEn } from './upstreamWorkspace'
 export default {
+  appNavigation: appNavigationEn,
+  homeOverview: homeOverviewEn,
+  musicWorkspace: musicWorkspaceEn,
+  audiobookWorkspace: audiobookWorkspaceEn,
+  speechWorkspace: speechWorkspaceEn,
+  singingWorkspace: singingWorkspaceEn, voiceStudio: voiceStudioEn,
   referenceWorkspace: referenceWorkspaceEn,
   generationWorkspace: generationWorkspaceEn,
   ...upstreamLibraryEn,
@@ -54,7 +66,7 @@ voiceProfiles: {
     created: 'Speech profile saved.',
     deleted: 'Speech profile deleted.',
     engineMissing: 'GPT-SoVITS not detected — install separately or enable mock mode for dry-run.',
-    engineReady: 'GPT-SoVITS checkout detected (synthesis invoke coming next).',
+    engineReady: 'GPT-SoVITS checkout detected.',
     engineMock: 'Speech clone mock mode is on (silent placeholder WAV).',
     trialTitle: 'Talking voice trial',
     trialIntro: 'Generate a short talking sample from a consent-backed profile. Needs GPT-SoVITS (or mock mode).',
@@ -214,7 +226,7 @@ voiceProfiles: {
       objective: { files: 'Add and prepare sources', samples: 'Listen and save your selection', coverage: 'Inspect observed coverage', build: 'Publish a reference or train', compare: 'Evaluate on held-out audio' },
       state: { complete: 'Complete', current: 'Current step', available: 'Available', blocked: 'Prerequisite needed' },
       prerequisite: { files: 'To continue, confirm the singer and prepare the enabled sources.', samples: 'To continue, include supported samples, choose a reference, and save your selection. Changed source settings require preparation again.', coverage: 'To continue, save a valid sample selection. Coverage analysis is optional and does not guarantee voice quality.', build: 'To continue, publish a voice from the saved selection. Unsaved edits must be reviewed first.', compare: 'Build a voice and save the selection before comparing its current references.' },
-      navigation: 'Voice workflow', tab: { files: 'Files', samples: 'Samples', coverage: 'Coverage', build: 'Build', compare: 'Compare' },
+      navigation: 'Voice workflow', tab: { files: 'Sources', samples: 'Review samples', coverage: 'Coverage', build: 'Train', compare: 'Compare' },
       step: 'Step {current} of {total}', next: 'Next: {step}',
       hint: { files: 'Choose sources and prepare audio.', samples: 'Listen, select samples, and save a reference.', coverage: 'Inspect the saved selection; measurements are optional.', build: 'Build and choose the active model.', compare: 'Compare on a separate recording.' },
       filesIntro: 'Enable the sources to process. Song inputs need vocal separation; isolated vocals bypass it. Excluded originals stay in the voice library.',
