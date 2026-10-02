@@ -3,16 +3,18 @@ import {
   parseSpeechVoiceProfile,
   parseSpeechVoiceProfilesResponse,
   parseSpeechCloneTrialResponse,
+  parseSpeechCloneEngineStatus,
   parsePatchSpeechVoiceProfileRequest,
 } from './contracts'
 import type {
   SpeechVoiceProfile,
   SpeechVoiceProfilesResponse,
   SpeechCloneTrialResponse,
+  SpeechCloneEngineStatus,
   PatchSpeechVoiceProfileRequest,
 } from './contracts'
 
-export type { SpeechVoiceProfile, SpeechCloneTrialResponse }
+export type { SpeechVoiceProfile, SpeechCloneTrialResponse, SpeechCloneEngineStatus }
 
 export async function listSpeechVoiceProfiles(signal?: AbortSignal): Promise<SpeechVoiceProfile[]> {
   const json = await apiFetch('/api/voice-profiles', { signal }, parseSpeechVoiceProfilesResponse)
@@ -51,12 +53,16 @@ export async function patchSpeechVoiceProfile(
   }, parseSpeechVoiceProfile)
 }
 
+export async function getSpeechCloneEngine(signal?: AbortSignal): Promise<SpeechCloneEngineStatus> {
+  return apiFetch('/api/speech-clone/engine', { signal }, parseSpeechCloneEngineStatus)
+}
+
 export async function startSpeechCloneTrial(
   profileId: string,
   text: string,
   signal?: AbortSignal,
 ): Promise<SpeechCloneTrialResponse> {
-  // Scaffold returns HTTP 501 with a structured body when GPT-SoVITS is absent.
+  // Missing engine returns HTTP 501 with a structured body; mock/ready return 200.
   const resp = await fetch('/api/speech-clone/trials', {
     method: 'POST',
     signal,

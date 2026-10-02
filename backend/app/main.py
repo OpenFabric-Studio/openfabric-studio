@@ -32,6 +32,7 @@ from .api.routes_voices import router as voices_router
 from .api.routes_voice_trials import router as voice_trials_router
 from .api.routes_voice_profiles import router as voice_profiles_router
 from .api.routes_speech_clone import router as speech_clone_router
+from .api.routes_audiobooks import router as audiobooks_router
 from .api.routes_yue2_upload import router as yue2_upload_router
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
@@ -107,6 +108,7 @@ app.include_router(voice_trials_router)
 app.include_router(voices_router)
 app.include_router(voice_profiles_router)
 app.include_router(speech_clone_router)
+app.include_router(audiobooks_router)
 app.include_router(videos_router)
 # Registered before proxy_router's catch-all so this exact path wins.
 app.include_router(yue2_upload_router)

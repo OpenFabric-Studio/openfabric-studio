@@ -31,6 +31,8 @@ Attribution for planned / inspired work
 ---------------------------------------
 - Voice-profile UX pattern inspired by LocalAI (MIT) — https://github.com/mudler/LocalAI
   OpenFabric implements its own FastAPI + SQLite voice-profile store; LocalAI code is not copied.
-- Planned talking / audiobook engine: GPT-SoVITS (MIT) — https://github.com/RVC-Boss/GPT-SoVITS
-  Not bundled; optional install. Singing voice cloning remains Seed-VC.
+- Talking / audiobook engine: GPT-SoVITS (MIT) — https://github.com/RVC-Boss/GPT-SoVITS
+  Not bundled; optional install via OPENFABRIC_GPT_SOVITS_DIR. OpenFabric never
+  auto-downloads pretrained weights. Singing voice cloning remains Seed-VC.
+  Do not use AGPL VoiceStudio code.
 

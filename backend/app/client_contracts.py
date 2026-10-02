@@ -22,6 +22,7 @@ from .video_contracts import VIDEO_CLIENT_MODELS
 from .audio_version_contracts import AudioVersion, TrackAudioVersionsResponse, CreateAudioVersionRequest
 from .audio_encoding import CLIENT_MODELS as AUDIO_CLIENT_MODELS
 from .voice_profile_contracts import VOICE_PROFILE_CLIENT_MODELS
+from .audiobook_contracts import AUDIOBOOK_CLIENT_MODELS
 
 WorkStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
 VoiceStatus = Literal["idle", "queued", "extracting", "cleaning", "preparing", "merging", "training", "ready", "failed", "cancelled"]
@@ -342,4 +343,5 @@ EXTRA_CLIENT_MODELS: list[type[BaseModel]] = [
     ProjectsResponse, MixSettingsResponse, OrchestratorStatusResponse, OrchestratorConfigResponse,
     UploadDatasetFilesResponse, LibraryStatusResponse, LibraryPickResponse,
     *VOICE_PROFILE_CLIENT_MODELS,
+    *AUDIOBOOK_CLIENT_MODELS,
 ]

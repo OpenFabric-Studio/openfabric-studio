@@ -9,6 +9,14 @@ from .contracts import Contract, JsonValue
 
 EngineHintMap = dict[str, JsonValue]
 
+SpeechCloneStatus = Literal[
+    "engine_not_installed",
+    "engine_ready",
+    "mock_completed",
+    "completed",
+    "failed",
+]
+
 
 class SpeechVoiceProfile(Contract):
     id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
@@ -38,11 +46,20 @@ class SpeechCloneTrialRequest(Contract):
 
 
 class SpeechCloneTrialResponse(Contract):
-    status: Literal["engine_not_installed"]
+    status: SpeechCloneStatus
     detail: str
     engine: Literal["speech", "gpt-sovits"]
     profile_id: str
-    install_hints: list[str]
+    install_hints: list[str] = Field(default_factory=list)
+    trial_id: str | None = None
+    output_path: str | None = None
+
+
+class SpeechCloneEngineStatus(Contract):
+    installed: bool
+    mock: bool
+    root: str | None = None
+    install_hints: list[str] = Field(default_factory=list)
 
 
 VOICE_PROFILE_CLIENT_MODELS: list[type[BaseModel]] = [
@@ -51,4 +68,5 @@ VOICE_PROFILE_CLIENT_MODELS: list[type[BaseModel]] = [
     PatchSpeechVoiceProfileRequest,
     SpeechCloneTrialRequest,
     SpeechCloneTrialResponse,
+    SpeechCloneEngineStatus,
 ]

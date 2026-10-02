@@ -153,6 +153,47 @@ export type AudioVersion = {
   "job_progress"?: (VoiceJobProgress | null)
 }
 
+export type AudiobookBook = {
+  "id": string
+  "title": string
+  "profile_id": string
+  "chapter_count": number
+  "status": "draft" | "queued" | "running" | "done" | "failed"
+  "export_path"?: (string | null)
+  "created_at": string
+  "updated_at": string
+}
+
+export type AudiobookBooksResponse = {
+  "books": Array<AudiobookBook>
+}
+
+export type AudiobookChapterInput = {
+  "title"?: string
+  "text": string
+}
+
+export type AudiobookCreateResponse = {
+  "book": AudiobookBook
+  "jobs": Array<AudiobookJob>
+}
+
+export type AudiobookJob = {
+  "id": string
+  "book_id": string
+  "chapter_index": number
+  "chapter_title"?: string
+  "status": "queued" | "running" | "done" | "failed" | "cancelled"
+  "detail"?: string
+  "output_path"?: (string | null)
+  "created_at": string
+  "updated_at": string
+}
+
+export type AudiobookJobsResponse = {
+  "jobs": Array<AudiobookJob>
+}
+
 export type BuildVoiceRequest = {
   "clean"?: boolean
   "preparation_revision"?: (string | null)
@@ -168,6 +209,12 @@ export type CreateAudioExportRequest = {
 
 export type CreateAudioVersionRequest = {
   "voice_id": string
+}
+
+export type CreateAudiobookRequest = {
+  "title": string
+  "profile_id": string
+  "chapters": Array<AudiobookChapterInput>
 }
 
 export type CreateGenerationPresetRequest = {
@@ -589,6 +636,13 @@ export type ShotRequest = {
   "prompt"?: string
 }
 
+export type SpeechCloneEngineStatus = {
+  "installed": boolean
+  "mock": boolean
+  "root"?: (string | null)
+  "install_hints"?: Array<string>
+}
+
 export type SpeechCloneTrialRequest = {
   "profile_id": string
   "text": string
@@ -596,11 +650,13 @@ export type SpeechCloneTrialRequest = {
 }
 
 export type SpeechCloneTrialResponse = {
-  "status": "engine_not_installed"
+  "status": "engine_not_installed" | "engine_ready" | "mock_completed" | "completed" | "failed"
   "detail": string
   "engine": "speech" | "gpt-sovits"
   "profile_id": string
-  "install_hints": Array<string>
+  "install_hints"?: Array<string>
+  "trial_id"?: (string | null)
+  "output_path"?: (string | null)
 }
 
 export type SpeechVoiceProfile = {
@@ -6736,7 +6792,13 @@ const schemas = {
   "SpeechCloneTrialResponse": {
     "properties": {
       "status": {
-        "const": "engine_not_installed",
+        "enum": [
+          "engine_not_installed",
+          "engine_ready",
+          "mock_completed",
+          "completed",
+          "failed"
+        ],
         "title": "Status",
         "type": "string"
       },
@@ -6762,16 +6824,337 @@ const schemas = {
         },
         "title": "Install Hints",
         "type": "array"
+      },
+      "trial_id": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Trial Id"
+      },
+      "output_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Output Path"
       }
     },
     "required": [
       "status",
       "detail",
       "engine",
-      "profile_id",
-      "install_hints"
+      "profile_id"
     ],
     "title": "SpeechCloneTrialResponse",
+    "type": "object"
+  },
+  "SpeechCloneEngineStatus": {
+    "properties": {
+      "installed": {
+        "title": "Installed",
+        "type": "boolean"
+      },
+      "mock": {
+        "title": "Mock",
+        "type": "boolean"
+      },
+      "root": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Root"
+      },
+      "install_hints": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Install Hints",
+        "type": "array"
+      }
+    },
+    "required": [
+      "installed",
+      "mock"
+    ],
+    "title": "SpeechCloneEngineStatus",
+    "type": "object"
+  },
+  "AudiobookChapterInput": {
+    "properties": {
+      "title": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Title",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 100000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "AudiobookChapterInput",
+    "type": "object"
+  },
+  "CreateAudiobookRequest": {
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "profile_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/AudiobookChapterInput"
+        },
+        "maxItems": 500,
+        "minItems": 1,
+        "title": "Chapters",
+        "type": "array"
+      }
+    },
+    "required": [
+      "title",
+      "profile_id",
+      "chapters"
+    ],
+    "title": "CreateAudiobookRequest",
+    "type": "object"
+  },
+  "AudiobookJob": {
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "book_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Book Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "chapter_title": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Chapter Title",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "detail": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Detail",
+        "type": "string"
+      },
+      "output_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Output Path"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "book_id",
+      "chapter_index",
+      "status",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "AudiobookJob",
+    "type": "object"
+  },
+  "AudiobookBook": {
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "profile_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "chapter_count": {
+        "minimum": 1,
+        "title": "Chapter Count",
+        "type": "integer"
+      },
+      "status": {
+        "enum": [
+          "draft",
+          "queued",
+          "running",
+          "done",
+          "failed"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "export_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Export Path"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "profile_id",
+      "chapter_count",
+      "status",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "AudiobookBook",
+    "type": "object"
+  },
+  "AudiobookBooksResponse": {
+    "properties": {
+      "books": {
+        "items": {
+          "$ref": "#/$defs/AudiobookBook"
+        },
+        "title": "Books",
+        "type": "array"
+      }
+    },
+    "required": [
+      "books"
+    ],
+    "title": "AudiobookBooksResponse",
+    "type": "object"
+  },
+  "AudiobookJobsResponse": {
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/AudiobookJob"
+        },
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "title": "AudiobookJobsResponse",
+    "type": "object"
+  },
+  "AudiobookCreateResponse": {
+    "properties": {
+      "book": {
+        "$ref": "#/$defs/AudiobookBook"
+      },
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/AudiobookJob"
+        },
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "book",
+      "jobs"
+    ],
+    "title": "AudiobookCreateResponse",
     "type": "object"
   },
   "ArtistSettings": {
@@ -10233,6 +10616,70 @@ function isSpeechCloneTrialResponse(value: unknown): value is SpeechCloneTrialRe
 }
 export function parseSpeechCloneTrialResponse(value: unknown): SpeechCloneTrialResponse {
   if (!isSpeechCloneTrialResponse(value)) throw new TypeError("Invalid SpeechCloneTrialResponse response")
+  return value
+}
+
+function isSpeechCloneEngineStatus(value: unknown): value is SpeechCloneEngineStatus {
+  return decodeSchema(schemas.SpeechCloneEngineStatus, value, schemas)
+}
+export function parseSpeechCloneEngineStatus(value: unknown): SpeechCloneEngineStatus {
+  if (!isSpeechCloneEngineStatus(value)) throw new TypeError("Invalid SpeechCloneEngineStatus response")
+  return value
+}
+
+function isAudiobookChapterInput(value: unknown): value is AudiobookChapterInput {
+  return decodeSchema(schemas.AudiobookChapterInput, value, schemas)
+}
+export function parseAudiobookChapterInput(value: unknown): AudiobookChapterInput {
+  if (!isAudiobookChapterInput(value)) throw new TypeError("Invalid AudiobookChapterInput response")
+  return value
+}
+
+function isCreateAudiobookRequest(value: unknown): value is CreateAudiobookRequest {
+  return decodeSchema(schemas.CreateAudiobookRequest, value, schemas)
+}
+export function parseCreateAudiobookRequest(value: unknown): CreateAudiobookRequest {
+  if (!isCreateAudiobookRequest(value)) throw new TypeError("Invalid CreateAudiobookRequest response")
+  return value
+}
+
+function isAudiobookJob(value: unknown): value is AudiobookJob {
+  return decodeSchema(schemas.AudiobookJob, value, schemas)
+}
+export function parseAudiobookJob(value: unknown): AudiobookJob {
+  if (!isAudiobookJob(value)) throw new TypeError("Invalid AudiobookJob response")
+  return value
+}
+
+function isAudiobookBook(value: unknown): value is AudiobookBook {
+  return decodeSchema(schemas.AudiobookBook, value, schemas)
+}
+export function parseAudiobookBook(value: unknown): AudiobookBook {
+  if (!isAudiobookBook(value)) throw new TypeError("Invalid AudiobookBook response")
+  return value
+}
+
+function isAudiobookBooksResponse(value: unknown): value is AudiobookBooksResponse {
+  return decodeSchema(schemas.AudiobookBooksResponse, value, schemas)
+}
+export function parseAudiobookBooksResponse(value: unknown): AudiobookBooksResponse {
+  if (!isAudiobookBooksResponse(value)) throw new TypeError("Invalid AudiobookBooksResponse response")
+  return value
+}
+
+function isAudiobookJobsResponse(value: unknown): value is AudiobookJobsResponse {
+  return decodeSchema(schemas.AudiobookJobsResponse, value, schemas)
+}
+export function parseAudiobookJobsResponse(value: unknown): AudiobookJobsResponse {
+  if (!isAudiobookJobsResponse(value)) throw new TypeError("Invalid AudiobookJobsResponse response")
+  return value
+}
+
+function isAudiobookCreateResponse(value: unknown): value is AudiobookCreateResponse {
+  return decodeSchema(schemas.AudiobookCreateResponse, value, schemas)
+}
+export function parseAudiobookCreateResponse(value: unknown): AudiobookCreateResponse {
+  if (!isAudiobookCreateResponse(value)) throw new TypeError("Invalid AudiobookCreateResponse response")
   return value
 }
 

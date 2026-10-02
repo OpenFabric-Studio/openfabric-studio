@@ -88,6 +88,13 @@ DEMUCS_DIR = _env_path("DEMUCS_DIR", r"E:\AI\Demucs")
 # Clone shells out to this checkout's own venv so it does not share the API env.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 SEED_VC_DIR = _env_path("SEED_VC_DIR", str(_REPO_ROOT / "external" / "seed-vc"))
+# Optional GPT-SoVITS checkout for talking / audiobook speech clone (MIT).
+# Not bundled; no weights are downloaded by OpenFabric. See TALKING_VOICE_PLAN.md.
+GPT_SOVITS_DIR = _env_path_prefer(
+    "OPENFABRIC_GPT_SOVITS_DIR",
+    "GPT_SOVITS_DIR",
+    default=str(_REPO_ROOT / "external" / "gpt-sovits"),
+)
 # Apple Silicon video engine (LTX-2.3 via the MLX port). setup_video.sh clones it here.
 LTX_DIR = _env_path("LTX_DIR", str(_REPO_ROOT / "external" / "ltx-2-mlx"))
 
