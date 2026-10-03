@@ -45,9 +45,14 @@ mac:
       arch: [arm64]
   category: public.app-category.music
   icon: build/icon.png
-  # Experimental unsigned builds; clean-install and downloaded-build behavior
-  # must be verified for each release candidate before publishing.
-  identity: null
+  # Ad-hoc signing (no certificate). With identity null the renamed Electron bundle had no valid seal, and a
+  # downloaded copy (quarantine flag set by the browser) was reported as "damaged" with no way to open it.
+  # Pattern from inikolax/remiqora v0.2.2 (bd8316e, #33, MIT). An ad-hoc seal turns that into the usual
+  # "Apple could not verify" prompt, which the user passes once via System Settings > Privacy & Security >
+  # Open Anyway. Hardened runtime stays off: without a Developer ID it makes library validation reject
+  # Electron's frameworks. A Developer ID and notarization is the real fix.
+  identity: "-"
+  hardenedRuntime: false
   artifactName: OpenFabric-Studio-${version}-${arch}.${ext}
 
 # Linux packaging is experimental; first-run setup currently reports unsupported.

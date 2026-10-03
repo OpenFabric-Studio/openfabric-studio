@@ -2,7 +2,7 @@ name: Desktop app
 
 # Packaging is expensive: tags v* and manual dispatch only (no PR builds).
 # Pushing a tag vX.Y.Z creates a DRAFT pre-release with installers; nothing becomes
-# public until the draft is published by hand. The installers are not signed yet.
+# public until the draft is published by hand. macOS builds are ad-hoc signed (no Developer ID yet).
 on:
   workflow_dispatch:
   push:
@@ -60,6 +60,14 @@ jobs:
         working-directory: desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      # An app without a valid seal is reported as "damaged" once downloaded; fail here instead.
+      # Ad-hoc verify pattern from inikolax/remiqora v0.2.2 (bd8316e, MIT).
+      - name: Verify the ad-hoc signature
+        if: runner.os == 'macOS'
+        run: |
+          codesign --verify --deep --strict --verbose=2 "dist/mac-arm64/OpenFabric Studio.app"
+          codesign --display --verbose=2 "dist/mac-arm64/OpenFabric Studio.app"
+        working-directory: desktop
       - uses: actions/upload-artifact@v7
         with:
           name: openfabric-studio-${{ runner.os }}
@@ -94,7 +102,7 @@ jobs:
           cat > ../notes.md <<'NOTES'
           Experimental OpenFabric Studio installers for Windows (NVIDIA GPU) and macOS (Apple Silicon).
 
-          - They are not signed yet. Windows shows a SmartScreen warning and macOS may ask you to allow the app.
+          - Windows shows a SmartScreen warning ("More info" → "Run anyway"). The macOS app is ad-hoc signed only (no Developer ID), so allow it once via System Settings → Privacy & Security → "Open Anyway".
           - First launch downloads the baseline music engines and models into a folder you choose. Voice and generated-video engines require their separately documented setup.
           - SHA-256 sums of every file are in `SHA256SUMS.txt`.
           - Derived from Remiqora under MIT — see NOTICE in the repository.

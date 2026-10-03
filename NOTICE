@@ -36,3 +36,4 @@ Attribution for planned / inspired work
   auto-downloads pretrained weights. Singing voice cloning remains Seed-VC.
   Do not use AGPL VoiceStudio code.
 - Audiobook options (pasted text, TXT, and EPUB import, pronunciation map, per-chapter regenerate, MP3 and chaptered M4B export) were inspired by Pandrator (MIT, https://github.com/lukaszliniewicz/Pandrator). OpenFabric reimplemented them in its own code; Pandrator source is not copied or vendored.
+- macOS ad-hoc signing for Electron downloads (identity "-", hardenedRuntime false, CI codesign verify, Open Anyway docs) follows the pattern from inikolax/remiqora v0.2.2 commit bd8316e / issue #33 (MIT). OpenFabric reimplemented the same electron-builder and workflow checks; Remiqora application code was not vendored for this change.

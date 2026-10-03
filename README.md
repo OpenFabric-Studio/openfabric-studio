@@ -90,7 +90,7 @@ Optional singing and speech CLI wrappers are `setup_voice.bat` / `./setup_voice.
 
 Generated video currently requires **Apple Silicon macOS**. CPU-only Seed-VC singing **training** is unsupported; conversion and training have different hardware requirements. Linux/Intel Mac desktop first-run installation is unavailable; use the source route. Clean Windows/Linux installations and GPU workflows still require real platform verification. See [platform setup and troubleshooting](docs/platform-setup.md).
 
-Desktop packaging is experimental. The first-run desktop bootstrap installs uv and the backend; optional engines and weights are selected inside the app. CI packaging runs on tags or manual dispatch.
+Desktop packaging is experimental. The first-run desktop bootstrap installs uv and the backend; optional engines and weights are selected inside the app. CI packaging runs on tags or manual dispatch. macOS installers are ad-hoc signed (no Developer ID): after download, allow the app once via System Settings → Privacy & Security → Open Anyway. See [desktop/README.md](desktop/README.md).
 
 ---
 

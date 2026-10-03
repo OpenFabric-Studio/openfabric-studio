@@ -55,7 +55,7 @@ npm run dist
 
 Outputs live under `desktop/dist/` with OpenFabric Studio package names. Build macOS packages on macOS. `npm run dist:dir` creates an unpacked application for testing.
 
-The build runs the frontend’s strict type check/build, copies backend sources, frontend assets and the ACE-Step/model-download patches into `resources/`, and refuses to package detected `.env`, databases or virtualenvs. Linux `.env.setup` proposals are excluded. It does not bundle model weights. Builds are unsigned and can trigger platform security prompts.
+The build runs the frontend’s strict type check/build, copies backend sources, frontend assets and the ACE-Step/model-download patches into `resources/`, and refuses to package detected `.env`, databases or virtualenvs. Linux `.env.setup` proposals are excluded. It does not bundle model weights. Windows builds are unsigned (SmartScreen). The macOS app is **ad-hoc signed** only (no Developer ID): a downloaded copy shows “Apple could not verify…”, then you allow it once in **System Settings → Privacy & Security → Open Anyway** (macOS 15+ has no reliable right-click bypass). Without that ad-hoc seal, Gatekeeper can report the download as “damaged” with no open path — the same fix Remiqora shipped in v0.2.2 (`bd8316e`, MIT).
 
 The [Desktop app workflow](../.github/workflows/desktop.yml) requires CI verification before packaging. PR/manual runs keep workflow artifacts; a matching version tag can create a **draft** prerelease with checksums. Publication requires manual review and real platform checks in [fork maintenance](../docs/fork-maintenance.md). There is no promised release date.
 
@@ -95,7 +95,7 @@ The local `model-manager-resume` update applies [yue-model-resume.patch](../exte
 
 ## Known gaps
 
-- No code signing or automatic updater.
+- No Developer ID certificate, notarization, or automatic updater. macOS uses ad-hoc signing only.
 - Desktop Linux first-run installation is not implemented.
 - Current fork installer/downloaded-build behavior is not yet verified on Windows or macOS.
 - Model download progress can be estimated rather than exact.
