@@ -36,6 +36,17 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             await admission.reserve_native(lambda: True)
         self.assertFalse(admission.native_work_inflight())
 
+    async def test_setup_rejects_native_after_waiting_for_admission(self) -> None:
+        with patch('app.module_jobs.work_busy', return_value=False) as setup:
+            async with admission.admission_lock:
+                pending = asyncio.create_task(admission.reserve_native(lambda: False))
+                await asyncio.sleep(0)
+                setup.return_value = True
+            with self.assertRaises(admission.ResourceBusyError) as caught:
+                await pending
+        self.assertEqual(caught.exception.code, 'module_setup_busy')
+        self.assertFalse(admission.native_work_inflight())
+
     async def test_native_reservation_is_visible_until_idempotent_release(self) -> None:
         lease = await admission.reserve_native(lambda: False)
         self.assertTrue(admission.native_work_inflight())

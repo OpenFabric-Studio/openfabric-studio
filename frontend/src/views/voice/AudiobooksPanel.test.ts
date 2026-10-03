@@ -7,14 +7,16 @@ import * as api from '../../api/audiobooks'
 import * as profilesApi from '../../api/voiceProfiles'
 import type { AudiobookBook, AudiobookCreateResponse, AudiobookJob } from '../../api/audiobooks'
 import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
+import type { EbookDraft } from '../../api/contracts'
 import en from '../../locales/en'
 import { audiobookWorkspaceEn } from '../../locales/audiobookWorkspace'
 
 vi.mock('../../api/audiobooks', async (original) => ({ ...await original<typeof import('../../api/audiobooks')>(),
   __v_isRef: false,
   listAudiobooks: vi.fn(), listAudiobookJobs: vi.fn(), createAudiobook: vi.fn(), retryAudiobook: vi.fn(),
+  listEbookDrafts: vi.fn(), getEbookDraft: vi.fn(), deleteEbookDraft: vi.fn(), importEbook: vi.fn(), saveEbookDraft: vi.fn(), createAudiobookFromDraft: vi.fn(), controlAudiobook: vi.fn(),
 }))
-vi.mock('../../api/voiceProfiles', () => ({ listSpeechVoiceProfiles: vi.fn() }))
+vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(), listSpeechVoiceProfiles: vi.fn(), startSpeechCloneTrial: vi.fn() }))
 
 let app: App | undefined
 let hidden = ref(false)
@@ -34,6 +36,7 @@ function deferred<T>() {
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); activities.length = 0; hidden = ref(false)
   vi.mocked(api.listAudiobooks).mockResolvedValue([book()])
+  vi.mocked(api.listEbookDrafts).mockResolvedValue([])
   vi.mocked(api.listAudiobookJobs).mockImplementation(async id => [job(book(id, id === 'b'.repeat(32) ? 'Second book' : 'First book'))])
   vi.mocked(profilesApi.listSpeechVoiceProfiles).mockResolvedValue([profile])
 })
@@ -343,4 +346,91 @@ it('waits for a library reload before retrying to prevent stale list results rep
   button(container, 'Retry failed chapters').dispatchEvent(new MouseEvent('click', { bubbles: true })); await settle()
   expect(api.retryAudiobook).not.toHaveBeenCalled()
   request.resolve([failed]); await settle()
+})
+
+const ebook: EbookDraft = { id: 'f'.repeat(32), title: 'Imported story', chapters: [{ title: 'Front matter', text: 'Copyright page', included: true }, { title: 'A chapter', text: 'The story begins here.', included: true }], source_filename: 'story.mobi', source_sha256: 'a'.repeat(64), warnings: [{ code: 'chapter_detection', message: 'Review chapter boundaries.' }], revision: 1, created_at: 'today', updated_at: 'today' }
+async function chooseImport(container: HTMLElement) {
+  vi.mocked(api.listEbookDrafts).mockResolvedValue([{ id: ebook.id, title: ebook.title, source_filename: ebook.source_filename, chapter_count: ebook.chapters.length, revision: ebook.revision, created_at: ebook.created_at, updated_at: ebook.updated_at }]); vi.mocked(api.getEbookDraft).mockResolvedValue(ebook); await draft(container)
+  await change(container, 'Saved ebook drafts', ebook.id)
+}
+it('retains existing editor work until a saved MOBI draft is deliberately selected', async () => {
+  const container = await mount(); await chooseImport(container)
+  expect(field(container, 'Book title').value).toBe('Draft book')
+  await click(container, 'Use imported chapters')
+  expect(field(container, 'Book title').value).toBe('Imported story')
+  expect(field(container, 'Chapter 2 text').value).toBe('The story begins here.')
+  expect(container.textContent).toContain('Review chapter boundaries.')
+  expect(container.querySelector('a[download]')?.getAttribute('href')).toContain(`/imports/${ebook.id}/source`)
+})
+
+it('saves reviewed inclusion choices and creates narration against the resulting revision', async () => {
+  const container = await mount(); await chooseImport(container); await click(container, 'Use imported chapters')
+  const check = [...container.querySelectorAll<HTMLInputElement>('input[type=checkbox]')][0]; if (!check) throw new Error('Missing inclusion choice'); check.click(); await settle()
+  vi.mocked(api.saveEbookDraft).mockResolvedValue({ ...ebook, revision: 2, chapters: [{ ...ebook.chapters[0], title: 'Front matter', text: 'Copyright page', included: false }, { title: 'A chapter', text: 'The story begins here.', included: true }] })
+  vi.mocked(api.createAudiobookFromDraft).mockResolvedValue({ book: book('e'.repeat(32), ebook.title, 'queued'), jobs: [] })
+  submit(container); await settle()
+  expect(api.createAudiobook).not.toHaveBeenCalled()
+  expect(api.saveEbookDraft).toHaveBeenCalledWith(ebook.id, expect.objectContaining({ revision: 1, chapters: expect.arrayContaining([expect.objectContaining({ included: false })]) }), expect.any(AbortSignal))
+  expect(api.createAudiobookFromDraft).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }), profile.id, expect.any(AbortSignal))
+})
+
+it('preserves reviewed text when another session changes the saved draft', async () => {
+  const container = await mount(); await chooseImport(container); await click(container, 'Use imported chapters'); await change(container, 'Chapter 2 text', 'Keep my newer text')
+  vi.mocked(api.saveEbookDraft).mockRejectedValue(new (await import('../../api/http')).ApiError('ebook_draft_conflict', 409))
+  await click(container, 'Save reviewed draft')
+  expect(field(container, 'Chapter 2 text').value).toBe('Keep my newer text'); expect(container.textContent).toContain('changed in another session'); expect(api.createAudiobookFromDraft).not.toHaveBeenCalled()
+})
+
+it('pauses and resumes saved narration with honest section-boundary guidance', async () => {
+  const running = book(undefined, undefined, 'running'); vi.mocked(api.listAudiobooks).mockResolvedValue([running]); vi.mocked(api.controlAudiobook).mockResolvedValue({ ...running, status: 'paused' })
+  const container = await mount(); await click(container, 'Pause narration')
+  expect(api.controlAudiobook).toHaveBeenCalledWith(running.id, 'pause', expect.any(AbortSignal)); expect(container.textContent).toContain('after the current speech section finishes')
+  expect(button(container, 'Resume narration')).toBeDefined()
+})
+
+it('blocks library reload while a narration control request is pending', async () => {
+  const running = book(undefined, undefined, 'running'); vi.mocked(api.listAudiobooks).mockResolvedValue([running])
+  const request = deferred<AudiobookBook>(); vi.mocked(api.controlAudiobook).mockReturnValue(request.promise)
+  const node = await mount(); await click(node, 'Pause narration')
+  expect(button(node, 'Reload library').disabled).toBe(true)
+  button(node, 'Reload library').dispatchEvent(new MouseEvent('click', { bubbles: true })); await settle()
+  expect(api.listAudiobooks).toHaveBeenCalledTimes(1)
+  request.resolve({ ...running, status: 'paused' }); await settle()
+  expect(button(node, 'Resume narration')).toBeDefined()
+})
+
+it('explains exact stable engine failure codes for narration', async () => {
+  vi.mocked(api.listAudiobookJobs).mockResolvedValue([{ ...job(book(), 'failed'), detail: 'api_unavailable' }])
+  const node = await mount(); expect(node.textContent).toContain('speech engine API is unavailable')
+})
+
+it('keeps the imported chapter editor visible after deleting its last chapter and adding another', async () => {
+  const node = await mount(); await chooseImport(node); await click(node, 'Use imported chapters')
+  await change(node, 'Chapter to review', '1'); await click(node, 'Remove chapter 2')
+  expect(field(node, 'Chapter to review').value).toBe('0')
+  await click(node, 'Add chapter'); expect(field(node, 'Chapter to review').value).toBe('1')
+})
+
+it('previews the selected narrator and invalidates late audio when its text changes', async () => {
+  const response = deferred<Awaited<ReturnType<typeof profilesApi.startSpeechCloneTrial>>>()
+  vi.mocked(profilesApi.startSpeechCloneTrial).mockReturnValue(response.promise)
+  const node = await mount(); await draft(node); await click(node, 'Preview narrator')
+  expect(profilesApi.startSpeechCloneTrial).toHaveBeenCalledWith(profile.id, 'Draft chapter text', expect.any(AbortSignal))
+  await change(node, 'Chapter 1 text', 'Updated chapter text')
+  expect(vi.mocked(profilesApi.startSpeechCloneTrial).mock.calls[0]?.[2]?.aborted).toBe(true)
+  response.resolve({ status: 'completed', detail: '', engine: 'gpt-sovits', profile_id: profile.id, trial_id: '1'.repeat(32) }); await settle()
+  expect(node.querySelector('audio')).toBeNull()
+})
+
+it('keeps the editor mounted during confirmed import deletion and retains its text after completion', async () => {
+  const node = await mount(); await chooseImport(node); await click(node, 'Use imported chapters')
+  const request = deferred<void>(); vi.mocked(api.deleteEbookDraft).mockReturnValue(request.promise)
+  await click(node, 'Delete saved draft'); await click(node, 'Delete source and saved draft')
+  expect(button(node, 'Back to books').disabled).toBe(true)
+  button(node, 'Back to books').dispatchEvent(new MouseEvent('click', { bubbles: true })); await settle()
+  expect(field(node, 'Book title').value).toBe(ebook.title)
+  request.resolve(); await settle()
+  expect(node.querySelector('a[download]')).toBeNull()
+  expect(field(node, 'Chapter 2 text').value).toBe('The story begins here.')
+  expect(button(node, 'Back to books').disabled).toBe(false)
 })

@@ -190,6 +190,8 @@ async def add_source(voice_id: str, upload: UploadFile) -> VoiceTrialSource:
 
 
 def start_comparison(voice_id: str, request: VoiceComparisonRequest) -> VoiceComparisonResponse:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     from .voice_build import resolve_model_artifact, resolve_reference_artifact
     root = _voice_path(voice_id)
     if any(key[0] == voice_id for key in _jobs):

@@ -30,6 +30,88 @@ from app.data_root import (
 
 
 class DataRootTests(unittest.TestCase):
+    def _speech_library(self, src: Path) -> None:
+        for folder in ('audiobooks', 'voice-profiles', 'speech-clone-trials'):
+            (src / folder).mkdir(parents=True, exist_ok=True)
+            (src / folder / 'sample.wav').write_bytes(b'original audio')
+        with sqlite3.connect(src / 'voice-profiles' / 'profiles.db') as connection:
+            connection.execute('CREATE TABLE voice_profiles(reference_audio_path TEXT, notes TEXT)')
+            connection.execute('INSERT INTO voice_profiles VALUES(?,?)',
+                (str(src / 'voice-profiles' / 'sample.wav'), 'Mention ' + str(src)))
+        with sqlite3.connect(src / 'audiobooks' / 'audiobooks.db') as connection:
+            connection.execute('CREATE TABLE audiobook_books(export_path TEXT)')
+            connection.execute('INSERT INTO audiobook_books VALUES(?)', (str(src / 'audiobooks' / 'sample.wav'),))
+            connection.execute('CREATE TABLE audiobook_jobs(output_path TEXT, chapter_text TEXT)')
+            connection.execute('INSERT INTO audiobook_jobs VALUES(?,?)',
+                (str(src / 'audiobooks' / 'sample.wav'), 'Story mentions ' + str(src)))
+
+    def test_speech_only_library_is_moved_and_absolute_paths_are_rewritten(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            self._speech_library(src)
+            self.assertTrue(has_library(src))
+            migrate_library(src, dest)
+            for folder in ('audiobooks', 'voice-profiles', 'speech-clone-trials'):
+                self.assertEqual((dest / folder / 'sample.wav').read_bytes(), b'original audio')
+                self.assertFalse((src / folder).exists())
+            with sqlite3.connect(dest / 'voice-profiles' / 'profiles.db') as connection:
+                path, notes = connection.execute('SELECT reference_audio_path, notes FROM voice_profiles').fetchone()
+            self.assertEqual(path, str(dest / 'voice-profiles' / 'sample.wav'))
+            self.assertEqual(notes, 'Mention ' + str(src))
+            with sqlite3.connect(dest / 'audiobooks' / 'audiobooks.db') as connection:
+                export = connection.execute('SELECT export_path FROM audiobook_books').fetchone()[0]
+                path, text = connection.execute('SELECT output_path, chapter_text FROM audiobook_jobs').fetchone()
+            self.assertEqual(export, str(dest / 'audiobooks' / 'sample.wav'))
+            self.assertEqual(path, export)
+            self.assertEqual(text, 'Story mentions ' + str(src))
+
+    def test_failed_speech_catalog_rewrite_restores_all_databases(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            self._library(src)
+            self._speech_library(src)
+            rewrite = data_root.rewrite_library_paths
+            def fail_after_speech(path: Path, old: Path, new: Path) -> None:
+                rewrite(path, old, new)
+                if path.name == 'audiobooks.db':
+                    raise OSError('interrupted speech metadata update')
+            with patch.object(data_root, 'rewrite_library_paths', side_effect=fail_after_speech):
+                with self.assertRaises(OSError):
+                    migrate_library(src, dest)
+            with sqlite3.connect(src / 'voice-profiles' / 'profiles.db') as connection:
+                path = connection.execute('SELECT reference_audio_path FROM voice_profiles').fetchone()[0]
+            self.assertEqual(path, str(src / 'voice-profiles' / 'sample.wav'))
+            with sqlite3.connect(src / 'audiobooks' / 'audiobooks.db') as connection:
+                path = connection.execute('SELECT export_path FROM audiobook_books').fetchone()[0]
+            self.assertEqual(path, str(src / 'audiobooks' / 'sample.wav'))
+            self.assertFalse(has_library(dest))
+
+    def test_migration_rejects_a_speech_database_symlink_outside_the_library(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); src, dest = root / 'old', root / 'new'
+            self._speech_library(src)
+            private = root / 'private.db'
+            (src / 'voice-profiles' / 'profiles.db').replace(private)
+            original = private.read_bytes()
+            (src / 'voice-profiles' / 'profiles.db').symlink_to(private)
+            with self.assertRaises(DataDirError):
+                migrate_library(src, dest)
+            self.assertEqual(private.read_bytes(), original)
+            self.assertTrue((src / 'audiobooks' / 'sample.wav').is_file())
+
+    def test_interrupted_speech_migration_can_be_recovered_without_losing_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve(); src, dest = root / 'old', root / 'new'
+            self._speech_library(src)
+            with patch.object(data_root, 'rewrite_text_prefixes', side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    migrate_library(src, dest)
+            migrate_library(src, dest)
+            with sqlite3.connect(dest / 'voice-profiles' / 'profiles.db') as connection:
+                path = connection.execute('SELECT reference_audio_path FROM voice_profiles').fetchone()[0]
+            self.assertEqual(path, str(dest / 'voice-profiles' / 'sample.wav'))
+            self.assertEqual((dest / 'speech-clone-trials' / 'sample.wav').read_bytes(), b'original audio')
+
     def test_migration_rewrites_version_catalog_and_export_absolute_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -471,6 +553,16 @@ class DataRootTests(unittest.TestCase):
             saved = json.loads(cfg.read_text(encoding="utf-8"))
             self.assertEqual(saved["error"], "destination_not_empty")
 
+    def test_place_seed_models_preserves_an_absent_optional_engine(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            seed = root / 'not-installed'
+            with patch('app.data_root.logger.exception') as log:
+                dest = place_seed_models(root / 'library', seed)
+            self.assertTrue(dest.is_dir())
+            self.assertFalse(seed.exists())
+            log.assert_not_called()
+
     def test_place_seed_models_moves_weights_and_retargets_a_stale_link(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -565,7 +657,7 @@ class DataRootTests(unittest.TestCase):
                     os.environ["OPENFABRIC_CONFIG"] = previous
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
-                ["tracks", "voices", "videos", "models", "logs", "database"],
+                ["tracks", "voices", "videos", "audiobooks", "speechProfiles", "speechTrials", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:

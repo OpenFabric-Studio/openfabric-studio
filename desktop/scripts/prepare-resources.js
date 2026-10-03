@@ -32,6 +32,9 @@ fs.cpSync(backendSrc, path.join(out, 'backend'), {
     return !rel.split(path.sep).includes('__pycache__') && !rel.endsWith('.pyc');
   },
 });
+// The backend wizard and desktop share one reviewed pin catalog.
+fs.mkdirSync(path.join(out, 'backend', 'app'), { recursive: true });
+fs.copyFileSync(path.join(root, 'desktop', 'manifest.json'), path.join(out, 'backend', 'app', 'module_assets.json'));
 
 const dist = path.join(root, 'frontend', 'dist');
 if (!fs.existsSync(path.join(dist, 'index.html'))) throw new Error('frontend/dist is missing: build the frontend first');

@@ -4,15 +4,39 @@ import {
   parseAudiobookBooksResponse,
   parseAudiobookCreateResponse,
   parseAudiobookJobsResponse,
+  parseEbookDraft, parseEbookDraftsResponse, parsePatchEbookDraftRequest,
 } from './contracts'
 import type {
   AudiobookBook,
   AudiobookCreateResponse,
   AudiobookJob,
   CreateAudiobookRequest,
+  EbookDraft, EbookDraftSummary, PatchEbookDraftRequest,
 } from './contracts'
 
 export type { AudiobookBook, AudiobookJob, AudiobookCreateResponse, CreateAudiobookRequest }
+export type { EbookDraft }
+
+export function importEbook(file: File, signal?: AbortSignal): Promise<EbookDraft> {
+  const form = new FormData(); form.append('file', file, file.name)
+  return apiFetch('/api/audiobooks/imports', { method: 'POST', body: form, signal }, parseEbookDraft)
+}
+export async function listEbookDrafts(signal?: AbortSignal): Promise<EbookDraftSummary[]> {
+  return (await apiFetch('/api/audiobooks/imports', { signal }, parseEbookDraftsResponse)).drafts
+}
+export function getEbookDraft(id: string, signal?: AbortSignal): Promise<EbookDraft> { return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { signal }, parseEbookDraft) }
+export async function deleteEbookDraft(id: string, signal?: AbortSignal): Promise<void> { await apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { method: 'DELETE', signal }) }
+export function saveEbookDraft(id: string, body: PatchEbookDraftRequest, signal?: AbortSignal): Promise<EbookDraft> {
+  const validated = parsePatchEbookDraftRequest(body)
+  return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { method: 'PATCH', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validated) }, parseEbookDraft)
+}
+export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal): Promise<AudiobookCreateResponse> {
+  return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(draft.id)}/create`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId, revision: draft.revision }) }, parseAudiobookCreateResponse)
+}
+export function ebookSourceUrl(id: string): string { return `/api/audiobooks/imports/${encodeURIComponent(id)}/source` }
+export function controlAudiobook(id: string, action: 'pause' | 'resume' | 'cancel', signal?: AbortSignal): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(id)}/${action}`, { method: 'POST', signal }, parseAudiobookBook)
+}
 
 export async function listAudiobooks(signal?: AbortSignal): Promise<AudiobookBook[]> {
   const json = await apiFetch('/api/audiobooks', { signal }, parseAudiobookBooksResponse)

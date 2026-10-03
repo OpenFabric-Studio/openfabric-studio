@@ -88,6 +88,13 @@ class JobLifecycleTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIsNone(job.proc)
             await asyncio.sleep(0)
 
+    async def test_video_does_not_register_work_during_module_setup(self) -> None:
+        with patch('app.module_jobs.work_busy', return_value=True):
+            with self.assertRaises(video.VideoJobError) as caught:
+                await self._start_video()
+        self.assertEqual(caught.exception.code, 'busy')
+        self.assertIsNone(video._current)
+
     async def test_midi_cancel_finishes_a_task_before_it_first_runs(self) -> None:
         job = await midi.start(1, "full")
         result = await midi.cancel(1, "full")

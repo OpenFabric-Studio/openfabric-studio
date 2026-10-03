@@ -28,6 +28,11 @@ async function describePlan(ctx) {
  * An abort keeps partial downloads so the next run resumes; a failure stops the run and rethrows.
  */
 async function runSetup(ctx, emit = () => {}) {
+  if (!ctx.components && ctx.platform !== 'win32-x64' && ctx.platform !== 'darwin-arm64') {
+    const error = new Error('Desktop bootstrap is unavailable on this platform. Follow the source installation instructions.');
+    error.code = 'unsupported-platform';
+    throw error;
+  }
   const skip = new Set(ctx.skip || []);
   const plan = await describePlan(ctx);
   const requirements = installationRequirements(plan);
@@ -51,6 +56,13 @@ async function runSetup(ctx, emit = () => {}) {
     emit({ type: 'component', id: c.id, status: 'running' });
     try {
       await c.install(ctx, (progress) => emit({ type: 'component', id: c.id, status: 'running', ...progress }));
+      ctx.signal?.throwIfAborted();
+      if (!(await c.verify(ctx))) {
+        const error = new Error(`Verification failed for ${c.id}. See the setup log and retry.`);
+        error.code = 'verification-failed';
+        throw error;
+      }
+      ctx.signal?.throwIfAborted();
     } catch (error) {
       if (ctx.signal?.aborted) throw error;
       emit({ type: 'component', id: c.id, status: 'error', error: error.message });
@@ -69,6 +81,7 @@ async function runSetup(ctx, emit = () => {}) {
  * unless `ignoreSkipped` is set (used to decide whether the app can start).
  */
 async function isSetupComplete(ctx, { ignoreSkipped = false } = {}) {
+  if (!ctx.components && ctx.platform !== 'win32-x64' && ctx.platform !== 'darwin-arm64') return false;
   const { all, done } = await pendingComponents(ctx);
   const skipped = new Set(ignoreSkipped ? ctx.skip || [] : []);
   return all.every((c) => done.has(c.id) || skipped.has(c.id));

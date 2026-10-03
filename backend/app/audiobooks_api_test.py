@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import tempfile
 import unittest
+import asyncio
 import wave
 from contextlib import closing
 from pathlib import Path
@@ -17,6 +18,30 @@ from app.api import routes_audiobooks, routes_voice_profiles
 
 
 class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
+    async def test_sync_narration_boundary_runs_outside_the_api_event_loop(self) -> None:
+        original = speech_clone._synthesize_unlocked
+
+        def synthesis(*, profile_id: str, text: str, output_path: Path, prompt_text: str | None,
+                      prompt_language: str | None, text_language: str | None, require_consent: bool) -> speech_clone.SynthesisOutcome:
+            with self.assertRaises(RuntimeError):
+                asyncio.get_running_loop()
+            return original(profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
+                            prompt_language=prompt_language, text_language=text_language, require_consent=require_consent)
+
+        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference")
+        with patch.object(speech_clone, "_synthesize_unlocked", side_effect=synthesis):
+            response = await self.client.post("/api/audiobooks", json={"title": "Book", "profile_id": profile.id, "chapters": [{"text": "Hello."}]})
+            identifier = response.json()["book"]["id"]
+            with closing(audiobooks._connect()) as connection:
+                connection.execute("UPDATE audiobook_books SET status = 'failed' WHERE id = ?", (identifier,))
+                connection.execute("UPDATE audiobook_jobs SET status = 'failed' WHERE book_id = ?", (identifier,))
+                connection.execute("UPDATE audiobook_sections SET status = 'queued', output_path = NULL")
+                connection.commit()
+            retried = await self.client.post(f"/api/audiobooks/{identifier}/retry")
+            self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(audiobooks.get_book(response.json()["book"]["id"]).status, "done")
+
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.profiles_root = Path(self.temporary.name) / "voice-profiles"
@@ -45,7 +70,7 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(routes_voice_profiles.router)
         app.include_router(routes_audiobooks.router)
         self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
         )
 
     async def asyncTearDown(self) -> None:

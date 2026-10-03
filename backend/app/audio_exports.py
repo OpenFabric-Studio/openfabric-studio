@@ -596,6 +596,8 @@ async def create_export(
                     if existing.status == "done":
                         _publish(existing)
                 return _response(existing)
+        from .resource_admission import require_setup_idle
+        require_setup_idle()
         document = ExportDocument(
             id=uuid.uuid4().hex,
             track_id=track_id,

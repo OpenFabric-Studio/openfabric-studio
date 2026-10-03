@@ -33,7 +33,7 @@ async def submit(params: str = Form(..., max_length=262144), title: str = Form('
         async with native_admission(video_jobs.work_busy):
             return await ace_jobs.submit(parsed, title, voice_id, ctx_audio, style_audio=ref_audio)
     except ResourceBusyError as exc:
-        raise HTTPException(status_code=409, detail='video_work_busy') from exc
+        raise HTTPException(status_code=409, detail=exc.code) from exc
     except AudioEncodingError as exc:
         raise HTTPException(status_code=503, detail=exc.code) from exc
     except ValidationError as exc:

@@ -1,13 +1,30 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { routeLocationKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import LibraryFolder from '../../components/shared/LibraryFolder.vue'
 import ArtistSettings from './ArtistSettings.vue'
 import GenerationSettings from './GenerationSettings.vue'
+import ModuleSetupPanel from './ModuleSetupPanel.vue'
 import { getAudioSettings, saveAudioSettings, type CompleteAudioEncodingSettings } from '../../api/audioSettings'
 import { parseAudioEncodingSettings } from '../../api/contracts'
 
 const { t } = useI18n()
+type SettingsTab = 'setup' | 'audio' | 'library' | 'preferences'
+const tab = ref<SettingsTab>('setup')
+const tabs: SettingsTab[] = ['setup', 'library', 'audio', 'preferences']
+const route = inject(routeLocationKey, undefined)
+watch(() => route?.hash, hash => { if (hash?.startsWith('#module-')) tab.value = 'setup' }, { immediate: true })
+function tabLabel(value: SettingsTab) { return value === 'setup' ? t('moduleWorkspace.title') : t(`settingsWorkspace.tabs.${value}`) }
+function moveTab(event: KeyboardEvent, index: number) {
+  let next: number
+  if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
+  else if (event.key === 'ArrowLeft') next = (index + tabs.length - 1) % tabs.length
+  else if (event.key === 'Home') next = 0
+  else if (event.key === 'End') next = tabs.length - 1
+  else return
+  event.preventDefault(); const value = tabs[next]; if (value) { tab.value = value; document.getElementById(`settings-tab-${value}`)?.focus() }
+}
 const draft = ref<CompleteAudioEncodingSettings | null>(null)
 const saved = ref<CompleteAudioEncodingSettings | null>(null)
 const defaults = ref<CompleteAudioEncodingSettings | null>(null)
@@ -92,7 +109,9 @@ onBeforeUnmount(() => { active = false; operation++; controller?.abort(); contro
       <h1 class="text-2xl font-semibold text-text">{{ t('settingsWorkspace.title') }}</h1>
       <p class="mt-2 text-sm text-text-dim">{{ t('settingsWorkspace.intro') }}</p>
     </div>
-    <section class="space-y-4 rounded-xl border border-border bg-panel p-5" :aria-busy="loading || saving">
+    <div role="tablist" :aria-label="t('settingsWorkspace.title')" class="flex flex-wrap gap-1 border-b border-border pb-2"><button v-for="(value, index) in tabs" :id="`settings-tab-${value}`" :key="value" type="button" role="tab" :aria-selected="tab === value" :aria-controls="`settings-panel-${value}`" :tabindex="tab === value ? 0 : -1" class="settings-button border-transparent" :class="tab === value ? 'bg-accent1/15 text-accent2' : 'text-text-dim'" @click="tab = value" @keydown="moveTab($event, index)">{{ tabLabel(value) }}</button></div>
+    <div v-show="tab === 'setup'" id="settings-panel-setup" role="tabpanel" aria-labelledby="settings-tab-setup"><ModuleSetupPanel /></div>
+    <section v-show="tab === 'audio'" id="settings-panel-audio" role="tabpanel" aria-labelledby="settings-tab-audio" class="space-y-4 rounded-xl border border-border bg-panel p-5" :aria-busy="loading || saving">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 class="text-lg font-semibold text-text">{{ t('settingsWorkspace.audioTitle') }}</h2>
@@ -178,9 +197,8 @@ onBeforeUnmount(() => { active = false; operation++; controller?.abort(); contro
       </form>
       <p v-if="notice" role="status" class="text-sm text-status-done">{{ notice }}</p>
     </section>
-    <GenerationSettings />
-    <LibraryFolder />
-    <ArtistSettings />
+    <div v-show="tab === 'library'" id="settings-panel-library" role="tabpanel" aria-labelledby="settings-tab-library"><LibraryFolder /></div>
+    <div v-show="tab === 'preferences'" id="settings-panel-preferences" role="tabpanel" aria-labelledby="settings-tab-preferences" class="space-y-8"><GenerationSettings /><ArtistSettings /></div>
   </div>
 </template>
 

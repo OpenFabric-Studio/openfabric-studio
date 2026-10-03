@@ -10,6 +10,7 @@ import * as audioApi from '../../api/audioSettings'
 import { i18n, setLocale } from '../../i18n'
 import { audioSettingsResponse } from './settingsTestFixtures'
 import type { CompleteAudioSettingsResponse } from '../../api/audioSettings'
+vi.mock('./ModuleSetupPanel.vue', () => ({ default: defineComponent({ render: () => null }) }))
 
 vi.mock('../../api/generationLibrary', async original => ({ ...await original<typeof import('../../api/generationLibrary')>(), getSettings: vi.fn().mockResolvedValue({ history_limit: 100, revision: 1 }) }))
 vi.mock('../../api/audioSettings', () => ({ getAudioSettings: vi.fn(), saveAudioSettings: vi.fn() }))

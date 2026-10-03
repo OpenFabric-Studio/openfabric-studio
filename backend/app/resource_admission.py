@@ -4,6 +4,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from typing import Literal
+
+from fastapi import HTTPException
 
 from .job_lifecycle import await_cleanup
 
@@ -13,7 +16,23 @@ _native_models: dict[str, int] = {}
 
 
 class ResourceBusyError(Exception):
-    """An incompatible video worker already owns local resources."""
+    """An incompatible local worker already owns resources."""
+
+    def __init__(self, code: Literal['video_work_busy', 'native_model_busy', 'module_setup_busy']) -> None:
+        self.code = code
+        super().__init__(code)
+
+
+def require_setup_idle() -> None:
+    """Call on the event loop immediately before registering local work.
+
+    Setup admission uses the same event loop; there must be no await between
+    this check and publication to a job registry. Speech worker threads use
+    module_jobs.speech_admission instead.
+    """
+    from .module_jobs import work_busy
+    if work_busy():
+        raise HTTPException(status_code=409, detail='module_setup_busy')
 
 
 def native_work_inflight() -> bool:
@@ -46,6 +65,9 @@ async def reserve_native(video_busy: Callable[[], bool], *, model_id: str | None
                          exclusive: bool = False) -> NativeLease:
     global _native_inflight
     async with admission_lock:
+        from .module_jobs import work_busy
+        if work_busy():
+            raise ResourceBusyError('module_setup_busy')
         if video_busy():
             raise ResourceBusyError("video_work_busy")
         if exclusive and model_id is not None and _native_models.get(model_id, 0):

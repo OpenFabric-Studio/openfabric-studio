@@ -26,9 +26,10 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm")
-LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs")
+LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
-_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports')
+_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'))
+_DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
 _CONFIG_LOCK = threading.RLock()
@@ -40,6 +41,9 @@ _LAYOUT = (
     ("files", "tracks"),
     ("voices", "voices"),
     ("videos", "videos"),
+    ("audiobooks", "audiobooks"),
+    ("voice-profiles", "speechProfiles"),
+    ("speech-clone-trials", "speechTrials"),
     ("models/seed-vc", "models"),
     ("logs", "logs"),
     ("aicollector.db", "database"),
@@ -107,7 +111,9 @@ def configured_data_dir() -> Path | None:
 
 
 def has_library(path: Path) -> bool:
-    return (path / "aicollector.db").is_file() or (path / "files").is_dir() or (path / "voices").is_dir()
+    return any((path / database).is_file() for database in _DATABASES) or any(
+        (path / folder).is_dir() for folder in ('files', 'voices', 'audiobooks', 'voice-profiles', 'speech-clone-trials')
+    )
 
 
 def _occupied(path: Path) -> bool:
@@ -120,6 +126,13 @@ def _is_inside(path: Path, parent: Path) -> bool:
     except ValueError:
         return False
     return path.resolve() != parent.resolve()
+
+
+def _database_path(root: Path, relative: Path) -> Path:
+    path = root / relative
+    if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
+        raise DataDirError('invalid_metadata')
+    return path
 
 
 def validate_data_dir(raw: str, blocked: list[Path]) -> Path:
@@ -198,7 +211,11 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
     with closing(sqlite3.connect(db_path)) as connection, connection:
         tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         for table, candidates in (("tracks", (*_PATH_COLUMNS, *_JSON_COLUMNS)), ("projects", ("data_json",)),
-                                  ('audio_versions', ('audio_path', 'captured_source_path'))):
+                                  ('audio_versions', ('audio_path', 'captured_source_path')),
+                                  ('voice_profiles', ('reference_audio_path',)),
+                                  ('audiobook_books', ('export_path',)),
+                                  ('audiobook_jobs', ('output_path',)),
+                                  ('audiobook_sections', ('output_path',))):
             if table not in tables:
                 continue
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -209,7 +226,7 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                 for rowid, value in connection.execute(f"SELECT rowid, {column} FROM {table}").fetchall():
                     if not isinstance(value, str) or not value:
                         continue
-                    if column in _PATH_COLUMNS:
+                    if column not in (*_JSON_COLUMNS, 'data_json'):
                         rewritten = _rewrite_path(value, src, dest)
                     else:
                         try:
@@ -393,15 +410,19 @@ def _clear_migration(migration: _Migration) -> None:
 
 def _restore_metadata(migration: _Migration) -> None:
     backups = migration.dest / _BACKUPS
-    database = backups / "aicollector.db"
-    if database.is_file():
+    for relative in _DATABASES:
+        database = backups / relative
+        if not database.is_file():
+            continue
         # The backup includes committed WAL contents. Sidecars from the
         # rewritten database must not be replayed over that original catalog.
         for suffix in ("-wal", "-shm"):
-            (migration.src / ("aicollector.db" + suffix)).unlink(missing_ok=True)
-        temporary = migration.src / ".aicollector.db.restore"
+            (migration.src / relative.parent / (relative.name + suffix)).unlink(missing_ok=True)
+        target = migration.src / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name('.' + target.name + '.restore')
         shutil.copy2(database, temporary)
-        temporary.replace(migration.src / "aicollector.db")
+        temporary.replace(target)
     for metadata_root in _METADATA_ROOTS:
         for saved in _metadata_files(backups / metadata_root):
             target = migration.src / saved.relative_to(backups)
@@ -507,9 +528,13 @@ def migrate_library(src: Path, dest: Path) -> None:
         try:
             _atomic_text(src / _SOURCE_JOURNAL, json.dumps({"destination": str(dest.resolve()), "token": token}))
             backups.mkdir()
-            database = src / "aicollector.db"
-            if database.is_file():
-                with closing(sqlite3.connect(database)) as source, closing(sqlite3.connect(backups / "aicollector.db")) as saved:
+            for relative in _DATABASES:
+                database = _database_path(src, relative)
+                if not database.is_file():
+                    continue
+                target = backups / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with closing(sqlite3.connect(database)) as source, closing(sqlite3.connect(target)) as saved:
                     source.backup(saved)
             for metadata_root in _METADATA_ROOTS:
                 for metadata in _metadata_files(src / metadata_root):
@@ -537,7 +562,8 @@ def migrate_library(src: Path, dest: Path) -> None:
                         shutil.copytree(item, target, symlinks=True, copy_function=_copy_library_file)
                     else:
                         _copy_library_file(item, target, follow_symlinks=False)
-            rewrite_library_paths(dest / "aicollector.db", src, dest)
+            for relative in _DATABASES:
+                rewrite_library_paths(_database_path(dest, relative), src, dest)
             for metadata_root in _METADATA_ROOTS:
                 rewrite_text_prefixes(dest / metadata_root, src, dest)
             completed = _Migration(migration.src, migration.dest, names, "complete", token)
@@ -708,5 +734,8 @@ def place_seed_models(data_dir: Path, seed_vc_dir: Path) -> Path:
     except OSError:
         logger.exception("could not create the singing-model folder")
         return dest
-    _link_checkpoints(legacy, dest)
+    # Optional engines are absent on a fresh minimal installation. Keep the
+    # library ready, but do not create a checkout or log an expected absence.
+    if seed_vc_dir.is_dir():
+        _link_checkpoints(legacy, dest)
     return dest

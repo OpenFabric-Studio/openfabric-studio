@@ -8,7 +8,8 @@ const { execFileSync } = require('node:child_process');
 const manifest = require('../manifest.json');
 const { evaluateGpu, freeBytes, runChecks } = require('../src/bootstrap/checks');
 const { runSetup, isSetupComplete, describePlan } = require('../src/bootstrap/run');
-const { buildComponents, demucsProject, ffmpegExecutable, recoverAceStepSource, replaceAceStepSource } = require('../src/bootstrap/components');
+const { buildComponents: bootstrapComponents, demucsProject, ffmpegExecutable, recoverAceStepSource, replaceAceStepSource } = require('../src/bootstrap/components');
+const buildComponents = ctx => bootstrapComponents({ ...ctx, includeOptional: true });
 const { extract, tarBinary } = require('../src/bootstrap/extract');
 const { layout, PLATFORM } = require('../src/paths');
 const { backendEnv } = require('../src/server');
@@ -228,7 +229,7 @@ test('skipped components are reported and do not count as installed', async () =
   const L = layout(tmp(), PLATFORM, manifest);
   const log = [];
   const events = [];
-  const ctx = { L, manifest, platform: PLATFORM, resources: {}, skip: ['b'], components: fakeComponents(log).map((c) => ({ ...c, verify: async () => false })) };
+  const ctx = { L, manifest, platform: PLATFORM, resources: {}, skip: ['b'], components: fakeComponents(log) };
   await runSetup(ctx, (e) => events.push(e));
   assert.deepEqual(log, ['a', 'c']);
   assert.ok(events.some((e) => e.id === 'b' && e.status === 'skipped'));
@@ -267,10 +268,11 @@ test('the backend environment points every path at the data root', () => {
   const env = backendEnv({ L, manifest, platform: 'win32-x64' });
   assert.equal(env.OPENFABRIC_DATA_DIR, L.data);
   assert.equal(env.OPENFABRIC_LOG_DIR, L.logs);
-  assert.equal(env.YUE2_DIR, L.yue2);
+  assert.equal(env.OPENFABRIC_MODULE_ROOT, L.root);
+  assert.equal(env.YUE2_DIR, process.env.YUE2_DIR, 'private engine choices are read by the backend before choosing managed defaults');
   assert.equal(env.HF_HOME, L.hfHome, 'model caches stay inside the chosen folder');
   assert.equal(env.TORCH_HOME, L.torchHome);
-  assert.equal(env.CUDA_BIN_DIR, L.yue2Bin);
+  assert.equal(env.CUDA_BIN_DIR, process.env.CUDA_BIN_DIR);
   assert.ok(env.PATH.split(path.delimiter).includes(L.uvDir));
   assert.equal(env.ELECTRON_RUN_AS_NODE, undefined);
 });
@@ -299,13 +301,24 @@ test('the uv component finds the binary inside a tarball with a top-level folder
   const uv = buildComponents({ L, manifest: fake, platform: 'darwin-arm64', resources }).find((c) => c.id === 'uv');
   await uv.install({ L, manifest: fake, platform: 'darwin-arm64', signal: undefined }, () => {});
   assert.equal(fs.readFileSync(L.uvBin, 'utf8'), 'fake uv binary');
+  fs.writeFileSync(L.uvBin, 'previous verified uv');
+  const fsp = require('node:fs/promises');
+  const rename = fsp.rename;
+  fsp.rename = async (from, to) => {
+    if (to === L.uvBin) throw new Error('uv promotion interrupted');
+    return rename(from, to);
+  };
+  try { await assert.rejects(uv.install({ L, manifest: fake, platform: 'darwin-arm64' }, () => {}), /uv promotion interrupted/); }
+  finally { fsp.rename = rename; }
+  assert.equal(fs.readFileSync(L.uvBin, 'utf8'), 'previous verified uv');
 });
 
-test('ffmpeg: a single static binary (the macOS build) is installed where the backend looks for it', async (t) => {
+test('ffmpeg and ffprobe are installed as a verified pair where the backend looks for them', { skip: process.platform === 'win32' }, async (t) => {
   const http = require('node:http');
   const crypto = require('node:crypto');
-  const body = Buffer.from('fake static ffmpeg');
-  const server = http.createServer((_req, res) => { res.writeHead(200, { 'content-length': body.length }); res.end(body); });
+  const body = Buffer.from('#!/bin/sh\necho "ffmpeg version test-1"\n');
+  const probe = Buffer.from('#!/bin/sh\necho "ffprobe version test-1"\n');
+  const server = http.createServer((req, res) => { const content = req.url.includes('ffprobe') ? probe : body; res.writeHead(200, { 'content-length': content.length }); res.end(content); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   t.after(() => { server.closeAllConnections(); server.close(); });
 
@@ -313,6 +326,7 @@ test('ffmpeg: a single static binary (the macOS build) is installed where the ba
   fake.ffmpeg.assets['darwin-arm64'] = {
     version: 'test-1', kind: 'binary', url: `http://127.0.0.1:${server.address().port}/ffmpeg-osx-arm64`,
     sha256: crypto.createHash('sha256').update(body).digest('hex'), bytes: body.length,
+    ffprobe: { url: `http://127.0.0.1:${server.address().port}/ffprobe-osx-arm64`, sha256: crypto.createHash('sha256').update(probe).digest('hex'), bytes: probe.length },
   };
   const L = layout(tmp(), 'darwin-arm64', fake);
   const resources = { backend: path.join(__dirname, '..', '..', 'backend'), acePatch: path.join(__dirname, '..', '..', 'external', 'patches', 'ace-step.patch') };
@@ -320,19 +334,20 @@ test('ffmpeg: a single static binary (the macOS build) is installed where the ba
   assert.equal(await ffmpeg.verify({}), false);
   await ffmpeg.install({ L, manifest: fake, platform: 'darwin-arm64' }, () => {});
   const exe = ffmpegExecutable(L, fake, 'darwin-arm64');
-  assert.equal(fs.readFileSync(exe, 'utf8'), 'fake static ffmpeg');
+  assert.deepEqual(fs.readFileSync(exe), body);
+  assert.deepEqual(fs.readFileSync(path.join(path.dirname(exe), 'ffprobe')), probe);
   assert.equal(path.dirname(exe), path.join(L.ffmpegDir, 'bin'));
   assert.equal(await ffmpeg.verify({}), true);
   assert.equal(ffmpeg.version, 'test-1', 'the recorded version follows the platform asset');
   if (process.platform !== 'win32') assert.ok(fs.statSync(exe).mode & 0o100, 'executable bit set');
 });
 
-test('the Windows FFmpeg asset keeps its recorded version and folder layout', () => {
+test('the Windows FFmpeg archive retains its pin and uses the shared normalized bin directory', () => {
   const L = layout(tmp(), 'win32-x64', manifest);
   const resources = { backend: path.join(__dirname, '..', '..', 'backend'), acePatch: path.join(__dirname, '..', '..', 'external', 'patches', 'ace-step.patch') };
   const ffmpeg = buildComponents({ L, manifest, platform: 'win32-x64', resources }).find((c) => c.id === 'ffmpeg');
   assert.equal(ffmpeg.version, manifest.ffmpeg.version, 'unchanged, so existing installs are not re-downloaded');
-  assert.match(ffmpegExecutable(L, manifest, 'win32-x64'), /ffmpeg-9\.0\.1-essentials_build[\\/]bin[\\/]ffmpeg\.exe$/);
+  assert.equal(ffmpegExecutable(L, manifest, 'win32-x64'), path.join(L.ffmpegDir, 'bin', 'ffmpeg.exe'));
 });
 
 test('every uv asset in the manifest names a binary that is "uv" or ends in "/uv"', () => {

@@ -2,7 +2,7 @@
 
 This is the Electron shell for [OpenFabric-Studio/openfabric-studio](https://github.com/OpenFabric-Studio/openfabric-studio), based on [inikolax/remiqora](https://github.com/inikolax/remiqora) by Nikolay Cherkashin ([inikolax](https://github.com/inikolax)). **0.3.0-dev.0 is an unreleased source snapshot:** no fork installer or release tag has been published. Upstream v0.2.1 downloads are historical and do not include this fork’s changes.
 
-The shell runs the same FastAPI backend and built Vue UI. First-run setup checks hardware and installs the baseline music engines into a chosen folder; voice and generated-video engines require their [separate setup](../README.md). It starts the backend on a free loopback port and requests model shutdown when the window closes.
+The shell runs the same FastAPI backend and built Vue UI. First-run setup installs only uv and the backend into a chosen writable folder. Optional engines and weights are reviewed and installed in Settings → Setup & modules. It starts the backend on a free loopback port and drains setup/model work when the window closes.
 
 [Roadmap](../ROADMAP.md) · [Contributing](../CONTRIBUTING.md) · [Fork maintenance and release checks](../docs/fork-maintenance.md) · [Fork issues](https://github.com/OpenFabric-Studio/openfabric-studio/issues)
 
@@ -10,11 +10,11 @@ The shell runs the same FastAPI backend and built Vue UI. First-run setup checks
 
 | Platform | Snapshot status |
 | --- | --- |
-| Windows x64, NVIDIA RTX 20-series or newer, driver 580 or newer | Setup/NSIS packaging implemented; fork clean installation and GPU workflows unverified. Upstream reported an RTX 4080 run. |
+| Windows x64 | Minimal setup/NSIS packaging implemented; no NVIDIA requirement for opening the studio. Fork clean installation and GPU workflows unverified. |
 | macOS, Apple Silicon | Setup/DMG packaging implemented; fork clean installation and GPU workflows unverified. Upstream reported a manual Mac run. |
 | Linux | Packaging configuration exists; desktop first-run setup reports unsupported. Use the repository’s Linux source scripts. |
 
-The Windows baseline prebuilt engine requires CUDA-capable hardware and driver 580 or newer. Upstream reported roughly 30 GB of downloads and 35 GB on disk. Setup estimates space from pending components with a 50% staging/cache allowance; completed components do not inflate update progress or space requirements. These are estimates, not a fork installation benchmark. CPU tests and a successful installer build do not establish GPU or platform support.
+The optional Windows prebuilt YuE engine requires CUDA-capable hardware and driver 580 or newer. Those requirements do not block the minimal backend bootstrap. Setup estimates space from pending components with a 50% staging/cache allowance; completed components do not inflate update progress or space requirements. CPU tests and a successful installer build do not establish GPU or platform support. See [platform setup](../docs/platform-setup.md) for module boundaries and manual steps.
 
 ## Data folders and existing installations
 
@@ -39,7 +39,7 @@ node node_modules/electron/install.js
 npm start
 ```
 
-The source app uses the checkout’s `backend/` and `frontend/dist`. First-run setup may download engines and weights; it is not a lightweight unit test. For browser launchers and refreshing an existing backend environment, see the [root installation guide](../README.md#-installation).
+The source app uses the checkout’s `backend/` and `frontend/dist`. First-run setup downloads uv and the backend environment; optional weights require a separate reviewed selection. For browser launchers and refreshing an existing backend environment, see the [root installation guide](../README.md#installation).
 
 ## Build an installer
 
@@ -63,15 +63,17 @@ The [Desktop app workflow](../.github/workflows/desktop.yml) requires CI verific
 
 | Path under chosen root | Content |
 | --- | --- |
-| `tools/uv`, `tools/python`, `tools/ffmpeg` | uv, managed Python 3.12 and pinned FFmpeg binaries |
+| `tools/uv`, `tools/python`, `tools/ffmpeg/bin` | uv, managed Python 3.12 and optional paired FFmpeg/FFprobe binaries |
 | `engines/YuE2` | Pinned audio.cpp engine and its models |
 | `engines/ACE-Step-1.5` | Pinned source, ACE-Step patch, environment and checkpoints |
 | `engines/Demucs` | Demucs environment |
+| `engines/seed-vc`, `engines/gpt-sovits` | Optional singing and speech environments |
+| `engines/ltx-2-mlx`, `engines/Music-Source-Separation-Training` | Optional video and RoFormer environments |
 | `backend-venv` | Backend Python environment |
 | `data`, `logs` | Library catalog, generated media and logs |
 | `cache/` | Model/download/uv caches |
 
-Pinned component versions and hashes are in [manifest.json](manifest.json). Verified downloads support resume/retry; `state.json` records completed versions and existing files. When changing a pin, inspect the publisher’s release/source and update its URL, digest and size as applicable, then run the downloader/setup regressions. Model and engine licenses remain separate from this repository’s [MIT license](../LICENSE); preserve upstream attribution.
+Pinned component versions and hashes are in [manifest.json](manifest.json), copied byte-for-byte into the packaged backend’s module catalog. Verified downloads support resume/retry; `state.json` records versions only after post-install verification. When changing a pin, inspect the publisher’s release/source and update its URL, digest and size as applicable, then run the downloader/setup regressions. Model and engine licenses remain separate from this repository’s [MIT license](../LICENSE); preserve upstream attribution.
 
 ACE source upgrades stage and patch a replacement before promotion. Interrupted swaps recover `checkpoints`; if both trees contain checkpoints, both remain. Conflicts are retained in `engines/ACE-Step-1.5.previous`, or `ACE-Step-1.5.preserved-*` across later upgrades. Review those directories manually before removing them. The installed source version includes the full pinned commit and patch SHA256.
 
@@ -83,13 +85,13 @@ The local `model-manager-resume` update applies [yue-model-resume.patch](../exte
 | --- | --- |
 | `OPENFABRIC_HOME` | Override the default setup root |
 | `OPENFABRIC_USER_DATA` | Isolate Electron’s saved preferences |
-| `OPENFABRIC_SKIP_COMPONENTS` | Skip listed setup components, e.g. `ace-step,demucs,weights` |
+| `OPENFABRIC_SKIP_COMPONENTS` | Test-only skip of minimal components (`uv,backend-env`); a skipped runtime may not launch |
 | `OPENFABRIC_LANG` | Force setup language (`en`) |
 | `OPENFABRIC_DEVTOOLS` | Open source-run DevTools |
 
 `npm test` uses Node’s test runner and an offline Python 3 harness for downloader/setup/lifecycle behavior. Set `PYTHON_BIN` if Python is not available as `python3` (`python` on Windows). Linux script tests use fake tools and are skipped on Windows. Tests use temporary configuration/data/engine paths and do not download GPU weights. Follow [AGENTS.md](../AGENTS.md) and the isolated full checks in [fork maintenance](../docs/fork-maintenance.md).
 
-[test/e2e/full.js](test/e2e/full.js) is the separate Windows/NVIDIA full-install/generation harness. It downloads real components and requires substantial disk/time; inspect its header and select an isolated folder before explicitly running it. Existing upstream execution reports do not verify the current fork. Unsigned-install behavior, clean installation, copied-library migration and GPU generation remain release checks, not claims made by CPU CI.
+[test/e2e/full.js](test/e2e/full.js) is a legacy Windows/NVIDIA full-install/generation harness. It assumes the old all-model first run and needs adaptation to the module wizard before use. Do not treat it as current platform evidence. Unsigned-install behavior, clean installation, copied-library migration and GPU generation remain release checks, not claims made by CPU CI.
 
 ## Known gaps
 

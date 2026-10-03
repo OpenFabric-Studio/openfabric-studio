@@ -2,7 +2,8 @@
 # Pinned MSST inference engine plus the upstream-listed Kimberley vocal model.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-DIR="$ROOT/external/Music-Source-Separation-Training"
+DIR="${VOICE_ROFORMER_DIR:-${OPENFABRIC_MODULE_ROOT:+$OPENFABRIC_MODULE_ROOT/engines/}Music-Source-Separation-Training}"
+if [[ -z "${VOICE_ROFORMER_DIR:-}" && -z "${OPENFABRIC_MODULE_ROOT:-}" ]]; then DIR="$ROOT/external/Music-Source-Separation-Training"; fi
 COMMIT="84b1eac0887756b4f1a9d7a1ff49105939749ed2"
 if [[ ! -f "$DIR/inference.py" ]]; then
   git clone --no-checkout https://github.com/ZFTurbo/Music-Source-Separation-Training.git "$DIR"
@@ -16,8 +17,11 @@ if ! git -C "$DIR" diff --quiet HEAD --; then
   echo "Existing MSST source has local edits; preserve it and use a separate installation." >&2
   exit 1
 fi
-if [[ ! -f "$DIR/.venv/bin/python" ]]; then
-  uv venv --python 3.12 "$DIR/.venv"
+ENGINE_PYTHON="$DIR/.venv/bin/python"
+case "${OSTYPE:-}" in msys*|cygwin*) ENGINE_PYTHON="$DIR/.venv/Scripts/python.exe" ;; esac
+if [[ ! -f "$ENGINE_PYTHON" ]]; then
+  "${UV_BIN:-uv}" venv --python 3.12 "$DIR/.venv"
 fi
-uv pip install --python "$DIR/.venv/bin/python" -r "$ROOT/backend/requirements-roformer.txt"
-"$DIR/.venv/bin/python" "$ROOT/backend/scripts/setup_roformer.py" --engine "$DIR" --dotenv "$ROOT/backend/.env"
+"${UV_BIN:-uv}" pip install --python "$ENGINE_PYTHON" -r "$ROOT/backend/requirements-roformer.txt"
+"$ENGINE_PYTHON" -c 'import torch, yaml, soundfile; from importlib.util import find_spec; assert find_spec("transformers") is not None'
+"$ENGINE_PYTHON" "$ROOT/backend/scripts/setup_roformer.py" --engine "$DIR" --dotenv "$ROOT/backend/.env" "$@"

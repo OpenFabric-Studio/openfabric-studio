@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from app import seed_vc_compat
 
@@ -277,8 +278,44 @@ class CompatibilityTests(unittest.TestCase):
         self.assertEqual(original, {path: path.read_bytes() for path in self.engine.rglob('*.py')})
 
     def test_fresh_setup_invokes_tracked_compatibility_helper(self):
-        setup = (Path(__file__).resolve().parents[2] / 'setup_voice.sh').read_text()
-        self.assertIn('"$DIR/.venv/bin/python" "$ROOT/backend/app/seed_vc_compat.py" "$DIR"', setup)
+        from app import module_install
+        from app.module_catalog import ModuleEnvironment
+        from app.module_jobs import InstallContext, ModuleJobService
+
+        repo = Path(__file__).resolve().parents[2]
+        setup = (repo / 'setup_voice.sh').read_text()
+        self.assertIn('"$ROOT/desktop/scripts/setup-feature.js" singing "$@"', setup)
+        environment = ModuleEnvironment.for_root(self.engine / 'managed')
+        service = ModuleJobService(environment)
+        context = InstallContext(service, 'a' * 32)
+        staged = context.workspace / 'singing-source'
+        helper = Path(seed_vc_compat.__file__).resolve()
+        helper_calls: list[list[str]] = []
+
+        async def simulate_vendor_boundary(argv: list[str], *, cwd: Path | None = None) -> None:
+            if argv[0] == 'git':
+                if 'checkout' in argv:
+                    for relative in ('modules/length_regulator.py', 'train.py', 'inference.py'):
+                        target = staged / relative
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes((self.engine / relative).read_bytes())
+                return
+            self.assertEqual(argv, [str(environment.python), str(helper), str(staged)])
+            helper_calls.append(argv)
+            self.assertEqual(seed_vc_compat.main(argv[1:]), 0)
+
+        async def exercise() -> None:
+            try:
+                with patch.object(context, 'run', side_effect=simulate_vendor_boundary):
+                    await module_install._clone(context, 'singing', module_install.SOURCE_PINS['singing'], environment.paths['singing'])
+            finally:
+                await service.shutdown()
+
+        asyncio.run(exercise())
+        self.assertEqual(len(helper_calls), 1)
+        installed = environment.paths['singing']
+        self.assertIn('f0_coarse.clamp(min=1, max=f0_bin - 1)', (installed / 'modules/length_regulator.py').read_text())
+        self.assertIn('resume', (installed / 'train.py').read_text())
 
     def test_unknown_source_rejects_without_partial_edits(self):
         (self.engine / 'train.py').write_text(TRAIN_SOURCE.replace('load_only_params=True,', 'load_only_params=False,'))

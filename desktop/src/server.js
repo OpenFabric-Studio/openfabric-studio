@@ -5,7 +5,6 @@ const net = require('node:net');
 const path = require('node:path');
 const { EventEmitter } = require('node:events');
 const { spawnTree, killTree, cleanEnv } = require('./proc');
-const { IS_WINDOWS } = require('./paths');
 const { ffmpegExecutable } = require('./bootstrap/components');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -46,12 +45,9 @@ function backendEnv({ L, manifest, platform }) {
     TORCH_HOME: L.torchHome,
     UV_NO_PROGRESS: '1',
     PYTHONUTF8: '1',
-    ACE_STEP_DIR: L.aceStep,
-    YUE2_DIR: L.yue2,
-    DEMUCS_DIR: L.demucs,
-    FFMPEG_BIN_DIR: ffmpegBin,
-    // The prebuilt engine keeps its CUDA runtime DLLs next to the executable.
-    CUDA_BIN_DIR: L.yue2Bin,
+    // Python reads .env before choosing defaults. Injecting engine defaults here
+    // would override private .env choices before load_dotenv can see them.
+    OPENFABRIC_MODULE_ROOT: process.env.OPENFABRIC_MODULE_ROOT || L.root,
     OPENFABRIC_DATA_DIR: L.data,
     OPENFABRIC_LOG_DIR: L.logs,
   });
@@ -65,40 +61,61 @@ class BackendServer extends EventEmitter {
     this.child = null;
     this.url = null;
     this.port = null;
+    this.startAbort = null;
+    this.stopTask = null;
   }
 
   async start({ timeoutMs = 90000, preferredPort } = {}) {
-    const { L, resources } = this.ctx;
-    await fsp.mkdir(L.logs, { recursive: true });
-    await fsp.mkdir(L.data, { recursive: true });
-    const port = await freePort(preferredPort);
-    this.port = port;
-    const logStream = fs.createWriteStream(path.join(L.logs, 'backend-server.log'), { flags: 'a' });
-    logStream.write(`\n--- start ${new Date().toISOString()} port ${port}\n`);
+    if (this.child || this.startAbort || this.stopTask) throw new Error('the backend is already starting or running');
+    const startAbort = new AbortController();
+    this.startAbort = startAbort;
+    const signal = startAbort.signal;
+    let logStream = null;
+    try {
+      const { L, resources } = this.ctx;
+      await fsp.mkdir(L.logs, { recursive: true });
+      await fsp.mkdir(L.data, { recursive: true });
+      const port = await freePort(preferredPort);
+      signal.throwIfAborted();
+      this.port = port;
+      logStream = fs.createWriteStream(path.join(L.logs, 'backend-server.log'), { fd: fs.openSync(path.join(L.logs, 'backend-server.log'), 'a') });
+      logStream.on('error', () => {
+        startAbort.abort(new Error('the backend log could not be written'));
+        void this.stop().catch(error => this.emit('stop-error', error));
+      });
+      logStream.write(`\n--- start ${new Date().toISOString()} port ${port}\n`);
 
-    const child = spawnTree(L.backendPython, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], {
-      cwd: resources.backend,
-      env: backendEnv(this.ctx),
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    this.child = child;
-    child.stdout.pipe(logStream, { end: false });
-    child.stderr.pipe(logStream, { end: false });
-    let exitCode = null;
-    child.on('exit', (code) => { exitCode = code ?? -1; logStream.end(); this.emit('exit', exitCode); });
+      const child = spawnTree(L.backendPython, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], {
+        cwd: resources.backend,
+        env: backendEnv(this.ctx),
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      this.child = child;
+      child.stdout.pipe(logStream, { end: false });
+      child.stderr.pipe(logStream, { end: false });
+      let exitCode = null;
+      let spawnError = null;
+      child.on('error', error => { spawnError = error; logStream.write(`Backend spawn failed: ${error.message}\n`); });
+      child.on('close', (code) => { exitCode = code ?? -1; logStream.end(); this.emit('exit', exitCode); });
 
-    const base = `http://127.0.0.1:${port}/`;
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (exitCode !== null) throw new Error(`the backend exited with code ${exitCode} (see ${path.join(L.logs, 'backend-server.log')})`);
-      try {
-        const res = await fetch(`${base}api/orchestrator/status`, { signal: AbortSignal.timeout(2000) });
-        if (res.ok) { this.url = base; return base; }
-      } catch { /* not up yet */ }
-      await sleep(400);
+      const base = `http://127.0.0.1:${port}/`;
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        signal.throwIfAborted();
+        if (spawnError) throw new Error(`the backend could not start (see ${path.join(L.logs, 'backend-server.log')})`);
+        if (exitCode !== null) throw new Error(`the backend exited with code ${exitCode} (see ${path.join(L.logs, 'backend-server.log')})`);
+        try {
+          const res = await fetch(`${base}api/orchestrator/status`, { signal: AbortSignal.any([signal, AbortSignal.timeout(2000)]) });
+          if (res.ok) { this.url = base; return base; }
+        } catch { /* not up yet */ }
+        await sleep(400);
+      }
+      throw new Error('the backend did not answer in time');
+    } catch (error) { await this.stop(); throw error; }
+    finally {
+      if (this.startAbort === startAbort) this.startAbort = null;
+      if (!this.child) logStream?.end();
     }
-    await this.stop();
-    throw new Error('the backend did not answer in time');
   }
 
   /**
@@ -106,17 +123,23 @@ class BackendServer extends EventEmitter {
    * then ends the backend and everything left under it.
    */
   async stop() {
+    this.startAbort?.abort(new Error('backend startup cancelled'));
+    if (this.stopTask) return this.stopTask;
     const child = this.child;
     if (!child) return;
-    if (this.url && child.exitCode === null) {
-      try {
-        await fetch(`${this.url}api/orchestrator/stop`, { method: 'POST', signal: AbortSignal.timeout(30000) });
-      } catch { /* the backend may already be gone */ }
-    }
-    await killTree(child);
-    for (let i = 0; i < 25 && child.exitCode === null; i++) await sleep(200);
-    this.child = null;
-    this.url = null;
+    this.stopTask = (async () => {
+      if (this.url && child.exitCode === null && child.signalCode === null) {
+        try {
+          await fetch(`${this.url}api/orchestrator/stop`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+        } catch { /* the backend may already be gone */ }
+      }
+      // FastAPI lifespan drains model/job registries after SIGTERM.
+      await killTree(child, { graceMs: 150000 });
+      this.child = null;
+      this.url = null;
+    })();
+    try { await this.stopTask; }
+    finally { this.stopTask = null; }
   }
 }
 

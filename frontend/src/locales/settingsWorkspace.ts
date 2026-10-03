@@ -1,6 +1,7 @@
 export const settingsWorkspaceEn = {
+  tabs: { library: 'Library', audio: 'Audio', preferences: 'Preferences' },
   title: 'Settings',
-  intro: 'Audio export defaults and the app data folder.',
+  intro: 'Set up features, check your modules, and manage your library and audio preferences.',
   audioTitle: 'Audio export defaults',
   futureExports: 'These settings apply to future exports. Already queued exports keep the settings captured when they were submitted.',
   sourceLimits: 'A higher bitrate, sample rate or bit depth cannot restore detail lost in an older MP3 or 16-bit recording. Export quality is limited by the source.',
@@ -38,4 +39,3 @@ export const settingsWorkspaceEn = {
   mono: 'Mono (1 channel)',
   stereo: 'Stereo (2 channels)',
 }
-

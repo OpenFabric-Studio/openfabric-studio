@@ -561,6 +561,8 @@ async def probe(request: str) -> ReferenceSource:
     await recover()
     async with admission_lock:
         _ensure_accepting()
+        from .resource_admission import require_setup_idle
+        require_setup_idle()
         if _unverified_workers or _unverified_probes() or video_busy() or len(_probe_tasks) >= 2:
             raise ReferenceImportError('busy')
         task = asyncio.create_task(_probe_inner(request))
@@ -596,6 +598,8 @@ def work_busy() -> bool:
 
 
 def _check_admission() -> None:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     from .video_jobs import work_busy as video_busy
     _ensure_accepting()
     if _unverified_workers or _unverified_probes() or video_busy() or sum(owned.task is not None and not owned.task.done() for owned in _jobs.values()) >= 2:

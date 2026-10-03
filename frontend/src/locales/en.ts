@@ -11,6 +11,7 @@ import { referenceWorkspaceEn } from './referenceWorkspace'
 import { generationWorkspaceEn } from './generationWorkspace'
 import { videoWorkspaceEn, videoErrorsEn } from './videoWorkspace'
 import { settingsWorkspaceEn } from './settingsWorkspace'
+import { moduleWorkspaceEn } from './moduleWorkspace'
 import { trackAudioEn } from './trackAudio'
 import { trackFavoritesEn } from './trackFavorites'
 import { upstreamLibraryEn } from './upstreamLibrary'
@@ -33,6 +34,7 @@ export default {
   trackAudio: trackAudioEn,
   videoWorkspace: videoWorkspaceEn,
   settingsWorkspace: settingsWorkspaceEn,
+  moduleWorkspace: moduleWorkspaceEn,
   common: {
     language: 'Interface language',
     help: 'Help',
@@ -524,6 +526,9 @@ voiceProfiles: {
     tracks: 'songs you generate',
     voices: 'cloned voices and the recordings they were built from',
     videos: 'music videos',
+    audiobooks: 'imported books, saved chapters and narrated audio',
+    speechProfiles: 'speech narrators and their reference recordings',
+    speechTrials: 'speech previews',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',

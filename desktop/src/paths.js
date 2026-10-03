@@ -53,15 +53,16 @@ function defaultDataRoot() {
 
 /** Every path the installer and the server use, all under one root the user can pick. */
 function layout(root, platform = PLATFORM, manifest = null) {
+  const windows = platform.startsWith('win32-');
   const engineAsset = manifest && manifest.engine.assets[platform];
-  const preset = engineAsset ? engineAsset.preset : IS_WINDOWS ? 'windows-cuda-release' : 'macos-metal-release';
+  const preset = engineAsset ? engineAsset.preset : windows ? 'windows-cuda-release' : platform.startsWith('linux-') ? 'linux-cuda-release' : 'macos-metal-release';
   const yue2 = path.join(root, 'engines', 'YuE2');
   const uvDir = path.join(root, 'tools', 'uv');
   const backendVenv = path.join(root, 'backend-venv');
   return {
     root,
     uvDir,
-    uvBin: path.join(uvDir, IS_WINDOWS ? 'uv.exe' : 'uv'),
+    uvBin: path.join(uvDir, windows ? 'uv.exe' : 'uv'),
     ffmpegDir: path.join(root, 'tools', 'ffmpeg'),
     pythonDir: path.join(root, 'tools', 'python'),
     uvCache: path.join(root, 'cache', 'uv'),
@@ -72,8 +73,12 @@ function layout(root, platform = PLATFORM, manifest = null) {
     yue2,
     yue2Bin: path.join(yue2, 'build', preset, 'bin'),
     demucs: path.join(root, 'engines', 'Demucs'),
+    seedVc: path.join(root, 'engines', 'seed-vc'),
+    gptSovits: path.join(root, 'engines', 'gpt-sovits'),
+    ltx: path.join(root, 'engines', 'ltx-2-mlx'),
+    roformer: path.join(root, 'engines', 'Music-Source-Separation-Training'),
     backendVenv,
-    backendPython: path.join(backendVenv, IS_WINDOWS ? 'Scripts' : 'bin', IS_WINDOWS ? 'python.exe' : 'python'),
+    backendPython: path.join(backendVenv, windows ? 'Scripts' : 'bin', windows ? 'python.exe' : 'python'),
     data: path.join(root, 'data'),
     logs: path.join(root, 'logs'),
     state: path.join(root, 'state.json'),

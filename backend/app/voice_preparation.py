@@ -152,6 +152,8 @@ def fingerprints(path: Path) -> list[SourceStamp]:
 
 
 def start(path: Path, options: PrepareVoiceRequest) -> VoicePreparationResponse:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     if path.resolve() in _jobs:
         raise HTTPException(status_code=409, detail='preparation_active')
     stamps = fingerprints(path)
@@ -179,6 +181,8 @@ def start(path: Path, options: PrepareVoiceRequest) -> VoicePreparationResponse:
 
 def start_coverage(path: Path, request: AnalyzeVoiceCoverageRequest) -> VoicePreparationResponse:
     """Analyze an existing saved selection without repeating separation."""
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     with document_lock(path / 'preparation.json'):
         if path.resolve() in _jobs:
             raise HTTPException(status_code=409, detail='preparation_active')

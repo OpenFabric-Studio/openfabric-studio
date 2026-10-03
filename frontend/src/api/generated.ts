@@ -158,10 +158,11 @@ export type AudiobookBook = {
   "title": string
   "profile_id": string
   "chapter_count": number
-  "status": "draft" | "queued" | "running" | "done" | "failed"
+  "status": "draft" | "queued" | "running" | "done" | "failed" | "paused" | "cancelled"
   "export_path"?: (string | null)
   "created_at": string
   "updated_at": string
+  "source_import_id"?: (string | null)
 }
 
 export type AudiobookBooksResponse = {
@@ -188,6 +189,8 @@ export type AudiobookJob = {
   "output_path"?: (string | null)
   "created_at": string
   "updated_at": string
+  "completed_sections"?: number
+  "total_sections"?: number
 }
 
 export type AudiobookJobsResponse = {
@@ -209,6 +212,11 @@ export type CreateAudioExportRequest = {
 
 export type CreateAudioVersionRequest = {
   "voice_id": string
+}
+
+export type CreateAudiobookFromDraftRequest = {
+  "profile_id": string
+  "revision": number
 }
 
 export type CreateAudiobookRequest = {
@@ -259,6 +267,43 @@ export type DeleteYueJobResponse = {
 export type DuplicateGenerationPresetRequest = {
   "name": string
   "revision": number
+}
+
+export type EbookChapterDraft = {
+  "title"?: string
+  "text": string
+  "included"?: boolean
+}
+
+export type EbookDraft = {
+  "id": string
+  "title": string
+  "chapters": Array<EbookChapterDraft>
+  "source_filename": string
+  "source_sha256": string
+  "warnings"?: Array<EbookImportWarning>
+  "revision": number
+  "created_at": string
+  "updated_at": string
+}
+
+export type EbookDraftSummary = {
+  "id": string
+  "title": string
+  "source_filename": string
+  "chapter_count": number
+  "revision": number
+  "created_at": string
+  "updated_at": string
+}
+
+export type EbookDraftsResponse = {
+  "drafts": Array<EbookDraftSummary>
+}
+
+export type EbookImportWarning = {
+  "code": "chapter_detection" | "chapter_split" | "non_narrative_content" | "nonlinear_content"
+  "message": string
 }
 
 export type FlacEncodingSettings = {
@@ -351,7 +396,7 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 
 export type LibraryFolderInfo = {
   "path": string
-  "key": "tracks" | "voices" | "videos" | "models" | "logs" | "database"
+  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database"
 }
 
 export type LibraryPickResponse = {
@@ -408,6 +453,103 @@ export type ModelStatusEntry = {
   "error": (string | null)
 }
 
+export type ModuleAction = {
+  "kind": "install" | "download" | "manual" | "verify" | "restart"
+  "label": string
+  "detail": string
+  "url"?: (string | null)
+}
+
+export type ModuleEvidence = {
+  "code": string
+  "detail": string
+  "verified": boolean
+}
+
+export type ModuleInfo = {
+  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "name": string
+  "description": string
+  "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
+  "supported": boolean
+  "managed": boolean
+  "automation": "automatic" | "manual" | "unsupported"
+  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "capabilities": Array<string>
+  "evidence": Array<ModuleEvidence>
+  "actions": Array<ModuleAction>
+  "estimated_download_bytes"?: (number | null)
+  "restart_required"?: boolean
+}
+
+export type ModuleInstallJob = {
+  "id": string
+  "state": "queued" | "running" | "completed" | "awaiting_manual" | "failed" | "cancelled" | "interrupted"
+  "created_at": string
+  "updated_at": string
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "download_models": boolean
+  "steps": Array<ModuleJobStep>
+  "current_step"?: (number | null)
+  "error_code"?: (string | null)
+  "restart_required"?: boolean
+}
+
+export type ModuleInstallRequest = {
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "download_models"?: boolean
+  "plan_token": string
+}
+
+export type ModuleInventory = {
+  "platform": string
+  "architecture": string
+  "acceleration": "apple_silicon" | "nvidia_unverified" | "cpu" | "unknown"
+  "managed_root": string
+  "free_bytes"?: (number | null)
+  "checked_at": string
+  "modules": Array<ModuleInfo>
+}
+
+export type ModuleJobStep = {
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "name": string
+  "state": "queued" | "running" | "verified" | "manual" | "skipped" | "failed"
+  "detail": string
+  "error_code"?: (string | null)
+}
+
+export type ModuleJobsResponse = {
+  "jobs": Array<ModuleInstallJob>
+}
+
+export type ModulePlan = {
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "download_models": boolean
+  "plan_token": string
+  "steps": Array<ModulePlanStep>
+  "estimated_download_bytes": number
+  "download_size_unknown": boolean
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_install": boolean
+  "warnings": Array<string>
+}
+
+export type ModulePlanRequest = {
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "download_models"?: boolean
+}
+
+export type ModulePlanStep = {
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "name": string
+  "operation": "install" | "verify" | "manual" | "unsupported"
+  "estimated_download_bytes"?: (number | null)
+  "detail": string
+  "actions": Array<ModuleAction>
+}
+
 export type Mp3EncodingSettings = {
   "mode"?: "cbr" | "vbr"
   "bitrate_kbps"?: 128 | 192 | 256 | 320
@@ -423,6 +565,12 @@ export type OrchestratorConfigResponse = {
 export type OrchestratorStatusResponse = {
   "active_model": ("ace_step" | "yue2" | null)
   "models": ModelStates
+}
+
+export type PatchEbookDraftRequest = {
+  "title": string
+  "chapters": Array<EbookChapterDraft>
+  "revision": number
 }
 
 export type PatchSpeechVoiceProfileRequest = {
@@ -6582,6 +6730,9 @@ const schemas = {
           "tracks",
           "voices",
           "videos",
+          "audiobooks",
+          "speechProfiles",
+          "speechTrials",
           "models",
           "logs",
           "database"
@@ -7216,6 +7367,18 @@ const schemas = {
         "minLength": 1,
         "title": "Updated At",
         "type": "string"
+      },
+      "completed_sections": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Completed Sections",
+        "type": "integer"
+      },
+      "total_sections": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Total Sections",
+        "type": "integer"
       }
     },
     "required": [
@@ -7262,7 +7425,9 @@ const schemas = {
           "queued",
           "running",
           "done",
-          "failed"
+          "failed",
+          "paused",
+          "cancelled"
         ],
         "title": "Status",
         "type": "string"
@@ -7290,6 +7455,19 @@ const schemas = {
         "minLength": 1,
         "title": "Updated At",
         "type": "string"
+      },
+      "source_import_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Import Id"
       }
     },
     "required": [
@@ -7354,6 +7532,252 @@ const schemas = {
       "jobs"
     ],
     "title": "AudiobookCreateResponse",
+    "type": "object"
+  },
+  "EbookChapterDraft": {
+    "properties": {
+      "title": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Title",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "included": {
+        "default": true,
+        "title": "Included",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "EbookChapterDraft",
+    "type": "object"
+  },
+  "EbookImportWarning": {
+    "properties": {
+      "code": {
+        "enum": [
+          "chapter_detection",
+          "chapter_split",
+          "non_narrative_content",
+          "nonlinear_content"
+        ],
+        "title": "Code",
+        "type": "string"
+      },
+      "message": {
+        "maxLength": 400,
+        "minLength": 1,
+        "title": "Message",
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "message"
+    ],
+    "title": "EbookImportWarning",
+    "type": "object"
+  },
+  "PatchEbookDraftRequest": {
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/EbookChapterDraft"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Chapters",
+        "type": "array"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "title",
+      "chapters",
+      "revision"
+    ],
+    "title": "PatchEbookDraftRequest",
+    "type": "object"
+  },
+  "EbookDraft": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/EbookChapterDraft"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Chapters",
+        "type": "array"
+      },
+      "source_filename": {
+        "maxLength": 240,
+        "minLength": 1,
+        "title": "Source Filename",
+        "type": "string"
+      },
+      "source_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "$ref": "#/$defs/EbookImportWarning"
+        },
+        "maxItems": 100,
+        "title": "Warnings",
+        "type": "array"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "chapters",
+      "source_filename",
+      "source_sha256",
+      "revision",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "EbookDraft",
+    "type": "object"
+  },
+  "EbookDraftSummary": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "source_filename": {
+        "maxLength": 240,
+        "minLength": 1,
+        "title": "Source Filename",
+        "type": "string"
+      },
+      "chapter_count": {
+        "maximum": 100,
+        "minimum": 1,
+        "title": "Chapter Count",
+        "type": "integer"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "source_filename",
+      "chapter_count",
+      "revision",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "EbookDraftSummary",
+    "type": "object"
+  },
+  "EbookDraftsResponse": {
+    "properties": {
+      "drafts": {
+        "items": {
+          "$ref": "#/$defs/EbookDraftSummary"
+        },
+        "title": "Drafts",
+        "type": "array"
+      }
+    },
+    "required": [
+      "drafts"
+    ],
+    "title": "EbookDraftsResponse",
+    "type": "object"
+  },
+  "CreateAudiobookFromDraftRequest": {
+    "properties": {
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "profile_id",
+      "revision"
+    ],
+    "title": "CreateAudiobookFromDraftRequest",
     "type": "object"
   },
   "ArtistSettings": {
@@ -10139,6 +10563,678 @@ const schemas = {
     ],
     "title": "ReferenceLyricsRequest",
     "type": "object"
+  },
+  "ModuleEvidence": {
+    "properties": {
+      "code": {
+        "maxLength": 80,
+        "title": "Code",
+        "type": "string"
+      },
+      "detail": {
+        "maxLength": 500,
+        "title": "Detail",
+        "type": "string"
+      },
+      "verified": {
+        "title": "Verified",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "code",
+      "detail",
+      "verified"
+    ],
+    "title": "ModuleEvidence",
+    "type": "object"
+  },
+  "ModuleAction": {
+    "properties": {
+      "kind": {
+        "enum": [
+          "install",
+          "download",
+          "manual",
+          "verify",
+          "restart"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 120,
+        "title": "Label",
+        "type": "string"
+      },
+      "detail": {
+        "maxLength": 1000,
+        "title": "Detail",
+        "type": "string"
+      },
+      "url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Url"
+      }
+    },
+    "required": [
+      "kind",
+      "label",
+      "detail"
+    ],
+    "title": "ModuleAction",
+    "type": "object"
+  },
+  "ModuleInfo": {
+    "properties": {
+      "id": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "speech",
+          "singing",
+          "separation",
+          "video",
+          "media",
+          "transcription",
+          "source_import",
+          "ebooks"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 80,
+        "title": "Name",
+        "type": "string"
+      },
+      "description": {
+        "maxLength": 300,
+        "title": "Description",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "unsupported",
+          "missing",
+          "partial",
+          "installed",
+          "ready"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "supported": {
+        "title": "Supported",
+        "type": "boolean"
+      },
+      "managed": {
+        "title": "Managed",
+        "type": "boolean"
+      },
+      "automation": {
+        "enum": [
+          "automatic",
+          "manual",
+          "unsupported"
+        ],
+        "title": "Automation",
+        "type": "string"
+      },
+      "dependencies": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks"
+          ],
+          "type": "string"
+        },
+        "title": "Dependencies",
+        "type": "array"
+      },
+      "capabilities": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Capabilities",
+        "type": "array"
+      },
+      "evidence": {
+        "items": {
+          "$ref": "#/$defs/ModuleEvidence"
+        },
+        "title": "Evidence",
+        "type": "array"
+      },
+      "actions": {
+        "items": {
+          "$ref": "#/$defs/ModuleAction"
+        },
+        "title": "Actions",
+        "type": "array"
+      },
+      "estimated_download_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estimated Download Bytes"
+      },
+      "restart_required": {
+        "default": false,
+        "title": "Restart Required",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "description",
+      "state",
+      "supported",
+      "managed",
+      "automation",
+      "dependencies",
+      "capabilities",
+      "evidence",
+      "actions"
+    ],
+    "title": "ModuleInfo",
+    "type": "object"
+  },
+  "ModuleInventory": {
+    "properties": {
+      "platform": {
+        "title": "Platform",
+        "type": "string"
+      },
+      "architecture": {
+        "title": "Architecture",
+        "type": "string"
+      },
+      "acceleration": {
+        "enum": [
+          "apple_silicon",
+          "nvidia_unverified",
+          "cpu",
+          "unknown"
+        ],
+        "title": "Acceleration",
+        "type": "string"
+      },
+      "managed_root": {
+        "title": "Managed Root",
+        "type": "string"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Free Bytes"
+      },
+      "checked_at": {
+        "title": "Checked At",
+        "type": "string"
+      },
+      "modules": {
+        "items": {
+          "$ref": "#/$defs/ModuleInfo"
+        },
+        "title": "Modules",
+        "type": "array"
+      }
+    },
+    "required": [
+      "platform",
+      "architecture",
+      "acceleration",
+      "managed_root",
+      "checked_at",
+      "modules"
+    ],
+    "title": "ModuleInventory",
+    "type": "object"
+  },
+  "ModulePlanRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "features": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks"
+          ],
+          "type": "string"
+        },
+        "maxItems": 10,
+        "minItems": 1,
+        "title": "Features",
+        "type": "array"
+      },
+      "download_models": {
+        "default": false,
+        "title": "Download Models",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "features"
+    ],
+    "title": "ModulePlanRequest",
+    "type": "object"
+  },
+  "ModulePlanStep": {
+    "properties": {
+      "module_id": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "speech",
+          "singing",
+          "separation",
+          "video",
+          "media",
+          "transcription",
+          "source_import",
+          "ebooks"
+        ],
+        "title": "Module Id",
+        "type": "string"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "install",
+          "verify",
+          "manual",
+          "unsupported"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "estimated_download_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estimated Download Bytes"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "actions": {
+        "items": {
+          "$ref": "#/$defs/ModuleAction"
+        },
+        "title": "Actions",
+        "type": "array"
+      }
+    },
+    "required": [
+      "module_id",
+      "name",
+      "operation",
+      "detail",
+      "actions"
+    ],
+    "title": "ModulePlanStep",
+    "type": "object"
+  },
+  "ModulePlan": {
+    "properties": {
+      "features": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks"
+          ],
+          "type": "string"
+        },
+        "title": "Features",
+        "type": "array"
+      },
+      "download_models": {
+        "title": "Download Models",
+        "type": "boolean"
+      },
+      "plan_token": {
+        "title": "Plan Token",
+        "type": "string"
+      },
+      "steps": {
+        "items": {
+          "$ref": "#/$defs/ModulePlanStep"
+        },
+        "title": "Steps",
+        "type": "array"
+      },
+      "estimated_download_bytes": {
+        "minimum": 0,
+        "title": "Estimated Download Bytes",
+        "type": "integer"
+      },
+      "download_size_unknown": {
+        "title": "Download Size Unknown",
+        "type": "boolean"
+      },
+      "required_free_bytes": {
+        "minimum": 0,
+        "title": "Required Free Bytes",
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Free Bytes"
+      },
+      "can_install": {
+        "title": "Can Install",
+        "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Warnings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "features",
+      "download_models",
+      "plan_token",
+      "steps",
+      "estimated_download_bytes",
+      "download_size_unknown",
+      "required_free_bytes",
+      "can_install",
+      "warnings"
+    ],
+    "title": "ModulePlan",
+    "type": "object"
+  },
+  "ModuleInstallRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "features": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks"
+          ],
+          "type": "string"
+        },
+        "maxItems": 10,
+        "minItems": 1,
+        "title": "Features",
+        "type": "array"
+      },
+      "download_models": {
+        "default": false,
+        "title": "Download Models",
+        "type": "boolean"
+      },
+      "plan_token": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Plan Token",
+        "type": "string"
+      }
+    },
+    "required": [
+      "features",
+      "plan_token"
+    ],
+    "title": "ModuleInstallRequest",
+    "type": "object"
+  },
+  "ModuleJobStep": {
+    "properties": {
+      "module_id": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "speech",
+          "singing",
+          "separation",
+          "video",
+          "media",
+          "transcription",
+          "source_import",
+          "ebooks"
+        ],
+        "title": "Module Id",
+        "type": "string"
+      },
+      "name": {
+        "title": "Name",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "queued",
+          "running",
+          "verified",
+          "manual",
+          "skipped",
+          "failed"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error Code"
+      }
+    },
+    "required": [
+      "module_id",
+      "name",
+      "state",
+      "detail"
+    ],
+    "title": "ModuleJobStep",
+    "type": "object"
+  },
+  "ModuleInstallJob": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "awaiting_manual",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      },
+      "features": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks"
+          ],
+          "type": "string"
+        },
+        "title": "Features",
+        "type": "array"
+      },
+      "download_models": {
+        "title": "Download Models",
+        "type": "boolean"
+      },
+      "steps": {
+        "items": {
+          "$ref": "#/$defs/ModuleJobStep"
+        },
+        "title": "Steps",
+        "type": "array"
+      },
+      "current_step": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Current Step"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error Code"
+      },
+      "restart_required": {
+        "default": false,
+        "title": "Restart Required",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "state",
+      "created_at",
+      "updated_at",
+      "features",
+      "download_models",
+      "steps"
+    ],
+    "title": "ModuleInstallJob",
+    "type": "object"
+  },
+  "ModuleJobsResponse": {
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/ModuleInstallJob"
+        },
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "title": "ModuleJobsResponse",
+    "type": "object"
   }
 } as const
 
@@ -10898,6 +11994,62 @@ export function parseAudiobookCreateResponse(value: unknown): AudiobookCreateRes
   return value
 }
 
+function isEbookChapterDraft(value: unknown): value is EbookChapterDraft {
+  return decodeSchema(schemas.EbookChapterDraft, value, schemas)
+}
+export function parseEbookChapterDraft(value: unknown): EbookChapterDraft {
+  if (!isEbookChapterDraft(value)) throw new TypeError("Invalid EbookChapterDraft response")
+  return value
+}
+
+function isEbookImportWarning(value: unknown): value is EbookImportWarning {
+  return decodeSchema(schemas.EbookImportWarning, value, schemas)
+}
+export function parseEbookImportWarning(value: unknown): EbookImportWarning {
+  if (!isEbookImportWarning(value)) throw new TypeError("Invalid EbookImportWarning response")
+  return value
+}
+
+function isPatchEbookDraftRequest(value: unknown): value is PatchEbookDraftRequest {
+  return decodeSchema(schemas.PatchEbookDraftRequest, value, schemas)
+}
+export function parsePatchEbookDraftRequest(value: unknown): PatchEbookDraftRequest {
+  if (!isPatchEbookDraftRequest(value)) throw new TypeError("Invalid PatchEbookDraftRequest response")
+  return value
+}
+
+function isEbookDraft(value: unknown): value is EbookDraft {
+  return decodeSchema(schemas.EbookDraft, value, schemas)
+}
+export function parseEbookDraft(value: unknown): EbookDraft {
+  if (!isEbookDraft(value)) throw new TypeError("Invalid EbookDraft response")
+  return value
+}
+
+function isEbookDraftSummary(value: unknown): value is EbookDraftSummary {
+  return decodeSchema(schemas.EbookDraftSummary, value, schemas)
+}
+export function parseEbookDraftSummary(value: unknown): EbookDraftSummary {
+  if (!isEbookDraftSummary(value)) throw new TypeError("Invalid EbookDraftSummary response")
+  return value
+}
+
+function isEbookDraftsResponse(value: unknown): value is EbookDraftsResponse {
+  return decodeSchema(schemas.EbookDraftsResponse, value, schemas)
+}
+export function parseEbookDraftsResponse(value: unknown): EbookDraftsResponse {
+  if (!isEbookDraftsResponse(value)) throw new TypeError("Invalid EbookDraftsResponse response")
+  return value
+}
+
+function isCreateAudiobookFromDraftRequest(value: unknown): value is CreateAudiobookFromDraftRequest {
+  return decodeSchema(schemas.CreateAudiobookFromDraftRequest, value, schemas)
+}
+export function parseCreateAudiobookFromDraftRequest(value: unknown): CreateAudiobookFromDraftRequest {
+  if (!isCreateAudiobookFromDraftRequest(value)) throw new TypeError("Invalid CreateAudiobookFromDraftRequest response")
+  return value
+}
+
 function isArtistSettings(value: unknown): value is ArtistSettings {
   return decodeSchema(schemas.ArtistSettings, value, schemas)
 }
@@ -11223,5 +12375,93 @@ function isReferenceLyricsRequest(value: unknown): value is ReferenceLyricsReque
 }
 export function parseReferenceLyricsRequest(value: unknown): ReferenceLyricsRequest {
   if (!isReferenceLyricsRequest(value)) throw new TypeError("Invalid ReferenceLyricsRequest response")
+  return value
+}
+
+function isModuleEvidence(value: unknown): value is ModuleEvidence {
+  return decodeSchema(schemas.ModuleEvidence, value, schemas)
+}
+export function parseModuleEvidence(value: unknown): ModuleEvidence {
+  if (!isModuleEvidence(value)) throw new TypeError("Invalid ModuleEvidence response")
+  return value
+}
+
+function isModuleAction(value: unknown): value is ModuleAction {
+  return decodeSchema(schemas.ModuleAction, value, schemas)
+}
+export function parseModuleAction(value: unknown): ModuleAction {
+  if (!isModuleAction(value)) throw new TypeError("Invalid ModuleAction response")
+  return value
+}
+
+function isModuleInfo(value: unknown): value is ModuleInfo {
+  return decodeSchema(schemas.ModuleInfo, value, schemas)
+}
+export function parseModuleInfo(value: unknown): ModuleInfo {
+  if (!isModuleInfo(value)) throw new TypeError("Invalid ModuleInfo response")
+  return value
+}
+
+function isModuleInventory(value: unknown): value is ModuleInventory {
+  return decodeSchema(schemas.ModuleInventory, value, schemas)
+}
+export function parseModuleInventory(value: unknown): ModuleInventory {
+  if (!isModuleInventory(value)) throw new TypeError("Invalid ModuleInventory response")
+  return value
+}
+
+function isModulePlanRequest(value: unknown): value is ModulePlanRequest {
+  return decodeSchema(schemas.ModulePlanRequest, value, schemas)
+}
+export function parseModulePlanRequest(value: unknown): ModulePlanRequest {
+  if (!isModulePlanRequest(value)) throw new TypeError("Invalid ModulePlanRequest response")
+  return value
+}
+
+function isModulePlanStep(value: unknown): value is ModulePlanStep {
+  return decodeSchema(schemas.ModulePlanStep, value, schemas)
+}
+export function parseModulePlanStep(value: unknown): ModulePlanStep {
+  if (!isModulePlanStep(value)) throw new TypeError("Invalid ModulePlanStep response")
+  return value
+}
+
+function isModulePlan(value: unknown): value is ModulePlan {
+  return decodeSchema(schemas.ModulePlan, value, schemas)
+}
+export function parseModulePlan(value: unknown): ModulePlan {
+  if (!isModulePlan(value)) throw new TypeError("Invalid ModulePlan response")
+  return value
+}
+
+function isModuleInstallRequest(value: unknown): value is ModuleInstallRequest {
+  return decodeSchema(schemas.ModuleInstallRequest, value, schemas)
+}
+export function parseModuleInstallRequest(value: unknown): ModuleInstallRequest {
+  if (!isModuleInstallRequest(value)) throw new TypeError("Invalid ModuleInstallRequest response")
+  return value
+}
+
+function isModuleJobStep(value: unknown): value is ModuleJobStep {
+  return decodeSchema(schemas.ModuleJobStep, value, schemas)
+}
+export function parseModuleJobStep(value: unknown): ModuleJobStep {
+  if (!isModuleJobStep(value)) throw new TypeError("Invalid ModuleJobStep response")
+  return value
+}
+
+function isModuleInstallJob(value: unknown): value is ModuleInstallJob {
+  return decodeSchema(schemas.ModuleInstallJob, value, schemas)
+}
+export function parseModuleInstallJob(value: unknown): ModuleInstallJob {
+  if (!isModuleInstallJob(value)) throw new TypeError("Invalid ModuleInstallJob response")
+  return value
+}
+
+function isModuleJobsResponse(value: unknown): value is ModuleJobsResponse {
+  return decodeSchema(schemas.ModuleJobsResponse, value, schemas)
+}
+export function parseModuleJobsResponse(value: unknown): ModuleJobsResponse {
+  if (!isModuleJobsResponse(value)) throw new TypeError("Invalid ModuleJobsResponse response")
   return value
 }

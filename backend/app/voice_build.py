@@ -1332,6 +1332,8 @@ async def _run_build(job: BuildJob) -> None:
 
 def start_build(voice_id: str, *, clean: bool = False, preparation_revision: str | None = None,
     training_steps: Literal[0, 200, 500, 1000] = 200, resume: bool = False, compare_checkpoints: bool = False) -> dict:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     path = voice_dir(voice_id)
     current = _builds.get(voice_id)
     if current is not None and current.status in _ACTIVE:
@@ -2012,6 +2014,8 @@ async def _run_apply(job: ApplyJob) -> None:
 
 
 def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = None) -> dict:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     if track_id in _apply_cancelling or track_id in _apply_deleting or any(job.cleanup_pending for job in _applies.values()):
         raise HTTPException(status_code=409, detail='apply_busy')
     if not _ID.fullmatch(voice_id or ""):

@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, nextTick, type App } from 'vue'
 import SettingsPage from './SettingsPage.vue'
+vi.mock('./ModuleSetupPanel.vue', () => ({ default: { render: () => null } }))
 import { i18n, setLocale } from '../../i18n'
 import * as artist from '../../api/artistSettings'
 vi.mock('../../api/artistSettings', () => ({ getArtistSettings: vi.fn(), saveArtistSettings: vi.fn() }))

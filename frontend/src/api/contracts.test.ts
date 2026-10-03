@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseAceJobResponse, parseSavedTrack, parseTracksResponse } from './contracts'
+import { parseAceJobResponse, parseLibraryStatusResponse, parseSavedTrack, parseTracksResponse } from './contracts'
 
 const track = {
   id: 1, short_id: 1, model: 'ace_step', created_at: '2026-10-01T00:00:00Z', title: 'Song', lyrics: '',
@@ -13,6 +13,17 @@ const job = {
 }
 
 describe('generated contract validation', () => {
+  it('accepts the full library inventory including saved speech and audiobooks', () => {
+    const folders = [
+      { path: 'audiobooks', key: 'audiobooks' },
+      { path: 'voice-profiles', key: 'speechProfiles' },
+      { path: 'speech-clone-trials', key: 'speechTrials' },
+    ]
+    expect(parseLibraryStatusResponse({
+      data_dir: '/library', pending_data_dir: '', restart_required: false,
+      error: '', can_pick: false, folders,
+    }).folders).toEqual(folders)
+  })
   it('accepts a real track envelope and recursive JSON parameters', () => {
     expect(parseTracksResponse({ data: [track] }).data[0]?.params).toEqual(track.params)
     expect(parseAceJobResponse(job).tracks).toHaveLength(1)

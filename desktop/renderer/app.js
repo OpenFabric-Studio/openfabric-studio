@@ -116,7 +116,7 @@
       'no-gpu': ['btn.drivers', () => api.openExternal('nvidia-drivers')],
       'old-driver': ['btn.drivers', () => api.openExternal('nvidia-drivers')],
       'old-gpu': ['btn.report', () => api.openExternal('issues')],
-      'unsupported-platform': ['btn.report', () => api.openExternal('issues')],
+      'unsupported-platform': ['btn.installation', () => api.openExternal('installation')],
       'no-disk': ['btn.folder', chooseFolder],
       offline: ['btn.recheck', runChecksAndShow],
     }[b.code];

@@ -110,6 +110,7 @@ async function runChecks({ platform, dataRoot, manifest, plan, fetchImpl = fetch
   const fail = (code, extra = {}) => { blocking ||= { code, ...extra }; };
 
   const supported = platform === 'win32-x64' || platform === 'darwin-arm64';
+  const gpuRequired = !!plan && plan.some(c => c.id === 'engine' && !c.skipped);
   if (!supported) {
     items.push({ id: 'platform', ok: false, platform });
     fail('unsupported-platform', { platform });
@@ -117,17 +118,17 @@ async function runChecks({ platform, dataRoot, manifest, plan, fetchImpl = fetch
 
   // Independent, so they run side by side: the screen waits for the slowest, not for the sum.
   const [gpu, free, online] = await Promise.all([
-    platform === 'win32-x64' ? detectNvidiaGpu() : Promise.resolve(null),
+    platform === 'win32-x64' && gpuRequired ? detectNvidiaGpu() : Promise.resolve(null),
     freeBytes(dataRoot),
     networkRequired ? isOnline(fetchImpl) : Promise.resolve(true),
   ]);
 
-  if (platform === 'win32-x64') {
+  if (platform === 'win32-x64' && gpuRequired) {
     const verdict = evaluateGpu(gpu, req);
     items.push({ id: 'gpu', ok: verdict.code !== 'no-gpu' && verdict.code !== 'old-gpu', name: gpu ? gpu.name : '', vramMiB: gpu ? gpu.vramMiB : 0 });
     items.push({ id: 'driver', ok: verdict.code !== 'old-driver' && !!gpu, driver: gpu ? gpu.driver : '', required: req.minDriver });
     if (!verdict.ok) fail(verdict.code, { gpu, required: req.minDriver });
-  } else if (platform === 'darwin-arm64') {
+  } else if (platform === 'darwin-arm64' && gpuRequired) {
     items.push({ id: 'gpu', ok: true, name: 'Apple Silicon', vramMiB: Math.round(os.totalmem() / 2 ** 20) });
   }
 

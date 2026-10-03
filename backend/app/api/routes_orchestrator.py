@@ -33,7 +33,7 @@ async def switch(req: SwitchRequest):
         async with native_admission(video_jobs.work_busy):
             await manager.switch_to(req.model)
     except ResourceBusyError as exc:
-        raise HTTPException(status_code=409, detail='video_work_busy') from exc
+        raise HTTPException(status_code=409, detail=exc.code) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except StartCancelled as exc:

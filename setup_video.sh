@@ -3,4 +3,4 @@
 # Engine/dependencies are pinned. Weights require an explicit --download-models.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-exec python3 "$ROOT/backend/scripts/setup_video.py" "$@"
+exec "${NODE_BIN:-node}" "$ROOT/desktop/scripts/setup-feature.js" video "$@"

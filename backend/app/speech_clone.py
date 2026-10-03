@@ -7,7 +7,11 @@ engine server is running. OpenFabric never downloads pretrained weights.
 from __future__ import annotations
 
 import os
+import io
+import asyncio
+import logging
 import struct
+import threading
 import uuid
 import wave
 from dataclasses import dataclass, field
@@ -19,6 +23,8 @@ import httpx
 
 from . import voice_profiles
 from .config import DATA_DIR, GPT_SOVITS_DIR
+from .module_evidence import record_capability_success
+from .job_lifecycle import await_cleanup
 from .voice_profile_contracts import (
     SpeechCloneEngineStatus,
     SpeechCloneTrialRequest,
@@ -45,6 +51,10 @@ INSTALL_HINTS = [
 ENGINE_DIR = GPT_SOVITS_DIR
 TRIALS_ROOT = DATA_DIR / "speech-clone-trials"
 API_TIMEOUT_S = 120.0
+MAX_SPEECH_AUDIO_BYTES = 128 * 1024 * 1024
+SYNTHESIS_LOCK = threading.RLock()
+_STOPPING = threading.Event()
+_LOG = logging.getLogger(__name__)
 
 
 def trials_root() -> Path:
@@ -91,15 +101,20 @@ def engine_installed(_engine: Literal["speech", "gpt-sovits"] = "gpt-sovits") ->
     return resolve_engine_root() is not None
 
 
+async def _probe_api(timeout_s: float) -> bool:
+    async with asyncio.timeout(timeout_s):
+        async with httpx.AsyncClient(timeout=timeout_s) as client:
+            # api.py has no dedicated health route; missing params return 400.
+            # Inspect headers only: health probing never consumes engine output.
+            async with client.stream("GET", api_base_url() + "/") as response:
+                return response.status_code < 500
+
+
 def api_reachable(timeout_s: float = 1.5) -> bool:
-    """Best-effort probe: any TCP/HTTP response from the pinned API base counts as up."""
-    base = api_base_url()
+    """Bounded reachability probe; a response is not synthesis verification."""
     try:
-        with httpx.Client(timeout=timeout_s) as client:
-            # api.py has no dedicated health route; root GET without params returns 400 JSON when up.
-            response = client.get(base + "/")
-            return response.status_code < 500
-    except httpx.HTTPError:
+        return asyncio.run(_probe_api(timeout_s))
+    except (httpx.HTTPError, TimeoutError):
         return False
 
 
@@ -135,8 +150,40 @@ def _resolve_prompt_text(prompt_text: str | None, notes: str) -> str:
     return "Reference audio."
 
 
-def _looks_like_wav(data: bytes) -> bool:
+def _looks_like_wav(data: bytes | bytearray) -> bool:
     return len(data) > 44 and data[:4] == b"RIFF" and data[8:12] == b"WAVE"
+
+
+def _validate_pcm_wav(data: bytes | bytearray) -> None:
+    if not _looks_like_wav(data):
+        raise RuntimeError("invalid_speech_audio")
+    try:
+        with wave.open(io.BytesIO(data), "rb") as source:
+            expected = source.getnframes() * source.getnchannels() * source.getsampwidth()
+            if expected <= 0 or expected > MAX_SPEECH_AUDIO_BYTES or source.getcomptype() != "NONE":
+                raise RuntimeError("invalid_speech_audio")
+            actual = 0
+            while chunk := source.readframes(65536):
+                actual += len(chunk)
+            if actual != expected:
+                raise RuntimeError("invalid_speech_audio")
+    except (wave.Error, EOFError) as exc:
+        raise RuntimeError("invalid_speech_audio") from exc
+
+
+async def _request_speech_audio(url: str, payload: dict[str, str]) -> bytearray:
+    """An absolute request deadline includes headers and every streamed byte."""
+    body = bytearray()
+    async with asyncio.timeout(API_TIMEOUT_S):
+        async with httpx.AsyncClient(timeout=API_TIMEOUT_S) as client:
+            async with client.stream("POST", url, json=payload) as response:
+                if response.status_code >= 400:
+                    raise RuntimeError("speech_api_failed")
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    if len(body) + len(chunk) > MAX_SPEECH_AUDIO_BYTES:
+                        raise RuntimeError("speech_audio_too_large")
+                    body.extend(chunk)
+    return body
 
 
 def _synthesize_via_api(
@@ -158,24 +205,18 @@ def _synthesize_via_api(
         "text_language": text_language,
     }
     url = urljoin(api_base_url() + "/", "")
-    with httpx.Client(timeout=API_TIMEOUT_S) as client:
-        response = client.post(url, json=payload)
-    if response.status_code >= 400:
-        detail = response.text[:500]
-        try:
-            parsed = response.json()
-            if isinstance(parsed, dict):
-                detail = str(parsed.get("message") or parsed.get("detail") or detail)
-        except Exception:
-            pass
-        raise RuntimeError(f"GPT-SoVITS API HTTP {response.status_code}: {detail}")
-    content_type = (response.headers.get("content-type") or "").lower()
-    body = response.content
-    if "json" in content_type and not _looks_like_wav(body):
-        raise RuntimeError(f"GPT-SoVITS API returned JSON instead of audio: {body[:300]!r}")
-    if not body:
-        raise RuntimeError("GPT-SoVITS API returned an empty body")
-    out.write_bytes(body)
+    # This synchronous boundary is called from a request/owned narration
+    # worker thread. Async I/O supplies cancellable absolute timeout behavior.
+    body = asyncio.run(_request_speech_audio(url, payload))
+    _validate_pcm_wav(body)
+    temporary = out.with_name(f".{out.stem}.{uuid.uuid4().hex}.tmp.wav")
+    try:
+        temporary.write_bytes(body)
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        temporary.replace(out)
+    finally:
+        temporary.unlink(missing_ok=True)
     return out
 
 
@@ -196,7 +237,7 @@ class SynthesisOutcome:
     install_hints: list[str] = field(default_factory=list)
 
 
-def synthesize_to_path(
+def _synthesize_unlocked(
     *,
     profile_id: str,
     text: str,
@@ -264,17 +305,61 @@ def synthesize_to_path(
             text_language=text_language_value,
             output_path=output_path,
         )
+        try:
+            record_capability_success("speech")
+        except Exception:
+            _LOG.exception("Speech capability receipt could not be saved")
         return SynthesisOutcome(
             status="completed",
             detail=f"Synthesized via GPT-SoVITS api.py at {api_base_url()}.",
             output_path=produced,
         )
-    except Exception as exc:  # noqa: BLE001 — surface engine errors as structured failed status
+    except Exception:  # noqa: BLE001 — keep technical details on the backend
+        _LOG.exception("Speech synthesis failed")
         return SynthesisOutcome(
             status="failed",
-            detail=f"GPT-SoVITS synthesis failed: {exc}",
+            detail="speech_synthesis_failed",
             install_hints=list(INSTALL_HINTS),
         )
+
+
+def synthesize_to_path(
+    *, profile_id: str, text: str, output_path: Path,
+    prompt_text: str | None = None, prompt_language: str | None = None,
+    text_language: str | None = None, require_consent: bool = True,
+) -> SynthesisOutcome:
+    """Serialize books and speech trials, rechecking consent inside the lock."""
+    from .module_jobs import ModuleSetupError, speech_admission
+    if _STOPPING.is_set():
+        return SynthesisOutcome(status="failed", detail="speech_backend_stopping")
+    try:
+        with speech_admission(), SYNTHESIS_LOCK:
+            if _STOPPING.is_set():
+                return SynthesisOutcome(status="failed", detail="speech_backend_stopping")
+            return _synthesize_unlocked(profile_id=profile_id, text=text, output_path=output_path,
+                                        prompt_text=prompt_text, prompt_language=prompt_language,
+                                        text_language=text_language, require_consent=require_consent)
+    except ModuleSetupError as exc:
+        return SynthesisOutcome(status="failed", detail=exc.code)
+
+
+def start() -> None:
+    _STOPPING.clear()
+
+
+def begin_shutdown() -> None:
+    """Close admission before async cleanup yields to queued request threads."""
+    _STOPPING.set()
+
+
+def _drain_synthesis() -> None:
+    with SYNTHESIS_LOCK:
+        pass
+
+
+async def shutdown() -> None:
+    begin_shutdown()
+    await await_cleanup(asyncio.to_thread(_drain_synthesis))
 
 
 def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:

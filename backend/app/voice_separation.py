@@ -9,12 +9,13 @@ from pathlib import Path
 from typing import Callable
 
 from .config import DEMUCS_DIR, LOG_DIR
+from .managed_layout import engine_default
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process
 from .stems import SpawnProcess, gpu_lock, separate_file
 from .gpu_lease import gpu_lease
 from .voice_contracts import SeparationQuality, VoiceSeparationOption, VoiceSeparationOptionsResponse
 
-ROFORMER_DIR = Path(os.getenv("VOICE_ROFORMER_DIR", str(Path(__file__).resolve().parents[2] / "external" / "Music-Source-Separation-Training")))
+ROFORMER_DIR = Path(os.getenv("VOICE_ROFORMER_DIR", engine_default('Music-Source-Separation-Training', str(Path(__file__).resolve().parents[2] / "external" / "Music-Source-Separation-Training"))))
 ROFORMER_CONFIG = Path(os.getenv("VOICE_ROFORMER_CONFIG", ""))
 ROFORMER_CHECKPOINT = Path(os.getenv("VOICE_ROFORMER_CHECKPOINT", ""))
 ROFORMER_MODEL_TYPE = os.getenv("VOICE_ROFORMER_MODEL_TYPE", "mel_band_roformer")

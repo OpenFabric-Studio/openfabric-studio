@@ -33,11 +33,12 @@ from .api.routes_voice_trials import router as voice_trials_router
 from .api.routes_voice_profiles import router as voice_profiles_router
 from .api.routes_speech_clone import router as speech_clone_router
 from .api.routes_audiobooks import router as audiobooks_router
+from .api.routes_modules import router as modules_router
 from .api.routes_yue2_upload import router as yue2_upload_router
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
-from . import ace_jobs, audio_exports, audio_versions, midi, native_yue, reference_imports, stems, tagging, video_jobs, voice_build, voice_comparisons, yue_jobs
+from . import ace_jobs, audio_exports, audio_versions, audiobooks, ebook_import, midi, module_jobs, native_yue, speech_clone, reference_imports, stems, tagging, video_jobs, voice_build, voice_comparisons, yue_jobs
 
 
 @asynccontextmanager
@@ -54,9 +55,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yue_jobs.recover()
         await reference_imports.start()
         await video_jobs.recover()
+        speech_clone.start()
+        ebook_import.start()
+        await audiobooks.start()
+        await module_jobs.recover()
         manager.start_watchdog()
         yield
     finally:
+        speech_clone.begin_shutdown()
         # Drain one-shot jobs before stopping the engines they depend on.
         try:
             try:
@@ -67,7 +73,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 outcomes = await asyncio.gather(
                     voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
-                    stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(), return_exceptions=True,
+                    stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
+                    audiobooks.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(), return_exceptions=True,
                 )
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
@@ -109,6 +116,7 @@ app.include_router(voices_router)
 app.include_router(voice_profiles_router)
 app.include_router(speech_clone_router)
 app.include_router(audiobooks_router)
+app.include_router(modules_router)
 app.include_router(videos_router)
 # Registered before proxy_router's catch-all so this exact path wins.
 app.include_router(yue2_upload_router)

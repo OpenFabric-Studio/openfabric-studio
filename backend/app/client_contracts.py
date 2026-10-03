@@ -310,7 +310,10 @@ class UploadDatasetFilesResponse(Contract):
 
 class LibraryFolderInfo(Contract):
     path: str
-    key: Literal["tracks", "voices", "videos", "models", "logs", "database"]
+    key: Literal[
+        "tracks", "voices", "videos", "audiobooks", "speechProfiles",
+        "speechTrials", "models", "logs", "database",
+    ]
 
 
 class LibraryStatusResponse(Contract):

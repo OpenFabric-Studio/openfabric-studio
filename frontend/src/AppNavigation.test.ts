@@ -8,8 +8,21 @@ import { i18n, setLocale } from './i18n'
 import * as api from './api/orchestrator'
 import { useOrchestratorStore } from './stores/orchestrator'
 import type { ModelRuntimeStatus, OrchestratorStatus } from './types'
+import * as modulesApi from './api/modules'
+import { useModulesStore } from './stores/modules'
+import type { ModuleInventory, ModuleInfo } from './api/generated'
 
 vi.mock('./api/orchestrator', () => ({ getStatus: vi.fn(), switchModel: vi.fn(), stopActive: vi.fn() }))
+vi.mock('./api/modules', () => ({ getModules: vi.fn(), listModuleJobs: vi.fn() }))
+function moduleSnapshot(state: ModuleInfo['state'] = 'installed'): ModuleInventory {
+  const ids: ModuleInfo['id'][] = ['ace_step', 'yue2', 'speech', 'singing', 'video', 'media']
+  return { platform: 'darwin', architecture: 'arm64', acceleration: 'apple_silicon', managed_root: '/managed', free_bytes: 100, checked_at: 'today', modules: ids.map(id => ({ id, name: id, description: '', state, supported: state !== 'unsupported', managed: true, automation: 'automatic', dependencies: [], capabilities: [], evidence: [], actions: [] })) }
+}
+function headerLink(name: string): HTMLAnchorElement {
+  const result = [...document.querySelectorAll<HTMLAnchorElement>('header a')].find(item => item.getAttribute('aria-label')?.startsWith(name + ':'))
+  if (!result) throw new Error(`Missing header link ${name}`)
+  return result
+}
 vi.mock('./composables/completionNotifications', () => ({
   completionNotifications: { unread: [] }, startCompletionPreferenceSync: vi.fn(), stopCompletionPreferenceSync: vi.fn(),
 }))
@@ -35,6 +48,8 @@ beforeEach(() => {
   vi.spyOn(window, 'matchMedia').mockReturnValue(media)
   vi.mocked(api.getStatus).mockResolvedValue(snapshot())
   vi.mocked(api.switchModel).mockResolvedValue(snapshot('running'))
+  vi.mocked(modulesApi.getModules).mockResolvedValue(moduleSnapshot())
+  vi.mocked(modulesApi.listModuleJobs).mockResolvedValue([])
 })
 afterEach(() => {
   app?.unmount(); app = undefined; document.body.replaceChildren(); vi.restoreAllMocks(); localStorage.clear()
@@ -157,32 +172,35 @@ it('releases drawer focus ownership on desktop resize and teardown', async () =>
   resize(true); await settle(); expect(document.activeElement).toBe(outside)
 })
 
-it('keeps engine status controls read-only when tapped', async () => {
+it('opens module settings when tapped without starting an engine', async () => {
   const { router } = await mount()
-  button('ACE-Step 1.5: stopped', document.querySelector('header') ?? document).click(); await settle()
+  headerLink('ACE-Step').click(); await settle()
   expect(api.switchModel).not.toHaveBeenCalled()
-  expect(router.currentRoute.value.name).toBe('voice-clone')
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('ACE-Step 1.5: stopped')
+  expect(router.currentRoute.value.name).toBe('settings')
+  expect(router.currentRoute.value.hash).toBe('#module-ace_step')
+  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('ACE-Step: Installed')
 })
 
 it('shows unknown until an initial runtime snapshot is available', async () => {
-  vi.mocked(api.getStatus).mockReturnValue(new Promise(() => {}))
+  vi.mocked(modulesApi.getModules).mockReturnValue(new Promise(() => {}))
   await mount()
-  expect(button('ACE-Step 1.5: status unavailable', document.querySelector('header') ?? document)).toBeDefined()
+  expect(headerLink('ACE-Step').getAttribute('aria-label')).toContain('Status unavailable')
 })
 
-it.each<ModelRuntimeStatus>(['stopped', 'starting', 'running', 'stopping', 'error'])('exposes the %s runtime state in labelled header icons', async status => {
-  const { store } = await mount(); store._applySnapshot(snapshot(status)); await settle()
-  const label = `ACE-Step 1.5: ${status === 'starting' || status === 'stopping' ? `${status}…` : status}`
-  expect(button(label, document.querySelector('header') ?? document)).toBeDefined()
+it.each<ModuleInfo['state']>(['ready', 'installed', 'partial', 'missing', 'unsupported'])('exposes the %s module state in six labelled header icons', async state => {
+  await mount(); useModulesStore().inventory = moduleSnapshot(state); await settle()
+  const labels = { ready: 'Ready', installed: 'Installed', partial: 'Setup incomplete', missing: 'Not installed', unsupported: 'Unavailable on this computer' }
+  expect(headerLink('ACE-Step').getAttribute('aria-label')).toContain(labels[state])
+  for (const name of ['ACE-Step', 'YuE', 'Speech', 'Singing', 'Video', 'Tools']) expect(headerLink(name)).toBeDefined()
+  expect(document.querySelectorAll('header a')).toHaveLength(6)
 })
 
 it('shows status tooltips for keyboard focus and dismisses them with Escape', async () => {
   await mount()
-  const status = button('ACE-Step 1.5: stopped', document.querySelector('header') ?? document)
+  const status = headerLink('ACE-Step')
   status.focus(); await settle()
   const tooltip = document.querySelector('[role="tooltip"]')
-  expect(tooltip?.textContent).toContain('ACE-Step 1.5: stopped')
+  expect(tooltip?.textContent).toContain('ACE-Step: Installed')
   expect(status.getAttribute('aria-describedby')).toBe(tooltip?.id)
   key(status, 'Escape'); await settle()
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
@@ -238,7 +256,7 @@ it('removes a hovered tooltip when history hides the mobile drawer', async () =>
 
 it('dismisses a tapped status tooltip with a second tap or an outside pointer action', async () => {
   await mount()
-  const status = button('ACE-Step 1.5: stopped', document.querySelector('header') ?? document)
+  const status = headerLink('ACE-Step')
   status.focus(); status.click(); await settle(); expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
   status.click(); await settle(); expect(document.querySelector('[role="tooltip"]')).toBeNull()
   status.click(); await settle(); expect(document.querySelector('[role="tooltip"]')).not.toBeNull()

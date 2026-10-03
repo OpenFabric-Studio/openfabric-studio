@@ -36,6 +36,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(drain_yue)
         self.enterContext(patch.object(main, 'ensure_layout'))
         self.enterContext(patch.object(main, 'place_seed_models'))
+        self.enterContext(patch.object(main.speech_clone, 'begin_shutdown'))
         self.enterContext(patch.object(main.audio_versions, 'recover', new=AsyncMock()))
         self.enterContext(patch.object(main.audio_exports, 'recover_exports', new=AsyncMock()))
         self.enterContext(patch.object(main.ace_jobs, 'recover'))
@@ -50,6 +51,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
             (main.video_jobs, 'shutdown'), (main.stems, 'shutdown'),
             (main.midi, 'shutdown'), (main.tagging, 'shutdown'),
             (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
+            (main.audiobooks, 'shutdown'), (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'), (main.speech_clone, 'shutdown'),
         ]]
         stop = self.enterContext(patch.object(main.manager, 'stop_all', new=AsyncMock()))
 

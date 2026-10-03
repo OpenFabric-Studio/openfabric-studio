@@ -1,3 +1,5 @@
+// LEGACY HARNESS: assumes the removed all-model desktop bootstrap. Adapt setupPhase
+// to the current Settings module wizard before running. This is not current platform evidence.
 // Full end-to-end test of an INSTALLED desktop app (manual, Windows + NVIDIA GPU, about 46 GB and 25 minutes).
 //
 //   npm i --no-save playwright            (only the package is needed, no browsers)

@@ -3,11 +3,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .contracts import Contract, JobStatus
 
-AudiobookBookStatus = Literal["draft", "queued", "running", "done", "failed"]
+AudiobookBookStatus = Literal["draft", "queued", "running", "done", "failed", "paused", "cancelled"]
 
 
 class AudiobookChapterInput(Contract):
@@ -31,6 +31,8 @@ class AudiobookJob(Contract):
     output_path: str | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
+    completed_sections: int = Field(default=0, ge=0)
+    total_sections: int = Field(default=0, ge=0)
 
 
 class AudiobookBook(Contract):
@@ -42,6 +44,7 @@ class AudiobookBook(Contract):
     export_path: str | None = None
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
+    source_import_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class AudiobookBooksResponse(Contract):
@@ -57,6 +60,58 @@ class AudiobookCreateResponse(Contract):
     jobs: list[AudiobookJob]
 
 
+class EbookChapterDraft(AudiobookChapterInput):
+    included: bool = True
+
+
+class EbookImportWarning(Contract):
+    code: Literal["chapter_detection", "chapter_split", "non_narrative_content", "nonlinear_content"]
+    message: str = Field(min_length=1, max_length=400)
+
+
+class PatchEbookDraftRequest(Contract):
+    title: str = Field(min_length=1, max_length=200)
+    chapters: list[EbookChapterDraft] = Field(min_length=1, max_length=100)
+    revision: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def valid_text(self) -> PatchEbookDraftRequest:
+        if not self.title.strip() or any(not chapter.text.strip() for chapter in self.chapters):
+            raise ValueError("draft_text_required")
+        return self
+
+
+class EbookDraft(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    title: str = Field(min_length=1, max_length=200)
+    chapters: list[EbookChapterDraft] = Field(min_length=1, max_length=100)
+    source_filename: str = Field(min_length=1, max_length=240)
+    source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    warnings: list[EbookImportWarning] = Field(default_factory=list, max_length=100)
+    revision: int = Field(ge=1)
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str = Field(min_length=1, max_length=64)
+
+
+class EbookDraftSummary(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    title: str = Field(min_length=1, max_length=200)
+    source_filename: str = Field(min_length=1, max_length=240)
+    chapter_count: int = Field(ge=1, le=100)
+    revision: int = Field(ge=1)
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str = Field(min_length=1, max_length=64)
+
+
+class EbookDraftsResponse(Contract):
+    drafts: list[EbookDraftSummary]
+
+
+class CreateAudiobookFromDraftRequest(Contract):
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision: int = Field(ge=1)
+
+
 AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     AudiobookChapterInput,
     CreateAudiobookRequest,
@@ -65,4 +120,11 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     AudiobookBooksResponse,
     AudiobookJobsResponse,
     AudiobookCreateResponse,
+    EbookChapterDraft,
+    EbookImportWarning,
+    PatchEbookDraftRequest,
+    EbookDraft,
+    EbookDraftSummary,
+    EbookDraftsResponse,
+    CreateAudiobookFromDraftRequest,
 ]

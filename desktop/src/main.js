@@ -9,11 +9,13 @@ const { BackendServer } = require('./server');
 const { loadConfig, updateConfig, ensureWritableDir } = require('./config');
 const { notificationHandlers } = require('./notifications');
 const { versionedDocumentUrl } = require('./navigation');
+const { drainApplication } = require('./lifecycle');
 
 // Only these links can be opened from the first-run screen.
 const EXTERNAL = {
   'nvidia-drivers': 'https://www.nvidia.com/drivers',
   issues: 'https://github.com/OpenFabric-Studio/openfabric-studio/issues/new/choose',
+  installation: 'https://github.com/OpenFabric-Studio/openfabric-studio/blob/master/docs/platform-setup.md',
 };
 const SETUP_PAGE = path.join(__dirname, '..', 'renderer', 'index.html');
 
@@ -24,6 +26,7 @@ let win = null;
 let ctx = null;
 let server = null;
 let setupAbort = null;
+let setupTask = null;
 let quitting = false;
 let savedPort = null;
 
@@ -33,7 +36,7 @@ function buildContext(dataRoot) {
     manifest,
     platform: PLATFORM,
     resources: resourcePaths(app.isPackaged),
-    // Test switch: skip the multi-gigabyte components, e.g. OPENFABRIC_SKIP_COMPONENTS=ace-step,demucs,weights
+    // Test switch: skipped uv/backend-env components may prevent startup.
     skip: (process.env.OPENFABRIC_SKIP_COMPONENTS || '').split(',').map((s) => s.trim()).filter(Boolean),
   };
 }
@@ -75,6 +78,9 @@ function showSetup(query = {}) {
 
 /** Starts the backend, then swaps the window over to the real app. */
 async function launch() {
+  if (quitting || setupAbort) return;
+  if (!(await isSetupComplete(ctx, { ignoreSkipped: true }))) return showSetup();
+  if (server) { server.removeAllListeners('exit'); await server.stop(); }
   send({ type: 'starting' });
   server = new BackendServer(ctx);
   server.on('exit', (code) => {
@@ -87,25 +93,30 @@ async function launch() {
       savedPort = server.port;
       await updateConfig(app.getPath('userData'), { port: savedPort });
     }
-    await win.loadURL(versionedDocumentUrl(url, app.getVersion()));
+    if (!quitting && win && !win.isDestroyed()) await win.loadURL(versionedDocumentUrl(url, app.getVersion()));
   } catch (err) {
-    showSetup({ state: 'crashed', message: err.message });
+    if (!quitting && win && !win.isDestroyed()) await showSetup({ state: 'crashed', message: err.message });
   }
 }
 
 async function startSetup() {
   if (setupAbort) return;
   setupAbort = new AbortController();
-  const run = { ...ctx, signal: setupAbort.signal };
-  try {
-    await runSetup(run, send);
-    send({ type: 'finished', complete: await isSetupComplete(ctx) });
-  } catch (err) {
-    if (setupAbort.signal.aborted) send({ type: 'paused' });
-    else send({ type: 'failed', componentId: err.componentId || null, message: err.message });
-  } finally {
-    setupAbort = null;
-  }
+  const controller = setupAbort;
+  const run = { ...ctx, signal: controller.signal };
+  setupTask = (async () => {
+    try {
+      await runSetup(run, send);
+      send({ type: 'finished', complete: await isSetupComplete(ctx) });
+    } catch (err) {
+      if (controller.signal.aborted) send({ type: 'paused' });
+      else send({ type: 'failed', componentId: err.componentId || null, message: err.message });
+    } finally {
+      setupAbort = null;
+    }
+  })();
+  try { await setupTask; }
+  finally { setupTask = null; }
 }
 
 function registerIpc() {
@@ -136,6 +147,7 @@ function registerIpc() {
     return ['remiqora', 'openfabric', 'openfabricstudio', 'openfabric-studio'].includes(path.basename(picked).toLowerCase().replace(/[\s_]/g, '')) ? picked : path.join(picked, 'OpenFabricStudio');
   });
   ipcMain.handle('setup:set-root', async (_e, dir) => {
+    if (setupAbort || server?.child) return { ok: false, message: 'Stop setup and the backend before selecting another folder.' };
     try {
       await ensureWritableDir(dir);
     } catch (err) {
@@ -151,7 +163,7 @@ function registerIpc() {
     await updateConfig(app.getPath('userData'), { dataRoot: ctx.L.root });
     startSetup();
   });
-  ipcMain.handle('setup:pause', () => { if (setupAbort) setupAbort.abort(new Error('paused')); });
+  ipcMain.handle('setup:pause', async () => { if (setupAbort) setupAbort.abort(new Error('paused')); if (setupTask) await setupTask; });
   ipcMain.handle('setup:launch', () => launch());
   ipcMain.handle('setup:open-external', (_e, key) => { if (EXTERNAL[key]) shell.openExternal(EXTERNAL[key]); });
   ipcMain.handle('setup:open-logs', () => shell.openPath(ctx.L.logs));
@@ -188,10 +200,9 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     if (quitting) return;
     quitting = true;
-    if (setupAbort) setupAbort.abort(new Error('quit'));
-    if (server) {
+    if (setupTask || server) {
       event.preventDefault();
-      server.stop().finally(() => app.quit());
+      drainApplication({ setupAbort, setupTask, server }).catch(error => console.error('Shutdown failed:', error.message)).finally(() => app.quit());
     }
   });
 }

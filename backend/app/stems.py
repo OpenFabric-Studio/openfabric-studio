@@ -66,6 +66,8 @@ async def start(track_id: int, *, force: bool = False) -> StemJob:
         return job
     if job and job.status == "done" and not force:
         return job
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     job = StemJob(status="queued")
     _jobs[track_id] = job
     job.task = asyncio.create_task(_run(track_id))

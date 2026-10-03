@@ -201,6 +201,8 @@ async def start(track_id: int, source: str, *, force: bool = False) -> MidiJob:
         return job
     if job and job.status == "done" and not force:
         return job
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     job = MidiJob(status="queued")
     _jobs[key] = job
     job.task = asyncio.create_task(_run(track_id, source))

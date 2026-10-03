@@ -1081,6 +1081,8 @@ async def start(
     from .work_busy import other_work_busy
 
     async with admission_lock:
+        from .resource_admission import require_setup_idle
+        require_setup_idle()
         store.ensure_open(project_id)
         document = store.load(project_id)
         project = document.project

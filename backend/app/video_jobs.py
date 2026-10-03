@@ -1732,7 +1732,10 @@ async def start_video(
     from .work_busy import other_work_busy
 
     async with admission_lock, _gate:
+        from .module_jobs import work_busy as setup_busy
         if (
+            setup_busy()
+            or
             native_work_inflight()
             or ace_busy()
             or await other_work_busy()

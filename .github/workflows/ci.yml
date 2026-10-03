@@ -36,6 +36,25 @@ jobs:
           OPENFABRIC_DATA_DIR: ${{ runner.temp }}/openfabric-native/library
           SEED_VC_DIR: ${{ runner.temp }}/openfabric-native/engine
 
+  backend-runtime:
+    name: Base runtime (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Install hashed base wheels
+        run: |
+          python -m pip install --require-hashes --only-binary :all: -r backend/requirements.lock
+      - run: python -m pip check
+      - name: Verify lightweight runtime imports
+        run: python -I -c "import fastapi, uvicorn, httpx, pydantic, multipart, dotenv, numpy, PIL"
+
   desktop:
     name: Desktop (unit tests)
     runs-on: ubuntu-latest
@@ -80,17 +99,19 @@ jobs:
           printf '%s\n' \
             "OPENFABRIC_CONFIG=$RUNNER_TEMP/openfabric-test-config.json" \
             "OPENFABRIC_DATA_DIR=$RUNNER_TEMP/openfabric-test-library" \
-            "SEED_VC_DIR=$RUNNER_TEMP/openfabric-test-seed-vc" >> "$GITHUB_ENV"
+            "SEED_VC_DIR=$RUNNER_TEMP/openfabric-test-seed-vc" \
+            "OPENFABRIC_MODULE_ROOT=$RUNNER_TEMP/openfabric-test-modules" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
       - run: pip install -r backend/requirements-test.txt
       - run: python backend/scripts/generate_contracts.py --check
-      # Default CI: mypy on linux only (multi-platform on release / dispatch via desktop workflow).
-      - name: Strict Python types (Linux)
+      - name: Strict Python types (Linux, macOS, Windows paths)
         run: |
-          python -m mypy --strict --follow-imports=silent app/contracts.py app/client_contracts.py app/generation_contracts.py app/generation_library.py app/api/routes_generation_library.py app/yue_contracts.py app/yue_jobs.py app/api/routes_yue_jobs.py app/api/routes_stem_exports.py app/native_yue.py app/native_artifacts.py app/main.py app/config.py app/orchestrator/state.py app/orchestrator/manager.py app/orchestrator/process.py app/orchestrator/windows_job.py app/orchestrator/windows_supervisor.py app/orchestrator/posix_supervisor.py app/api/routes_proxy.py app/api/routes_ace_jobs.py app/reference_melody.py app/reference_contracts.py app/reference_imports.py app/reference_tools.py app/api/routes_references.py app/atomic_files.py app/data_root.py app/ace_jobs.py app/audio_version_contracts.py app/audio_version_store.py app/audio_versions.py app/audio_encoding.py app/audio_exports.py app/artist_settings.py app/tagging.py app/tagging_genres.py app/track_activity.py app/api/tagged_download_response.py app/api/routes_audio_versions.py app/api/routes_audio_exports.py app/api/routes_audio_settings.py app/job_lifecycle.py app/resource_admission.py app/track_view.py app/voice_contracts.py app/voice_profile_contracts.py app/voice_profiles.py app/speech_starter_voices.py app/api/routes_voice_profiles.py app/api/routes_speech_clone.py app/voice_progress.py app/gpu_lease.py app/voice_apply_progress.py app/voice_comparisons.py app/voice_separation.py app/voice_artifacts.py app/voice_preparation.py app/voice_coverage.py app/prep_vocal.py app/clean_vocal.py app/seed_vc_compat.py app/voice_measure.py app/voice_download.py app/voice_replacement.py app/video_contracts.py app/video_projects.py app/video_media.py app/video_process.py app/video_render.py app/video_text.py app/video_io.py app/video_engine.py app/video_analysis.py app/api/routes_voice_trials.py scripts/generate_contracts.py scripts/setup_yue_native.py scripts/setup_roformer.py scripts/setup_video.py scripts/run_video.py --platform linux
+          for target in linux darwin win32; do
+            python -m mypy --strict --follow-imports=silent app/managed_layout.py app/audiobook_contracts.py app/audiobooks.py app/audiobook_narration.py app/ebook_import.py app/ebook_import_worker.py app/speech_clone.py app/api/routes_audiobooks.py app/module_evidence.py app/module_runtime.py app/module_contracts.py app/module_catalog.py app/module_jobs.py app/module_install.py app/module_security.py app/api/routes_modules.py app/contracts.py app/client_contracts.py app/generation_contracts.py app/generation_library.py app/api/routes_generation_library.py app/yue_contracts.py app/yue_jobs.py app/api/routes_yue_jobs.py app/api/routes_stem_exports.py app/native_yue.py app/native_artifacts.py app/main.py app/config.py app/orchestrator/state.py app/orchestrator/manager.py app/orchestrator/process.py app/orchestrator/windows_job.py app/orchestrator/windows_supervisor.py app/orchestrator/posix_supervisor.py app/api/routes_proxy.py app/api/routes_ace_jobs.py app/reference_melody.py app/reference_contracts.py app/reference_imports.py app/reference_tools.py app/api/routes_references.py app/atomic_files.py app/data_root.py app/ace_jobs.py app/audio_version_contracts.py app/audio_version_store.py app/audio_versions.py app/audio_encoding.py app/audio_exports.py app/artist_settings.py app/tagging.py app/tagging_genres.py app/track_activity.py app/api/tagged_download_response.py app/api/routes_audio_versions.py app/api/routes_audio_exports.py app/api/routes_audio_settings.py app/job_lifecycle.py app/resource_admission.py app/track_view.py app/voice_contracts.py app/voice_profile_contracts.py app/voice_profiles.py app/speech_starter_voices.py app/api/routes_voice_profiles.py app/api/routes_speech_clone.py app/voice_progress.py app/gpu_lease.py app/voice_apply_progress.py app/voice_comparisons.py app/voice_separation.py app/voice_artifacts.py app/voice_preparation.py app/voice_coverage.py app/prep_vocal.py app/clean_vocal.py app/seed_vc_compat.py app/voice_measure.py app/voice_download.py app/voice_replacement.py app/video_contracts.py app/video_projects.py app/video_media.py app/video_process.py app/video_render.py app/video_text.py app/video_io.py app/video_engine.py app/video_analysis.py app/api/routes_voice_trials.py scripts/generate_contracts.py scripts/setup_modules.py scripts/setup_yue_native.py scripts/setup_roformer.py scripts/setup_video.py scripts/run_video.py --platform "$target"
+          done
         working-directory: backend
       - run: python -m unittest discover -s app -p '*_test.py' -v
         working-directory: backend

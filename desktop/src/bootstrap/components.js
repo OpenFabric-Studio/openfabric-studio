@@ -4,7 +4,7 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { downloadFile } = require('./download');
-const { extract, extractAtomic } = require('./extract');
+const { extract, promoteDirectory } = require('./extract');
 const { applyGitPatch, isGitPatchApplied } = require('./patch');
 const { runCommand, cleanEnv } = require('../proc');
 const { IS_WINDOWS } = require('../paths');
@@ -99,6 +99,19 @@ async function findFile(dir, name) {
   return null;
 }
 
+async function verifyMediaPair(L, manifest, platform, ctx) {
+  for (const tool of ['ffmpeg', 'ffprobe']) {
+    const executable = ffmpegExecutable(L, manifest, platform, tool);
+    if (!(await exists(executable))) return false;
+    let valid = false;
+    try {
+      await runCommand(executable, ['-version'], { signal: ctx?.signal, timeoutMs: 5000, onLine: line => { if (line.startsWith(`${tool} version `)) valid = true; } });
+    } catch (error) { if (ctx?.signal?.aborted) throw error; return false; }
+    if (!valid) return false;
+  }
+  return true;
+}
+
 /** Moves the contents of an extracted engine archive into place: tools/ and model_specs/ next to bin/, the rest into bin/. */
 async function placeEngineFiles(extracted, L) {
   for (const name of await fsp.readdir(extracted)) {
@@ -145,53 +158,109 @@ async function replaceAceStepSource(current, staged) {
  *   verify(ctx) -> bool (sanity check on disk), install(ctx, report).
  * report({ done, total, note }): byte progress is optional, `note` is a human line (uv output, ...).
  */
-function buildComponents({ L, manifest, platform, resources }) {
-  const engine = manifest.engine.assets[platform];
+function buildComponents({ L, manifest, platform, resources, includeOptional = false }) {
   const uvAsset = manifest.uv.assets[platform];
-  const ffAsset = manifest.ffmpeg.assets[platform];
+  if (!uvAsset) return [];
   const logFile = path.join(L.logs, 'setup.log');
-  const aceVersion = `${manifest.aceStep.commit}:${sha256(fs.readFileSync(resources.acePatch))}`;
-  const modelManagerPatch = fs.readFileSync(resources.modelManagerPatch || path.join(path.dirname(resources.acePatch), 'yue-model-resume.patch'), 'utf8');
-  const modelManagerVersion = sha256(modelManagerPatch);
+  const lockedRequirements = path.join(resources.backend, 'requirements.lock');
+  const requirements = fs.existsSync(lockedRequirements) ? lockedRequirements : path.join(resources.backend, 'requirements.txt');
+  const lockOptions = requirements === lockedRequirements ? ['--require-hashes', '--only-binary', ':all:'] : [];
+
+  const backendEnv = {
+    id: 'backend-env',
+    weight: 60e6,
+    version: `py3.12-${sha1(`${path.basename(requirements)}:${fs.readFileSync(requirements, 'utf8')}`)}`,
+    async verify(ctx) {
+      if (!(await exists(L.backendPython))) return false;
+      try {
+        await runCommand(L.backendPython, ['-c', 'import sys; assert sys.version_info[:2] == (3, 12); import fastapi, uvicorn, httpx, pydantic, multipart, dotenv, numpy, PIL'], { signal: ctx?.signal, timeoutMs: 15000 });
+        await runCommand(L.backendPython, ['-m', 'pip', 'check'], { signal: ctx?.signal, timeoutMs: 15000 });
+        return true;
+      } catch (error) { if (ctx?.signal?.aborted) throw error; return false; }
+    },
+    async install(ctx, report) {
+      const env = uvEnv(L);
+      const note = (line) => report({ note: line });
+      await runCommand(L.uvBin, ['venv', '--python', '3.12', '--seed', '--allow-existing', L.backendVenv], { env, onLine: note, signal: ctx.signal, logFile });
+      await runCommand(L.uvBin, ['pip', 'install', '--python', L.backendPython, ...lockOptions, '-r', requirements], { env, onLine: note, signal: ctx.signal, logFile });
+    },
+  };
 
   const uv = {
     id: 'uv',
     weight: uvAsset.bytes,
     version: manifest.uv.version,
-    verify: () => exists(L.uvBin),
+    async verify(ctx) {
+      if (!(await exists(L.uvBin))) return false;
+      let version = '';
+      try {
+        await runCommand(L.uvBin, ['--version'], { onLine: (line) => { version += line; }, signal: ctx?.signal, timeoutMs: 5000 });
+        return version.trim().split(/\s+/).slice(0, 2).join(' ') === `uv ${manifest.uv.version}`;
+      } catch (error) { if (ctx?.signal?.aborted) throw error; return false; }
+    },
     async install(ctx, report) {
       const archive = await fetchTo(ctx, uvAsset, 0, uvAsset.bytes, report);
       const tmp = path.join(L.downloads, 'uv-extract');
       await fsp.rm(tmp, { recursive: true, force: true });
-      await extract(archive, tmp);
+      await extract(archive, tmp, { signal: ctx.signal });
       await fsp.mkdir(L.uvDir, { recursive: true });
       const found = await findFile(tmp, path.basename(uvAsset.bin));
       if (!found) throw new Error(`${path.basename(uvAsset.bin)} was not found inside the uv archive`);
-      await fsp.copyFile(found, L.uvBin);
-      if (!IS_WINDOWS) await fsp.chmod(L.uvBin, 0o755);
+      const candidate = `${L.uvBin}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fsp.copyFile(found, candidate);
+        if (!IS_WINDOWS) await fsp.chmod(candidate, 0o755);
+        ctx.signal?.throwIfAborted();
+        await fsp.rename(candidate, L.uvBin);
+      } finally { await fsp.rm(candidate, { force: true }); }
       await fsp.rm(tmp, { recursive: true, force: true });
       await fsp.rm(archive, { force: true });
     },
   };
 
+  // Opening the studio does not require models, a GPU, or optional media tools.
+  if (!includeOptional) return [uv, backendEnv].map(c => ({ ...c, network: true }));
+  const engine = manifest.engine.assets[platform];
+  if (!engine) {
+    const error = new Error('Optional desktop assets are unavailable; use Settings or the source installation instructions.');
+    error.code = 'unsupported-platform';
+    throw error;
+  }
+  const ffAsset = manifest.ffmpeg.assets[platform];
+  const aceVersion = `${manifest.aceStep.commit}:${sha256(fs.readFileSync(resources.acePatch))}`;
+  const modelManagerPatch = fs.readFileSync(resources.modelManagerPatch || path.join(path.dirname(resources.acePatch), 'yue-model-resume.patch'), 'utf8');
+  const modelManagerVersion = sha256(modelManagerPatch);
+
   const ffmpeg = {
     id: 'ffmpeg',
-    weight: ffAsset ? ffAsset.bytes : 0,
+    weight: ffAsset ? ffAsset.bytes + (ffAsset.ffprobe?.bytes || 0) : 0,
     version: (ffAsset && ffAsset.version) || manifest.ffmpeg.version,
-    verify: () => exists(ffmpegExecutable(L, manifest, platform)),
+    verify: ctx => verifyMediaPair(L, manifest, platform, ctx),
     async install(ctx, report) {
-      if (!ffAsset) throw new Error('No FFmpeg build is pinned for this system. Install ffmpeg yourself and put it on PATH.');
-      const download = await fetchTo(ctx, ffAsset, 0, ffAsset.bytes, report);
-      if (ffAsset.kind === 'binary') {
-        // A single static executable (macOS): nothing to unpack, just put it where the backend looks for it.
-        const dest = ffmpegExecutable(L, manifest, platform);
-        await fsp.mkdir(path.dirname(dest), { recursive: true });
-        await fsp.copyFile(download, dest);
-        await fsp.chmod(dest, 0o755);
-      } else {
-        await extractAtomic(download, L.ffmpegDir);
-      }
-      await fsp.rm(download, { force: true });
+      if (!ffAsset || (ffAsset.kind === 'binary' && !ffAsset.ffprobe)) throw new Error('No complete media tool pair is pinned for this system. Install both FFmpeg and FFprobe and put their bin directory on PATH.');
+      const total = ffmpeg.weight;
+      const download = await fetchTo(ctx, ffAsset, 0, total, report);
+      const staged = `${L.ffmpegDir}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fsp.mkdir(path.join(staged, 'bin'), { recursive: true });
+        if (ffAsset.kind === 'binary') {
+          const probe = await fetchTo(ctx, ffAsset.ffprobe, ffAsset.bytes, total, report);
+          await fsp.copyFile(download, path.join(staged, 'bin', 'ffmpeg'));
+          await fsp.copyFile(probe, path.join(staged, 'bin', 'ffprobe'));
+        } else {
+          await extract(download, staged, { signal: ctx.signal });
+          for (const tool of ['ffmpeg', 'ffprobe']) {
+            const name = platform.startsWith('win32-') ? `${tool}.exe` : tool;
+            const source = path.join(staged, ffAsset.binDir, name);
+            if (!(await exists(source))) throw new Error(`${name} is missing from the pinned media archive`);
+            await fsp.copyFile(source, path.join(staged, 'bin', name));
+          }
+        }
+        if (!platform.startsWith('win32-')) for (const tool of ['ffmpeg', 'ffprobe']) await fsp.chmod(path.join(staged, 'bin', tool), 0o755);
+        if (!(await verifyMediaPair({ ...L, ffmpegDir: staged }, manifest, platform, ctx))) throw new Error('The media executables could not be verified');
+        await promoteDirectory(staged, L.ffmpegDir, { signal: ctx.signal });
+        await fsp.rm(download, { force: true });
+      } finally { await fsp.rm(staged, { recursive: true, force: true }); }
     },
   };
 
@@ -209,26 +278,12 @@ function buildComponents({ L, manifest, platform, resources }) {
         const archive = await fetchTo(ctx, file, base, total, report);
         base += file.bytes;
         const out = path.join(staging, String(i));
-        await extract(archive, out);
+        await extract(archive, out, { signal: ctx.signal });
         await placeEngineFiles(out, L);
         await fsp.rm(archive, { force: true });
       }
       if (!IS_WINDOWS) await fsp.chmod(path.join(L.yue2Bin, 'audiocpp_server'), 0o755);
       await fsp.rm(staging, { recursive: true, force: true });
-    },
-  };
-
-  const backendEnv = {
-    id: 'backend-env',
-    weight: 60e6,
-    // Re-run when a new app version changes the backend's requirements.
-    version: `py3.12-${sha1(fs.existsSync(path.join(resources.backend, 'requirements.txt')) ? fs.readFileSync(path.join(resources.backend, 'requirements.txt'), 'utf8') : '')}`,
-    verify: () => exists(L.backendPython),
-    async install(ctx, report) {
-      const env = uvEnv(L);
-      const note = (line) => report({ note: line });
-      await runCommand(L.uvBin, ['venv', '--python', '3.12', '--allow-existing', L.backendVenv], { env, onLine: note, signal: ctx.signal, logFile });
-      await runCommand(L.uvBin, ['pip', 'install', '--python', L.backendPython, '-r', path.join(resources.backend, 'requirements.txt')], { env, onLine: note, signal: ctx.signal, logFile });
     },
   };
 
@@ -274,7 +329,7 @@ function buildComponents({ L, manifest, platform, resources }) {
         const archive = await fetchTo(ctx, { url: manifest.aceStep.url }, 0, manifest.aceStep.approxBytes, report);
         const tmp = `${L.aceStep}.tmp`;
         await fsp.rm(tmp, { recursive: true, force: true });
-        await extract(archive, tmp, { stripComponents: 1 });
+        await extract(archive, tmp, { stripComponents: 1, signal: ctx.signal });
         await applyGitPatch(await fsp.readFile(resources.acePatch, 'utf8'), tmp);
         await fsp.writeFile(path.join(tmp, '.openfabric-patched'), wanted);
         await replaceAceStepSource(L.aceStep, tmp);
@@ -343,15 +398,15 @@ function buildComponents({ L, manifest, platform, resources }) {
 }
 
 /** Path of ffmpeg: a pinned build under tools/ffmpeg where there is one, otherwise whatever the system has. */
-function ffmpegExecutable(L, manifest, platform) {
+function ffmpegExecutable(L, manifest, platform, tool = 'ffmpeg') {
+  if (tool !== 'ffmpeg' && tool !== 'ffprobe') throw new Error('Unsupported media tool');
   const asset = manifest.ffmpeg.assets[platform];
-  const exe = platform.startsWith('win32') ? 'ffmpeg.exe' : 'ffmpeg';   // by the platform asked for, not by the host running the code
-  if (asset && asset.kind === 'binary') return path.join(L.ffmpegDir, 'bin', exe);
-  if (asset) return path.join(L.ffmpegDir, asset.binDir, exe);
-  for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin']) {
-    if (fs.existsSync(path.join(dir, 'ffmpeg'))) return path.join(dir, 'ffmpeg');
+  const exe = platform.startsWith('win32') ? `${tool}.exe` : tool;
+  if (asset) return path.join(L.ffmpegDir, 'bin', exe);
+  for (const dir of [process.env.FFMPEG_BIN_DIR, ...(process.env.PATH || '').split(path.delimiter), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin'].filter(Boolean)) {
+    if (fs.existsSync(path.join(dir, exe))) return path.join(dir, exe);
   }
-  return path.join('/usr/local/bin', 'ffmpeg');
+  return path.join(L.ffmpegDir, 'bin', exe);
 }
 
 module.exports = { buildComponents, ffmpegExecutable, demucsProject, dirSize, recoverAceStepSource, replaceAceStepSource };

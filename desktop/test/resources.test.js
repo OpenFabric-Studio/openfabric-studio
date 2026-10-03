@@ -24,9 +24,11 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   const script = path.join(fixture, 'desktop', 'scripts', 'prepare-resources.js');
   await fs.mkdir(path.dirname(script), { recursive: true });
   await fs.copyFile(path.join(repo, 'desktop', 'scripts', 'prepare-resources.js'), script);
+  await fs.copyFile(path.join(repo, 'desktop', 'manifest.json'), path.join(fixture, 'desktop', 'manifest.json'));
   await fs.mkdir(path.join(fixture, 'frontend', 'dist'), { recursive: true });
   await fs.writeFile(path.join(fixture, 'frontend', 'dist', 'index.html'), '<html></html>');
   await fs.mkdir(path.join(fixture, 'backend', 'scripts'), { recursive: true });
+  await fs.copyFile(path.join(repo, 'backend', 'requirements.lock'), path.join(fixture, 'backend', 'requirements.lock'));
   await fs.copyFile(path.join(repo, 'backend', 'scripts', 'setup_yue_native.py'), path.join(fixture, 'backend', 'scripts', 'setup_yue_native.py'));
   const starterAssets = path.join(repo, 'backend', 'assets', 'starter-voices');
   await fs.cp(starterAssets, path.join(fixture, 'backend', 'assets', 'starter-voices'), { recursive: true });
@@ -37,6 +39,8 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   }
   execFileSync(process.execPath, [script, '--skip-frontend-build'], { stdio: 'pipe' });
   const resources = path.join(fixture, 'desktop', 'resources');
+  assert.deepEqual(await fs.readFile(path.join(resources, 'backend', 'app', 'module_assets.json')), await fs.readFile(path.join(repo, 'desktop', 'manifest.json')));
+  assert.deepEqual(await fs.readFile(path.join(resources, 'backend', 'requirements.lock')), await fs.readFile(path.join(repo, 'backend', 'requirements.lock')));
   const packagedStarters = path.join(resources, 'backend', 'assets', 'starter-voices');
   await assertDirectoryCopy(starterAssets, packagedStarters);
   const helper = await fs.readFile(path.join(resources, 'backend', 'scripts', 'setup_yue_native.py'), 'utf8');
