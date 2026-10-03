@@ -163,6 +163,12 @@ export type AudiobookBook = {
   "created_at": string
   "updated_at": string
   "source_import_id"?: (string | null)
+  "author"?: string
+  "pronunciations"?: Array<PronunciationEntry>
+  "mp3_ready"?: boolean
+  "m4b_ready"?: boolean
+  "has_cover"?: boolean
+  "export_note"?: string
 }
 
 export type AudiobookBooksResponse = {
@@ -223,6 +229,8 @@ export type CreateAudiobookRequest = {
   "title": string
   "profile_id": string
   "chapters": Array<AudiobookChapterInput>
+  "author"?: string
+  "pronunciations"?: Array<PronunciationEntry>
 }
 
 export type CreateGenerationPresetRequest = {
@@ -283,6 +291,8 @@ export type EbookDraft = {
   "source_sha256": string
   "warnings"?: Array<EbookImportWarning>
   "revision": number
+  "author"?: string
+  "pronunciations"?: Array<PronunciationEntry>
   "created_at": string
   "updated_at": string
 }
@@ -390,6 +400,12 @@ export type ImportGenerationPreset = {
 
 export type ImportGenerationPresetsRequest = {
   "presets": Array<ImportGenerationPreset>
+}
+
+export type ImportPastedTextRequest = {
+  "title": string
+  "text": string
+  "author"?: string
 }
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
@@ -571,6 +587,8 @@ export type PatchEbookDraftRequest = {
   "title": string
   "chapters": Array<EbookChapterDraft>
   "revision": number
+  "author"?: (string | null)
+  "pronunciations"?: (Array<PronunciationEntry> | null)
 }
 
 export type PatchSpeechVoiceProfileRequest = {
@@ -618,6 +636,11 @@ export type ProjectUpdateRequest = {
 
 export type ProjectsResponse = {
   "data": Array<ProjectSummaryResponse>
+}
+
+export type PronunciationEntry = {
+  "written": string
+  "spoken": string
 }
 
 export type ReferenceAbcRequest = {
@@ -772,6 +795,10 @@ export type SelectVoiceSamplesRequest = {
   "reference_id": string
   "cleaned_segment_ids"?: Array<string>
   "max_selected_seconds"?: (number | null)
+}
+
+export type SetPronunciationsRequest = {
+  "pronunciations"?: Array<PronunciationEntry>
 }
 
 export type SetTrackFavoriteRequest = {
@@ -7246,6 +7273,29 @@ const schemas = {
     "title": "StarterSpeechVoicesResponse",
     "type": "object"
   },
+  "PronunciationEntry": {
+    "description": "Written text replaced with the spoken form before synthesis.",
+    "properties": {
+      "written": {
+        "maxLength": 80,
+        "minLength": 1,
+        "title": "Written",
+        "type": "string"
+      },
+      "spoken": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Spoken",
+        "type": "string"
+      }
+    },
+    "required": [
+      "written",
+      "spoken"
+    ],
+    "title": "PronunciationEntry",
+    "type": "object"
+  },
   "AudiobookChapterInput": {
     "properties": {
       "title": {
@@ -7289,6 +7339,20 @@ const schemas = {
         "maxItems": 100,
         "minItems": 1,
         "title": "Chapters",
+        "type": "array"
+      },
+      "author": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Author",
+        "type": "string"
+      },
+      "pronunciations": {
+        "items": {
+          "$ref": "#/$defs/PronunciationEntry"
+        },
+        "maxItems": 100,
+        "title": "Pronunciations",
         "type": "array"
       }
     },
@@ -7468,6 +7532,41 @@ const schemas = {
         ],
         "default": null,
         "title": "Source Import Id"
+      },
+      "author": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Author",
+        "type": "string"
+      },
+      "pronunciations": {
+        "items": {
+          "$ref": "#/$defs/PronunciationEntry"
+        },
+        "maxItems": 100,
+        "title": "Pronunciations",
+        "type": "array"
+      },
+      "mp3_ready": {
+        "default": false,
+        "title": "Mp3 Ready",
+        "type": "boolean"
+      },
+      "m4b_ready": {
+        "default": false,
+        "title": "M4B Ready",
+        "type": "boolean"
+      },
+      "has_cover": {
+        "default": false,
+        "title": "Has Cover",
+        "type": "boolean"
+      },
+      "export_note": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Export Note",
+        "type": "string"
       }
     },
     "required": [
@@ -7607,6 +7706,35 @@ const schemas = {
         "minimum": 1,
         "title": "Revision",
         "type": "integer"
+      },
+      "author": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Author"
+      },
+      "pronunciations": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/PronunciationEntry"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Pronunciations"
       }
     },
     "required": [
@@ -7663,6 +7791,20 @@ const schemas = {
         "title": "Revision",
         "type": "integer"
       },
+      "author": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Author",
+        "type": "string"
+      },
+      "pronunciations": {
+        "items": {
+          "$ref": "#/$defs/PronunciationEntry"
+        },
+        "maxItems": 100,
+        "title": "Pronunciations",
+        "type": "array"
+      },
       "created_at": {
         "maxLength": 64,
         "minLength": 1,
@@ -7687,6 +7829,48 @@ const schemas = {
       "updated_at"
     ],
     "title": "EbookDraft",
+    "type": "object"
+  },
+  "ImportPastedTextRequest": {
+    "properties": {
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 2000000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "author": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Author",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "text"
+    ],
+    "title": "ImportPastedTextRequest",
+    "type": "object"
+  },
+  "SetPronunciationsRequest": {
+    "properties": {
+      "pronunciations": {
+        "items": {
+          "$ref": "#/$defs/PronunciationEntry"
+        },
+        "maxItems": 100,
+        "title": "Pronunciations",
+        "type": "array"
+      }
+    },
+    "title": "SetPronunciationsRequest",
     "type": "object"
   },
   "EbookDraftSummary": {
@@ -11938,6 +12122,14 @@ export function parseStarterSpeechVoicesResponse(value: unknown): StarterSpeechV
   return value
 }
 
+function isPronunciationEntry(value: unknown): value is PronunciationEntry {
+  return decodeSchema(schemas.PronunciationEntry, value, schemas)
+}
+export function parsePronunciationEntry(value: unknown): PronunciationEntry {
+  if (!isPronunciationEntry(value)) throw new TypeError("Invalid PronunciationEntry response")
+  return value
+}
+
 function isAudiobookChapterInput(value: unknown): value is AudiobookChapterInput {
   return decodeSchema(schemas.AudiobookChapterInput, value, schemas)
 }
@@ -12023,6 +12215,22 @@ function isEbookDraft(value: unknown): value is EbookDraft {
 }
 export function parseEbookDraft(value: unknown): EbookDraft {
   if (!isEbookDraft(value)) throw new TypeError("Invalid EbookDraft response")
+  return value
+}
+
+function isImportPastedTextRequest(value: unknown): value is ImportPastedTextRequest {
+  return decodeSchema(schemas.ImportPastedTextRequest, value, schemas)
+}
+export function parseImportPastedTextRequest(value: unknown): ImportPastedTextRequest {
+  if (!isImportPastedTextRequest(value)) throw new TypeError("Invalid ImportPastedTextRequest response")
+  return value
+}
+
+function isSetPronunciationsRequest(value: unknown): value is SetPronunciationsRequest {
+  return decodeSchema(schemas.SetPronunciationsRequest, value, schemas)
+}
+export function parseSetPronunciationsRequest(value: unknown): SetPronunciationsRequest {
+  if (!isSetPronunciationsRequest(value)) throw new TypeError("Invalid SetPronunciationsRequest response")
   return value
 }
 

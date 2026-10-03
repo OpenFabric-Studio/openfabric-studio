@@ -60,6 +60,7 @@ class ExtractedEbook:
     title: str
     chapters: list[EbookChapterDraft]
     warnings: list[EbookImportWarning]
+    author: str = ""
 
 
 def converter_path() -> Path | None:
@@ -252,6 +253,8 @@ def extract_epub(raw: bytes) -> ExtractedEbook:
             title = next(("".join(element.itertext()).strip() for element in package.iter() if _local(element.tag) == "title"), "Imported book") or "Imported book"
             if len(title) > 200:
                 raise EbookImportError("ebook_title_too_long")
+            author = next((" ".join("".join(element.itertext()).split()) for element in package.iter() if _local(element.tag) == "creator"), "")
+            author = author[:200]
             manifest: dict[str, ET.Element] = {element.get("id", ""): element for element in package.iter() if _local(element.tag) == "item"}
             toc: dict[str, dict[str, str]] = {}
             for item in manifest.values():
@@ -319,7 +322,7 @@ def extract_epub(raw: bytes) -> ExtractedEbook:
                 warnings.append(EbookImportWarning(code="non_narrative_content", message="Images, scripts and navigation are not narrated. Tables retain their text, but complex layouts may need editing."))
             if nonlinear:
                 warnings.append(EbookImportWarning(code="nonlinear_content", message="The source includes supplementary content. It is included for review; deselect material you do not want narrated."))
-            return ExtractedEbook(title, chapters, warnings)
+            return ExtractedEbook(title, chapters, warnings, author)
     except EbookImportError:
         raise
     except (OSError, UnicodeError, KeyError, ValueError, zipfile.BadZipFile, RuntimeError) as exc:
@@ -340,6 +343,69 @@ def _draft_dir(identifier: str) -> Path:
     return path
 
 
+_HEADING = re.compile(r"^(?:#{1,6}\s+\S.*|(?:chapter|part|book|prologue|epilogue)\b.*)$", re.IGNORECASE)
+
+
+def chapters_from_plain_text(raw: str, book_title: str) -> ExtractedEbook:
+    """Split pasted or .txt prose on markdown headings and chapter lines."""
+    title = " ".join(book_title.split()) or "Imported text"
+    if len(title) > 200:
+        raise EbookImportError("ebook_title_too_long")
+    text = raw.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not text:
+        raise EbookImportError("ebook_text_empty")
+    if len(text) > MAX_BOOK_CHARS:
+        raise EbookImportError("ebook_too_large", 413)
+    chapters: list[EbookChapterDraft] = []
+    chapter_title = "Chapter 1"
+    paragraphs: list[str] = []
+    saw_heading = False
+
+    def flush() -> None:
+        body = "\n".join(paragraphs).strip()
+        if body:
+            chapters.extend(split_chapter(chapter_title, body))
+
+    for line in text.split("\n"):
+        stripped = line.strip().lstrip("\ufeff")
+        if stripped and _HEADING.match(stripped):
+            if paragraphs or saw_heading:
+                flush()
+                paragraphs = []
+            chapter_title = stripped.lstrip("#").strip()[:180] or chapter_title
+            saw_heading = True
+            continue
+        paragraphs.append(line)
+    flush()
+    warnings: list[EbookImportWarning] = []
+    if not chapters:
+        chapters = split_chapter("Chapter 1", text)
+        warnings.append(EbookImportWarning(code="chapter_detection", message="No chapter headings were found, so this text is one chapter. Lines such as 'Chapter 1' or markdown headings start a new chapter."))
+    else:
+        warnings.append(EbookImportWarning(code="chapter_detection", message="Chapter boundaries were inferred from headings. Review them before narration."))
+    if any("(part " in chapter.title for chapter in chapters):
+        warnings.append(EbookImportWarning(code="chapter_split", message="Long chapters were split into parts to fit narration limits; no text was truncated."))
+    if len(chapters) > audiobooks.MAX_CHAPTERS:
+        raise EbookImportError("ebook_too_large", 413)
+    return ExtractedEbook(title, chapters, warnings)
+
+
+def extract_uploaded(filename: str, source: bytes) -> ExtractedEbook:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".epub":
+        return extract_epub(source)
+    if suffix != ".txt":
+        raise EbookImportError("unsupported_ebook_format")
+    if not source or len(source) > MAX_UPLOAD_BYTES or b"\x00" in source:
+        raise EbookImportError("ebook_too_large" if source and len(source) > MAX_UPLOAD_BYTES else "invalid_text", 413 if source and len(source) > MAX_UPLOAD_BYTES else 400)
+    try:
+        text = source.decode("utf-8-sig")
+    except UnicodeError as exc:
+        raise EbookImportError("invalid_text") from exc
+    stem = Path(filename).stem.replace("_", " ").strip() or "Imported text"
+    return chapters_from_plain_text(text, stem)
+
+
 def save_draft(filename: str, source: bytes, extracted: ExtractedEbook) -> EbookDraft:
     safe_name = Path(filename.replace("\\", "/")).name
     if not safe_name or len(safe_name) > 240:
@@ -347,7 +413,8 @@ def save_draft(filename: str, source: bytes, extracted: ExtractedEbook) -> Ebook
     identifier = uuid.uuid4().hex
     stamp = audiobooks._now()
     draft = EbookDraft(id=identifier, title=extracted.title, chapters=extracted.chapters, source_filename=safe_name,
-                      source_sha256=hashlib.sha256(source).hexdigest(), warnings=extracted.warnings, revision=1, created_at=stamp, updated_at=stamp)
+                      source_sha256=hashlib.sha256(source).hexdigest(), warnings=extracted.warnings, revision=1,
+                      author=extracted.author, created_at=stamp, updated_at=stamp)
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         _ensure_schema(connection)
         connection.execute("BEGIN IMMEDIATE")
@@ -406,8 +473,18 @@ def patch_draft(identifier: str, body: PatchEbookDraftRequest) -> EbookDraft:
         current = get_draft(identifier)
         if current.revision != body.revision:
             raise EbookImportError("ebook_draft_conflict", 409)
-        updated = current.model_copy(update={"title": body.title.strip(), "chapters": body.chapters,
-                                             "revision": current.revision + 1, "updated_at": audiobooks._now()})
+        changes: dict[str, object] = {"title": body.title.strip(), "chapters": body.chapters,
+                                      "revision": current.revision + 1, "updated_at": audiobooks._now()}
+        if "author" in body.model_fields_set and body.author is not None:
+            changes["author"] = body.author.strip()
+        if "pronunciations" in body.model_fields_set and body.pronunciations is not None:
+            from .audiobook_pronounce import PronunciationError, ensure_unique
+            try:
+                ensure_unique(body.pronunciations)
+            except PronunciationError as exc:
+                raise EbookImportError(exc.code) from exc
+            changes["pronunciations"] = body.pronunciations
+        updated = current.model_copy(update=changes)
         connection.execute("UPDATE ebook_drafts SET payload = ? WHERE id = ?", (updated.model_dump_json(), identifier))
         connection.commit()
         return updated
@@ -509,8 +586,10 @@ def create_from_draft(identifier: str, body: CreateAudiobookFromDraftRequest) ->
         chapters = [AudiobookChapterInput(title=chapter.title, text=chapter.text) for chapter in draft.chapters if chapter.included]
         if not chapters:
             raise EbookImportError("ebook_chapters_required")
-        return audiobooks.create_book(CreateAudiobookRequest(title=draft.title, profile_id=body.profile_id, chapters=chapters),
-                                      source_import_id=identifier, source_import_revision=draft.revision)
+        return audiobooks.create_book(CreateAudiobookRequest(
+            title=draft.title, profile_id=body.profile_id, chapters=chapters,
+            author=draft.author, pronunciations=draft.pronunciations),
+            source_import_id=identifier, source_import_revision=draft.revision)
 
 
 async def _convert(filename: str, source: bytes) -> EbookDraft:
@@ -584,6 +663,38 @@ async def _watch_workspace(workspace: Path) -> None:
                 if total > MAX_WORKSPACE_BYTES:
                     raise EbookImportError("ebook_too_large", 413)
         await asyncio.sleep(0.02)
+
+
+def import_pasted(title: str, text: str, author: str = "") -> EbookDraft:
+    if _SHUTTING_DOWN or len(_TASKS) >= 2:
+        raise EbookImportError("ebook_import_busy", 409)
+    extracted = chapters_from_plain_text(text, title)
+    if author.strip():
+        extracted = ExtractedEbook(extracted.title, extracted.chapters, extracted.warnings, author.strip()[:200])
+    return save_draft("pasted.txt", text.encode("utf-8"), extracted)
+
+
+async def import_document(filename: str, source: bytes) -> EbookDraft:
+    suffix = Path(filename).suffix.lower()
+    if suffix == ".mobi":
+        return await import_mobi(filename, source)
+    if suffix not in {".epub", ".txt"}:
+        raise EbookImportError("unsupported_ebook_format")
+    if _SHUTTING_DOWN or len(_TASKS) >= 2:
+        raise EbookImportError("ebook_import_busy", 409)
+
+    async def _run() -> EbookDraft:
+        extracted = await asyncio.to_thread(extract_uploaded, filename, source)
+        if _SHUTTING_DOWN:
+            raise EbookImportError("ebook_import_cancelled", 499)
+        return save_draft(filename, source, extracted)
+
+    task = asyncio.create_task(_run(), name="ebook-import")
+    _TASKS.add(task)
+    try:
+        return await task
+    finally:
+        _TASKS.discard(task)
 
 
 async def import_mobi(filename: str, source: bytes) -> EbookDraft:

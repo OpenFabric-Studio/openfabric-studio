@@ -15,10 +15,28 @@ class AudiobookChapterInput(Contract):
     text: str = Field(min_length=1, max_length=20_000)
 
 
+class PronunciationEntry(Contract):
+    """Written text replaced with the spoken form before synthesis."""
+    written: str = Field(min_length=1, max_length=80)
+    spoken: str = Field(min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def stripped(self) -> PronunciationEntry:
+        written = self.written.strip()
+        spoken = self.spoken.strip()
+        if not written or not spoken:
+            raise ValueError("pronunciation_required")
+        self.written = written
+        self.spoken = spoken
+        return self
+
+
 class CreateAudiobookRequest(Contract):
     title: str = Field(min_length=1, max_length=200)
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     chapters: list[AudiobookChapterInput] = Field(min_length=1, max_length=100)
+    author: str = Field(default="", max_length=200)
+    pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
 
 
 class AudiobookJob(Contract):
@@ -45,6 +63,12 @@ class AudiobookBook(Contract):
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
     source_import_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    author: str = Field(default="", max_length=200)
+    pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
+    mp3_ready: bool = False
+    m4b_ready: bool = False
+    has_cover: bool = False
+    export_note: str = Field(default="", max_length=500)
 
 
 class AudiobookBooksResponse(Contract):
@@ -73,6 +97,8 @@ class PatchEbookDraftRequest(Contract):
     title: str = Field(min_length=1, max_length=200)
     chapters: list[EbookChapterDraft] = Field(min_length=1, max_length=100)
     revision: int = Field(ge=1)
+    author: str | None = Field(default=None, max_length=200)
+    pronunciations: list[PronunciationEntry] | None = Field(default=None, max_length=100)
 
     @model_validator(mode="after")
     def valid_text(self) -> PatchEbookDraftRequest:
@@ -89,8 +115,20 @@ class EbookDraft(Contract):
     source_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     warnings: list[EbookImportWarning] = Field(default_factory=list, max_length=100)
     revision: int = Field(ge=1)
+    author: str = Field(default="", max_length=200)
+    pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
+
+
+class ImportPastedTextRequest(Contract):
+    title: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=2_000_000)
+    author: str = Field(default="", max_length=200)
+
+
+class SetPronunciationsRequest(Contract):
+    pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
 
 
 class EbookDraftSummary(Contract):
@@ -113,6 +151,7 @@ class CreateAudiobookFromDraftRequest(Contract):
 
 
 AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
+    PronunciationEntry,
     AudiobookChapterInput,
     CreateAudiobookRequest,
     AudiobookJob,
@@ -124,6 +163,8 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     EbookImportWarning,
     PatchEbookDraftRequest,
     EbookDraft,
+    ImportPastedTextRequest,
+    SetPronunciationsRequest,
     EbookDraftSummary,
     EbookDraftsResponse,
     CreateAudiobookFromDraftRequest,

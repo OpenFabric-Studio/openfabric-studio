@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.routing import APIRoute
@@ -17,7 +18,8 @@ from ..audiobook_contracts import (
     AudiobookJobsResponse,
     CreateAudiobookRequest,
     CreateAudiobookFromDraftRequest,
-    EbookDraft, EbookDraftsResponse, PatchEbookDraftRequest,
+    EbookDraft, EbookDraftsResponse, ImportPastedTextRequest, PatchEbookDraftRequest,
+    SetPronunciationsRequest,
 )
 from ..job_lifecycle import await_cleanup
 from ..module_security import require_local_origin
@@ -90,8 +92,8 @@ async def _disconnected(request: Request) -> None:
 
 @router.post("/imports", response_model=EbookDraft)
 async def import_ebook(request: Request, file: UploadFile = File(...)) -> EbookDraft:
-    filename = file.filename or "book.mobi"
-    if not filename.lower().endswith(".mobi"):
+    filename = file.filename or ""
+    if Path(filename).suffix.lower() not in {".mobi", ".epub", ".txt"}:
         raise HTTPException(400, "unsupported_ebook_format")
     raw = bytearray()
     try:
@@ -101,7 +103,7 @@ async def import_ebook(request: Request, file: UploadFile = File(...)) -> EbookD
                 raise HTTPException(413, "ebook_too_large")
     finally:
         await file.close()
-    operation = asyncio.create_task(ebook_import.import_mobi(filename, bytes(raw)))
+    operation = asyncio.create_task(ebook_import.import_document(filename, bytes(raw)))
     disconnect = asyncio.create_task(_disconnected(request))
     try:
         completed, _ = await asyncio.wait((operation, disconnect), return_when=asyncio.FIRST_COMPLETED)
@@ -116,6 +118,15 @@ async def import_ebook(request: Request, file: UploadFile = File(...)) -> EbookD
             if not task.done():
                 task.cancel()
         await await_cleanup(asyncio.gather(operation, disconnect, return_exceptions=True))
+
+
+@router.post("/imports/text", response_model=EbookDraft)
+async def import_pasted_text(body: ImportPastedTextRequest) -> EbookDraft:
+    try:
+        return await asyncio.to_thread(ebook_import.import_pasted, body.title, body.text, body.author)
+    except ebook_import.EbookImportError as exc:
+        _raise(exc)
+        raise
 
 
 @router.get("/imports", response_model=EbookDraftsResponse)
@@ -160,7 +171,9 @@ async def narrate_ebook_draft(draft_id: str, body: CreateAudiobookFromDraftReque
 def download_ebook_source(draft_id: str) -> FileResponse:
     try:
         draft = ebook_import.get_draft(draft_id)
-        return FileResponse(ebook_import.source_path(draft_id), media_type="application/x-mobipocket-ebook", filename=draft.source_filename)
+        media = {".mobi": "application/x-mobipocket-ebook", ".epub": "application/epub+zip", ".txt": "text/plain"}.get(
+            Path(draft.source_filename).suffix.lower(), "application/octet-stream")
+        return FileResponse(ebook_import.source_path(draft_id), media_type=media, filename=draft.source_filename)
     except (ebook_import.EbookImportError, audiobooks.AudiobookError) as exc:
         _raise(exc)
         raise
@@ -218,6 +231,58 @@ def list_audiobook_jobs(book_id: str) -> AudiobookJobsResponse:
     except audiobooks.AudiobookError as exc:
         _raise(exc)
         raise  # pragma: no cover
+
+
+@router.put("/{book_id}/pronunciations", response_model=AudiobookBook)
+def set_audiobook_pronunciations(book_id: str, body: SetPronunciationsRequest) -> AudiobookBook:
+    try:
+        return audiobooks.set_pronunciations(book_id, body.pronunciations)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/chapters/{chapter_index}/regenerate", response_model=AudiobookBook)
+async def regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
+    try:
+        await audiobooks.wait_for_book(book_id)
+        if audiobooks._sync_worker():
+            return await await_cleanup(asyncio.to_thread(audiobooks.regenerate_chapter, book_id, chapter_index))
+        return audiobooks.regenerate_chapter(book_id, chapter_index)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/cover", response_model=AudiobookBook)
+async def upload_audiobook_cover(book_id: str, file: UploadFile = File(...)) -> AudiobookBook:
+    raw = bytearray()
+    try:
+        while chunk := await file.read(65536):
+            raw.extend(chunk)
+            if len(raw) > 2_000_000:
+                raise HTTPException(413, "cover_too_large")
+    finally:
+        await file.close()
+    try:
+        book = await asyncio.to_thread(audiobooks.save_cover, book_id, bytes(raw))
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+    return book
+
+
+@router.get("/{book_id}/exports/{fmt}")
+def download_audiobook_format(book_id: str, fmt: str) -> FileResponse:
+    try:
+        path = audiobooks.export_format_path(book_id, fmt)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+    book = audiobooks.get_book(book_id)
+    safe = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in book.title).strip() or "audiobook"
+    media = {"wav": "audio/wav", "mp3": "audio/mpeg", "m4b": "audio/mp4"}[fmt]
+    return FileResponse(path, media_type=media, filename=f"{safe}.{fmt}")
 
 
 @router.post("/{book_id}/retry", response_model=AudiobookBook)

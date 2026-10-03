@@ -163,6 +163,13 @@ def _synthesize(identifier: str, profile_id: str, text: str, target: Path) -> No
 
 
 def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> None:
+    from .audiobook_pronounce import PronunciationError, apply_pronunciations
+    try:
+        spoken = apply_pronunciations(chapter.chapter_text, audiobooks.pronunciations_for(identifier))
+    except PronunciationError as exc:
+        _job_status(chapter.id, "failed", exc.code)
+        return
+    chapter = chapter.model_copy(update={"chapter_text": spoken})
     output_root = audiobooks.chapters_dir(identifier)
     sections_root = _contained(output_root / "sections", output_root)
     sections_root.mkdir(exist_ok=True)
@@ -206,7 +213,7 @@ def _process_book(identifier: str) -> None:
     if not _active(identifier):
         return
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
-        transition = connection.execute("UPDATE audiobook_books SET status = 'running', export_path = NULL, updated_at = ? WHERE id = ? AND status IN ('queued', 'running')", (audiobooks._now(), identifier))
+        transition = connection.execute("UPDATE audiobook_books SET status = 'running', export_path = NULL, mp3_export_path = NULL, m4b_export_path = NULL, export_note = '', updated_at = ? WHERE id = ? AND status IN ('queued', 'running')", (audiobooks._now(), identifier))
         if transition.rowcount == 0:
             return
         connection.commit()
@@ -229,10 +236,21 @@ def _process_book(identifier: str) -> None:
         return
     paths = [audiobooks.chapter_audio_path(identifier, job.chapter_index) for job in jobs]
     exported = concat_wavs(identifier, paths, audiobooks.book_dir(identifier) / "export.wav")
-    with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
-        if _active(identifier):
-            audiobooks._update_book(connection, identifier, status="done", export_path=str(exported))
-            connection.commit()
+    if not _active(identifier):
+        return
+    from .audiobook_publish import publish_formats
+    book = audiobooks.get_book(identifier)
+    try:
+        mp3, m4b, note = publish_formats(
+            identifier,
+            title=book.title,
+            author=book.author,
+            chapters=[(job.chapter_title, path) for job, path in zip(jobs, paths, strict=True)],
+            cover=audiobooks.cover_path_for(identifier),
+        )
+    except audiobooks.AudiobookError as exc:
+        mp3, m4b, note = None, None, exc.code
+    audiobooks.finish_book(identifier, wav=exported, mp3=mp3, m4b=m4b, note=note)
 
 
 def run_sync(identifier: str) -> None:

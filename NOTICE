@@ -35,4 +35,4 @@ Attribution for planned / inspired work
   Not bundled; optional install via OPENFABRIC_GPT_SOVITS_DIR. OpenFabric never
   auto-downloads pretrained weights. Singing voice cloning remains Seed-VC.
   Do not use AGPL VoiceStudio code.
-
+- Audiobook options (pasted text, TXT, and EPUB import, pronunciation map, per-chapter regenerate, MP3 and chaptered M4B export) were inspired by Pandrator (MIT, https://github.com/lukaszliniewicz/Pandrator). OpenFabric reimplemented them in its own code; Pandrator source is not copied or vendored.

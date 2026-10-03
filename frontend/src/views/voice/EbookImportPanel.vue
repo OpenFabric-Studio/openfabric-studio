@@ -10,11 +10,16 @@ const props = defineProps<{ disabled: boolean }>()
 const emit = defineEmits<{ useDraft: [draft: EbookDraft]; deletedDraft: [id: string]; deleting: [active: boolean] }>()
 const { t } = useI18n()
 const drafts = ref<EbookDraftSummary[]>([]), pending = ref<EbookDraft | null>(null), working = ref(false), phase = ref<'importing' | 'openingDraft' | 'deletingDraft'>('importing'), error = ref(''), confirmingDelete = ref(false)
+const pasteTitle = ref(''), pasteBody = ref(''), pasting = ref(false)
 let alive = true, generation = 0, controller: AbortController | null = null
 function errorText(err: unknown) {
   const code = err instanceof ApiError ? err.message : ''
-  const allowed = ['ebook_converter_missing', 'ebook_encrypted', 'ebook_too_large', 'invalid_mobi', 'unsafe_ebook', 'ebook_conversion_timeout', 'ebook_text_empty', 'ebook_import_busy', 'ebook_draft_limit', 'ebook_draft_in_use']
+  const allowed = ['ebook_converter_missing', 'ebook_encrypted', 'ebook_too_large', 'invalid_mobi', 'unsupported_ebook_format', 'invalid_text', 'unsafe_ebook', 'ebook_conversion_timeout', 'ebook_text_empty', 'ebook_import_busy', 'ebook_draft_limit', 'ebook_draft_in_use']
   return t(allowed.includes(code) ? `audiobookWorkspace.importErrors.${code}` : 'audiobookWorkspace.importFailed')
+}
+function remember(draft: EbookDraft) {
+  pending.value = draft
+  drafts.value = [{ id: draft.id, title: draft.title, source_filename: draft.source_filename, chapter_count: draft.chapters.length, revision: draft.revision, created_at: draft.created_at, updated_at: draft.updated_at }, ...drafts.value.filter(item => item.id !== draft.id)]
 }
 async function reload() {
   if (working.value) return
@@ -27,11 +32,21 @@ async function upload(event: Event) {
   if (props.disabled || working.value || !(event.target instanceof HTMLInputElement)) return
   const file = event.target.files?.[0]; event.target.value = ''
   if (!file) return
-  if (!file.name.toLowerCase().endsWith('.mobi')) { error.value = t('audiobookWorkspace.importErrors.invalid_mobi'); return }
+  const lower = file.name.toLowerCase()
+  if (!lower.endsWith('.mobi') && !lower.endsWith('.epub') && !lower.endsWith('.txt')) { error.value = t('audiobookWorkspace.importErrors.unsupported_ebook_format'); return }
   if (file.size > 50 * 1024 * 1024) { error.value = t('audiobookWorkspace.importErrors.ebook_too_large'); return }
   const token = ++generation; controller?.abort(); const request = new AbortController(); controller = request
   working.value = true; phase.value = 'importing'; error.value = ''; pending.value = null; confirmingDelete.value = false
-  try { const draft = await api.importEbook(file, request.signal); if (alive && token === generation) { pending.value = draft; drafts.value = [{ id: draft.id, title: draft.title, source_filename: draft.source_filename, chapter_count: draft.chapters.length, revision: draft.revision, created_at: draft.created_at, updated_at: draft.updated_at }, ...drafts.value.filter(item => item.id !== draft.id)] } }
+  try { const draft = await api.importEbook(file, request.signal); if (alive && token === generation) remember(draft) }
+  catch (err) { if (alive && token === generation) error.value = errorText(err) }
+  finally { if (alive && token === generation) { working.value = false; controller = null } }
+}
+async function paste() {
+  const title = pasteTitle.value.trim(), text = pasteBody.value.trim()
+  if (props.disabled || working.value || !title || !text) return
+  const token = ++generation; controller?.abort(); const request = new AbortController(); controller = request
+  working.value = true; phase.value = 'importing'; error.value = ''; pending.value = null; confirmingDelete.value = false
+  try { const draft = await api.importPastedText({ title, text }, request.signal); if (alive && token === generation) { remember(draft); pasteBody.value = '' } }
   catch (err) { if (alive && token === generation) error.value = errorText(err) }
   finally { if (alive && token === generation) { working.value = false; controller = null } }
 }
@@ -59,7 +74,14 @@ onBeforeUnmount(() => { alive = false; cancel() })
 <template>
   <section class="space-y-3 rounded-xl border border-accent1/30 bg-accent1/5 p-4" :aria-busy="working" :aria-label="t('audiobookWorkspace.importTitle')">
     <div><h3 class="text-sm font-semibold text-text">{{ t('audiobookWorkspace.importTitle') }}</h3><p class="mt-1 text-xs text-text-dim">{{ t('audiobookWorkspace.importHint') }}</p></div>
-    <div class="flex flex-wrap gap-3"><label class="flex min-h-11 min-w-0 max-w-full cursor-pointer flex-wrap items-center gap-3 rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text"><span>{{ t('audiobookWorkspace.upload') }}</span><input type="file" accept=".mobi,application/x-mobipocket-ebook" :aria-label="t('audiobookWorkspace.upload')" :disabled="props.disabled || working" class="min-w-0 max-w-full text-xs sm:max-w-48 file:mr-2 file:rounded file:border-0 file:bg-panel-2 file:px-2 file:py-1 file:text-text" @change="upload"></label><button v-if="working && phase !== 'deletingDraft'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text" @click="cancel">{{ t('audiobookWorkspace.cancelImport') }}</button></div>
+    <div class="flex flex-wrap gap-3"><label class="flex min-h-11 min-w-0 max-w-full cursor-pointer flex-wrap items-center gap-3 rounded-lg border border-border bg-panel px-3 py-2 text-sm text-text"><span>{{ t('audiobookWorkspace.upload') }}</span><input type="file" accept=".txt,.epub,.mobi,text/plain,application/epub+zip,application/x-mobipocket-ebook" :aria-label="t('audiobookWorkspace.upload')" :disabled="props.disabled || working" class="min-w-0 max-w-full text-xs sm:max-w-48 file:mr-2 file:rounded file:border-0 file:bg-panel-2 file:px-2 file:py-1 file:text-text" @change="upload"></label><button v-if="working && phase !== 'deletingDraft'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text" @click="cancel">{{ t('audiobookWorkspace.cancelImport') }}</button></div>
+    <button type="button" class="min-h-11 text-xs text-text-dim hover:text-text hover:underline" :disabled="props.disabled || working" @click="pasting = !pasting">{{ t('audiobookWorkspace.pasteToggle') }}</button>
+    <div v-if="pasting" class="space-y-2 rounded-lg border border-border bg-panel p-3" @keydown.enter.prevent="paste">
+      <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pasteHint') }}</p>
+      <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.pasteTitle') }}</span><input v-model="pasteTitle" type="text" maxlength="200" :aria-label="t('audiobookWorkspace.pasteTitle')" :disabled="props.disabled || working" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 px-3 text-sm text-text"></label>
+      <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.pasteText') }}</span><textarea v-model="pasteBody" rows="4" maxlength="2000000" :aria-label="t('audiobookWorkspace.pasteText')" :disabled="props.disabled || working" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"></textarea></label>
+      <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="props.disabled || working || !pasteTitle.trim() || !pasteBody.trim()" @click="paste">{{ t('audiobookWorkspace.pasteImport') }}</button>
+    </div>
     <p v-if="working" role="status" class="text-sm text-text-dim">{{ t(`audiobookWorkspace.${phase}`) }}</p>
     <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
     <a v-if="error" href="/settings#module-ebooks" class="inline-block min-h-11 py-3 text-sm text-text underline decoration-accent2">{{ t('audiobookWorkspace.converterSetup') }}</a>

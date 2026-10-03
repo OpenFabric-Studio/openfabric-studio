@@ -21,6 +21,9 @@ export function importEbook(file: File, signal?: AbortSignal): Promise<EbookDraf
   const form = new FormData(); form.append('file', file, file.name)
   return apiFetch('/api/audiobooks/imports', { method: 'POST', body: form, signal }, parseEbookDraft)
 }
+export function importPastedText(body: { title: string; text: string; author?: string }, signal?: AbortSignal): Promise<EbookDraft> {
+  return apiFetch('/api/audiobooks/imports/text', { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, parseEbookDraft)
+}
 export async function listEbookDrafts(signal?: AbortSignal): Promise<EbookDraftSummary[]> {
   return (await apiFetch('/api/audiobooks/imports', { signal }, parseEbookDraftsResponse)).drafts
 }
@@ -77,6 +80,25 @@ export async function retryAudiobook(bookId: string, signal?: AbortSignal): Prom
 
 export function audiobookExportUrl(bookId: string): string {
   return `/api/audiobooks/${encodeURIComponent(bookId)}/export`
+}
+
+export function audiobookExportFormatUrl(bookId: string, format: 'mp3' | 'm4b'): string {
+  return `/api/audiobooks/${encodeURIComponent(bookId)}/exports/${format}`
+}
+
+export function setAudiobookPronunciations(bookId: string, pronunciations: Array<{ written: string; spoken: string }>, signal?: AbortSignal): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/pronunciations`, {
+    method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pronunciations }),
+  }, parseAudiobookBook)
+}
+
+export function regenerateAudiobookChapter(bookId: string, chapterIndex: number, signal?: AbortSignal): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/regenerate`, { method: 'POST', signal }, parseAudiobookBook)
+}
+
+export function uploadAudiobookCover(bookId: string, file: File, signal?: AbortSignal): Promise<AudiobookBook> {
+  const form = new FormData(); form.append('file', file, file.name)
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/cover`, { method: 'POST', body: form, signal }, parseAudiobookBook)
 }
 
 export function audiobookChapterAudioUrl(bookId: string, chapterIndex: number): string {
