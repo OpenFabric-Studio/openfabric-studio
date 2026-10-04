@@ -11,7 +11,7 @@ export function emptyAceSettings(): AceGenerationSettings {
     styleReferenceName: null, loraRequiresReselection: false, loraName: null, loraScale: 1 }
 }
 export function emptyYueSettings(): YueGenerationSettings {
-  return { engine: 'yue2', referenceImportId: null, lyrics: '', style: '', cot: 'off', precision: 'q8_0', abc: '',
+  return { engine: 'yue2', referenceImportId: null, title: '', lyrics: '', style: '', cot: 'off', precision: 'q8_0', abc: '',
     cfgScale: null, numInferenceSteps: 8, semantic: samplingSettings(null), abcSampling: samplingSettings(null),
     seed: 831001, randomSeed: false, batchSize: 1, voiceId: null, referenceRequiresReupload: false }
 }
@@ -41,7 +41,7 @@ export function historyResultSettings(entry: GenerationHistoryEntry): Generation
   const seedKnown = entry.seed !== null && Number.isSafeInteger(entry.seed) && entry.seed >= 0
   const seed = seedKnown ? entry.seed : settings.seed
   const randomSeed = seedKnown ? false : settings.randomSeed
-  if (settings.engine === 'yue2') return { ...settings, lyrics: entry.lyrics, seed, randomSeed }
+  if (settings.engine === 'yue2') return { ...settings, title: entry.title, lyrics: entry.lyrics, seed, randomSeed }
   const generatedVocals = !settings.instrumental && !!entry.lyrics.trim()
   return { ...settings, seed, randomSeed, customLyrics: entry.lyrics,
     mode: settings.mode === 'simple' && generatedVocals ? 'custom' : settings.mode,

@@ -107,6 +107,7 @@ export type ApproveVideoVariantRequest = {
 
 export type ArtistSettings = {
   "artist": string
+  "album"?: string
 }
 
 export type AudioEncodingSettings = {
@@ -169,6 +170,7 @@ export type AudiobookBook = {
   "m4b_ready"?: boolean
   "has_cover"?: boolean
   "export_note"?: string
+  "language"?: string
 }
 
 export type AudiobookBooksResponse = {
@@ -197,6 +199,8 @@ export type AudiobookJob = {
   "updated_at": string
   "completed_sections"?: number
   "total_sections"?: number
+  "language"?: string
+  "language_ready"?: boolean
 }
 
 export type AudiobookJobsResponse = {
@@ -209,6 +213,11 @@ export type BuildVoiceRequest = {
   "training_steps"?: 0 | 200 | 500 | 1000
   "resume"?: boolean
   "compare_checkpoints"?: boolean
+}
+
+export type ChapterLanguageUpdate = {
+  "chapter_index": number
+  "language"?: string
 }
 
 export type CreateAudioExportRequest = {
@@ -231,6 +240,7 @@ export type CreateAudiobookRequest = {
   "chapters": Array<AudiobookChapterInput>
   "author"?: string
   "pronunciations"?: Array<PronunciationEntry>
+  "language"?: string
 }
 
 export type CreateGenerationPresetRequest = {
@@ -795,6 +805,11 @@ export type SelectVoiceSamplesRequest = {
   "reference_id": string
   "cleaned_segment_ids"?: Array<string>
   "max_selected_seconds"?: (number | null)
+}
+
+export type SetAudiobookLanguagesRequest = {
+  "language"?: string
+  "chapters"?: Array<ChapterLanguageUpdate>
 }
 
 export type SetPronunciationsRequest = {
@@ -1490,6 +1505,7 @@ export type Yue2ModelSpecs = {
 export type YueGenerationSettings = {
   "referenceImportId": (string | null)
   "engine": "yue2"
+  "title": string
   "lyrics": string
   "style": string
   "cot": "off" | "melody" | "full"
@@ -7354,6 +7370,12 @@ const schemas = {
         "maxItems": 100,
         "title": "Pronunciations",
         "type": "array"
+      },
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
+        "type": "string"
       }
     },
     "required": [
@@ -7443,6 +7465,17 @@ const schemas = {
         "minimum": 0,
         "title": "Total Sections",
         "type": "integer"
+      },
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
+        "type": "string"
+      },
+      "language_ready": {
+        "default": false,
+        "title": "Language Ready",
+        "type": "boolean"
       }
     },
     "required": [
@@ -7566,6 +7599,12 @@ const schemas = {
         "default": "",
         "maxLength": 500,
         "title": "Export Note",
+        "type": "string"
+      },
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
         "type": "string"
       }
     },
@@ -7964,6 +8003,47 @@ const schemas = {
     "title": "CreateAudiobookFromDraftRequest",
     "type": "object"
   },
+  "ChapterLanguageUpdate": {
+    "properties": {
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
+        "type": "string"
+      }
+    },
+    "required": [
+      "chapter_index"
+    ],
+    "title": "ChapterLanguageUpdate",
+    "type": "object"
+  },
+  "SetAudiobookLanguagesRequest": {
+    "properties": {
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
+        "type": "string"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/ChapterLanguageUpdate"
+        },
+        "maxItems": 100,
+        "title": "Chapters",
+        "type": "array"
+      }
+    },
+    "title": "SetAudiobookLanguagesRequest",
+    "type": "object"
+  },
   "ArtistSettings": {
     "additionalProperties": false,
     "properties": {
@@ -7971,6 +8051,13 @@ const schemas = {
         "maxLength": 120,
         "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]*$",
         "title": "Artist",
+        "type": "string"
+      },
+      "album": {
+        "default": "",
+        "maxLength": 120,
+        "pattern": "^[^\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f\\x7f]*$",
+        "title": "Album",
         "type": "string"
       }
     },
@@ -8632,6 +8719,12 @@ const schemas = {
         "title": "Engine",
         "type": "string"
       },
+      "title": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Title",
+        "type": "string"
+      },
       "lyrics": {
         "default": "",
         "maxLength": 100000,
@@ -8751,6 +8844,7 @@ const schemas = {
     "required": [
       "referenceImportId",
       "engine",
+      "title",
       "lyrics",
       "style",
       "cot",
@@ -12255,6 +12349,22 @@ function isCreateAudiobookFromDraftRequest(value: unknown): value is CreateAudio
 }
 export function parseCreateAudiobookFromDraftRequest(value: unknown): CreateAudiobookFromDraftRequest {
   if (!isCreateAudiobookFromDraftRequest(value)) throw new TypeError("Invalid CreateAudiobookFromDraftRequest response")
+  return value
+}
+
+function isChapterLanguageUpdate(value: unknown): value is ChapterLanguageUpdate {
+  return decodeSchema(schemas.ChapterLanguageUpdate, value, schemas)
+}
+export function parseChapterLanguageUpdate(value: unknown): ChapterLanguageUpdate {
+  if (!isChapterLanguageUpdate(value)) throw new TypeError("Invalid ChapterLanguageUpdate response")
+  return value
+}
+
+function isSetAudiobookLanguagesRequest(value: unknown): value is SetAudiobookLanguagesRequest {
+  return decodeSchema(schemas.SetAudiobookLanguagesRequest, value, schemas)
+}
+export function parseSetAudiobookLanguagesRequest(value: unknown): SetAudiobookLanguagesRequest {
+  if (!isSetAudiobookLanguagesRequest(value)) throw new TypeError("Invalid SetAudiobookLanguagesRequest response")
   return value
 }
 

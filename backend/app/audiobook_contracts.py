@@ -1,6 +1,7 @@
 """Contracts for audiobook jobs (talking speech-clone path)."""
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
@@ -31,12 +32,28 @@ class PronunciationEntry(Contract):
         return self
 
 
+_LANGUAGE = re.compile(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}")
+
+
+def _language_code(value: str) -> str:
+    text = value.strip()
+    if text and _LANGUAGE.fullmatch(text) is None:
+        raise ValueError("invalid_language")
+    return text
+
+
 class CreateAudiobookRequest(Contract):
     title: str = Field(min_length=1, max_length=200)
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     chapters: list[AudiobookChapterInput] = Field(min_length=1, max_length=100)
     author: str = Field(default="", max_length=200)
     pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
+    language: str = Field(default="", max_length=35)
+
+    @model_validator(mode="after")
+    def language_code(self) -> CreateAudiobookRequest:
+        self.language = _language_code(self.language)
+        return self
 
 
 class AudiobookJob(Contract):
@@ -51,6 +68,8 @@ class AudiobookJob(Contract):
     updated_at: str = Field(min_length=1, max_length=64)
     completed_sections: int = Field(default=0, ge=0)
     total_sections: int = Field(default=0, ge=0)
+    language: str = Field(default="", max_length=35)
+    language_ready: bool = False
 
 
 class AudiobookBook(Contract):
@@ -69,6 +88,27 @@ class AudiobookBook(Contract):
     m4b_ready: bool = False
     has_cover: bool = False
     export_note: str = Field(default="", max_length=500)
+    language: str = Field(default="", max_length=35)
+
+
+class ChapterLanguageUpdate(Contract):
+    chapter_index: int = Field(ge=0, le=99)
+    language: str = Field(default="", max_length=35)
+
+    @model_validator(mode="after")
+    def language_code(self) -> ChapterLanguageUpdate:
+        self.language = _language_code(self.language)
+        return self
+
+
+class SetAudiobookLanguagesRequest(Contract):
+    language: str = Field(default="", max_length=35)
+    chapters: list[ChapterLanguageUpdate] = Field(default_factory=list, max_length=100)
+
+    @model_validator(mode="after")
+    def language_code(self) -> SetAudiobookLanguagesRequest:
+        self.language = _language_code(self.language)
+        return self
 
 
 class AudiobookBooksResponse(Contract):
@@ -168,4 +208,6 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     EbookDraftSummary,
     EbookDraftsResponse,
     CreateAudiobookFromDraftRequest,
+    ChapterLanguageUpdate,
+    SetAudiobookLanguagesRequest,
 ]

@@ -20,7 +20,7 @@ function save(node: HTMLElement) { const button = [...node.querySelectorAll('but
 it('loads and saves artist metadata alongside the existing library and audio settings', async () => {
   const node = await mount(); expect(input(node).value).toBe('Singer'); expect(node.querySelector('input[spellcheck=false]')?.getAttribute('type')).toBe('text')
   input(node).value = 'New Singer'; input(node).dispatchEvent(new Event('input', { bubbles: true })); await settle(); save(node).click(); await settle()
-  expect(artist.saveArtistSettings).toHaveBeenCalledWith('New Singer', expect.any(AbortSignal)); expect(node.textContent).toContain('Artist name saved.')
+  expect(artist.saveArtistSettings).toHaveBeenCalledWith('New Singer', '', expect.any(AbortSignal)); expect(node.textContent).toContain('Artist name saved.')
 })
 it('keeps newer edits made while a captured artist name is saving', async () => {
   let finish: (value: { artist: string }) => void = () => { throw new Error('No save') }

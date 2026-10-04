@@ -364,9 +364,9 @@ class TaggedDownloadTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(exports_router)
         app.include_router(settings_router)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            self.assertEqual((await client.get('/api/settings')).json(), {"artist": "Ártist 日本"})
+            self.assertEqual((await client.get('/api/settings')).json(), {"artist": "Ártist 日本", "album": ""})
             updated = await client.put('/api/settings', json={"artist": "  Updated  \n Artist "})
-            self.assertEqual(updated.json(), {"artist": "Updated Artist"})
+            self.assertEqual(updated.json(), {"artist": "Updated Artist", "album": ""})
             self.assertEqual((await client.put('/api/settings', json={"artist": "x" * 121})).status_code, 422)
             response = await client.get(f'/api/tracks/{self.track_id}/versions/{self.voice_id}/download?album=Album&track_no=7')
             self.assertEqual(response.status_code, 200)

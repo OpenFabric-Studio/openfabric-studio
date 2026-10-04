@@ -46,18 +46,24 @@ class _Stopped(Exception):
 
 
 def split_sections(text: str) -> list[str]:
+    """Keep pause punctuation with the left piece so a request is not cut mid-phrase."""
     result: list[str] = []
     remainder = text
+    marks = ("\n\n", ". ", "? ", "! ", "; ", ": ", ", ", "—", "–", "\n")
     while len(remainder) > SECTION_CHARS:
         window = remainder[:SECTION_CHARS]
-        boundary = max(window.rfind("\n\n"), window.rfind(". "), window.rfind("? "), window.rfind("! "))
+        boundary = max(window.rfind(mark) for mark in marks)
         if boundary < SECTION_CHARS // 3:
             boundary = window.rfind(" ")
         if boundary < SECTION_CHARS // 3:
             boundary = SECTION_CHARS
         else:
             boundary += 1
-        result.append(remainder[:boundary])
+        piece = remainder[:boundary]
+        if not piece.strip():
+            boundary = min(SECTION_CHARS, len(remainder))
+            piece = remainder[:boundary]
+        result.append(piece)
         remainder = remainder[boundary:]
     if remainder:
         result.append(remainder)
@@ -186,17 +192,25 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
             _section_status(chapter.id, section.section_index, "running")
             temporary = target.with_name(f".{target.stem}.{uuid.uuid4().hex}.partial.wav")
             try:
-                _synthesize(identifier, profile_id, section.section_text, temporary)
+                from .audiobook_cache import reuse, store
+                if not reuse(profile_id, section.section_text, temporary):
+                    _synthesize(identifier, profile_id, section.section_text, temporary)
                 # The upstream reply must be real PCM WAV before publication.
                 with wave.open(str(temporary), "rb") as handle:
                     if handle.getnframes() <= 0:
                         raise audiobooks.AudiobookError("invalid_speech_audio")
                 temporary.replace(target)
+                store(profile_id, section.section_text, target)
             finally:
                 temporary.unlink(missing_ok=True)
             _section_status(chapter.id, section.section_index, "done", target)
             paths.append(target)
         target = concat_wavs(identifier, paths, output_root / f"{chapter.chapter_index:04d}.wav")
+        try:
+            from .narration_pauses import chunk_wav
+            audiobooks.save_pause_spans(chapter.id, chunk_wav(target))
+        except (OSError, wave.Error, ValueError):
+            _LOG.warning("Pause spans were not stored for %s", chapter.id, exc_info=True)
         _job_status(chapter.id, "done", "narration_completed", target)
     except _Stopped:
         status = "cancelled" if audiobooks.get_book(identifier).status == "cancelled" else "queued"

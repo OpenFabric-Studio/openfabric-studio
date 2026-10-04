@@ -67,7 +67,12 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreater(jobs[0].total_sections, 1)
             await audiobooks.resume_book(identifier)
             await self.wait_for(identifier, "done")
-            self.assertEqual(calls, audiobooks.list_jobs(book_id=identifier)[0].total_sections)
+            finished = audiobooks.list_jobs(book_id=identifier)[0]
+            with audiobooks._LOCK, audiobooks._connect() as connection:
+                rows = connection.execute("SELECT section_text FROM audiobook_sections WHERE job_id = ?", (finished.id,)).fetchall()
+            # Identical spoken sections reuse the durable cache, so calls match unique text, not repeats.
+            self.assertEqual(calls, len({row[0] for row in rows}))
+            self.assertLessEqual(calls, finished.total_sections)
             self.assertTrue(audiobooks.export_path_for(identifier).is_file())
 
     async def test_cancel_retains_completed_sections_and_recovery_pauses_interrupted_jobs(self) -> None:

@@ -81,6 +81,7 @@ class AceGenerationSettings(GenerationContract):
 class YueGenerationSettings(GenerationContract):
     referenceImportId: GenerationId | None = None
     engine: Literal['yue2']
+    title: GenerationLabel = ''
     lyrics: GenerationText = ''
     style: GenerationText = ''
     cot: Literal['off', 'melody', 'full'] = 'off'

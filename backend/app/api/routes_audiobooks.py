@@ -19,6 +19,7 @@ from ..audiobook_contracts import (
     CreateAudiobookRequest,
     CreateAudiobookFromDraftRequest,
     EbookDraft, EbookDraftsResponse, ImportPastedTextRequest, PatchEbookDraftRequest,
+    SetAudiobookLanguagesRequest,
     SetPronunciationsRequest,
 )
 from ..job_lifecycle import await_cleanup
@@ -270,6 +271,42 @@ async def upload_audiobook_cover(book_id: str, file: UploadFile = File(...)) -> 
         _raise(exc)
         raise
     return book
+
+
+@router.put("/{book_id}/languages", response_model=AudiobookBook)
+def set_audiobook_languages(book_id: str, body: SetAudiobookLanguagesRequest) -> AudiobookBook:
+    try:
+        return audiobooks.set_languages(
+            book_id, body.language, [(item.chapter_index, item.language) for item in body.chapters],
+        )
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/{book_id}/exports/cue")
+def download_audiobook_cue(book_id: str) -> Response:
+    from ..audiobook_collection import cue_text, download_name
+    try:
+        body = cue_text(book_id)
+        name = download_name(book_id, "cue")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+    return Response(body, media_type="text/plain; charset=utf-8",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@router.get("/{book_id}/exports/collection")
+def download_audiobook_collection(book_id: str) -> FileResponse:
+    from ..audiobook_collection import download_name, write_collection
+    try:
+        path = write_collection(book_id)
+        name = download_name(book_id, "zip")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+    return FileResponse(path, media_type="application/zip", filename=name)
 
 
 @router.get("/{book_id}/exports/{fmt}")

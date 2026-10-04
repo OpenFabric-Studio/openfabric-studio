@@ -25,9 +25,9 @@ it('renames only the title and preserves style across another history load', asy
   vi.mocked(tracks.listTracks).mockResolvedValue([{ ...saved(), title: 'Another title' }]); await store.loadHistory()
   expect(store.jobs[0]).toMatchObject({ title: 'Another title', style: 'folk, acoustic guitar' })
 })
-it.each([null, 4, [1], {}, '', '  '].map(style => [style]))('falls back to the saved title for malformed or absent style %j', async style => {
+it.each([null, 4, [1], {}, '', '  '].map(style => [style]))('keeps a missing style separate from the saved title %j', async style => {
   vi.mocked(tracks.listTracks).mockResolvedValue([saved(style)]); const store = useYue2Store(); await store.loadHistory()
-  expect(store.jobs[0]).toMatchObject({ title: 'Renamed song', style: 'Renamed song' })
+  expect(store.jobs[0]).toMatchObject({ title: 'Renamed song', style: '' })
 })
 it('keeps a saved card when backend deletion fails', async () => {
   const store = useYue2Store(); await store.loadHistory(); const job = store.jobs[0]

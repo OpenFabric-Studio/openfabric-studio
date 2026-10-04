@@ -9,8 +9,8 @@ describe('artist settings boundary', () => {
     const fetcher = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ artist: 'Björk 東京' })))
     vi.stubGlobal('fetch', fetcher)
     expect(await getArtistSettings(signal)).toEqual({ artist: 'Björk 東京' })
-    expect(await saveArtistSettings('Björk 東京', signal)).toEqual({ artist: 'Björk 東京' })
-    expect(fetcher).toHaveBeenLastCalledWith('/api/settings', expect.objectContaining({ method: 'PUT', signal, body: JSON.stringify({ artist: 'Björk 東京' }) }))
+    expect(await saveArtistSettings('Björk 東京', '', signal)).toEqual({ artist: 'Björk 東京' })
+    expect(fetcher).toHaveBeenLastCalledWith('/api/settings', expect.objectContaining({ method: 'PUT', signal, body: JSON.stringify({ artist: 'Björk 東京', album: '' }) }))
   })
 
   it('rejects invalid input before sending and malformed responses', async () => {

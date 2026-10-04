@@ -28,6 +28,7 @@ watch(
     referenceImportId.value = null; referenceNotice.value = false
     lyrics.value = typeof params.lyrics === 'string' ? params.lyrics : ''
     style.value = typeof params.style === 'string' ? params.style : ''
+    songTitle.value = typeof params.song_title === 'string' ? params.song_title : ''
     cot.value = params.cot === 'melody' || params.cot === 'full' ? params.cot : 'off'
     precision.value = params.precision === 'q4_0' ? params.precision : 'q8_0'
     seed.value = finiteNumber(params.seed) ? params.seed : 831001
@@ -48,6 +49,7 @@ watch(
 )
 
 const lyrics = ref('')
+const songTitle = ref('')
 const style = ref('')
 const cot = ref<CotMode>('off')
 const precision = ref<'q8_0' | 'q4_0'>('q8_0')
@@ -71,14 +73,14 @@ const abcSampling = reactive<SamplingSettings>({
 })
 
 const snapshot = computed<YueGenerationSettings>(() => ({
-  engine: 'yue2', referenceImportId: referenceImportId.value, lyrics: lyrics.value, style: style.value, cot: cot.value, precision: precision.value,
+  engine: 'yue2', referenceImportId: referenceImportId.value, title: songTitle.value, lyrics: lyrics.value, style: style.value, cot: cot.value, precision: precision.value,
   abc: abc.value, cfgScale: cfgScale.value, numInferenceSteps: numInferenceSteps.value,
   semantic: { ...semantic }, abcSampling: { ...abcSampling }, seed: seed.value, randomSeed: randomSeed.value,
   batchSize: batchSize.value, voiceId: selectedVoiceId.value, referenceRequiresReupload: referenceNotice.value,
 }))
 watch(pendingYueDraft, saved => {
   if (!saved) return
-  lyrics.value = saved.lyrics; style.value = saved.style; cot.value = saved.cot; precision.value = saved.precision
+  lyrics.value = saved.lyrics; songTitle.value = saved.title; style.value = saved.style; cot.value = saved.cot; precision.value = saved.precision
   abc.value = saved.abc; cfgScale.value = saved.cfgScale; numInferenceSteps.value = saved.numInferenceSteps
   Object.assign(semantic, saved.semantic); Object.assign(abcSampling, saved.abcSampling)
   seed.value = saved.seed ?? 831001; randomSeed.value = saved.randomSeed; batchSize.value = saved.batchSize
@@ -159,6 +161,7 @@ async function submit() {
   try {
     await store.generateBatch({
       lyrics: lyrics.value.trim(),
+      title: songTitle.value.trim(),
       style: style.value.trim(),
       cot: cot.value,
       precision: precision.value,
@@ -196,6 +199,12 @@ async function submit() {
           <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'lyrics'">{{ t('common.help') }}</button>
         </div>
         <textarea v-model="lyrics" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-sm text-text" :placeholder="t('aceGen.lyricsPlaceholder')"></textarea>
+      </div>
+
+      <div class="space-y-1.5">
+        <label class="text-sm font-medium text-text" for="yue-song-title">{{ t('yueGen.songTitle') }}</label>
+        <input id="yue-song-title" v-model="songTitle" maxlength="500" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 text-sm text-text" :placeholder="t('yueGen.songTitlePlaceholder')" :aria-label="t('yueGen.songTitle')">
+        <p class="text-xs text-text-dim">{{ t('yueGen.songTitleHint') }}</p>
       </div>
 
       <div class="space-y-1.5">

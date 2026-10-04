@@ -1,6 +1,7 @@
 import { apiFetch, ApiError } from './http'
 import {
   parseAudiobookBook,
+  parseSetAudiobookLanguagesRequest,
   parseAudiobookBooksResponse,
   parseAudiobookCreateResponse,
   parseAudiobookJobsResponse,
@@ -84,6 +85,21 @@ export function audiobookExportUrl(bookId: string): string {
 
 export function audiobookExportFormatUrl(bookId: string, format: 'mp3' | 'm4b'): string {
   return `/api/audiobooks/${encodeURIComponent(bookId)}/exports/${format}`
+}
+
+export function audiobookCueUrl(bookId: string): string {
+  return `/api/audiobooks/${encodeURIComponent(bookId)}/exports/cue`
+}
+
+export function audiobookCollectionUrl(bookId: string): string {
+  return `/api/audiobooks/${encodeURIComponent(bookId)}/exports/collection`
+}
+
+export function setAudiobookLanguages(bookId: string, language: string, chapters: Array<{ chapter_index: number; language: string }>, signal?: AbortSignal): Promise<AudiobookBook> {
+  const body = parseSetAudiobookLanguagesRequest({ language, chapters })
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/languages`, {
+    method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }, parseAudiobookBook)
 }
 
 export function setAudiobookPronunciations(bookId: string, pronunciations: Array<{ written: string; spoken: string }>, signal?: AbortSignal): Promise<AudiobookBook> {

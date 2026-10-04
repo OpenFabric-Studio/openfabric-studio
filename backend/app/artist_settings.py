@@ -17,8 +17,9 @@ _json = TypeAdapter(JsonObject)
 class ArtistSettings(Contract):
     model_config = ConfigDict(extra="forbid")
     artist: str = Field(max_length=120, strict=True, pattern=r"^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$")
+    album: str = Field(default="", max_length=120, strict=True, pattern=r"^[^\x00-\x08\x0b\x0c\x0e-\x1f\x7f]*$")
 
-    @field_validator("artist")
+    @field_validator("artist", "album")
     @classmethod
     def normalize_artist(cls, value: str) -> str:
         return " ".join(value.split())

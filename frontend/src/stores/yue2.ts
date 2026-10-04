@@ -104,7 +104,7 @@ export const useYue2Store = defineStore('yue2', {
             status: 'done',
             createdAt: new Date(track.created_at).getTime() || Date.now(),
             title: track.title,
-            style: typeof track.params.style === 'string' && track.params.style.trim() ? track.params.style : track.title,
+            style: typeof track.params.style === 'string' && track.params.style.trim() ? track.params.style : '',
             lyrics: track.lyrics,
             cot: track.params.cot === 'melody' || track.params.cot === 'full' ? track.params.cot : 'off',
             precision: track.params.precision === 'q4_0' ? 'q4_0' : 'q8_0',
@@ -355,7 +355,7 @@ export const useYue2Store = defineStore('yue2', {
         clearVoiceWatch(Number(trackId))
       }
     },
-    async generateBatch(params: { lyrics: string; style: string; cot: CotMode; precision: 'q8_0' | 'q4_0'; baseSeed: number; randomSeed: boolean; batchSize: number; options: GenerateOptions; settings?: YueGenerationSettings; voiceId?: string | null }) {
+    async generateBatch(params: { lyrics: string; style: string; title?: string; cot: CotMode; precision: 'q8_0' | 'q4_0'; baseSeed: number; randomSeed: boolean; batchSize: number; options: GenerateOptions; settings?: YueGenerationSettings; voiceId?: string | null }) {
       const token = this._sessionGeneration
       const voiceId = params.voiceId === undefined ? getActiveVoiceId() : params.voiceId
       const options = ownedApi.completeYueOptions(params.options)
@@ -363,8 +363,10 @@ export const useYue2Store = defineStore('yue2', {
       for (let index = 0; index < params.batchSize; index++) {
         if (token !== this._sessionGeneration) return
         const seed = params.randomSeed ? Math.floor(Math.random() * 2147483647) : params.baseSeed + index
-        const row = await ownedApi.submit({ title: params.style.slice(0, 500), lyrics: params.lyrics,
-          seed, options, precision: params.precision, voice_id: voiceId, settings: params.settings ?? null })
+        const songTitle = (params.title ?? '').trim().slice(0, 500)
+        const settings = params.settings ? { ...params.settings, title: songTitle, style: params.style, lyrics: params.lyrics } : null
+        const row = await ownedApi.submit({ title: songTitle, lyrics: params.lyrics,
+          seed, options, precision: params.precision, voice_id: voiceId, settings })
         if (token !== this._sessionGeneration) return
         rememberGenerationJob(`yue:${row.id}`)
         this._mergeOwned([row])

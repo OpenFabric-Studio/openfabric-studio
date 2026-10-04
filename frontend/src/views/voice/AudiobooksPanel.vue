@@ -38,6 +38,9 @@ const author = ref('')
 type SpeechPair = { written: string; spoken: string }
 const pronunciations = ref<SpeechPair[]>([])
 const bookSpeech = ref<SpeechPair[]>([])
+const bookLanguage = ref('')
+const chapterLanguages = ref<Record<string, string>>({})
+const savingLanguages = ref(false)
 const savingSpeech = ref(false)
 const regeneratingIndex = ref<number | null>(null)
 const titleInput = ref<HTMLInputElement | null>(null)
@@ -410,8 +413,34 @@ async function onCover(event: Event) {
   } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.unsupported_cover') }
 }
 watch(selectedBookId, () => {
-  bookSpeech.value = (books.value.find(item => item.id === selectedBookId.value)?.pronunciations ?? []).map(item => ({ written: item.written, spoken: item.spoken }))
+  const book = books.value.find(item => item.id === selectedBookId.value)
+  bookSpeech.value = (book?.pronunciations ?? []).map(item => ({ written: item.written, spoken: item.spoken }))
+  bookLanguage.value = book?.language ?? ''
+  chapterLanguages.value = {}
 })
+watch(jobs, rows => {
+  const next = { ...chapterLanguages.value }
+  for (const job of rows) {
+    if (!(job.id in next)) next[job.id] = job.language ?? ''
+  }
+  chapterLanguages.value = next
+})
+async function onSaveLanguages() {
+  const book = selectedBook.value
+  if (!book || savingLanguages.value || book.status === 'queued' || book.status === 'running') return
+  savingLanguages.value = true; error.value = ''; notice.value = ''
+  try {
+    const chapters = jobs.value.map(job => ({ chapter_index: job.chapter_index, language: (chapterLanguages.value[job.id] ?? '').trim() }))
+    const updated = await audiobooksApi.setAudiobookLanguages(book.id, bookLanguage.value.trim(), chapters)
+    if (!mounted) return
+    upsertBook(updated)
+    bookLanguage.value = updated.language ?? ''
+    chapterLanguages.value = {}
+    notice.value = t('audiobookWorkspace.languagesSaved')
+    void loadJobs(book.id)
+  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.control') }
+  finally { if (mounted) savingLanguages.value = false }
+}
 async function onRetry() {
   const book = selectedBook.value
   if (!mounted || loading.value || saving.value || retrying.value || book?.status !== 'failed') return
@@ -569,6 +598,8 @@ onBeforeUnmount(() => {
             <a v-if="selectedBook.status === 'done'" data-export-book class="rounded-lg bg-accent1 px-3 py-2 text-xs font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :href="audiobooksApi.audiobookExportUrl(selectedBook.id)" download>{{ t('audiobooks.downloadExport') }}</a>
             <a v-if="selectedBook.mp3_ready" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookExportFormatUrl(selectedBook.id, 'mp3')" download>{{ t('audiobookWorkspace.downloadMp3') }}</a>
             <a v-if="selectedBook.m4b_ready" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookExportFormatUrl(selectedBook.id, 'm4b')" download>{{ t('audiobookWorkspace.downloadM4b') }}</a>
+            <a v-if="selectedBook.status === 'done'" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookCueUrl(selectedBook.id)" download>{{ t('audiobookWorkspace.downloadCue') }}</a>
+            <a v-if="selectedBook.status === 'done'" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookCollectionUrl(selectedBook.id)" download>{{ t('audiobookWorkspace.downloadCollection') }}</a>
           </div>
         </div>
         <p v-if="selectedBook.status !== 'done'" class="text-xs text-text-dim">{{ t('audiobookWorkspace.boundaryHint') }}</p>
@@ -588,6 +619,12 @@ onBeforeUnmount(() => {
             <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingSpeech" @click="onSaveSpeech">{{ t('audiobookWorkspace.savePronunciations') }}</button>
           </div>
         </div>
+        <div class="space-y-2 rounded-lg border border-border p-3">
+          <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.language') }}</p>
+          <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.languageHint') }}</p>
+          <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.language') }}</span><input v-model="bookLanguage" maxlength="35" type="text" :aria-label="t('audiobookWorkspace.language')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.languagePlaceholder')"></label>
+          <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingLanguages || selectedBook.status === 'queued' || selectedBook.status === 'running'" @click="onSaveLanguages">{{ t('audiobookWorkspace.saveLanguages') }}</button>
+        </div>
         <div class="border-t border-border pt-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="text-sm font-semibold text-text">{{ t('audiobooks.jobsTitle') }}</h3>
@@ -602,7 +639,9 @@ onBeforeUnmount(() => {
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <h4 class="text-sm font-medium text-text">{{ job.chapter_title || t('audiobookWorkspace.chapterName', { number: job.chapter_index + 1 }) }}</h4>
                 <span class="text-xs" :class="job.status === 'failed' ? 'text-status-failed' : job.status === 'done' ? 'text-status-done' : 'text-text-dim'">{{ t(`audiobookWorkspace.status.${job.status}`) }}</span>
+                <span data-language-chip class="rounded-full border border-border px-2 py-0.5 text-xs text-text-dim">{{ (chapterLanguages[job.id] || job.language) || t('audiobookWorkspace.languageMissing') }} · {{ job.language_ready ? t('audiobookWorkspace.languageReady') : t('audiobookWorkspace.languageNotReady') }}</span>
               </div>
+              <label class="mt-2 block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 }) }}</span><input v-model="chapterLanguages[job.id]" maxlength="35" type="text" :aria-label="t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 })" class="min-h-11 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.languagePlaceholder')"></label>
               <p v-if="chapterHint(job)" class="mt-2 text-xs text-text-dim">{{ chapterHint(job) }}</p>
               <p v-if="job.total_sections" class="mt-2 text-xs text-text-dim">{{ t('audiobookWorkspace.sections', { done: job.completed_sections ?? 0, total: job.total_sections }) }}</p>
               <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>

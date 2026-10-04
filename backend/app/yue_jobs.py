@@ -191,7 +191,7 @@ def submit(request: YueSubmitRequest) -> YueJobResponse:
         raise HTTPException(429, detail='generation_queue_full')
     job_id = uuid.uuid4().hex
     response = YueJobResponse(id=job_id, status='queued', stage='queued', created_at=_now(),
-        title=request.title or request.options.style[:500], lyrics=request.lyrics, seed=request.seed,
+        title=(request.title.strip() or (request.settings.title.strip() if request.settings is not None else "") or "Untitled")[:500], lyrics=request.lyrics, seed=request.seed,
         precision=request.precision, options=request.options, voice_id=request.voice_id)
     stored = _StoredJob(request=request, response=response)
     db.get_db().execute('INSERT INTO yue_jobs(id,payload_json,created_at) VALUES(?,?,?)',
@@ -266,7 +266,7 @@ def _catalog_audio(job: _StoredJob, destination: Path) -> int:
     if abc_path.exists() and (abc_path.resolve() != abc_path or abc_path.stat().st_size > 400_000):
         raise ValueError('Invalid completed score')
     params = _json.validate_json(job.request.options.model_dump_json(exclude_none=True))
-    params.update({'precision': job.request.precision, 'seed': job.request.seed})
+    params.update({'precision': job.request.precision, 'seed': job.request.seed, 'song_title': job.response.title})
     if job.request.settings is not None:
         params['_generation_settings'] = _json.validate_json(job.request.settings.model_dump_json())
     wall_ms = job.response.elapsed_seconds * 1000

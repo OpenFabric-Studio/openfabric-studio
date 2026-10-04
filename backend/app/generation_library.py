@@ -136,13 +136,15 @@ def _sampling(params: JsonObject, prefix: str, nested: str) -> GenerationSamplin
     return model.model_validate(valid)
 
 
-def snapshot_from_params(engine: GenerationEngine, params: JsonObject, lyrics: str, seed: object) -> GenerationSettings:
+def snapshot_from_params(engine: GenerationEngine, params: JsonObject, lyrics: str, seed: object, title: str = "") -> GenerationSettings:
     """Prefer validated app snapshots; native fallback copies only inspected public fields."""
     supplied = params.get('_generation_settings')
     if supplied is not None:
         try:
             snapshot = TypeAdapter[GenerationSettings](GenerationSettings).validate_python(supplied)
             if snapshot.engine == engine:
+                if isinstance(snapshot, YueGenerationSettings) and not snapshot.title.strip() and title.strip():
+                    return snapshot.model_copy(update={"title": title.strip()[:500]})
                 return snapshot
         except ValidationError:
             pass
@@ -169,7 +171,7 @@ def snapshot_from_params(engine: GenerationEngine, params: JsonObject, lyrics: s
     mapping = {'style': 'style', 'cot': 'cot', 'precision': 'precision', 'abc': 'abc',
                'cfgScale': 'cfg_scale', 'numInferenceSteps': 'num_inference_steps', 'batchSize': 'batch_size'}
     values = {name: params[key] for name, key in mapping.items() if key in params}
-    values.update({'engine': engine, 'lyrics': lyrics[:100_000], 'seed': seed,
+    values.update({'engine': engine, 'title': title.strip()[:500], 'lyrics': lyrics[:100_000], 'seed': seed,
                    'semantic': _sampling(params, 'semantic', 'semantic'),
                    'abcSampling': _sampling(params, 'abc', 'abc_sampling'),
                    'referenceRequiresReupload': bool(params.get('audio'))})
@@ -193,7 +195,7 @@ def capture_track(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
     except ValidationError:
         params = {}
     typed_engine: GenerationEngine = 'ace_step' if engine == 'ace_step' else 'yue2'
-    snapshot = snapshot_from_params(typed_engine, params, lyrics_raw, row['seed'])
+    snapshot = snapshot_from_params(typed_engine, params, lyrics_raw, row['seed'], title_raw)
     reference = (snapshot.useRefAudio or snapshot.styleReferenceRequiresReupload) if isinstance(snapshot, AceGenerationSettings) else snapshot.referenceRequiresReupload
     seed = row['seed']
     if isinstance(seed, bool) or not isinstance(seed, int) or abs(seed) > 9_007_199_254_740_991:
@@ -202,7 +204,7 @@ def capture_track(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
     if isinstance(snapshot, AceGenerationSettings):
         search_fields.extend([snapshot.simpleQuery, snapshot.customPrompt, snapshot.customLyrics])
     else:
-        search_fields.extend([snapshot.style, snapshot.abc, snapshot.lyrics])
+        search_fields.extend([snapshot.title, snapshot.style, snapshot.abc, snapshot.lyrics])
     connection.execute('''INSERT OR IGNORE INTO generation_history
         (id,engine,created_at,title,lyrics,seed,track_id,settings_json,search_text,reference_requires_reupload)
         VALUES(?,?,?,?,?,?,?,?,?,?)''', (uuid.uuid4().hex, typed_engine, row['created_at'], title_raw[:500],

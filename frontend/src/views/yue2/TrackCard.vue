@@ -133,6 +133,7 @@ function copyParamsToForm() {
     ...p,
     lyrics: props.job.lyrics || p.lyrics || '',
     style: props.job.style || p.style || '',
+    song_title: props.job.title,
     cot: props.job.cot || p.cot || 'off',
     precision: props.job.precision || p.precision || 'q8_0',
     seed: props.job.seed ?? p.seed,

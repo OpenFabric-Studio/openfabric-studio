@@ -104,17 +104,17 @@ def _book_columns(connection: sqlite3.Connection) -> set[str]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 2:
+    if version == 3:
         return
-    if version not in (0, 1):
+    if version not in (0, 1, 2):
         raise AudiobookError("audiobook_storage_unavailable", 503)
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 2:
+        if version == 3:
             connection.commit()
             return
-        if version not in (0, 1):
+        if version not in (0, 1, 2):
             raise AudiobookError("audiobook_storage_unavailable", 503)
         if version == 0:
             connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_books (
@@ -148,7 +148,21 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         for name, statement in additions:
             if name not in present:
                 connection.execute(statement)
-        connection.execute("PRAGMA user_version = 2")
+        job_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(audiobook_jobs)")}
+        if "language" not in job_columns:
+            connection.execute("ALTER TABLE audiobook_jobs ADD COLUMN language TEXT NOT NULL DEFAULT ''")
+        if "pause_json" not in job_columns:
+            connection.execute("ALTER TABLE audiobook_jobs ADD COLUMN pause_json TEXT NOT NULL DEFAULT '[]'")
+        present = _book_columns(connection)
+        if "language" not in present:
+            connection.execute("ALTER TABLE audiobook_books ADD COLUMN language TEXT NOT NULL DEFAULT ''")
+        connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_chapter_cache (
+            cache_key TEXT PRIMARY KEY,
+            profile_id TEXT NOT NULL,
+            text_sha256 TEXT NOT NULL,
+            wav_name TEXT NOT NULL,
+            created_at TEXT NOT NULL)""")
+        connection.execute("PRAGMA user_version = 3")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -182,6 +196,7 @@ def _row_to_book(row: sqlite3.Row) -> AudiobookBook:
         m4b_ready=bool(row["m4b_export_path"]),
         has_cover=bool(row["cover_path"]),
         export_note=str(row["export_note"] or ""),
+        language=str(row["language"] or ""),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -190,17 +205,23 @@ def _row_to_book(row: sqlite3.Row) -> AudiobookBook:
 def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
     with closing(_connect()) as connection:
         counts = connection.execute("SELECT COUNT(*), SUM(status = 'done') FROM audiobook_sections WHERE job_id = ?", (row["id"],)).fetchone()
+        book = connection.execute("SELECT language FROM audiobook_books WHERE id = ?", (row["book_id"],)).fetchone()
+    override = str(row["language"] or "")
+    language = override or (str(book["language"] or "") if book is not None else "")
+    status = _JOB_STATUS.validate_python(row["status"])
     return AudiobookJob(
         id=str(row["id"]),
         book_id=str(row["book_id"]),
         chapter_index=int(row["chapter_index"]),
         chapter_title=str(row["chapter_title"] or ""),
         completed_sections=int(counts[1] or 0), total_sections=int(counts[0]),
-        status=_JOB_STATUS.validate_python(row["status"]),
+        status=status,
         detail=str(row["detail"] or ""),
         output_path=str(row["output_path"]) if row["output_path"] else None,
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
+        language=language,
+        language_ready=status == "done" and bool(language),
     )
 
 
@@ -326,7 +347,13 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
                     output_path=None,
                     created_at=stamp,
                     updated_at=stamp,
+                    language=body.language,
                 )
+            )
+        if body.language:
+            connection.execute(
+                "UPDATE audiobook_books SET language = ? WHERE id = ?",
+                (body.language, book_id),
             )
         connection.commit()
         book_row = connection.execute(
@@ -677,6 +704,77 @@ def _republish(book_id: str) -> None:
             (str(mp3) if mp3 else None, str(m4b) if m4b else None, note[:500], _now(), book_id),
         )
         connection.commit()
+
+
+def set_languages(book_id: str, language: str, chapters: list[tuple[int, str]]) -> AudiobookBook:
+    """Book language is the default. A chapter value replaces it for that chapter only."""
+    if not _ID.fullmatch(book_id):
+        raise AudiobookError("invalid_book_id", 404)
+    if len(chapters) > MAX_CHAPTERS:
+        raise AudiobookError("too_many_chapters")
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute("SELECT status, chapter_count FROM audiobook_books WHERE id = ?", (book_id,)).fetchone()
+        if row is None:
+            raise AudiobookError("book_not_found", 404)
+        if row["status"] in {"queued", "running"}:
+            raise AudiobookError("audiobook_busy", 409)
+        seen: set[int] = set()
+        for index, chapter_language in chapters:
+            if index in seen or not 0 <= index < int(row["chapter_count"]):
+                raise AudiobookError("chapter_not_found", 404)
+            seen.add(index)
+            connection.execute(
+                "UPDATE audiobook_jobs SET language = ?, updated_at = ? WHERE book_id = ? AND chapter_index = ?",
+                (chapter_language, _now(), book_id, index),
+            )
+        connection.execute(
+            "UPDATE audiobook_books SET language = ?, updated_at = ? WHERE id = ?",
+            (language, _now(), book_id),
+        )
+        connection.commit()
+    return get_book(book_id)
+
+
+def save_pause_spans(job_id: str, spans: list[dict[str, int]]) -> None:
+    if not _ID.fullmatch(job_id):
+        raise AudiobookError("invalid_book_id", 404)
+    bounded = spans[:500]
+    payload = json.dumps([
+        {"start_ms": int(item["start_ms"]), "end_ms": int(item["end_ms"])}
+        for item in bounded
+        if 0 <= int(item["start_ms"]) <= int(item["end_ms"]) <= 86_400_000
+    ])
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        connection.execute("UPDATE audiobook_jobs SET pause_json = ? WHERE id = ?", (payload, job_id))
+        connection.commit()
+
+
+def pause_spans(job_id: str) -> list[dict[str, int]]:
+    if not _ID.fullmatch(job_id):
+        return []
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        row = connection.execute("SELECT pause_json FROM audiobook_jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return []
+    try:
+        loaded = json.loads(str(row["pause_json"] or "[]"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(loaded, list):
+        return []
+    spans: list[dict[str, int]] = []
+    for item in loaded:
+        if not isinstance(item, dict):
+            continue
+        start = item.get("start_ms")
+        end = item.get("end_ms")
+        if isinstance(start, int) and isinstance(end, int) and 0 <= start <= end:
+            spans.append({"start_ms": start, "end_ms": end})
+    return spans
 
 
 async def start() -> None:

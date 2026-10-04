@@ -105,9 +105,11 @@ def _bounded_text(value: str, max_bytes: int = 4096) -> str:
 
 
 def build_tags(track: SavedTrack, version: AudioVersion, artist: str,
-               options: TaggedDownloadOptions, previous_comment: str = "") -> dict[str, str]:
+               options: TaggedDownloadOptions, previous_comment: str = "",
+               album_default: str = "") -> dict[str, str]:
     title = _bounded_text(" ".join(track.title.split()), 2048) or "Untitled"
-    tags = {"title": title, "artist": artist, "album": (options.album or title).strip(), "encoded_by": "OpenFabric"}
+    album = options.album if options.album is not None and options.album.strip() else album_default
+    tags = {"title": title, "artist": artist, "album": (album or title).strip(), "encoded_by": "OpenFabric"}
     try:
         tags["date"] = datetime.fromisoformat(track.created_at.replace("Z", "+00:00")).date().isoformat()
     except ValueError:
@@ -246,7 +248,8 @@ async def _prepare(identifier: str, track_id: int, version_id: str | None,
     try:
         async with _capacity:
             track, version, source = _selected(track_id, version_id, export_id)
-            artist = artist_settings.get_settings().artist
+            saved_tags = artist_settings.get_settings()
+            artist = saved_tags.artist
             ffmpeg, ffprobe = tool("ffmpeg"), tool("ffprobe")
             directory = Path(tempfile.mkdtemp(prefix="openfabric-tagged-", dir=_TEMP_ROOT))
             # Snapshot with owned, cancellable IO before launching an external
@@ -258,7 +261,7 @@ async def _prepare(identifier: str, track_id: int, version_id: str | None,
                 [ffprobe, "-v", "error", *_INPUT, "-show_format", "-of", "json", str(captured)], directory,
                 max_bytes=_MAX_METADATA_BYTES + 8192))
             previous = next((value for key, value in probe.format.tags.items() if key.lower() == "comment"), "")
-            tags = build_tags(track, version, artist, options, previous)
+            tags = build_tags(track, version, artist, options, previous, album_default=saved_tags.album)
             metadata = directory / "metadata.txt"
             metadata.write_text(_metadata_document(probe.format.tags, tags), encoding="utf-8", newline="")
             extension = source.suffix.lower().lstrip(".")
