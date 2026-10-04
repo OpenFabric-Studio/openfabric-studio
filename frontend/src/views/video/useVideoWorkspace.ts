@@ -3,7 +3,7 @@ import { listTracks, type SavedTrack } from '../../api/tracks'
 import * as api from '../../api/videos'
 import { ApiError } from '../../api/http'
 import { i18n } from '../../i18n'
-import { parseUpdateVideoProjectRequest, type VideoReadinessResponse, type UpdateVideoProjectRequest, type VideoProject, type VideoProjectSettings, type VideoExportSettings, type VideoMarker, type VideoOverlay, type VideoShotDraft } from '../../api/contracts'
+import { parseUpdateVideoProjectRequest, type VideoReadinessResponse, type UpdateVideoProjectRequest, type CreateVideoProjectRequest, type VideoProject, type VideoProjectSettings, type VideoExportSettings, type VideoMarker, type VideoOverlay, type VideoShotDraft } from '../../api/contracts'
 import { createPollingLoop } from '../../composables/polling'
 import { newVideoId, toShotDraft, shotProblem, frameTime, type VideoWorkspaceStep } from './videoWorkspace'
 
@@ -71,7 +71,7 @@ export function useVideoWorkspace() {
   const savedShot = computed(() => project.value?.shots?.find((item) => item.id === selectedShotId.value))
   const active = computed(() => api.isVideoActive(project.value?.job?.status))
   const readOnly = computed(() => acting.value || active.value)
-  const problem = computed(() => draft.value?.shots.map((shot) => shotProblem(draft.value?.shots ?? [], shot.id, project.value?.duration_sec ?? 0)).find(Boolean) ?? '')
+  const problem = computed(() => draft.value?.shots.map((shot) => shotProblem(draft.value?.shots ?? [], shot.id, project.value?.preset === 'reel' ? 15 : (project.value?.duration_sec ?? 0))).find(Boolean) ?? '')
   const coverageEnd = computed(() => Math.max(0, ...(draft.value?.shots ?? []).map((shot) => shot.start_sec + (shot.seconds ?? 4))))
   const approvalCount = computed(() => project.value?.shots?.filter((shot) => shot.approved_variant_id).length ?? 0)
   let alive = true
@@ -250,16 +250,19 @@ export function useVideoWorkspace() {
       }
     }
   }
-  async function createProject() {
-    if (!trackId.value || acting.value) return
+  async function createProject(request?: CreateVideoProjectRequest) {
+    if (acting.value) return
+    if (!request && !trackId.value) return
     acting.value = true
     if (dirty.value && !await save()) { acting.value = false; return }
     if (!alive) return
     const token = ++generation
     actionController?.abort()
     actionController = new AbortController()
+    const seed = Math.floor(Math.random() * 2147483648)
+    const body: CreateVideoProjectRequest = request ?? { track_id: trackId.value ?? undefined, name: tracks.value.find((item) => item.id === trackId.value)?.title || 'Video project', seed }
     try {
-      const row = await api.createVideoProject({ track_id: trackId.value, name: tracks.value.find((item) => item.id === trackId.value)?.title || 'Video project', seed: Math.floor(Math.random() * 2147483648) }, actionController.signal)
+      const row = await api.createVideoProject(body.seed == null ? { ...body, seed } : body, actionController.signal)
       if (alive && token === generation) { activate(row, false); step.value = 'direction' }
     } catch (cause) { if (alive && token === generation) error.value = api.videoRequestError(cause) }
     finally { if (alive) acting.value = false }
@@ -312,7 +315,8 @@ export function useVideoWorkspace() {
     if (previous) { draft.value.shots = previous; reconcileSelection(previous) }
   }
   function addShot() {
-    if (!draft.value || readOnly.value || draft.value.shots.length >= 40) return
+    const cap = project.value?.preset === 'reel' ? 4 : 40
+    if (!draft.value || readOnly.value || draft.value.shots.length >= cap) return
     const shot: VideoShotDraft = { id: newVideoId(), start_sec: frameTime(coverageEnd.value), seconds: 4, prompt: draft.value.direction || 'Describe this scene', seed: ((draft.value.seed ?? 42) + draft.value.shots.length) % 2147483648 }
     editShots([...draft.value.shots, shot]); selectedShotId.value = shot.id
   }

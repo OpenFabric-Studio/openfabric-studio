@@ -21,6 +21,7 @@ from .video_contracts import (
     VideoRevisionRequest,
     VideoRenderRequest,
     VideoExportSettings,
+    VideoSeconds,
 )
 from .video_media import tool, probe_media
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
@@ -68,7 +69,7 @@ class PendingExport(VideoContract):
 
 class StoredVideoProject(VideoContract):
     project: VideoProject
-    source: SourceIdentity
+    source: SourceIdentity | None = None
     reference_paths: dict[str, str] = Field(default_factory=dict)
     worker: WorkerIdentity | None = None
     published_file: str = ""
@@ -204,12 +205,16 @@ def identity(path: Path) -> SourceIdentity:
 
 
 def source_changed(document: StoredVideoProject) -> bool:
+    if document.project.track_id is None:
+        return False
+    source = document.source
+    if source is None:
+        return True
     try:
         path = source_path(document.project.track_id)
         stat = path.stat()
     except (OSError, VideoProjectError):
         return True
-    source = document.source
     return str(path) != source.path or (
         stat.st_size,
         stat.st_dev,
@@ -245,9 +250,115 @@ def list_projects() -> list[VideoProject]:
     return sorted(found, key=lambda project: project.updated_at, reverse=True)
 
 
+_REEL_PLANS: dict[int, tuple[VideoSeconds, ...]] = {
+    8: (4, 4),
+    10: (4, 6),
+    12: (4, 4, 4),
+    14: (4, 4, 6),
+}
+_REEL_LABELS = (
+    "Opening shot.",
+    "The same subject continues.",
+    "A closer view.",
+    "The closing shot.",
+)
+
+
+def _enforce_reel(project: VideoProject) -> None:
+    """Keep a reel vertical, short, and free of a library song."""
+    if project.preset != "reel":
+        if project.track_id is None and project.mode != "generated":
+            raise VideoProjectError("song_required")
+        return
+    if project.track_id is not None:
+        raise VideoProjectError("reel_has_song")
+    if project.mode != "generated":
+        raise VideoProjectError("reel_mode")
+    if (project.settings.width, project.settings.height) != (704, 1280):
+        raise VideoProjectError("reel_size")
+    shots = sorted(project.shots, key=lambda shot: shot.start_sec)
+    if not 2 <= len(shots) <= 4:
+        raise VideoProjectError("reel_shots")
+    if any(shot.seconds not in (2, 4, 6) for shot in shots):
+        raise VideoProjectError("reel_length")
+    end = shots[-1].start_sec + shots[-1].seconds
+    if end < 8 - 1e-6 or end > 15 + 1 / 24:
+        raise VideoProjectError("reel_duration")
+    project.duration_sec = end
+
+
+def _picture_project(body: CreateVideoProjectRequest) -> VideoProject:
+    from .video_contracts import VideoExportSettings, VideoProjectSettings
+
+    if body.preset == "reel" and body.track_id is not None:
+        raise VideoProjectError("reel_has_song")
+    if body.mode != "generated":
+        raise VideoProjectError("song_required")
+    if body.preset == "reel":
+        chosen = 12 if body.duration_sec is None else body.duration_sec
+        if chosen != int(chosen) or int(chosen) not in _REEL_PLANS:
+            raise VideoProjectError("reel_duration")
+        lengths = _REEL_PLANS[int(chosen)]
+        duration = float(sum(lengths))
+        settings = VideoProjectSettings(width=704, height=1280)
+        export_settings = VideoExportSettings(aspect="portrait")
+        base = (body.direction.strip() or "A vertical scene")[:1800]
+        cursor = 0.0
+        shots: list[VideoProjectShot] = []
+        for index, seconds in enumerate(lengths):
+            shots.append(
+                VideoProjectShot(
+                    id=uuid.uuid4().hex,
+                    start_sec=cursor,
+                    seconds=seconds,
+                    prompt=f"{base} {_REEL_LABELS[index]}",
+                    seed=(body.seed + index) % 2147483648,
+                )
+            )
+            cursor += seconds
+    else:
+        duration = 12 if body.duration_sec is None else body.duration_sec
+        if duration < 2 or duration > 60:
+            raise VideoProjectError("bad_length")
+        settings = VideoProjectSettings()
+        export_settings = VideoExportSettings()
+        shots = []
+    stamp = now()
+    project = VideoProject(
+        id=uuid.uuid4().hex,
+        revision=1,
+        track_id=None,
+        track_title="",
+        name=body.name,
+        preset=body.preset,
+        mode="generated",
+        direction=body.direction,
+        seed=body.seed,
+        duration_sec=duration,
+        source_fingerprint="",
+        created_at=stamp,
+        updated_at=stamp,
+        settings=settings,
+        export_settings=export_settings,
+        shots=shots,
+    )
+    _enforce_reel(project)
+    return project
+
+
 async def create(body: CreateVideoProjectRequest) -> VideoProject:
     from .video_jobs import _probe_duration, VideoJobError
 
+    if body.track_id is None:
+        project = _picture_project(body)
+        document = StoredVideoProject(project=project, source=None)
+        try:
+            save(document)
+        except OSError as exc:
+            raise VideoProjectError("storage_failed") from exc
+        return view(document)
+    if body.preset == "reel":
+        raise VideoProjectError("reel_has_song")
     path = source_path(body.track_id)
     before = path.stat()
     try:
@@ -367,7 +478,8 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
             old = {shot.id: shot for shot in project.shots}
             shots: list[VideoProjectShot] = []
             for draft in sorted(body.shots, key=lambda shot: shot.start_sec):
-                if draft.start_sec + draft.seconds > project.duration_sec + 1 / 24:
+                limit = 15 if project.preset == "reel" else project.duration_sec
+                if draft.start_sec + draft.seconds > limit + 1 / 24:
                     raise VideoProjectError("past_end")
                 if (
                     draft.reference_id is not None
@@ -384,6 +496,7 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
                         shot.approved_variant_id = previous.approved_variant_id
                 shots.append(shot)
             project.shots = shots
+        _enforce_reel(project)
         if any(
             overlay.end_sec > project.duration_sec + 1 / 24
             for overlay in project.overlays

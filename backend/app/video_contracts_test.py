@@ -39,3 +39,16 @@ class VideoContractTests(unittest.TestCase):
             VideoShotDraft(id="../private", start_sec=0, seconds=4, prompt="one")
         with self.assertRaises(ValidationError):
             VideoRenderRequest(revision=0, shot_ids=[])
+
+    def test_vertical_frame_is_a_real_size_and_mismatched_pairs_stay_invalid(self) -> None:
+        from app.video_contracts import VideoProjectSettings
+
+        self.assertEqual(
+            (VideoProjectSettings(width=704, height=1280).width, VideoProjectSettings(width=704, height=1280).height),
+            (704, 1280),
+        )
+        with self.assertRaises(ValidationError):
+            VideoProjectSettings(width=1280, height=1280)
+        with self.assertRaises(ValidationError):
+            VideoProjectSettings(width=704, height=704)
+

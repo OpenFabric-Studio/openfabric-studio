@@ -223,7 +223,7 @@ it('keeps the library available with an empty message after deleting its last pr
   expect(document.querySelector('[data-video-project-library]')).not.toBeNull()
   expect(document.body.textContent).toContain('No saved video projects yet')
   expect(document.querySelector('[role=tab][aria-selected=true]')?.textContent).toContain('Song')
-  expect(document.querySelector('[data-testid=video-global-status]')?.textContent).toContain('Choose a song to begin')
+  expect(document.querySelector('[data-testid=video-global-status]')?.textContent).toContain('Start from a song, a silent video, or a reel')
   expect([...document.querySelectorAll('[role=tab]')].some(tab => tab.textContent?.includes('✓'))).toBe(false)
 })
 

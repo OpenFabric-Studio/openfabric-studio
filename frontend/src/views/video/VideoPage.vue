@@ -49,14 +49,22 @@ const searchedTracks = computed(() => tracks.value.filter((track) => `${track.ti
 const engineOption = computed(() => readiness.value?.options.find((option) => option.id === (draft.value?.settings.engine_pack ?? 'ltx23')))
 const generatedMode = computed(() => draft.value?.mode === 'generated')
 const repairDescriptionFor = ref('')
-watch([() => selectedShot.value?.id, generatedMode, () => selectedShot.value ? shotProblem(draft.value?.shots ?? [], selectedShot.value.id, project.value?.duration_sec ?? 0) === 'bad_prompt' : false], ([id, generated, invalid]) => {
+watch([() => selectedShot.value?.id, generatedMode, () => selectedShot.value ? shotProblem(draft.value?.shots ?? [], selectedShot.value.id, timelineLimit.value) === 'bad_prompt' : false], ([id, generated, invalid]) => {
   if (generated || id !== repairDescriptionFor.value) repairDescriptionFor.value = ''
   // Keep the recovery editor mounted while typing; valid image descriptions
   // stay hidden until a stored value actually needs correction.
   if (id && !generated && invalid) repairDescriptionFor.value = id
 }, { immediate: true })
 const modeReady = computed(() => Boolean(readiness.value?.ffmpeg_ready) && (!generatedMode.value || Boolean(engineOption.value?.available)))
-const canAnalyze = computed(() => !readOnly.value && !serverBusy.value && Boolean(readiness.value?.analysis_ready && readiness.value.ffmpeg_ready) && !project.value?.source_changed)
+const canAnalyze = computed(() => !readOnly.value && !serverBusy.value && Boolean(readiness.value?.analysis_ready && readiness.value.ffmpeg_ready) && !project.value?.source_changed && project.value?.track_id != null)
+const pictureProject = computed(() => project.value?.track_id == null)
+const reelProject = computed(() => project.value?.preset === 'reel')
+const shotCap = computed(() => reelProject.value ? 4 : 40)
+const clipLengths = computed((): readonly VideoClipLength[] => reelProject.value ? [2, 4, 6] : videoClipLengths)
+const timelineLimit = computed(() => reelProject.value ? 15 : (project.value?.duration_sec ?? 0))
+const startKind = ref<'song' | 'silent' | 'reel'>('song')
+const silentSeconds = ref(12)
+const reelSeconds = ref(12)
 const elapsed = computed(() => {
   const job = project.value?.job
   if (!job?.started_at) return null
@@ -113,6 +121,11 @@ function changeStep(value: VideoWorkspaceStep, focus = false) {
   step.value = value
   if (focus) void focusPanel()
 }
+function beginPicture() {
+  const seed = Math.floor(Math.random() * 2147483648)
+  if (startKind.value === 'reel') void createProject({ name: 'Reel', preset: 'reel', duration_sec: reelSeconds.value, seed })
+  else void createProject({ name: 'Silent video', duration_sec: silentSeconds.value, seed })
+}
 function startNewProject() {
   if (acting.value || saving.value || loading.value) return
   if (!creatingProject.value) returnStep = step.value
@@ -152,7 +165,7 @@ function stepKey(event: KeyboardEvent, index: number) {
 }
 function stepDone(value: VideoWorkspaceStep) {
   if (showNewProject.value || !project.value || !draft.value) return false
-  return value === 'song' ? Boolean(project.value) : value === 'direction' ? Boolean(draft.value?.direction || draft.value?.mode !== 'generated')
+  return value === 'song' ? Boolean(project.value) : value === 'direction' ? Boolean(draft.value?.direction || pictureProject.value || draft.value?.mode !== 'generated')
     : value === 'storyboard' ? validShots.value : value === 'preview' ? approvalCount.value > 0 && approvalCount.value === draft.value?.shots.length : Boolean(project.value?.file_url)
 }
 function length(value: VideoClipLength) {
@@ -187,7 +200,7 @@ function addMarker() {
   if (draft.value) draft.value.markers.push({ id: newVideoId(), time_sec: frameTime(position.value), kind: 'manual', label: t('videoWorkspace.manualMarker'), confidence: 1 })
 }
 function addOverlay() {
-  if (draft.value && project.value) draft.value.overlays.push({ id: newVideoId(), kind: 'title', text: project.value.track_title,
+  if (draft.value && project.value) draft.value.overlays.push({ id: newVideoId(), kind: 'title', text: project.value.track_title || project.value.name,
     start_sec: 0, end_sec: Math.min(4, project.value.duration_sec), position: 'bottom', font_size: 36, color: '#ffffff' })
 }
 async function removeLegacy(id: string) {
@@ -257,13 +270,29 @@ onBeforeUnmount(stopSource)
       <template v-if="step === 'song'">
         <div v-if="showNewProject" data-new-video-project class="video-card space-y-4">
           <div><h3 class="font-semibold">{{ t('videoExperience.chooseSong') }}</h3><p class="mt-2 text-sm leading-relaxed text-text-dim">{{ t('videoExperience.newIntro') }}</p></div>
-          <label>{{ t('videoWorkspace.searchSongs') }}<input v-model="songSearch" type="search"></label><label>{{ t('video.song') }}<select :value="trackId ?? ''" :disabled="acting" @change="chooseTrack"><option value="">{{ t('video.songPlaceholder') }}</option><option v-for="track in searchedTracks" :key="track.id" :value="track.id">{{ track.title || track.filename }} · {{ clockText((track.duration_ms ?? 0) / 1000) }}</option></select></label>
-          <p class="text-sm text-text-dim">{{ t('videoExperience.sourceHint') }}</p><p v-if="!tracks.length">{{ t('video.noSongs') }}</p>
-          <p v-if="!loading && !readiness?.ffmpeg_ready" role="status" class="text-sm text-status-failed">{{ readiness ? t('video.err.ffmpeg_missing') : t('videoWorkspace.readinessFailed') }}</p>
-          <div class="video-actions"><button type="button" :disabled="!trackId || acting || !readiness?.ffmpeg_ready" class="primary" @click="createProject">{{ acting ? t('videoExperience.newLoading') : t('videoWorkspace.newProject') }}</button><button v-if="project" type="button" :disabled="acting" @click="cancelNewProject">{{ t('videoExperience.backToProject') }}</button></div>
+          <div role="group" :aria-label="t('videoExperience.newProject')" class="flex flex-wrap gap-2">
+            <button type="button" :aria-pressed="startKind === 'song'" @click="startKind = 'song'">{{ t('videoExperience.startSong') }}</button>
+            <button type="button" :aria-pressed="startKind === 'silent'" @click="startKind = 'silent'">{{ t('videoExperience.startSilent') }}</button>
+            <button type="button" :aria-pressed="startKind === 'reel'" @click="startKind = 'reel'">{{ t('videoExperience.startReel') }}</button>
+          </div>
+          <template v-if="startKind === 'song'">
+            <label>{{ t('videoWorkspace.searchSongs') }}<input v-model="songSearch" type="search"></label><label>{{ t('video.song') }}<select :value="trackId ?? ''" :disabled="acting" @change="chooseTrack"><option value="">{{ t('video.songPlaceholder') }}</option><option v-for="track in searchedTracks" :key="track.id" :value="track.id">{{ track.title || track.filename }} · {{ clockText((track.duration_ms ?? 0) / 1000) }}</option></select></label>
+            <p class="text-sm text-text-dim">{{ t('videoExperience.sourceHint') }}</p><p v-if="!tracks.length">{{ t('video.noSongs') }}</p>
+            <p v-if="!loading && !readiness?.ffmpeg_ready" role="status" class="text-sm text-status-failed">{{ readiness ? t('video.err.ffmpeg_missing') : t('videoWorkspace.readinessFailed') }}</p>
+          </template>
+          <template v-else-if="startKind === 'silent'">
+            <p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.silentIntro') }}</p>
+            <label>{{ t('videoExperience.silentLength') }}<input v-model.number="silentSeconds" type="number" min="2" max="60" step="1" :disabled="acting"></label>
+          </template>
+          <template v-else>
+            <p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.reelIntro') }}</p>
+            <label>{{ t('videoExperience.reelLength') }}<select v-model.number="reelSeconds" :disabled="acting"><option :value="8">8 s</option><option :value="10">10 s</option><option :value="12">12 s</option><option :value="14">14 s</option></select></label>
+          </template>
+          <div class="video-actions"><button type="button" :disabled="acting || (startKind === 'song' && (!trackId || !readiness?.ffmpeg_ready))" class="primary" @click="startKind === 'song' ? createProject() : beginPicture()">{{ acting ? t('videoExperience.newLoading') : t('videoWorkspace.newProject') }}</button><button v-if="project" type="button" :disabled="acting" @click="cancelNewProject">{{ t('videoExperience.backToProject') }}</button></div>
         </div>
         <div v-else-if="project && draft" class="video-card space-y-4">
-          <div><p class="text-xs text-text-dim">{{ t('videoExperience.currentSong') }}</p><h3 class="mt-1 break-words font-semibold">{{ project.track_title }} <span class="text-sm font-normal text-text-dim">· {{ clockText(project.duration_sec) }}</span></h3><p v-if="!selectedTrack" class="mt-2 text-sm text-text-dim">{{ t('videoExperience.missingSource') }}</p></div>
+          <div v-if="pictureProject"><p class="text-xs text-text-dim">{{ t('videoExperience.currentSong') }}</p><h3 class="mt-1 break-words font-semibold">{{ project.name }} <span class="text-sm font-normal text-text-dim">· {{ clockText(project.duration_sec) }}</span></h3><p class="mt-2 text-sm text-text-dim">{{ reelProject ? t('videoExperience.reelSaved') : t('videoExperience.silentSaved') }}</p></div>
+          <div v-else><p class="text-xs text-text-dim">{{ t('videoExperience.currentSong') }}</p><h3 class="mt-1 break-words font-semibold">{{ project.track_title }} <span class="text-sm font-normal text-text-dim">· {{ clockText(project.duration_sec) }}</span></h3><p v-if="!selectedTrack" class="mt-2 text-sm text-text-dim">{{ t('videoExperience.missingSource') }}</p></div>
           <label>{{ t('videoWorkspace.projectName') }}<input v-model="draft.name" maxlength="120" :disabled="readOnly"></label>
           <div class="video-actions"><button type="button" class="primary" @click="changeStep('direction', true)">{{ t('videoWorkspace.continue') }}</button><button type="button" :disabled="acting || saving" @click="startNewProject">{{ t('videoExperience.newProject') }}</button></div>
         </div>
@@ -273,30 +302,30 @@ onBeforeUnmount(stopSource)
 
         <div class="video-card space-y-3">
           <h3 class="font-semibold">{{ t('videoExperience.storyboard') }}</h3>
-          <div v-if="!draft.shots.length" class="video-empty"><p class="font-semibold">{{ t('videoExperience.noShots') }}</p><p class="mt-2 text-sm text-text-dim">{{ t('videoExperience.noShotsHint') }}</p></div>
+          <div v-if="!draft.shots.length" class="video-empty"><p class="font-semibold">{{ t('videoExperience.noShots') }}</p><p class="mt-2 text-sm text-text-dim">{{ pictureProject ? t('videoExperience.noShotsPictureHint') : t('videoExperience.noShotsHint') }}</p></div>
           <div class="flex flex-wrap justify-between gap-2 text-sm"><span>{{ t('video.shotCount', { count: draft.shots.length }) }} · {{ clockText(coverageEnd) }} / {{ clockText(project.duration_sec) }}</span><span v-if="gapSeconds > 1 / 24">{{ t('videoWorkspace.gaps', { seconds: gapSeconds.toFixed(2) }) }}</span></div>
-          <svg v-if="waves" viewBox="0 0 1000 50" preserveAspectRatio="none" class="h-16 w-full rounded bg-panel-2" role="img" :aria-label="t('videoWorkspace.waveform')"><polyline :points="waves" fill="none" stroke="currentColor" stroke-width="1" class="text-accent1"/><polyline :points="energy" fill="none" stroke="currentColor" stroke-width="2" class="text-accent2"/></svg>
+          <svg v-if="waves && !pictureProject" viewBox="0 0 1000 50" preserveAspectRatio="none" class="h-16 w-full rounded bg-panel-2" role="img" :aria-label="t('videoWorkspace.waveform')"><polyline :points="waves" fill="none" stroke="currentColor" stroke-width="1" class="text-accent1"/><polyline :points="energy" fill="none" stroke="currentColor" stroke-width="2" class="text-accent2"/></svg>
           <div class="relative h-12 rounded bg-panel-2" :aria-label="t('videoWorkspace.timeline')"><span v-for="marker in (draft.markers ?? []).filter((item) => item.kind === 'beat').slice(0, 300)" :key="marker.id" class="absolute top-0 h-2 w-px bg-text-dim" :style="{ left: `${marker.time_sec / project.duration_sec * 100}%` }" aria-hidden="true"></span><button v-for="(shot, index) in draft.shots" :key="shot.id" class="absolute top-2 min-w-1 truncate border border-border text-xs" :aria-label="t('video.shotLabel', { current: index + 1 })" :aria-pressed="selectedShotId === shot.id" :style="{ left: `${shot.start_sec / project.duration_sec * 100}%`, width: `${(shot.seconds ?? 4) / project.duration_sec * 100}%`, minHeight: '36px', padding: '4px' }" @click="selectedShotId = shot.id; seek(shot.start_sec)">{{ index + 1 }}</button></div>
-          <label>{{ t('videoWorkspace.seekSong') }} · {{ clockText(position) }}<input v-model.number="position" type="range" min="0" :max="project.duration_sec" step="0.041666666666666664" :aria-valuetext="clockText(position)" @input="seek(position)"></label>
-          <div class="flex gap-2 overflow-x-auto pb-2" :aria-label="t('videoWorkspace.shotList')"><button v-for="(shot, index) in draft.shots" :key="shot.id" :aria-pressed="selectedShotId === shot.id" :class="selectedShotId === shot.id ? 'border-accent1' : 'border-border'" class="min-w-36 max-w-48 shrink-0 rounded-lg border p-3 text-left" @click="selectedShotId = shot.id"><strong>{{ index + 1 }} · {{ clockText(shot.start_sec) }}–{{ clockText(shot.start_sec + (shot.seconds ?? 4)) }}</strong><span class="mt-1 block truncate text-xs">{{ shot.prompt }}</span><span v-if="shotProblem(draft.shots, shot.id, project.duration_sec)" class="block text-xs text-status-failed">{{ t('videoWorkspace.needsFix') }}</span></button></div>
-          <div class="flex flex-wrap gap-2"><button :disabled="readOnly || draft.shots.length >= 40" @click="addShot">{{ t('video.addShot') }}</button><button :disabled="readOnly || !undoStack.length" @click="undo">{{ t('videoWorkspace.undo') }}</button><label class="inline-check"><input v-model="ripple" type="checkbox">{{ t('videoWorkspace.ripple') }}</label><button :disabled="!canAnalyze" @click="analyze">{{ t('videoWorkspace.reanalyze') }}</button></div>
-          <p v-if="readiness && !readiness.analysis_ready" class="text-sm text-status-failed">{{ t('videoWorkspace.analysisDependencyHint') }}</p>
+          <label v-if="!pictureProject">{{ t('videoWorkspace.seekSong') }} · {{ clockText(position) }}<input v-model.number="position" type="range" min="0" :max="project.duration_sec" step="0.041666666666666664" :aria-valuetext="clockText(position)" @input="seek(position)"></label>
+          <div class="flex gap-2 overflow-x-auto pb-2" :aria-label="t('videoWorkspace.shotList')"><button v-for="(shot, index) in draft.shots" :key="shot.id" :aria-pressed="selectedShotId === shot.id" :class="selectedShotId === shot.id ? 'border-accent1' : 'border-border'" class="min-w-36 max-w-48 shrink-0 rounded-lg border p-3 text-left" @click="selectedShotId = shot.id"><strong>{{ index + 1 }} · {{ clockText(shot.start_sec) }}–{{ clockText(shot.start_sec + (shot.seconds ?? 4)) }}</strong><span class="mt-1 block truncate text-xs">{{ shot.prompt }}</span><span v-if="shotProblem(draft.shots, shot.id, timelineLimit)" class="block text-xs text-status-failed">{{ t('videoWorkspace.needsFix') }}</span></button></div>
+          <div class="flex flex-wrap gap-2"><button :disabled="readOnly || draft.shots.length >= shotCap" @click="addShot">{{ t('video.addShot') }}</button><button :disabled="readOnly || !undoStack.length" @click="undo">{{ t('videoWorkspace.undo') }}</button><label class="inline-check"><input v-model="ripple" type="checkbox">{{ t('videoWorkspace.ripple') }}</label><button v-if="!pictureProject" :disabled="!canAnalyze" @click="analyze">{{ t('videoWorkspace.reanalyze') }}</button></div>
+          <p v-if="!pictureProject && readiness && !readiness.analysis_ready" class="text-sm text-status-failed">{{ t('videoWorkspace.analysisDependencyHint') }}</p>
         </div>
         <fieldset v-if="selectedShot" :disabled="readOnly" class="video-card space-y-4">
           <h3 class="font-semibold">{{ t('videoExperience.selectedShot', { number: draft.shots.findIndex(shot => shot.id === selectedShotId) + 1 }) }}</h3>
-          <div class="grid gap-4 sm:grid-cols-2"><label>{{ t('video.start') }}<input v-model.number="selectedShot.start_sec" type="number" min="0" :max="project.duration_sec" step="0.041666666666666664" @change="selectedShot.start_sec = frameTime(selectedShot.start_sec)"></label><div><span class="mb-1 block text-sm">{{ t('video.length') }}</span><div role="group" :aria-label="t('video.length')" class="flex flex-wrap gap-2"><button v-for="seconds in videoClipLengths" :key="seconds" type="button" :aria-pressed="selectedShot.seconds === seconds" @click="length(seconds)">{{ seconds }} s</button></div></div></div>
+          <div class="grid gap-4 sm:grid-cols-2"><label>{{ t('video.start') }}<input v-model.number="selectedShot.start_sec" type="number" min="0" :max="project.duration_sec" step="0.041666666666666664" @change="selectedShot.start_sec = frameTime(selectedShot.start_sec)"></label><div><span class="mb-1 block text-sm">{{ t('video.length') }}</span><div role="group" :aria-label="t('video.length')" class="flex flex-wrap gap-2"><button v-for="seconds in clipLengths" :key="seconds" type="button" :aria-pressed="selectedShot.seconds === seconds" @click="length(seconds)">{{ seconds }} s</button></div></div></div>
           <label v-if="generatedMode">{{ t('video.prompt') }}<textarea v-model="selectedShot.prompt" data-testid="video-shot-prompt" rows="4" maxlength="2000"></textarea><span class="text-xs text-text-dim">{{ selectedShot.prompt.length }} / 2000 · {{ t('videoWorkspace.promptHint') }}</span></label>
           <p v-else class="text-sm text-text-dim">{{ t('videoExperience.imageShotHint') }}</p>
           <label v-if="!generatedMode && repairDescriptionFor === selectedShot.id">{{ t('videoExperience.repairDescription') }}<textarea v-model="selectedShot.prompt" data-video-shot-description-repair rows="2" maxlength="2000"></textarea><span class="text-xs text-text-dim">{{ t('videoExperience.repairDescriptionHint') }}</span></label>
-          <label>{{ t('videoWorkspace.reference') }}<select v-model="selectedShot.reference_id"><option :value="null">{{ generatedMode ? t('videoWorkspace.none') : t('videoWorkspace.firstImage') }}</option><option v-for="image in project.references" :key="image.id" :value="image.id">{{ image.name }}</option></select></label>
+          <label>{{ t('videoWorkspace.reference') }}<select v-model="selectedShot.reference_id"><option :value="null">{{ pictureProject && (project.references?.length ?? 0) === 1 ? t('videoWorkspace.firstImage') : generatedMode ? t('videoWorkspace.none') : t('videoWorkspace.firstImage') }}</option><option v-for="image in project.references" :key="image.id" :value="image.id">{{ image.name }}</option></select></label>
           <details class="video-secondary"><summary>{{ t('videoExperience.shotSettings') }}</summary><div class="mt-4 space-y-4">
             <div class="grid gap-4 sm:grid-cols-2"><label>{{ t('videoWorkspace.seed') }}<input v-model.number="selectedShot.seed" type="number" min="0" max="2147483647"></label><label v-if="generatedMode">{{ t('videoWorkspace.strength') }}<input v-model.number="selectedShot.reference_strength" type="range" min="0" max="1" step="0.05"><span>{{ selectedShot.reference_strength ?? 0.7 }}</span></label></div>
             <label class="inline-check"><input v-model="selectedShot.locked" type="checkbox">{{ t('videoWorkspace.lock') }}</label>
-            <div class="video-actions"><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, -1))">{{ t('videoWorkspace.moveEarlier') }}</button><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, 1))">{{ t('videoWorkspace.moveLater') }}</button><button type="button" :disabled="selectedShot.seconds === 2 || draft.shots.length >= 40" @click="editShots(splitShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.split') }}</button><button type="button" :disabled="draft.shots.length >= 40" @click="editShots(duplicateShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.duplicate') }}</button><button type="button" class="text-status-failed" @click="removeShot">{{ t('video.removeShot') }}</button></div>
+            <div class="video-actions"><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, -1))">{{ t('videoWorkspace.moveEarlier') }}</button><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, 1))">{{ t('videoWorkspace.moveLater') }}</button><button type="button" :disabled="selectedShot.seconds === 2 || draft.shots.length >= shotCap" @click="editShots(splitShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.split') }}</button><button type="button" :disabled="draft.shots.length >= shotCap" @click="editShots(duplicateShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.duplicate') }}</button><button type="button" class="text-status-failed" @click="removeShot">{{ t('video.removeShot') }}</button></div>
           </div></details>
-          <p v-if="shotProblem(draft.shots, selectedShot.id, project.duration_sec)" role="alert" class="text-status-failed">{{ videoErrorText(shotProblem(draft.shots, selectedShot.id, project.duration_sec)) }}</p>
+          <p v-if="shotProblem(draft.shots, selectedShot.id, timelineLimit)" role="alert" class="text-status-failed">{{ videoErrorText(shotProblem(draft.shots, selectedShot.id, timelineLimit)) }}</p>
         </fieldset>
-        <details class="video-card video-secondary"><summary>{{ t('videoExperience.markers') }}</summary><div class="mt-4 space-y-2"><div class="flex flex-wrap items-center justify-between gap-2"><h3>{{ t('videoWorkspace.markers') }} <span v-if="project.analysis?.tempo_bpm" class="text-text-dim">~{{ Math.round(project.analysis.tempo_bpm) }} BPM</span></h3><button :disabled="readOnly" @click="addMarker">{{ t('videoWorkspace.addMarker') }}</button></div><p class="text-xs text-text-dim">{{ t('videoWorkspace.markerHint') }}</p><div class="max-h-48 overflow-y-auto space-y-1"><div v-for="marker in importantMarkers" :key="marker.id" class="flex flex-wrap items-center gap-2 text-sm"><button @click="seek(marker.time_sec)">{{ clockText(marker.time_sec) }} · {{ marker.label || marker.kind }}</button><span>{{ Math.round((marker.confidence ?? 0) * 100) }}%</span><button :disabled="readOnly || !selectedShot" @click="snapShot(marker)">{{ t('videoWorkspace.snap') }}</button><button v-if="marker.kind === 'manual'" :disabled="readOnly" @click="draft.markers = draft.markers.filter((item) => item.id !== marker.id)">{{ t('video.removeShot') }}</button></div></div></div></details>
+        <details v-if="!pictureProject" class="video-card video-secondary"><summary>{{ t('videoExperience.markers') }}</summary><div class="mt-4 space-y-2"><div class="flex flex-wrap items-center justify-between gap-2"><h3>{{ t('videoWorkspace.markers') }} <span v-if="project.analysis?.tempo_bpm" class="text-text-dim">~{{ Math.round(project.analysis.tempo_bpm) }} BPM</span></h3><button :disabled="readOnly" @click="addMarker">{{ t('videoWorkspace.addMarker') }}</button></div><p class="text-xs text-text-dim">{{ t('videoWorkspace.markerHint') }}</p><div class="max-h-48 overflow-y-auto space-y-1"><div v-for="marker in importantMarkers" :key="marker.id" class="flex flex-wrap items-center gap-2 text-sm"><button @click="seek(marker.time_sec)">{{ clockText(marker.time_sec) }} · {{ marker.label || marker.kind }}</button><span>{{ Math.round((marker.confidence ?? 0) * 100) }}%</span><button :disabled="readOnly || !selectedShot" @click="snapShot(marker)">{{ t('videoWorkspace.snap') }}</button><button v-if="marker.kind === 'manual'" :disabled="readOnly" @click="draft.markers = draft.markers.filter((item) => item.id !== marker.id)">{{ t('video.removeShot') }}</button></div></div></div></details>
         <div class="flex flex-wrap gap-2"><button :disabled="!canCompute || !selectedShot" class="primary" @click="preview()">{{ t('videoWorkspace.previewShot') }}</button><button type="button" @click="changeStep('preview', true)">{{ t('videoWorkspace.reviewPreviews') }}</button></div>
         <p v-if="computeBlocker" role="status" class="text-sm text-status-failed">{{ computeBlocker }}</p><p class="text-sm text-text-dim">{{ t('videoWorkspace.previewHint') }}</p>
       </template>
@@ -316,7 +345,7 @@ onBeforeUnmount(stopSource)
       </template>
       <template v-else-if="draft && project && step === 'export'">
 <p class="text-sm font-medium text-text">{{ t('videoExperience.approvalProgress', { approved: approvalCount, total: draft.shots.length }) }}</p>
-        <fieldset :disabled="readOnly" class="rounded-xl bg-panel p-4 space-y-4"><div class="grid gap-4 sm:grid-cols-2"><label>{{ t('videoWorkspace.aspect') }}<select v-model="draft.export_settings.aspect"><option value="landscape">16:9</option><option value="portrait">9:16</option><option value="square">1:1</option></select></label><label>{{ t('videoWorkspace.encodeQuality') }}<select v-model="draft.export_settings.quality"><option value="fast">{{ t('video.qualityFaster') }}</option><option value="standard">{{ t('video.qualityStandard') }}</option><option value="high">{{ t('videoWorkspace.high') }}</option></select></label></div><p class="text-xs text-text-dim">{{ t('videoWorkspace.exportHint') }}</p>
+        <fieldset :disabled="readOnly" class="rounded-xl bg-panel p-4 space-y-4"><div class="grid gap-4 sm:grid-cols-2"><label>{{ t('videoWorkspace.aspect') }}<select v-model="draft.export_settings.aspect"><option value="landscape">16:9</option><option value="portrait">9:16</option><option value="square">1:1</option></select></label><label>{{ t('videoWorkspace.encodeQuality') }}<select v-model="draft.export_settings.quality"><option value="fast">{{ t('video.qualityFaster') }}</option><option value="standard">{{ t('video.qualityStandard') }}</option><option value="high">{{ t('videoWorkspace.high') }}</option></select></label></div><p class="text-xs text-text-dim">{{ reelProject && draft.export_settings.aspect === 'portrait' ? t('videoDirection.reelSizeHint') : t('videoWorkspace.exportHint') }}</p>
           <details class="video-secondary"><summary>{{ t('videoExperience.textOptions') }}</summary><div class="mt-4 space-y-4"><label class="inline-check"><input v-model="draft.export_settings.include_overlays" type="checkbox">{{ t('videoWorkspace.includeText') }}</label><div class="flex justify-between gap-2"><h3>{{ t('videoWorkspace.overlays') }}</h3><button :disabled="draft.overlays.length >= 100" @click="addOverlay">{{ t('videoWorkspace.addText') }}</button></div>
           <div v-for="overlay in draft.overlays" :key="overlay.id" class="space-y-2 rounded-lg bg-panel-2 p-3"><label>{{ t('videoWorkspace.text') }}<textarea v-model="overlay.text" rows="2" maxlength="500"></textarea></label><div class="grid gap-2 sm:grid-cols-4"><label>{{ t('video.start') }}<input v-model.number="overlay.start_sec" type="number" min="0" :max="project.duration_sec" step="0.1"></label><label>{{ t('videoWorkspace.end') }}<input v-model.number="overlay.end_sec" type="number" min="0" :max="project.duration_sec" step="0.1"></label><label>{{ t('videoWorkspace.position') }}<select v-model="overlay.position"><option value="top">{{ t('videoWorkspace.top') }}</option><option value="center">{{ t('videoWorkspace.center') }}</option><option value="bottom">{{ t('videoWorkspace.bottom') }}</option></select></label><label>{{ t('videoWorkspace.textSize') }}<input v-model.number="overlay.font_size" type="number" min="14" max="96"></label></div><label>{{ t('videoWorkspace.color') }}<input v-model="overlay.color" type="color"></label><button @click="draft.overlays = draft.overlays.filter((item) => item.id !== overlay.id)">{{ t('video.removeShot') }}</button></div>
           </div></details>

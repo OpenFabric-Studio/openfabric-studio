@@ -263,11 +263,13 @@ export type CreateStemExportRequest = {
 }
 
 export type CreateVideoProjectRequest = {
-  "track_id": number
+  "track_id"?: (number | null)
   "name"?: string
+  "preset"?: "none" | "reel"
   "mode"?: "generated" | "cover" | "visualizer"
   "direction"?: string
   "seed"?: number
+  "duration_sec"?: (number | null)
 }
 
 export type CreateVideoRequest = {
@@ -1077,9 +1079,10 @@ export type VideoPlanResponse = {
 export type VideoProject = {
   "id": string
   "revision": number
-  "track_id": number
+  "track_id"?: (number | null)
   "track_title": string
   "name": string
+  "preset"?: "none" | "reel"
   "mode"?: "generated" | "cover" | "visualizer"
   "direction"?: string
   "seed"?: number
@@ -1120,7 +1123,7 @@ export type VideoProjectJob = {
 export type VideoProjectSettings = {
   "engine_pack"?: "ltx23" | "ltx25"
   "width"?: 704 | 768 | 1280
-  "height"?: 448 | 512 | 704
+  "height"?: 448 | 512 | 704 | 1280
   "stage1_steps"?: number
   "stage2_steps"?: number
   "cfg_scale"?: number
@@ -3157,7 +3160,8 @@ const schemas = {
         "enum": [
           448,
           512,
-          704
+          704,
+          1280
         ],
         "title": "Height",
         "type": "integer"
@@ -3573,9 +3577,17 @@ const schemas = {
         "type": "integer"
       },
       "track_id": {
-        "minimum": 1,
-        "title": "Track Id",
-        "type": "integer"
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Track Id"
       },
       "track_title": {
         "title": "Track Title",
@@ -3585,6 +3597,15 @@ const schemas = {
         "maxLength": 120,
         "minLength": 1,
         "title": "Name",
+        "type": "string"
+      },
+      "preset": {
+        "default": "none",
+        "enum": [
+          "none",
+          "reel"
+        ],
+        "title": "Preset",
         "type": "string"
       },
       "mode": {
@@ -3715,7 +3736,6 @@ const schemas = {
     "required": [
       "id",
       "revision",
-      "track_id",
       "track_title",
       "name",
       "duration_sec",
@@ -3747,15 +3767,32 @@ const schemas = {
     "additionalProperties": false,
     "properties": {
       "track_id": {
-        "minimum": 1,
-        "title": "Track Id",
-        "type": "integer"
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Track Id"
       },
       "name": {
         "default": "Untitled video",
         "maxLength": 120,
         "minLength": 1,
         "title": "Name",
+        "type": "string"
+      },
+      "preset": {
+        "default": "none",
+        "enum": [
+          "none",
+          "reel"
+        ],
+        "title": "Preset",
         "type": "string"
       },
       "mode": {
@@ -3780,11 +3817,22 @@ const schemas = {
         "minimum": 0,
         "title": "Seed",
         "type": "integer"
+      },
+      "duration_sec": {
+        "anyOf": [
+          {
+            "maximum": 60,
+            "minimum": 2,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration Sec"
       }
     },
-    "required": [
-      "track_id"
-    ],
     "title": "CreateVideoProjectRequest",
     "type": "object"
   },

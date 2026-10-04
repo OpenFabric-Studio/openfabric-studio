@@ -314,22 +314,35 @@ def _prompt(project: VideoProject, shot: VideoProjectShot) -> str:
     return " ".join((project.direction + " " + shot.prompt).split())
 
 
+def generation_mode(project: VideoProject, has_still: bool) -> Literal["a2v", "i2v", "t2v"]:
+    """Songs stay audio-to-video. A picture project uses one still, or text alone."""
+    if project.track_id is not None:
+        return "a2v"
+    return "i2v" if has_still else "t2v"
+
+
+def _still_id(project: VideoProject, shot: VideoProjectShot) -> str | None:
+    if shot.reference_id is not None:
+        return shot.reference_id
+    if project.mode != "generated" and project.references:
+        return project.references[0].id
+    if project.track_id is None and len(project.references) == 1:
+        return project.references[0].id
+    return None
+
+
 def fingerprint(
     document: store.StoredVideoProject, shot: VideoProjectShot, seed: int, engine: str
 ) -> str:
     project = document.project
-    reference = shot.reference_id or (
-        project.references[0].id
-        if project.mode != "generated" and project.references
-        else None
-    )
+    reference = _still_id(project, shot)
     reference_hash = (
         store.file_hash(store.reference_file(project.id, reference))
         if reference is not None
         else ""
     )
     value = {
-        "source": document.source.sha256,
+        "source": document.source.sha256 if document.source is not None else "",
         "engine": engine,
         "mode": project.mode,
         "settings": project.settings.model_dump(),
@@ -429,10 +442,12 @@ async def _cpu_shot(
     project: VideoProject,
     shot: VideoProjectShot,
     seed: int,
-    source: Path,
+    source: Path | None,
     dest: Path,
     variant_id: str,
 ) -> None:
+    if source is None:
+        raise store.VideoProjectError("song_required")
     reference = shot.reference_id or (
         project.references[0].id if project.references else None
     )
@@ -486,7 +501,7 @@ async def _generate(
     shot: VideoProjectShot,
     seed: int,
     engine: str,
-    source: Path,
+    source: Path | None,
 ) -> VideoVariant:
     project = document.project
     variant_id = uuid.uuid4().hex
@@ -501,7 +516,7 @@ async def _generate(
         mode=project.mode,
         reference_id=shot.reference_id,
         reference_strength=shot.reference_strength,
-        source_fingerprint=document.source.sha256,
+        source_fingerprint=document.source.sha256 if document.source is not None else "",
         engine_fingerprint=engine,
     )
 
@@ -523,41 +538,47 @@ async def _generate(
     _set_variant(project.id, shot.id, variant_id, running)
     try:
         if project.mode == "generated":
-            excerpt = path.with_suffix(".wav")
-            await _command(
-                project.id,
-                [
-                    tool("ffmpeg"),
-                    "-v",
-                    "error",
-                    "-y",
-                    "-ss",
-                    str(shot.start_sec),
-                    "-i",
-                    str(source),
-                    "-t",
-                    str(shot.seconds),
-                    "-vn",
-                    "-ac",
-                    "2",
-                    "-ar",
-                    "44100",
-                    str(excerpt),
-                ],
-                "excerpt",
-                variant_id=variant_id,
-            )
+            still = _still_id(project, shot)
             references = (
                 (
                     ImageReference(
-                        store.reference_file(project.id, shot.reference_id),
+                        store.reference_file(project.id, still),
                         0,
                         shot.reference_strength,
                     ),
                 )
-                if shot.reference_id
+                if still is not None
                 else ()
             )
+            mode = generation_mode(project, bool(references))
+            excerpt: Path | None = None
+            if mode == "a2v":
+                if source is None:
+                    raise store.VideoProjectError("source_missing")
+                excerpt = path.with_suffix(".wav")
+                await _command(
+                    project.id,
+                    [
+                        tool("ffmpeg"),
+                        "-v",
+                        "error",
+                        "-y",
+                        "-ss",
+                        str(shot.start_sec),
+                        "-i",
+                        str(source),
+                        "-t",
+                        str(shot.seconds),
+                        "-vn",
+                        "-ac",
+                        "2",
+                        "-ar",
+                        "44100",
+                        str(excerpt),
+                    ],
+                    "excerpt",
+                    variant_id=variant_id,
+                )
             frames = shot.seconds * 24 + 1
             settings = RenderSettings(
                 output=partial,
@@ -566,6 +587,7 @@ async def _generate(
                 source_audio=excerpt,
                 references=references,
                 profile_id=project.settings.engine_pack,
+                mode=mode,
                 width=project.settings.width,
                 height=project.settings.height,
                 seed=seed,
@@ -574,7 +596,7 @@ async def _generate(
                 cfg_scale=project.settings.cfg_scale,
                 negative_prompt=project.settings.negative_prompt or None,
                 temporal_tiles=2 if frames > 145 else 1,
-                spatial_tiles=2 if project.settings.width >= 1280 else 1,
+                spatial_tiles=2 if max(project.settings.width, project.settings.height) >= 1280 else 1,
             )
             await _command(
                 project.id,
@@ -642,6 +664,9 @@ async def _generate(
 def aspect_size(
     settings: VideoExportSettings, width: int, height: int
 ) -> tuple[int, int]:
+    # 704×1280 is already a vertical frame the engine accepts. Do not crop it.
+    if settings.aspect == "portrait" and (width, height) == (704, 1280):
+        return (704, 1280)
     if settings.aspect == "portrait":
         return (int(height * 9 / 16) // 2 * 2, height)
     if settings.aspect == "square":
@@ -670,7 +695,7 @@ def _timeline(
 
 async def _assemble(
     document: store.StoredVideoProject,
-    source: Path,
+    source: Path | None,
     engine: str,
     settings: VideoExportSettings,
 ) -> None:
@@ -680,6 +705,10 @@ async def _assemble(
     job = project.job
     if job is None or not project.shots:
         raise store.VideoProjectError("no_shots")
+    if project.track_id is not None and source is None:
+        raise store.VideoProjectError("source_missing")
+    if project.track_id is None:
+        source = None
     duration = (
         math.ceil(
             timeline_duration(
@@ -853,15 +882,15 @@ async def _assemble(
             "-y",
             "-i",
             str(joined),
-            "-i",
-            str(source),
         ]
+        if source is not None:
+            argv += ["-i", str(source)]
         if settings.include_overlays and project.overlays:
             from .video_text import render_text
 
             chain = "[0:v]null[v0]"
             last = "v0"
-            input_index = 2
+            input_index = 2 if source is not None else 1
             for index, overlay in enumerate(project.overlays):
                 image = run / f"text_{index}.png"
                 render_text(overlay, width, height, image)
@@ -883,11 +912,11 @@ async def _assemble(
             ]
         else:
             argv += ["-map", "0:v:0", "-c:v", "copy"]
+        if source is not None:
+            argv += ["-map", "1:a:0", "-c:a", "aac"]
+        else:
+            argv += ["-an"]
         argv += [
-            "-map",
-            "1:a:0",
-            "-c:a",
-            "aac",
             "-t",
             str(duration),
             "-f",
@@ -895,7 +924,9 @@ async def _assemble(
             str(partial),
         ]
         await _command(project.id, argv, "export")
-        await validate_media(partial, duration, (width, height), require_audio=True)
+        await validate_media(
+            partial, duration, (width, height), require_audio=source is not None
+        )
         output_hash = await hash_file(partial)
 
         def verified(saved: store.StoredVideoProject) -> None:
@@ -943,11 +974,15 @@ async def _run(
         _job_phase(project_id, "preparing")
         run = store.artifact(project_id, f"runs/{job.id}")
         run.mkdir(parents=True, exist_ok=True)
-        source = run / ("source" + Path(document.source.path).suffix)
+        source: Path | None = None
+        if project.track_id is not None:
+            if document.source is None:
+                raise store.VideoProjectError("source_missing")
+            source = run / ("source" + Path(document.source.path).suffix)
+            await copy_verified(
+                store.source_path(project.track_id), source, document.source.sha256
+            )
         store.atomic_text(run / "review.json", document.model_dump_json())
-        await copy_verified(
-            store.source_path(project.track_id), source, document.source.sha256
-        )
 
         async def render() -> None:
             engine = await _engine_fingerprint(project, verify=True)
@@ -1464,8 +1499,12 @@ async def analyze(project_id: str, body: VideoRevisionRequest) -> VideoProject:
         or project_id in _cancelling
     ):
         raise store.VideoProjectError("busy")
+    track_id = document.project.track_id
+    if track_id is None or document.source is None:
+        raise store.VideoProjectError("no_song")
     if store.source_changed(document):
         raise store.VideoProjectError("source_changed")
+    song = store.source_path(track_id)
 
     async def measure() -> VideoSongAnalysis:
         env = os.environ.copy()
@@ -1481,7 +1520,7 @@ async def analyze(project_id: str, body: VideoRevisionRequest) -> VideoProject:
                 "-m",
                 "app.video_analysis",
                 "--input",
-                str(store.source_path(document.project.track_id)),
+                str(song),
                 "--ffmpeg",
                 ffmpeg,
             ],

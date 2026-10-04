@@ -18,10 +18,15 @@ class VideoContract(Contract):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
 
 
+VideoPreset = Literal["none", "reel"]
+PORTRAIT_FRAME = (704, 1280)
+PICTURE_SIZES = {(704, 448), (768, 512), (1280, 704), PORTRAIT_FRAME}
+
+
 class VideoProjectSettings(VideoContract):
     engine_pack: Literal["ltx23", "ltx25"] = "ltx23"
     width: Literal[704, 768, 1280] = 704
-    height: Literal[448, 512, 704] = 448
+    height: Literal[448, 512, 704, 1280] = 448
     stage1_steps: int = Field(default=30, ge=10, le=50)
     stage2_steps: int = Field(default=3, ge=1, le=3)
     cfg_scale: float = Field(default=3, ge=1, le=8)
@@ -29,7 +34,7 @@ class VideoProjectSettings(VideoContract):
 
     @model_validator(mode="after")
     def valid_size(self) -> VideoProjectSettings:
-        if (self.width, self.height) not in {(704, 448), (768, 512), (1280, 704)}:
+        if (self.width, self.height) not in PICTURE_SIZES:
             raise ValueError("invalid_picture_size")
         return self
 
@@ -166,9 +171,10 @@ class VideoProjectJob(VideoContract):
 class VideoProject(VideoContract):
     id: VideoId
     revision: int = Field(ge=1)
-    track_id: int = Field(ge=1)
+    track_id: int | None = Field(default=None, ge=1)
     track_title: str
     name: str = Field(min_length=1, max_length=120)
+    preset: VideoPreset = "none"
     mode: VideoMode = "generated"
     direction: str = Field(default="", max_length=2000)
     seed: int = Field(default=0, ge=0, le=2147483647)
@@ -195,11 +201,13 @@ class VideoProjectsResponse(VideoContract):
 
 
 class CreateVideoProjectRequest(VideoContract):
-    track_id: int = Field(ge=1)
+    track_id: int | None = Field(default=None, ge=1)
     name: str = Field(default="Untitled video", min_length=1, max_length=120)
+    preset: VideoPreset = "none"
     mode: VideoMode = "generated"
     direction: str = Field(default="", max_length=2000)
     seed: int = Field(default=0, ge=0, le=2147483647)
+    duration_sec: float | None = Field(default=None, ge=2, le=60)
 
 
 class VideoRevisionRequest(VideoContract):

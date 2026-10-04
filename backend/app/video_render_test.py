@@ -1430,3 +1430,28 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
 
         info = await probe_media(self.r.output_file(self.project.id))
         self.assertGreaterEqual(info.audio_duration, 5.015)
+
+
+class PictureRenderPlanTests(unittest.TestCase):
+    def test_picture_projects_do_not_send_audio_and_keep_the_vertical_frame(self) -> None:
+        from app.video_contracts import VideoExportSettings, VideoProjectSettings
+        from app.video_render import aspect_size, generation_mode
+
+        song = VideoProject(
+            id="a" * 32,
+            revision=1,
+            track_id=1,
+            track_title="Song",
+            name="Song video",
+            duration_sec=12,
+            source_fingerprint="song",
+            created_at="2026-10-04T00:00:00+00:00",
+            updated_at="2026-10-04T00:00:00+00:00",
+        )
+        reel = song.model_copy(update={"track_id": None, "preset": "reel", "settings": VideoProjectSettings(width=704, height=1280)})
+        self.assertEqual(generation_mode(song, True), "a2v")
+        self.assertEqual(generation_mode(reel, True), "i2v")
+        self.assertEqual(generation_mode(reel, False), "t2v")
+        self.assertEqual(aspect_size(VideoExportSettings(aspect="portrait"), 704, 1280), (704, 1280))
+        self.assertEqual(aspect_size(VideoExportSettings(aspect="portrait"), 704, 448), (252, 448))
+

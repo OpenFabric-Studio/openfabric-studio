@@ -310,3 +310,69 @@ class VideoProjectTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(error.exception.code, "storage_failed")
         self.assertEqual(path.read_bytes(), before)
         self.assertEqual(list(path.parent.glob("*.tmp")), [])
+
+
+class PictureProjectTests(VideoProjectTests):
+    async def test_reel_starts_without_a_song_at_a_vertical_frame(self) -> None:
+        from app.video_contracts import CreateVideoProjectRequest
+
+        project = await self.p.create(CreateVideoProjectRequest(preset="reel", name="Reel"))
+        self.assertIsNone(project.track_id)
+        self.assertEqual(project.preset, "reel")
+        self.assertEqual((project.settings.width, project.settings.height), (704, 1280))
+        self.assertEqual(project.export_settings.aspect, "portrait")
+        self.assertEqual(project.duration_sec, 12)
+        self.assertEqual([shot.seconds for shot in project.shots], [4, 4, 4])
+        self.assertFalse(project.source_changed)
+        self.assertEqual(project.mode, "generated")
+
+    async def test_silent_project_has_no_song_and_no_reel_shots(self) -> None:
+        from app.video_contracts import CreateVideoProjectRequest
+
+        project = await self.p.create(
+            CreateVideoProjectRequest(name="Silent", duration_sec=8)
+        )
+        self.assertIsNone(project.track_id)
+        self.assertEqual(project.preset, "none")
+        self.assertEqual(project.duration_sec, 8)
+        self.assertEqual(project.shots, [])
+        self.assertFalse(project.source_changed)
+
+    async def test_reel_rejects_a_song_and_a_landscape_frame(self) -> None:
+        from app.video_contracts import (
+            CreateVideoProjectRequest,
+            UpdateVideoProjectRequest,
+            VideoProjectSettings,
+        )
+
+        with self.assertRaises(self.p.VideoProjectError) as created:
+            await self.p.create(CreateVideoProjectRequest(track_id=1, preset="reel"))
+        self.assertEqual(created.exception.code, "reel_has_song")
+        project = await self.p.create(CreateVideoProjectRequest(preset="reel"))
+        with self.assertRaises(self.p.VideoProjectError) as edited:
+            self.p.update(
+                project.id,
+                UpdateVideoProjectRequest(
+                    revision=project.revision,
+                    settings=VideoProjectSettings(width=704, height=448),
+                ),
+            )
+        self.assertEqual(edited.exception.code, "reel_size")
+        self.assertEqual(self.p.get(project.id).settings.height, 1280)
+
+    async def test_reel_duration_must_stay_between_eight_and_fifteen(self) -> None:
+        from app.video_contracts import CreateVideoProjectRequest, UpdateVideoProjectRequest, VideoShotDraft
+
+        with self.assertRaises(self.p.VideoProjectError) as created:
+            await self.p.create(CreateVideoProjectRequest(preset="reel", duration_sec=9))
+        self.assertEqual(created.exception.code, "reel_duration")
+        project = await self.p.create(CreateVideoProjectRequest(preset="reel", duration_sec=8))
+        self.assertEqual([shot.seconds for shot in project.shots], [4, 4])
+        short = [
+            VideoShotDraft(id=shot.id, start_sec=index * 2, seconds=2, prompt=shot.prompt, seed=shot.seed)
+            for index, shot in enumerate(project.shots)
+        ]
+        with self.assertRaises(self.p.VideoProjectError) as edited:
+            self.p.update(project.id, UpdateVideoProjectRequest(revision=project.revision, shots=short))
+        self.assertEqual(edited.exception.code, "reel_duration")
+

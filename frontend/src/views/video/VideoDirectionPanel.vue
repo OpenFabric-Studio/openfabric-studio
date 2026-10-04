@@ -13,11 +13,14 @@ const { t, te } = useI18n()
 const panelId = useId()
 const uploadError = ref('')
 watch(() => props.project.id, () => { uploadError.value = '' })
-const approaches: { mode: VideoDraft['mode']; title: string; hint: string; icon: AppIconName }[] = [
+const approachChoices: { mode: VideoDraft['mode']; title: string; hint: string; icon: AppIconName }[] = [
   { mode: 'generated', title: 'videoWorkspace.generated', hint: 'videoDirection.generatedHint', icon: 'video' },
   { mode: 'cover', title: 'videoWorkspace.cover', hint: 'videoDirection.coverHint', icon: 'editor' },
   { mode: 'visualizer', title: 'videoWorkspace.visualizer', hint: 'videoDirection.visualizerHint', icon: 'yue2' },
 ]
+const picture = computed(() => props.project.track_id == null)
+const reel = computed(() => props.project.preset === 'reel')
+const approaches = computed(() => picture.value ? approachChoices.filter((item) => item.mode === 'generated') : approachChoices)
 const generated = computed(() => draft.value.mode === 'generated')
 const references = computed(() => props.project.references ?? [])
 const engineOption = computed(() => props.readiness?.options.find(option => option.id === (draft.value.settings.engine_pack ?? 'ltx23')))
@@ -25,6 +28,7 @@ const comparisonOption = computed(() => props.readiness?.options.find(option => 
 const canUpload = computed(() => !props.readOnly && Boolean(props.readiness?.ffmpeg_ready) && references.value.length < 6)
 const analysisAllowed = computed(() => props.canAnalyze && !props.readOnly && !props.project.source_changed && Boolean(props.readiness?.analysis_ready && props.readiness.ffmpeg_ready))
 const analysisReason = computed(() => {
+  if (picture.value) return ''
   if (props.project.source_changed) return t('videoWorkspace.sourceChanged')
   if (!props.readiness) return t('videoWorkspace.readinessFailed')
   if (!props.readiness.analysis_ready || !props.readiness.ffmpeg_ready) return t('videoWorkspace.analysisDependencyHint')
@@ -44,10 +48,11 @@ function selectApproach(mode: VideoDraft['mode']) {
   if (!props.readOnly) draft.value.mode = mode
 }
 function setSize(event: Event) {
-  if (props.readOnly || !(event.target instanceof HTMLSelectElement)) return
+  if (props.readOnly || reel.value || !(event.target instanceof HTMLSelectElement)) return
   if (event.target.value === '704') { draft.value.settings.width = 704; draft.value.settings.height = 448 }
   else if (event.target.value === '768') { draft.value.settings.width = 768; draft.value.settings.height = 512 }
   else if (event.target.value === '1280') { draft.value.settings.width = 1280; draft.value.settings.height = 704 }
+  else if (event.target.value === '704x1280') { draft.value.settings.width = 704; draft.value.settings.height = 1280 }
 }
 function filesChanged(event: Event) {
   if (!(event.target instanceof HTMLInputElement)) return
@@ -95,10 +100,10 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
       </div>
       <div class="grid min-w-0 gap-4 sm:grid-cols-2">
         <label>{{ t('video.size') }}
-          <select :value="draft.settings.width ?? 704" data-video-size @change="setSize">
-            <option value="704">704×448</option><option value="768">768×512</option><option value="1280">1280×704</option>
+          <select :value="draft.settings.height === 1280 ? '704x1280' : String(draft.settings.width ?? 704)" :disabled="reel" data-video-size @change="setSize">
+            <option value="704">704×448</option><option value="768">768×512</option><option value="1280">1280×704</option><option value="704x1280">704×1280</option>
           </select>
-          <span class="field-hint">{{ generated ? t('videoWorkspace.sizeHint') : t('videoDirection.imageSizeHint') }}</span>
+          <span class="field-hint">{{ reel ? t('videoDirection.reelSizeHint') : generated ? t('videoWorkspace.sizeHint') : t('videoDirection.imageSizeHint') }}</span>
         </label>
         <label>{{ t('videoWorkspace.newShotSeed') }}
           <input v-model.number="draft.seed" data-video-seed type="number" min="0" max="2147483647">
@@ -109,7 +114,7 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
 
     <section class="min-w-0 space-y-4 rounded-xl border border-border bg-panel p-4 sm:p-5" :aria-labelledby="`${panelId}-references`">
       <div class="flex flex-wrap items-start justify-between gap-2">
-        <div><h3 :id="`${panelId}-references`" class="font-medium">{{ t('videoWorkspace.references') }}</h3><p class="mt-1 text-xs text-text-dim">{{ generated ? t('videoDirection.generatedReferences') : t('videoDirection.requiredReferences') }}</p></div>
+        <div><h3 :id="`${panelId}-references`" class="font-medium">{{ t('videoWorkspace.references') }}</h3><p class="mt-1 text-xs text-text-dim">{{ picture && generated ? t('videoDirection.stillHint') : generated ? t('videoDirection.generatedReferences') : t('videoDirection.requiredReferences') }}</p></div>
         <span class="text-xs text-text-dim">{{ t('videoDirection.referenceCount', { count: references.length }) }}</span>
       </div>
       <p class="field-hint">{{ t('videoWorkspace.referenceHint') }}</p>
@@ -158,10 +163,11 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
     <footer class="space-y-3 border-t border-border pt-5">
       <p v-if="analysisReason" :id="`${panelId}-analysis-blocked`" role="status" class="text-sm text-text-dim">{{ analysisReason }}</p>
       <div class="flex flex-wrap gap-3">
-        <button type="button" :disabled="!analysisAllowed" :aria-describedby="analysisReason ? `${panelId}-analysis-blocked` : `${panelId}-analysis-hint`" class="primary" @click="analyze">{{ t('video.analyze') }}</button>
+        <button v-if="!picture" type="button" :disabled="!analysisAllowed" :aria-describedby="analysisReason ? `${panelId}-analysis-blocked` : `${panelId}-analysis-hint`" class="primary" @click="analyze">{{ t('video.analyze') }}</button>
         <button type="button" @click="emit('continue')">{{ t('videoWorkspace.editStoryboard') }}</button>
       </div>
-      <p :id="`${panelId}-analysis-hint`" class="field-hint">{{ t('videoDirection.analyzeHint') }} {{ t('videoWorkspace.analysisHint') }}</p>
+      <p v-if="picture" class="field-hint">{{ t('videoDirection.pictureHint') }}</p>
+      <p v-else :id="`${panelId}-analysis-hint`" class="field-hint">{{ t('videoDirection.analyzeHint') }} {{ t('videoWorkspace.analysisHint') }}</p>
       <p class="field-hint">{{ draft.shots.length ? t('videoDirection.continueHint') : t('videoDirection.emptyStoryboard') }}</p>
     </footer>
   </div>
