@@ -491,13 +491,13 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
     elif identifier == 'singing':
         detail += ' CPU training is unsupported; weights remain a separate reviewed step.'
     elif identifier == 'kokoro':
-        detail = 'Pinned Kokoro checkout checked. No voices were downloaded. Install espeak-ng yourself and set PYTORCH_ENABLE_MPS_FALLBACK=1 on a Mac. Kokoro does not clone a person and does not replace GPT-SoVITS. Narration is not callable from the app yet.'
+        detail = 'Pinned Kokoro checkout checked. No voices were downloaded. Install espeak-ng yourself. Narration is POST /api/local-engines/kokoro after config.json, kokoro-v1_0.pth, and a preset voice file are in place. Kokoro does not clone a person and does not replace GPT-SoVITS. The runner uses PyTorch with PYTORCH_ENABLE_MPS_FALLBACK=1.'
     elif identifier == 'chatterbox':
-        detail = 'Pinned Chatterbox checkout checked. Weights were not downloaded. Original and multilingual can use cuda, cpu, or mps. Turbo is not called. Generation is not callable from the app yet.'
+        detail = 'Pinned Chatterbox checkout checked. Weights were not downloaded. Call POST /api/local-engines/chatterbox after the original or multilingual checkpoint files are in place. Turbo is refused. GPT-SoVITS is unchanged.'
     elif identifier == 'wan22':
-        detail = 'Pinned mlx-video checkout checked. Wan 2.2 TI2V-5B weights were not downloaded. 14B, S2V, and Animate are not set up. Video generation is not callable from the app yet.'
+        detail = 'Pinned mlx-video checkout checked. Wan 2.2 TI2V-5B weights were not downloaded or converted. Call POST /api/local-engines/wan with engine wan22 after the converted TI2V-5B folder is in place. 14B, S2V, and Animate are refused. Song videos stay on LTX.'
     elif identifier == 'rvc':
-        detail = 'Pinned RVC checkout checked with CPU packages from PyPI. HuBERT, RMVPE, and trained voices were not downloaded. On a Mac this is CPU, not GPU. Conversion is not callable from the app yet. Seed-VC is unchanged.'
+        detail = 'Pinned RVC checkout checked with CPU packages from PyPI. Call POST /api/local-engines/rvc after assets/hubert_base, assets/rmvpe/rmvpe.pt, and a trained .pth voice are in place. On a Mac this is CPU. Seed-VC is unchanged.'
     if identifier in ('kokoro', 'chatterbox', 'wan22', 'rvc') and download_models:
         detail += ' The download flag does not fetch these weights.'
     return InstallOutcome('manual', detail)
