@@ -143,6 +143,18 @@ export async function uploadVideoReference(id: string, revision: number, file: F
   return apiFetch(`${projectPath(id)}/references`, { method: 'POST', body: form, signal }, parseVideoProject)
 }
 
+export async function uploadVideoSpeech(id: string, revision: number, file: File, signal?: AbortSignal): Promise<VideoProject> {
+  parseVideoRevisionRequest({ revision })
+  const form = new FormData()
+  form.append('revision', String(revision))
+  form.append('file', file)
+  return apiFetch(`${projectPath(id)}/speech`, { method: 'POST', body: form, signal }, parseVideoProject)
+}
+
+export async function clearVideoSpeech(id: string, body: VideoRevisionRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'speech/clear', parseVideoRevisionRequest(body), signal)
+}
+
 export async function previewVideoProject(id: string, body: VideoRenderRequest, signal?: AbortSignal): Promise<VideoProject> {
   return projectPost(id, 'preview', parseVideoRenderRequest(body), signal)
 }

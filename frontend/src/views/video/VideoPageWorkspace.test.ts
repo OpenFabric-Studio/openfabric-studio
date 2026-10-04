@@ -423,5 +423,5 @@ it('allows approved export during other model work while generation stays blocke
   expect(button('Render missing shots and assemble').disabled).toBe(true)
   expect(button('Export approved clips').disabled).toBe(false)
   button('Export approved clips').click(); await flush()
-  expect(api.exportVideoProject).toHaveBeenCalledWith(project.id, { revision: 1, settings: project.export_settings }, expect.any(AbortSignal))
+  expect(api.exportVideoProject).toHaveBeenCalledWith(project.id, { revision: 1, settings: { ...project.export_settings, attach_speech: false } }, expect.any(AbortSignal))
 })

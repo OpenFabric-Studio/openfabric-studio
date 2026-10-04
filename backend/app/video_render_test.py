@@ -1452,6 +1452,40 @@ class PictureRenderPlanTests(unittest.TestCase):
         self.assertEqual(generation_mode(song, True), "a2v")
         self.assertEqual(generation_mode(reel, True), "i2v")
         self.assertEqual(generation_mode(reel, False), "t2v")
+        from app.video_render import generation_audio
+        speech = Path("talking.wav")
+        self.assertIsNone(generation_audio(reel, speech))
+        self.assertEqual(generation_audio(song, speech), speech)
         self.assertEqual(aspect_size(VideoExportSettings(aspect="portrait"), 704, 1280), (704, 1280))
         self.assertEqual(aspect_size(VideoExportSettings(aspect="portrait"), 704, 448), (252, 448))
 
+
+
+
+class SpeechExportFilterTests(unittest.TestCase):
+    def test_attached_speech_is_fitted_to_the_picture_length(self) -> None:
+        import shutil
+        import subprocess
+        import tempfile
+        from app.video_render import fitted_speech_filter
+
+        ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+        ffprobe = shutil.which("ffprobe") or "ffprobe"
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            picture = root / "picture.mp4"
+            speech = root / "speech.wav"
+            output = root / "out.mp4"
+            subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=black:s=64x64:d=2:r=24", "-an", str(picture)], check=True)
+            subprocess.run([ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.4", str(speech)], check=True)
+            duration = 2.0
+            subprocess.run([
+                ffmpeg, "-v", "error", "-y", "-i", str(picture), "-i", str(speech),
+                "-map", "0:v:0", "-map", "1:a:0", "-af", fitted_speech_filter(duration),
+                "-c:v", "copy", "-c:a", "aac", "-t", str(duration), str(output),
+            ], check=True)
+            probe = subprocess.run([
+                ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=duration",
+                "-of", "default=nw=1:nk=1", str(output),
+            ], check=True, capture_output=True, text=True)
+            self.assertAlmostEqual(float(probe.stdout.strip()), duration, delta=0.1)

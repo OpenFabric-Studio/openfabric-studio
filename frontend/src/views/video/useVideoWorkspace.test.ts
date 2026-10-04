@@ -141,7 +141,7 @@ it('recovers a partial browser draft with saved shots and explicit backend defau
   expect(currentDraft(workspace).name).toBe('Recovered name')
   expect(currentDraft(workspace).shots).toHaveLength(2)
   expect(currentDraft(workspace).settings).toMatchObject({ engine_pack: 'ltx23', width: 704, height: 448, stage1_steps: 30, stage2_steps: 3, cfg_scale: 4 })
-  expect(currentDraft(workspace).export_settings).toEqual({ aspect: 'landscape', quality: 'high', include_overlays: true })
+  expect(currentDraft(workspace).export_settings).toEqual({ aspect: 'landscape', quality: 'high', include_overlays: true, attach_speech: false })
 })
 it('selects a recoverable draft shot when the first saved shot was removed locally', async () => {
   const second = project.shots?.[1]

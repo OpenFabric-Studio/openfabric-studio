@@ -13,7 +13,7 @@ let app: App | undefined
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren() })
 
 function draftFixture(mode: VideoDraft['mode'] = 'generated'): VideoDraft {
-  return { name: 'Direction draft', mode, direction: 'A quiet neon city', seed: 17,
+  return { name: 'Direction draft', mode, direction: 'A quiet neon city', character_lock: false, seed: 17,
     settings: { engine_pack: 'ltx23', width: 704, height: 448, stage1_steps: 30, stage2_steps: 3, cfg_scale: 3, negative_prompt: 'blurry' },
     export_settings: { aspect: 'landscape', quality: 'standard', include_overlays: true }, shots: [], markers: [], overlays: [] }
 }
@@ -225,4 +225,18 @@ it('locks editing and duplicate actions during project work but leaves navigatio
   button('Duplicate for comparison').click(); button('Edit storyboard').click(); await flush()
   expect(duplicate).not.toHaveBeenCalled()
   expect(advance).toHaveBeenCalledTimes(1)
+})
+
+it('says character lock is image conditioning and hides it on a song', async () => {
+  await mount()
+  expect(document.querySelector('[data-character-lock]')).toBeNull()
+  app?.unmount()
+  document.body.replaceChildren()
+  const project = videoProjectFixture('d'.repeat(32), null)
+  project.preset = 'none'
+  await mount({ project })
+  const box = document.querySelector('[data-character-lock]')
+  expect(box).toBeTruthy()
+  expect(document.body.textContent).toContain('image conditioning, not a trained face')
+  expect(document.body.textContent).not.toContain('trained face model')
 })

@@ -84,3 +84,25 @@ export function moveShot(shots: readonly VideoShotDraft[], id: string, direction
     return result
   })
 }
+
+export function resolvedStillId(
+  project: { track_id?: number | null; mode?: string | null; character_lock?: boolean; references?: readonly { id: string }[] | null },
+  shot: { reference_id?: string | null },
+): string | null {
+  if (shot.reference_id) return shot.reference_id
+  const references = project.references ?? []
+  if (project.mode && project.mode !== 'generated' && references[0]) return references[0].id
+  if (project.track_id == null && references.length === 1 && references[0]) return references[0].id
+  return null
+}
+
+export function characterLockIssue(
+  project: { track_id?: number | null; mode?: string | null; character_lock?: boolean; references?: readonly { id: string }[] | null },
+  shots: readonly { reference_id?: string | null }[],
+): '' | 'missing' | 'mismatch' {
+  if (!project.character_lock || project.track_id != null || !shots.length) return ''
+  const ids = shots.map((shot) => resolvedStillId(project, shot))
+  if (ids.some((id) => !id)) return 'missing'
+  if (new Set(ids).size > 1) return 'mismatch'
+  return ''
+}

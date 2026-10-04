@@ -43,6 +43,8 @@ class VideoExportSettings(VideoContract):
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
     quality: Literal["fast", "standard", "high"] = "standard"
     include_overlays: bool = True
+    # Silent stays the default. Speech is muxed at export and is not a model input.
+    attach_speech: bool = False
 
 
 class VideoShotDraft(VideoContract):
@@ -152,6 +154,16 @@ class VideoReference(VideoContract):
     url: str
 
 
+class VideoSpeechClip(VideoContract):
+    """An existing speech file attached for export. It never drives the picture."""
+
+    id: VideoId
+    name: str = Field(max_length=160)
+    bytes: int = Field(ge=1, le=83886080)
+    duration_sec: float = Field(gt=0, le=600)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class VideoProjectJob(VideoContract):
     id: VideoId
     operation: Literal["preview", "render", "export"]
@@ -177,6 +189,7 @@ class VideoProject(VideoContract):
     preset: VideoPreset = "none"
     mode: VideoMode = "generated"
     direction: str = Field(default="", max_length=2000)
+    character_lock: bool = False
     seed: int = Field(default=0, ge=0, le=2147483647)
     duration_sec: float = Field(gt=0, le=21600)
     source_fingerprint: str
@@ -187,6 +200,7 @@ class VideoProject(VideoContract):
     export_settings: VideoExportSettings = Field(default_factory=VideoExportSettings)
     shots: list[VideoProjectShot] = Field(default_factory=list, max_length=40)
     references: list[VideoReference] = Field(default_factory=list, max_length=6)
+    speech_clip: VideoSpeechClip | None = None
     overlays: list[VideoOverlay] = Field(default_factory=list, max_length=100)
     markers: list[VideoMarker] = Field(default_factory=list, max_length=4000)
     analysis: VideoSongAnalysis | None = None
@@ -218,6 +232,7 @@ class UpdateVideoProjectRequest(VideoRevisionRequest):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     mode: VideoMode | None = None
     direction: str | None = Field(default=None, max_length=2000)
+    character_lock: bool | None = None
     seed: int | None = Field(default=None, ge=0, le=2147483647)
     settings: VideoProjectSettings | None = None
     export_settings: VideoExportSettings | None = None

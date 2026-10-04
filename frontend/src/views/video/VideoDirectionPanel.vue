@@ -85,7 +85,7 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
       <div v-if="generated" class="space-y-4">
         <label>{{ t('videoWorkspace.directionPrompt') }}
           <textarea v-model="draft.direction" data-video-direction-prompt rows="3" maxlength="2000" :placeholder="t('video.promptPlaceholder')" :aria-describedby="`${panelId}-direction-hint`" />
-          <span :id="`${panelId}-direction-hint`" class="field-hint">{{ t('videoWorkspace.directionHint') }}</span>
+          <span :id="`${panelId}-direction-hint`" class="field-hint">{{ draft.character_lock && picture ? t('videoWorkspace.characterDirectionHint') : t('videoWorkspace.directionHint') }}</span>
         </label>
         <label>{{ t('videoWorkspace.engine') }}
           <select v-model="draft.settings.engine_pack" data-video-model>
@@ -118,6 +118,11 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
         <span class="text-xs text-text-dim">{{ t('videoDirection.referenceCount', { count: references.length }) }}</span>
       </div>
       <p class="field-hint">{{ t('videoWorkspace.referenceHint') }}</p>
+      <template v-if="picture && generated">
+        <label class="character-lock"><input v-model="draft.character_lock" data-character-lock type="checkbox" :disabled="readOnly"><span>{{ t('videoDirection.characterLock') }}</span></label>
+        <p class="field-hint">{{ t('videoDirection.characterLockHint') }}</p>
+        <p v-if="draft.character_lock && !references.length" role="alert" class="text-sm text-status-failed">{{ t('videoDirection.characterMissing') }}</p>
+      </template>
       <label>{{ t('videoWorkspace.uploadImage') }}<input type="file" accept="image/png,image/jpeg,image/webp" :disabled="!canUpload" @change="filesChanged"></label>
       <div v-if="references.length" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <figure v-for="image in references" :key="image.id" class="min-w-0"><img :src="image.url" :alt="image.name" loading="lazy" class="aspect-[4/3] w-full rounded-lg object-cover"><figcaption :title="image.name" class="mt-1 truncate text-xs text-text-dim">{{ image.name }} · {{ image.width }}×{{ image.height }}</figcaption></figure>
@@ -186,6 +191,8 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
 .video-direction button:disabled, .video-direction input:disabled, .video-direction fieldset:disabled input, .video-direction fieldset:disabled select, .video-direction fieldset:disabled textarea { opacity: .5; cursor: not-allowed; }
 .video-direction button:focus-visible, .video-direction input:focus-visible, .video-direction select:focus-visible, .video-direction textarea:focus-visible, .video-direction summary:focus-visible { outline: 2px solid var(--color-accent2); outline-offset: 3px; }
 .field-hint { font-size: .75rem; line-height: 1.6; color: var(--color-text-dim); overflow-wrap: anywhere; }
+.character-lock { flex-direction: row; align-items: center; min-height: 44px; }
+.character-lock input { width: 18px; height: 18px; }
 .disclosure { min-width: 0; padding: .5rem 1rem; border: 1px solid var(--color-border); border-radius: .75rem; background: var(--color-panel); }
 .disclosure summary { min-height: 44px; padding-block: .75rem; cursor: pointer; font-size: .875rem; color: var(--color-text-dim); }
 @media (prefers-reduced-motion: reduce) { .video-direction button.approach-card { transition: none; } }

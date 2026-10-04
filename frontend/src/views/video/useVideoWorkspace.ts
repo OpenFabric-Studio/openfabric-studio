@@ -11,6 +11,7 @@ export interface VideoDraft {
   name: string
   mode: NonNullable<VideoProject['mode']>
   direction: string
+  character_lock: boolean
   seed: number
   settings: VideoProjectSettings
   export_settings: VideoExportSettings
@@ -20,13 +21,13 @@ export interface VideoDraft {
 }
 
 function fromProject(project: VideoProject): VideoDraft {
-  return { name: project.name, mode: project.mode ?? 'generated', direction: project.direction ?? '', seed: project.seed ?? 42,
+  return { name: project.name, mode: project.mode ?? 'generated', direction: project.direction ?? '', character_lock: project.character_lock ?? false, seed: project.seed ?? 42,
     settings: { engine_pack: 'ltx23', width: 704, height: 448, stage1_steps: 30, stage2_steps: 3, cfg_scale: 3, ...project.settings },
-    export_settings: { aspect: 'landscape', quality: 'standard', include_overlays: true, ...project.export_settings },
+    export_settings: { aspect: 'landscape', quality: 'standard', include_overlays: true, attach_speech: false, ...project.export_settings },
     shots: (project.shots ?? []).map(toShotDraft), markers: (project.markers ?? []).map((item) => ({ ...item })), overlays: (project.overlays ?? []).map((item) => ({ ...item })) }
 }
 function snapshot(draft: VideoDraft, revision: number): UpdateVideoProjectRequest {
-  return { revision, name: draft.name, mode: draft.mode, direction: draft.direction, seed: draft.seed, settings: { ...draft.settings }, export_settings: { ...draft.export_settings },
+  return { revision, name: draft.name, mode: draft.mode, direction: draft.direction, character_lock: draft.character_lock, seed: draft.seed, settings: { ...draft.settings }, export_settings: { ...draft.export_settings },
     shots: draft.shots.map((shot) => ({ ...shot })), markers: draft.markers.map((marker) => ({ ...marker })), overlays: draft.overlays.map((overlay) => ({ ...overlay })) }
 }
 const draftKey = (id: string) => `openfabric:video-draft:${id}`
@@ -39,7 +40,7 @@ function restoreDraft(project: VideoProject): VideoDraft | null {
     if (body.revision !== project.revision) return null
     const saved = fromProject(project)
     return { name: body.name ?? saved.name, mode: body.mode ?? saved.mode,
-      direction: body.direction ?? saved.direction, seed: body.seed ?? saved.seed,
+      direction: body.direction ?? saved.direction, character_lock: body.character_lock ?? saved.character_lock, seed: body.seed ?? saved.seed,
       settings: { ...saved.settings, ...body.settings }, export_settings: { ...saved.export_settings, ...body.export_settings },
       shots: body.shots ?? saved.shots, markers: body.markers ?? saved.markers, overlays: body.overlays ?? saved.overlays }
   } catch { return null }
@@ -302,6 +303,15 @@ export function useVideoWorkspace() {
     if (file.size > 20 * 1024 * 1024 || !['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) { error.value = 'invalid_reference'; return }
     return action((row, signal) => api.uploadVideoReference(row.id, row.revision, file, signal))
   }
+  function uploadSpeech(file: File) {
+    if (project.value?.track_id != null) return
+    if (file.size > 80 * 1024 * 1024) { error.value = 'speech_too_large'; return }
+    return action((row, signal) => api.uploadVideoSpeech(row.id, row.revision, file, signal))
+  }
+  function clearSpeech() {
+    if (project.value?.track_id != null) return
+    return action((row, signal) => api.clearVideoSpeech(row.id, { revision: row.revision }, signal))
+  }
   function editShots(shots: VideoShotDraft[]) {
     if (!draft.value || readOnly.value) return
     undoStack.value.push(draft.value.shots.map((shot) => ({ ...shot })))
@@ -356,5 +366,5 @@ export function useVideoWorkspace() {
   onUnmounted(() => { alive = false; generation++; lifetime.abort(); actionController?.abort(); loop.stop(); if (clock !== undefined) clearInterval(clock); if (saveTimer !== undefined) clearTimeout(saveTimer) })
   return { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
     selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, editShots, undo, addShot }
+    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, editShots, undo, addShot }
 }

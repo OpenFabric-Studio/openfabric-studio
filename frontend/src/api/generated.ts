@@ -971,6 +971,7 @@ export type UpdateVideoProjectRequest = {
   "name"?: (string | null)
   "mode"?: ("generated" | "cover" | "visualizer" | null)
   "direction"?: (string | null)
+  "character_lock"?: (boolean | null)
   "seed"?: (number | null)
   "settings"?: (VideoProjectSettings | null)
   "export_settings"?: (VideoExportSettings | null)
@@ -1016,6 +1017,7 @@ export type VideoExportSettings = {
   "aspect"?: "landscape" | "portrait" | "square"
   "quality"?: "fast" | "standard" | "high"
   "include_overlays"?: boolean
+  "attach_speech"?: boolean
 }
 
 export type VideoJobResponse = {
@@ -1085,6 +1087,7 @@ export type VideoProject = {
   "preset"?: "none" | "reel"
   "mode"?: "generated" | "cover" | "visualizer"
   "direction"?: string
+  "character_lock"?: boolean
   "seed"?: number
   "duration_sec": number
   "source_fingerprint": string
@@ -1095,6 +1098,7 @@ export type VideoProject = {
   "export_settings"?: VideoExportSettings
   "shots"?: Array<VideoProjectShot>
   "references"?: Array<VideoReference>
+  "speech_clip"?: (VideoSpeechClip | null)
   "overlays"?: Array<VideoOverlay>
   "markers"?: Array<VideoMarker>
   "analysis"?: (VideoSongAnalysis | null)
@@ -1203,6 +1207,14 @@ export type VideoSongAnalysis = {
   "markers"?: Array<VideoMarker>
   "tempo_bpm"?: (number | null)
   "warnings"?: Array<string>
+}
+
+export type VideoSpeechClip = {
+  "id": string
+  "name": string
+  "bytes": number
+  "duration_sec": number
+  "sha256": string
 }
 
 export type VideoVariant = {
@@ -2886,6 +2898,11 @@ const schemas = {
         "default": true,
         "title": "Include Overlays",
         "type": "boolean"
+      },
+      "attach_speech": {
+        "default": false,
+        "title": "Attach Speech",
+        "type": "boolean"
       }
     },
     "title": "VideoExportSettings",
@@ -3416,6 +3433,48 @@ const schemas = {
     "title": "VideoSongAnalysis",
     "type": "object"
   },
+  "VideoSpeechClip": {
+    "additionalProperties": false,
+    "description": "An existing speech file attached for export. It never drives the picture.",
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 160,
+        "title": "Name",
+        "type": "string"
+      },
+      "bytes": {
+        "maximum": 83886080,
+        "minimum": 1,
+        "title": "Bytes",
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 600,
+        "title": "Duration Sec",
+        "type": "number"
+      },
+      "sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Sha256",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "bytes",
+      "duration_sec",
+      "sha256"
+    ],
+    "title": "VideoSpeechClip",
+    "type": "object"
+  },
   "VideoVariant": {
     "additionalProperties": false,
     "properties": {
@@ -3624,6 +3683,11 @@ const schemas = {
         "title": "Direction",
         "type": "string"
       },
+      "character_lock": {
+        "default": false,
+        "title": "Character Lock",
+        "type": "boolean"
+      },
       "seed": {
         "default": 0,
         "maximum": 2147483647,
@@ -3675,6 +3739,17 @@ const schemas = {
         "maxItems": 6,
         "title": "References",
         "type": "array"
+      },
+      "speech_clip": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VideoSpeechClip"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "overlays": {
         "items": {
@@ -3961,6 +4036,18 @@ const schemas = {
         ],
         "default": null,
         "title": "Direction"
+      },
+      "character_lock": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Character Lock"
       },
       "seed": {
         "anyOf": [

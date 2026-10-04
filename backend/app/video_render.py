@@ -314,6 +314,20 @@ def _prompt(project: VideoProject, shot: VideoProjectShot) -> str:
     return " ".join((project.direction + " " + shot.prompt).split())
 
 
+def fitted_speech_filter(duration: float) -> str:
+    """Pad or trim an attached speech clip to the picture. It is not a model input."""
+    if not math.isfinite(duration) or duration <= 0:
+        raise store.VideoProjectError("invalid_speech")
+    return f"apad=whole_dur={duration:.6f},atrim=0:{duration:.6f}"
+
+
+def generation_audio(project: VideoProject, source: Path | None) -> Path | None:
+    """Songs use the library track. A speech clip is never a model input."""
+    if project.track_id is None:
+        return None
+    return source
+
+
 def generation_mode(project: VideoProject, has_still: bool) -> Literal["a2v", "i2v", "t2v"]:
     """Songs stay audio-to-video. A picture project uses one still, or text alone."""
     if project.track_id is not None:
@@ -322,13 +336,7 @@ def generation_mode(project: VideoProject, has_still: bool) -> Literal["a2v", "i
 
 
 def _still_id(project: VideoProject, shot: VideoProjectShot) -> str | None:
-    if shot.reference_id is not None:
-        return shot.reference_id
-    if project.mode != "generated" and project.references:
-        return project.references[0].id
-    if project.track_id is None and len(project.references) == 1:
-        return project.references[0].id
-    return None
+    return store.effective_still(project, shot)[0]
 
 
 def fingerprint(
@@ -351,6 +359,11 @@ def fingerprint(
         "seed": seed,
         "reference_sha256": reference_hash,
     }
+    if project.character_lock and project.track_id is None:
+        _still, strength = store.effective_still(project, shot)
+        value["character_lock"] = True
+        value["locked_reference"] = _still or ""
+        value["locked_strength"] = strength
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -504,6 +517,9 @@ async def _generate(
     source: Path | None,
 ) -> VideoVariant:
     project = document.project
+    source = generation_audio(project, source)
+    still, strength = store.effective_still(project, shot)
+    locked = project.character_lock and project.track_id is None
     variant_id = uuid.uuid4().hex
     expected = fingerprint(document, shot, seed, engine)
     variant = VideoVariant(
@@ -514,8 +530,8 @@ async def _generate(
         prompt=_prompt(project, shot),
         settings=project.settings.model_copy(),
         mode=project.mode,
-        reference_id=shot.reference_id,
-        reference_strength=shot.reference_strength,
+        reference_id=still if locked else shot.reference_id,
+        reference_strength=strength if locked else shot.reference_strength,
         source_fingerprint=document.source.sha256 if document.source is not None else "",
         engine_fingerprint=engine,
     )
@@ -538,13 +554,12 @@ async def _generate(
     _set_variant(project.id, shot.id, variant_id, running)
     try:
         if project.mode == "generated":
-            still = _still_id(project, shot)
             references = (
                 (
                     ImageReference(
                         store.reference_file(project.id, still),
                         0,
-                        shot.reference_strength,
+                        strength,
                     ),
                 )
                 if still is not None
@@ -552,6 +567,7 @@ async def _generate(
             )
             mode = generation_mode(project, bool(references))
             excerpt: Path | None = None
+            # A talking clip is never a model input. Songs stay on the a2v path.
             if mode == "a2v":
                 if source is None:
                     raise store.VideoProjectError("source_missing")
@@ -709,6 +725,14 @@ async def _assemble(
         raise store.VideoProjectError("source_missing")
     if project.track_id is None:
         source = None
+    speech: Path | None = None
+    if project.track_id is None and settings.attach_speech:
+        if not document.speech_path:
+            raise store.VideoProjectError("speech_missing")
+        speech = store.artifact(project.id, document.speech_path)
+        if not speech.is_file():
+            raise store.VideoProjectError("speech_missing")
+    soundtrack = source if source is not None else speech
     duration = (
         math.ceil(
             timeline_duration(
@@ -883,14 +907,14 @@ async def _assemble(
             "-i",
             str(joined),
         ]
-        if source is not None:
-            argv += ["-i", str(source)]
+        if soundtrack is not None:
+            argv += ["-i", str(soundtrack)]
         if settings.include_overlays and project.overlays:
             from .video_text import render_text
 
             chain = "[0:v]null[v0]"
             last = "v0"
-            input_index = 2 if source is not None else 1
+            input_index = 2 if soundtrack is not None else 1
             for index, overlay in enumerate(project.overlays):
                 image = run / f"text_{index}.png"
                 render_text(overlay, width, height, image)
@@ -898,6 +922,8 @@ async def _assemble(
                 chain += f";[{last}][{input_index}:v]overlay=0:0:enable='between(t,{overlay.start_sec},{overlay.end_sec})'[v{index + 1}]"
                 last = f"v{index + 1}"
                 input_index += 1
+            if speech is not None:
+                chain += f";[1:a]{fitted_speech_filter(duration)}[aout]"
             argv += [
                 "-filter_complex",
                 chain,
@@ -910,12 +936,19 @@ async def _assemble(
                 "-pix_fmt",
                 "yuv420p",
             ]
+            if soundtrack is not None:
+                argv += ["-map", "[aout]" if speech is not None else "1:a:0", "-c:a", "aac"]
+            else:
+                argv += ["-an"]
         else:
             argv += ["-map", "0:v:0", "-c:v", "copy"]
-        if source is not None:
-            argv += ["-map", "1:a:0", "-c:a", "aac"]
-        else:
-            argv += ["-an"]
+            if soundtrack is not None:
+                argv += ["-map", "1:a:0"]
+                if speech is not None:
+                    argv += ["-af", fitted_speech_filter(duration)]
+                argv += ["-c:a", "aac"]
+            else:
+                argv += ["-an"]
         argv += [
             "-t",
             str(duration),
@@ -925,7 +958,7 @@ async def _assemble(
         ]
         await _command(project.id, argv, "export")
         await validate_media(
-            partial, duration, (width, height), require_audio=source is not None
+            partial, duration, (width, height), require_audio=soundtrack is not None
         )
         output_hash = await hash_file(partial)
 
@@ -1138,6 +1171,8 @@ async def start(
             raise store.VideoProjectError("source_changed")
         if not project.shots:
             raise store.VideoProjectError("no_shots")
+        if operation != "export":
+            store.ensure_character_lock(project)
         if any(
             value not in {shot.id for shot in project.shots} for value in body.shot_ids
         ):
@@ -1148,6 +1183,15 @@ async def start(
         except VideoMediaError as exc:
             raise store.VideoProjectError("ffmpeg_missing") from exc
         effective_export = export_settings or project.export_settings
+        if project.track_id is not None and effective_export.attach_speech:
+            raise store.VideoProjectError("speech_picture_only")
+        if (
+            project.track_id is None
+            and effective_export.attach_speech
+            and operation != "preview"
+            and not document.speech_path
+        ):
+            raise store.VideoProjectError("speech_missing")
         if operation != "preview" and effective_export.include_overlays and project.overlays:
             try:
                 import PIL

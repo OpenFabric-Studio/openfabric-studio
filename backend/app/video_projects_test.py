@@ -376,3 +376,95 @@ class PictureProjectTests(VideoProjectTests):
             self.p.update(project.id, UpdateVideoProjectRequest(revision=project.revision, shots=short))
         self.assertEqual(edited.exception.code, "reel_duration")
 
+
+
+    async def test_character_lock_requires_one_still_and_ignores_songs(self) -> None:
+        from fastapi import UploadFile
+        from app.video_contracts import (
+            CreateVideoProjectRequest,
+            UpdateVideoProjectRequest,
+            VideoExportSettings,
+            VideoShotDraft,
+        )
+
+        song = await self.p.create(CreateVideoProjectRequest(track_id=1))
+        with self.assertRaises(self.p.VideoProjectError) as locked:
+            self.p.update(
+                song.id,
+                UpdateVideoProjectRequest(revision=song.revision, character_lock=True),
+            )
+        self.assertEqual(locked.exception.code, "character_lock_picture_only")
+        with self.assertRaises(self.p.VideoProjectError) as speech:
+            self.p.update(
+                song.id,
+                UpdateVideoProjectRequest(
+                    revision=song.revision,
+                    export_settings=VideoExportSettings(attach_speech=True),
+                ),
+            )
+        self.assertEqual(speech.exception.code, "speech_picture_only")
+        self.assertFalse(self.p.get(song.id).character_lock)
+        self.assertFalse(self.p.get(song.id).export_settings.attach_speech)
+
+        project = await self.p.create(CreateVideoProjectRequest(name="Silent", duration_sec=8))
+        shot = VideoShotDraft(id="a" * 32, start_sec=0, seconds=4, prompt="A person walks.")
+        project = self.p.update(
+            project.id,
+            UpdateVideoProjectRequest(
+                revision=project.revision, character_lock=True, shots=[shot]
+            ),
+        )
+        self.assertIn("character_still_missing", project.warnings)
+        with self.assertRaises(self.p.VideoProjectError) as missing:
+            self.p.ensure_character_lock(project)
+        self.assertEqual(missing.exception.code, "character_still_missing")
+
+        still = self.root / "still.png"
+        subprocess.run(
+            [
+                shutil.which("ffmpeg") or "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=32x32",
+                "-frames:v",
+                "1",
+                str(still),
+            ],
+            check=True,
+        )
+        project = await self.p.upload_reference(
+            project.id,
+            project.revision,
+            UploadFile(io.BytesIO(still.read_bytes()), filename="face.png"),
+        )
+        self.assertNotIn("character_still_missing", project.warnings)
+        still_id, strength = self.p.effective_still(project, project.shots[0])
+        self.assertEqual(still_id, project.references[0].id)
+        self.assertEqual(strength, self.p.CHARACTER_LOCK_STRENGTH)
+        self.p.ensure_character_lock(project)
+
+    async def test_speech_clip_attaches_without_becoming_the_default_soundtrack(self) -> None:
+        from fastapi import UploadFile
+        from app.video_contracts import CreateVideoProjectRequest, VideoRevisionRequest
+
+        project = await self.p.create(CreateVideoProjectRequest(name="Silent", duration_sec=8))
+        project = await self.p.upload_speech(
+            project.id,
+            project.revision,
+            UploadFile(io.BytesIO(self.audio.read_bytes()), filename="line.wav"),
+        )
+        self.assertIsNotNone(project.speech_clip)
+        assert project.speech_clip is not None
+        self.assertGreater(project.speech_clip.duration_sec, 1)
+        self.assertFalse(project.export_settings.attach_speech)
+        self.assertTrue(self.p.speech_file(project.id).is_file())
+        cleared = self.p.clear_speech(
+            project.id, VideoRevisionRequest(revision=project.revision)
+        )
+        self.assertIsNone(cleared.speech_clip)
+        with self.assertRaises(self.p.VideoProjectError):
+            self.p.speech_file(project.id)

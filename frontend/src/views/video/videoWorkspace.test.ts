@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { VideoShotDraft } from '../../api/contracts'
-import { changeShotLength, duplicateShot, moveShot, shotProblem, splitShot, toShotDraft, videoWorkspaceSteps } from './videoWorkspace'
+import { changeShotLength, characterLockIssue, duplicateShot, moveShot, shotProblem, splitShot, toShotDraft, videoWorkspaceSteps } from './videoWorkspace'
 const first: VideoShotDraft = { id: 'a'.repeat(32), start_sec: 0, seconds: 8, prompt: 'A reviewed scene', seed: 12 }
 const second: VideoShotDraft = { id: 'b'.repeat(32), start_sec: 8, seconds: 4, prompt: 'A second scene', seed: 13 }
 describe('video storyboard edits', () => {
@@ -25,4 +25,13 @@ describe('video storyboard edits', () => {
   it('sends only editable fields instead of server-owned variants', () => {
     const draft = toShotDraft({ ...first, variants: [], approved_variant_id: null }); expect(draft).toEqual({ ...first, reference_id: null, reference_strength: .7, locked: false }); expect('variants' in draft).toBe(false)
   })
+})
+
+it('warns when character lock has no still and accepts one shared still', () => {
+  const project = { track_id: null, mode: 'generated', character_lock: true, references: [] as { id: string }[] }
+  expect(characterLockIssue(project, [first])).toBe('missing')
+  const locked = { ...project, references: [{ id: 'f'.repeat(32) }] }
+  expect(characterLockIssue(locked, [first, second])).toBe('')
+  expect(characterLockIssue({ ...locked, character_lock: false }, [first])).toBe('')
+  expect(characterLockIssue({ ...locked, track_id: 4 }, [first])).toBe('')
 })

@@ -15,6 +15,7 @@ from .video_contracts import (
     VideoProject,
     VideoProjectShot,
     VideoReference,
+    VideoSpeechClip,
     VideoProjectJob,
     CreateVideoProjectRequest,
     UpdateVideoProjectRequest,
@@ -71,6 +72,7 @@ class StoredVideoProject(VideoContract):
     project: VideoProject
     source: SourceIdentity | None = None
     reference_paths: dict[str, str] = Field(default_factory=dict)
+    speech_path: str = ""
     worker: WorkerIdentity | None = None
     published_file: str = ""
     pending_export: PendingExport | None = None
@@ -224,9 +226,58 @@ def source_changed(document: StoredVideoProject) -> bool:
     ) != (source.size, source.device, source.inode, source.mtime_ns, source.ctime_ns)
 
 
+CHARACTER_LOCK_STRENGTH = 0.95
+
+
+def effective_still(project: VideoProject, shot: VideoProjectShot) -> tuple[str | None, float]:
+    """Resolve the still sent to the model. Character lock forces one image."""
+    still = shot.reference_id
+    if still is None and project.mode != "generated" and project.references:
+        still = project.references[0].id
+    if still is None and project.track_id is None and len(project.references) == 1:
+        still = project.references[0].id
+    if (
+        project.character_lock
+        and project.track_id is None
+        and len(project.references) == 1
+    ):
+        still = project.references[0].id
+    strength = (
+        CHARACTER_LOCK_STRENGTH
+        if project.character_lock and project.track_id is None
+        else shot.reference_strength
+    )
+    return still, strength
+
+
+def character_lock_warnings(project: VideoProject) -> list[str]:
+    """Picture projects only. A missing or mixed still is image conditioning, not a trainer."""
+    if not project.character_lock or project.track_id is not None or not project.shots:
+        return []
+    stills = [effective_still(project, shot)[0] for shot in project.shots]
+    warnings: list[str] = []
+    if any(item is None for item in stills):
+        warnings.append("character_still_missing")
+    present = {item for item in stills if item is not None}
+    if len(present) > 1:
+        warnings.append("character_still_mismatch")
+    return warnings
+
+
+def ensure_character_lock(project: VideoProject) -> None:
+    warnings = character_lock_warnings(project)
+    if "character_still_missing" in warnings:
+        raise VideoProjectError("character_still_missing")
+    if "character_still_mismatch" in warnings:
+        raise VideoProjectError("character_still_mismatch")
+
+
 def view(document: StoredVideoProject) -> VideoProject:
     project = document.project.model_copy(deep=True)
     project.source_changed = source_changed(document)
+    extra = character_lock_warnings(project)
+    if extra:
+        project.warnings = list(dict.fromkeys([*project.warnings, *extra]))
     return project
 
 
@@ -464,11 +515,17 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
             project.mode = body.mode
         if body.direction is not None:
             project.direction = body.direction
+        if body.character_lock is not None:
+            if body.character_lock and project.track_id is not None:
+                raise VideoProjectError("character_lock_picture_only")
+            project.character_lock = body.character_lock
         if body.seed is not None:
             project.seed = body.seed
         if body.settings is not None:
             project.settings = body.settings
         if body.export_settings is not None:
+            if project.track_id is not None and body.export_settings.attach_speech:
+                raise VideoProjectError("speech_picture_only")
             project.export_settings = body.export_settings
         if body.overlays is not None:
             project.overlays = body.overlays
@@ -508,7 +565,8 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
             project.settings,
             project.mode,
             project.direction,
-        ) != (before.settings, before.mode, before.direction)
+            project.character_lock,
+        ) != (before.settings, before.mode, before.direction, before.character_lock)
         if global_changed:
             for shot in project.shots:
                 shot.approved_variant_id = None
@@ -558,6 +616,11 @@ def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
             for relative in copied.reference_paths.values():
                 original = artifact(project_id, relative)
                 dest = artifact(copied.project.id, relative)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(original, dest)
+            if copied.speech_path:
+                original = artifact(project_id, copied.speech_path)
+                dest = artifact(copied.project.id, copied.speech_path)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(original, dest)
             for reference in copied.project.references:
@@ -771,3 +834,167 @@ def reference_file(project_id: str, reference_id: str) -> Path:
     if not path.is_file():
         raise VideoProjectError("not_found")
     return path
+
+
+def speech_file(project_id: str) -> Path:
+    document = load(project_id)
+    if not document.speech_path or document.project.speech_clip is None:
+        raise VideoProjectError("not_found")
+    path = artifact(project_id, document.speech_path)
+    if not path.is_file():
+        raise VideoProjectError("not_found")
+    return path
+
+
+def _looks_like_speech(header: bytes) -> bool:
+    if header.startswith(b"RIFF") and header[8:12] == b"WAVE":
+        return True
+    if header.startswith((b"ID3", b"fLaC", b"OggS")):
+        return True
+    if len(header) >= 2 and header[0] == 0xFF and header[1] & 0xE0 == 0xE0:
+        return True
+    return len(header) >= 8 and header[4:8] == b"ftyp"
+
+
+async def upload_speech(project_id: str, revision: int, upload: UploadFile) -> VideoProject:
+    task: asyncio.Task[VideoProject] | None = None
+    state = _ReferenceUploadState()
+    try:
+        with _lock:
+            ensure_open(project_id)
+            document = load(project_id)
+            if document.project.track_id is not None:
+                raise VideoProjectError("speech_picture_only")
+            if project_id in _reference_cancelling:
+                raise VideoProjectError("busy")
+            if any(_reference_cleanup_failed(item) for item in _reference_tasks.get(project_id, ())):
+                raise VideoProjectError("cleanup_failed")
+            task = asyncio.create_task(_upload_speech(project_id, revision, upload, state))
+            _reference_tasks.setdefault(project_id, {})[task] = state
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if task is not None and not task.done():
+            _cancel_reference(task, state)
+            await await_cleanup(asyncio.gather(task, return_exceptions=True))
+        raise
+    finally:
+        if task is None:
+            await await_cleanup(upload.close())
+        elif task.done() and not _reference_cleanup_failed(task):
+            with _lock:
+                owned = _reference_tasks.get(project_id)
+                if owned is not None:
+                    owned.pop(task, None)
+                    if not owned:
+                        _reference_tasks.pop(project_id, None)
+
+
+async def _upload_speech(
+    project_id: str, revision: int, upload: UploadFile, state: _ReferenceUploadState
+) -> VideoProject:
+    import wave
+
+    name = upload.filename or "speech"
+    speech_id = uuid.uuid4().hex
+    temporary: Path | None = None
+    output: Path | None = None
+    count = 0
+    published = False
+    proc: asyncio.subprocess.Process | None = None
+    removed: list[str] = []
+    try:
+        state.started = True
+        if state.cancel_requested:
+            raise asyncio.CancelledError
+        if len(name) > 160 or "/" in name or "\\" in name or name in {".", ".."}:
+            raise VideoProjectError("invalid_speech")
+        root = project_dir(project_id)
+        temporary = root / f".{speech_id}.speech"
+        output = artifact(project_id, f"speech/{speech_id}.wav")
+        with temporary.open("wb") as handle:
+            while chunk := await upload.read(65536):
+                count += len(chunk)
+                if count > 80 * 1024 * 1024:
+                    raise VideoProjectError("speech_too_large")
+                handle.write(chunk)
+        if count < 1:
+            raise VideoProjectError("invalid_speech")
+        with temporary.open("rb") as reader:
+            header = reader.read(16)
+        if not _looks_like_speech(header):
+            raise VideoProjectError("invalid_speech")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        proc = await spawn_process(
+            tool("ffmpeg"),
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            str(temporary),
+            "-vn",
+            "-ac",
+            "2",
+            "-ar",
+            "44100",
+            "-c:a",
+            "pcm_s16le",
+            str(output),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await communicate_process(proc, 120)
+        if proc.returncode != 0 or not output.is_file():
+            raise VideoProjectError("invalid_speech")
+        with wave.open(str(output), "rb") as decoded:
+            duration = decoded.getnframes() / decoded.getframerate()
+        size = output.stat().st_size
+        if size > 80 * 1024 * 1024:
+            raise VideoProjectError("speech_too_large")
+        if not 0.2 <= duration <= 600:
+            raise VideoProjectError("invalid_speech")
+        digest = file_hash(output)
+        relative = str(output.relative_to(root))
+
+        def change(document: StoredVideoProject) -> None:
+            if document.project.track_id is not None:
+                raise VideoProjectError("speech_picture_only")
+            if document.speech_path and document.speech_path != relative:
+                removed.append(document.speech_path)
+            document.speech_path = relative
+            document.project.speech_clip = VideoSpeechClip(
+                id=speech_id,
+                name=name,
+                bytes=size,
+                duration_sec=duration,
+                sha256=digest,
+            )
+            document.project.file_url = ""
+            document.project.poster_url = ""
+
+        result = mutate(project_id, change, revision=revision)
+        published = True
+        for old in removed:
+            artifact(project_id, old).unlink(missing_ok=True)
+        return result
+    finally:
+        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload))
+
+
+def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    removed: list[str] = []
+
+    def change(document: StoredVideoProject) -> None:
+        if document.project.track_id is not None:
+            raise VideoProjectError("speech_picture_only")
+        if document.speech_path:
+            removed.append(document.speech_path)
+        document.speech_path = ""
+        document.project.speech_clip = None
+        document.project.export_settings.attach_speech = False
+        document.project.file_url = ""
+        document.project.poster_url = ""
+
+    result = mutate(project_id, change, revision=body.revision)
+    for old in removed:
+        artifact(project_id, old).unlink(missing_ok=True)
+    return result

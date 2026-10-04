@@ -204,6 +204,34 @@ def reference_file(project_id: str, reference_id: str) -> FileResponse:
         _project_error(exc)
 
 
+@router.post("/projects/{project_id}/speech", response_model=VideoProject)
+async def upload_speech(
+    project_id: str,
+    revision: Annotated[int, Form(ge=1)],
+    file: Annotated[UploadFile, File()],
+) -> VideoProject:
+    try:
+        return await projects.upload_speech(project_id, revision, file)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/speech/clear", response_model=VideoProject)
+def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    try:
+        return projects.clear_speech(project_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/projects/{project_id}/speech")
+def speech_file(project_id: str) -> FileResponse:
+    try:
+        return FileResponse(projects.speech_file(project_id), media_type="audio/wav")
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
 @router.post("/projects/{project_id}/analyze", response_model=VideoProject)
 async def analyze_project(project_id: str, body: VideoRevisionRequest) -> VideoProject:
     try:
