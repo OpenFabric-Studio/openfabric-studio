@@ -9,6 +9,9 @@ import { preparedVoice, voiceProfile, comparison } from './voiceTestFixtures'
 import type { VoicePreparationResponse, VoiceProfileResponse, VoiceUploadResponse } from '../../api/contracts'
 import { ApiError } from '../../api/http'
 
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
+  listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
+}))
 vi.mock('../../api/voices', async (original) => ({ ...await original<typeof import('../../api/voices')>(),
   listVoices: vi.fn(), getVoicePreparation: vi.fn(), prepareVoice: vi.fn(), cancelVoicePreparation: vi.fn(),
   selectVoiceSamples: vi.fn(), buildVoice: vi.fn(), selectVoiceModel: vi.fn(), cancelVoiceBuild: vi.fn(),

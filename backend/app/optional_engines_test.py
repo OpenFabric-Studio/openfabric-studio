@@ -177,3 +177,38 @@ class OptionalEngineRouteTests(unittest.TestCase):
         self.assertEqual(refused.status_code, 409)
         self.assertIn('setup_kokoro.sh', refused.json()['detail']['detail'])
         self.assertEqual(turbo.status_code, 422)
+
+    def test_success_exposes_a_media_url_and_serves_only_that_file(self) -> None:
+        from app.optional_engines import LocalRun
+        data = Path(self.temporary.name) / 'data'
+        output = data / 'outputs' / 'local-engines' / 'kokoro' / ('ab' * 16 + '.wav')
+        output.parent.mkdir(parents=True)
+        output.write_bytes(b'RIFF' + b'\0' * 40)
+        run = LocalRun('completed', 'kokoro wrote audio.', output, 'runtime')
+        with patch('app.api.routes_optional_engines.narrate_kokoro', return_value=run), patch.object(config, 'DATA_DIR', data):
+            created = self.client.post('/api/local-engines/kokoro', json={'text': 'Hello.', 'voice': 'af_heart'})
+            played = self.client.get(created.json()['media_url'])
+            missing = self.client.get('/api/local-engines/kokoro/media/' + 'cd' * 16)
+            escaped = self.client.get('/api/local-engines/kokoro/media/' + '..')
+        self.assertEqual(created.status_code, 200)
+        self.assertEqual(created.json()['media_url'], f'/api/local-engines/kokoro/media/{output.stem}')
+        self.assertEqual(played.status_code, 200)
+        self.assertTrue(played.headers['content-type'].startswith('audio/wav'))
+        self.assertEqual(missing.status_code, 404)
+        self.assertNotEqual(escaped.status_code, 200)
+        self.assertNotIn(b'RIFF', escaped.content)
+
+    def test_browser_pick_is_staged_and_does_not_download_weights(self) -> None:
+        data = Path(self.temporary.name) / 'data'
+        with patch.object(config, 'DATA_DIR', data):
+            saved = self.client.post('/api/local-engines/inputs', files={'file': ('clip.wav', b'RIFFclip-bytes!!', 'audio/wav')})
+            refused = self.client.post('/api/local-engines/inputs', files={'file': ('weights.bin', b'model-weights-here', 'application/octet-stream')})
+        self.assertEqual(saved.status_code, 200)
+        path = Path(saved.json()['path'])
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.suffix, '.wav')
+        self.assertEqual(path.parent.name, 'inputs')
+        self.assertNotIn('huggingface', saved.text.lower())
+        self.assertEqual(refused.status_code, 400)
+        self.assertIn('wav', refused.json()['detail']['detail'])
+

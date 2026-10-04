@@ -13,6 +13,7 @@ async function parseErrorBody(resp: Response): Promise<string> {
     if (isObject(data)) {
       if (typeof data.error === 'string') return data.error
       if (typeof data.detail === 'string') return data.detail
+      if (isObject(data.detail) && typeof data.detail.detail === 'string' && data.detail.detail.length > 0 && data.detail.detail.length <= 2000) return data.detail.detail
       if (isObject(data.error) && typeof data.error.message === 'string') return data.error.message
     }
   } catch {

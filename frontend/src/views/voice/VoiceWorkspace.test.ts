@@ -7,6 +7,9 @@ import * as api from '../../api/voices'
 import { i18n, setLocale } from '../../i18n'
 import { preparedVoice, voiceProfile } from './voiceTestFixtures'
 
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
+  listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
+}))
 vi.mock('../../api/voices', async (original) => ({ ...await original<typeof import('../../api/voices')>(),
   listVoices: vi.fn(), getVoicePreparation: vi.fn(), prepareVoice: vi.fn(), selectVoiceSamples: vi.fn(),
   voiceSeparationOptions: vi.fn(), listVoiceTrialSources: vi.fn(), listVoiceComparisons: vi.fn(),

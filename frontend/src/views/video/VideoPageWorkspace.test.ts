@@ -11,6 +11,9 @@ import type { VideoProject } from '../../api/contracts'
 import { videoProjectFixture, videoTrack, videoReadinessFixture } from './videoFixtures'
 import { claimPlayback, releasePlaybackIfCurrent } from '../../composables/audioPlayback'
 
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
+  listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
+}))
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), listTracks: vi.fn() }))
 vi.mock('../../api/videos', async (original) => ({ ...await original<typeof import('../../api/videos')>(), listVideoProjects: vi.fn(), getVideoProject: vi.fn(), deleteVideoProject: vi.fn(), listVideos: vi.fn(), otherWorkBusy: vi.fn(), videoReadiness: vi.fn(), createVideoProject: vi.fn(), updateVideoProject: vi.fn(), analyzeVideoProject: vi.fn(), previewVideoProject: vi.fn(), renderVideoProject: vi.fn(), exportVideoProject: vi.fn(), uploadVideoReference: vi.fn() }))
 let app: App | undefined

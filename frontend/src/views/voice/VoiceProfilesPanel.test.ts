@@ -11,6 +11,9 @@ import en from '../../locales/en'
 import { speechWorkspaceEn } from '../../locales/speechWorkspace'
 import { hasOpenDialog } from '../../composables/useDialogA11y'
 
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
+  listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
+}))
 vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(),
   listSpeechVoiceProfiles: vi.fn(), getSpeechCloneEngine: vi.fn(),
   createSpeechVoiceProfile: vi.fn(), deleteSpeechVoiceProfile: vi.fn(), startSpeechCloneTrial: vi.fn(),
@@ -223,7 +226,7 @@ it.each(['completed', 'mock_completed'] as const)('plays and downloads identifie
 
 it('opens creation on demand and requires explicit consent before submitting', async () => {
   const container = await mount()
-  expect(container.querySelector('input[type=file]')).toBeNull()
+  expect([...container.querySelectorAll('input[type=file]')].filter(input => !input.closest('[data-local-engines]'))).toEqual([])
   await creationDraft(container)
   expect(button(container, 'Create profile').disabled).toBe(true)
   await submit(container, 'Create speech profile')
@@ -247,7 +250,7 @@ it('searches the profile library and selects the synthesis profile without a sec
   await click(container, 'Second narrator')
   expect(container.querySelector('[aria-pressed=true]')?.textContent).toContain('Second narrator')
   expect(form(container, 'Speech synthesis').textContent).toContain('Second narrator')
-  expect(container.querySelector('select')).toBeNull()
+  expect([...container.querySelectorAll('select')].filter(input => !input.closest('[data-local-engines]'))).toEqual([])
   await change(container, 'Search speech profiles', '')
   expect(button(container, 'First narrator')).toBeDefined()
 })

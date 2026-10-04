@@ -6,6 +6,7 @@ import { videoDirectionEn } from './videoDirection'
 import { videoLibraryEn } from './videoLibrary'
 import { audiobookWorkspaceEn } from './audiobookWorkspace'
 import { speechWorkspaceEn } from './speechWorkspace'
+import { localEnginesEn } from './localEngines'
 import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
 import { referenceWorkspaceEn } from './referenceWorkspace'
 import { generationWorkspaceEn } from './generationWorkspace'
@@ -25,6 +26,7 @@ export default {
   videoLibrary: videoLibraryEn,
   audiobookWorkspace: audiobookWorkspaceEn,
   speechWorkspace: speechWorkspaceEn,
+  localEngines: localEnginesEn,
   singingWorkspace: singingWorkspaceEn, voiceStudio: voiceStudioEn,
   referenceWorkspace: referenceWorkspaceEn,
   generationWorkspace: generationWorkspaceEn,

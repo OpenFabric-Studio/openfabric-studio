@@ -156,6 +156,14 @@ def _output(identifier: str, suffix: str) -> Path:
     return path
 
 
+def stage_input_path(suffix: str) -> Path:
+    """A browser-picked clip, still, or trained voice. Not a weight download."""
+    allowed = {'.wav', '.flac', '.mp3', '.png', '.jpg', '.jpeg', '.webp', '.pth'}
+    if suffix.lower() not in allowed:
+        raise OptionalEngineError('input_refused', 'Choose a wav, flac, mp3, png, jpg, webp, or pth file.')
+    return _output('inputs', suffix.lower())
+
+
 def _engine_python(identifier: ModuleId) -> Path:
     from .module_catalog import engine_python
     return engine_python(require_installed(identifier), sys.platform)

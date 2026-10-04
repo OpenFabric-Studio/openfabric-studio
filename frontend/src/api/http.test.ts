@@ -36,4 +36,9 @@ describe('HTTP response boundaries', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"debug":"private path"}', { status: 500 })))
     await expect(apiFetch('/example')).rejects.toEqual(new ApiError('HTTP 500', 500))
   })
+
+  it('shows a nested engine detail without a stack trace', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: { code: 'weights_missing', detail: 'Place these files yourself. OpenFabric does not download them for kokoro: kokoro-v1_0.pth, voices/af_heart.pt.' } }), { status: 409 })))
+    await expect(apiFetch('/example')).rejects.toEqual(new ApiError('Place these files yourself. OpenFabric does not download them for kokoro: kokoro-v1_0.pth, voices/af_heart.pt.', 409))
+  })
 })

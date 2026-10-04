@@ -7,6 +7,9 @@ import { i18n } from '../../i18n'
 import VideoPage from './VideoPage.vue'
 import * as videosApi from '../../api/videos'
 import * as tracksApi from '../../api/tracks'
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
+  listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
+}))
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), listTracks: vi.fn() }))
 vi.mock('../../api/videos', async (original) => ({ ...await original<typeof import('../../api/videos')>(), listVideos: vi.fn(), otherWorkBusy: vi.fn(), listVideoProjects: vi.fn(), videoReadiness: vi.fn() }))
 let app: App | undefined

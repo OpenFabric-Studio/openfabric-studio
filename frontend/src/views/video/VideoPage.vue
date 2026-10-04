@@ -8,6 +8,7 @@ import VideoDirectionPanel from './VideoDirectionPanel.vue'
 import VideoSoundtrackPanel from './VideoSoundtrackPanel.vue'
 import VideoCharacterPanel from './VideoCharacterPanel.vue'
 import VideoCharacterTrainer from './VideoCharacterTrainer.vue'
+import LocalEnginePanel from '../voice/LocalEnginePanel.vue'
 import { videoWorkspaceSteps, videoClipLengths, changeShotLength, splitShot, duplicateShot, moveShot, newVideoId, frameTime, shotProblem, characterLockIssue, type VideoWorkspaceStep, type VideoClipLength } from './videoWorkspace'
 import { videoErrorText, videoRequestError, deleteVideo, isVideoActive } from '../../api/videos'
 import type { VideoProjectJob, VideoMarker } from '../../api/contracts'
@@ -300,6 +301,7 @@ onBeforeUnmount(stopSource)
           <label>{{ t('videoWorkspace.projectName') }}<input v-model="draft.name" maxlength="120" :disabled="readOnly"></label>
           <div class="video-actions"><button type="button" class="primary" @click="changeStep('direction', true)">{{ t('videoWorkspace.continue') }}</button><button type="button" :disabled="acting || saving" @click="startNewProject">{{ t('videoExperience.newProject') }}</button></div>
         </div>
+        <LocalEnginePanel v-if="(showNewProject && startKind !== 'song') || (!showNewProject && pictureProject)" kind="picture" />
       </template>
       <template v-else-if="draft && project && step === 'direction'">
         <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @duplicate="duplicate" />

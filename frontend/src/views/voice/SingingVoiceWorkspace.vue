@@ -17,6 +17,7 @@ import { useVoiceSession } from './useVoiceSession'
 import { emptyVoiceReviewState, voiceWorkspaceSteps, type VoiceWorkspaceStep } from './voiceWorkspace'
 import { voiceStepFacts } from './voiceProgress'
 import VoiceJobSummary from './VoiceJobSummary.vue'
+import LocalEnginePanel from './LocalEnginePanel.vue'
 import { singingStage, singingInitialStage, publishedSourcesChanged, type SingingStage } from './singingNavigation'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
@@ -576,6 +577,7 @@ onBeforeUnmount(() => {
       </template>
       </div>
     </section>
+    <LocalEnginePanel class="lg:col-span-2" kind="singing" :active="active" />
     </div>
     <Teleport to="body"><div v-if="deleteTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><section ref="deleteDialog" data-voice-confirmation role="dialog" aria-modal="true" aria-labelledby="singing-delete-title" aria-describedby="singing-delete-body" tabindex="-1" class="w-full max-w-md space-y-4 rounded-xl border border-border bg-panel p-5"><h2 id="singing-delete-title" class="text-lg font-semibold">{{ t('singingWorkspace.deleteTitle', { name: deleteTarget.name }) }}</h2><p id="singing-delete-body" class="text-sm text-text-dim">{{ t('singingWorkspace.deleteHint') }}</p><div class="flex justify-end gap-3"><button type="button" :disabled="deleting" class="min-h-11 rounded-lg border border-border px-4 text-sm" @click="deleteTarget = null">{{ t('common.cancel') }}</button><button data-confirm-delete type="button" :disabled="deleting" class="min-h-11 rounded-lg bg-status-failed px-4 text-sm text-white disabled:opacity-50" @click="confirmDelete">{{ deleting ? t('common.loading') : t('voiceClone.deleteVoice') }}</button></div></section></div></Teleport>
   </div>

@@ -6,6 +6,7 @@ import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProf
 import { useDialogA11y } from '../../composables/useDialogA11y'
 import StarterSpeechVoices from './StarterSpeechVoices.vue'
 import SpeechAudioPreview from './SpeechAudioPreview.vue'
+import LocalEnginePanel from './LocalEnginePanel.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const emit = defineEmits<{ activity: [message: string] }>()
@@ -339,6 +340,8 @@ onBeforeUnmount(() => {
         </template>
         <p v-else class="text-sm text-text-dim">{{ t('speechWorkspace.selectOrCreate') }}</p>
       </form>
+
+      <LocalEnginePanel kind="speech" :active="active" />
 
       <section class="rounded-xl border border-border bg-panel p-4" :aria-label="t('speechWorkspace.engineStatus')">
         <div class="flex items-start justify-between gap-3"><h3 class="text-sm font-semibold text-text">{{ t('speechWorkspace.engineStatus') }}</h3><button type="button" :disabled="loading || engineLoading || saving || deleting || !!importingId" class="text-xs text-text-dim hover:text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" @click="refresh">{{ t('speechWorkspace.refresh') }}</button></div>
