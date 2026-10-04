@@ -34,8 +34,10 @@ export function saveEbookDraft(id: string, body: PatchEbookDraftRequest, signal?
   const validated = parsePatchEbookDraftRequest(body)
   return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { method: 'PATCH', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validated) }, parseEbookDraft)
 }
-export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal): Promise<AudiobookCreateResponse> {
-  return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(draft.id)}/create`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ profile_id: profileId, revision: draft.revision }) }, parseAudiobookCreateResponse)
+export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal, cast?: Array<{ name: string; profile_id: string }>): Promise<AudiobookCreateResponse> {
+  const body: { profile_id: string; revision: number; cast?: Array<{ name: string; profile_id: string }> } = { profile_id: profileId, revision: draft.revision }
+  if (cast?.length) body.cast = cast
+  return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(draft.id)}/create`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, parseAudiobookCreateResponse)
 }
 export function ebookSourceUrl(id: string): string { return `/api/audiobooks/imports/${encodeURIComponent(id)}/source` }
 export function controlAudiobook(id: string, action: 'pause' | 'resume' | 'cancel', signal?: AbortSignal): Promise<AudiobookBook> {
@@ -99,6 +101,18 @@ export function setAudiobookLanguages(bookId: string, language: string, chapters
   const body = parseSetAudiobookLanguagesRequest({ language, chapters })
   return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/languages`, {
     method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  }, parseAudiobookBook)
+}
+
+export function setAudiobookCast(bookId: string, cast: Array<{ name: string; profile_id: string }>, signal?: AbortSignal): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/cast`, {
+    method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cast }),
+  }, parseAudiobookBook)
+}
+
+export function setAudiobookChapterText(bookId: string, chapterIndex: number, text: string, signal?: AbortSignal): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/text`, {
+    method: 'PUT', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }),
   }, parseAudiobookBook)
 }
 

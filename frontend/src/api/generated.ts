@@ -171,6 +171,7 @@ export type AudiobookBook = {
   "has_cover"?: boolean
   "export_note"?: string
   "language"?: string
+  "cast"?: Array<CastMember>
 }
 
 export type AudiobookBooksResponse = {
@@ -201,6 +202,7 @@ export type AudiobookJob = {
   "total_sections"?: number
   "language"?: string
   "language_ready"?: boolean
+  "chapter_text"?: string
 }
 
 export type AudiobookJobsResponse = {
@@ -213,6 +215,11 @@ export type BuildVoiceRequest = {
   "training_steps"?: 0 | 200 | 500 | 1000
   "resume"?: boolean
   "compare_checkpoints"?: boolean
+}
+
+export type CastMember = {
+  "name": string
+  "profile_id": string
 }
 
 export type ChapterLanguageUpdate = {
@@ -232,6 +239,7 @@ export type CreateAudioVersionRequest = {
 export type CreateAudiobookFromDraftRequest = {
   "profile_id": string
   "revision": number
+  "cast"?: Array<CastMember>
 }
 
 export type CreateAudiobookRequest = {
@@ -241,6 +249,7 @@ export type CreateAudiobookRequest = {
   "author"?: string
   "pronunciations"?: Array<PronunciationEntry>
   "language"?: string
+  "cast"?: Array<CastMember>
 }
 
 export type CreateGenerationPresetRequest = {
@@ -810,6 +819,14 @@ export type SelectVoiceSamplesRequest = {
 export type SetAudiobookLanguagesRequest = {
   "language"?: string
   "chapters"?: Array<ChapterLanguageUpdate>
+}
+
+export type SetCastRequest = {
+  "cast"?: Array<CastMember>
+}
+
+export type SetChapterTextRequest = {
+  "text": string
 }
 
 export type SetPronunciationsRequest = {
@@ -7289,6 +7306,30 @@ const schemas = {
     "title": "StarterSpeechVoicesResponse",
     "type": "object"
   },
+  "CastMember": {
+    "description": "A named speaker bound to a saved speech profile.",
+    "properties": {
+      "name": {
+        "maxLength": 40,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "profile_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "profile_id"
+    ],
+    "title": "CastMember",
+    "type": "object"
+  },
   "PronunciationEntry": {
     "description": "Written text replaced with the spoken form before synthesis.",
     "properties": {
@@ -7376,6 +7417,14 @@ const schemas = {
         "maxLength": 35,
         "title": "Language",
         "type": "string"
+      },
+      "cast": {
+        "items": {
+          "$ref": "#/$defs/CastMember"
+        },
+        "maxItems": 16,
+        "title": "Cast",
+        "type": "array"
       }
     },
     "required": [
@@ -7476,6 +7525,12 @@ const schemas = {
         "default": false,
         "title": "Language Ready",
         "type": "boolean"
+      },
+      "chapter_text": {
+        "default": "",
+        "maxLength": 20000,
+        "title": "Chapter Text",
+        "type": "string"
       }
     },
     "required": [
@@ -7606,6 +7661,14 @@ const schemas = {
         "maxLength": 35,
         "title": "Language",
         "type": "string"
+      },
+      "cast": {
+        "items": {
+          "$ref": "#/$defs/CastMember"
+        },
+        "maxItems": 16,
+        "title": "Cast",
+        "type": "array"
       }
     },
     "required": [
@@ -7994,6 +8057,14 @@ const schemas = {
         "minimum": 1,
         "title": "Revision",
         "type": "integer"
+      },
+      "cast": {
+        "items": {
+          "$ref": "#/$defs/CastMember"
+        },
+        "maxItems": 16,
+        "title": "Cast",
+        "type": "array"
       }
     },
     "required": [
@@ -8042,6 +8113,35 @@ const schemas = {
       }
     },
     "title": "SetAudiobookLanguagesRequest",
+    "type": "object"
+  },
+  "SetCastRequest": {
+    "properties": {
+      "cast": {
+        "items": {
+          "$ref": "#/$defs/CastMember"
+        },
+        "maxItems": 16,
+        "title": "Cast",
+        "type": "array"
+      }
+    },
+    "title": "SetCastRequest",
+    "type": "object"
+  },
+  "SetChapterTextRequest": {
+    "properties": {
+      "text": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "SetChapterTextRequest",
     "type": "object"
   },
   "ArtistSettings": {
@@ -12216,6 +12316,14 @@ export function parseStarterSpeechVoicesResponse(value: unknown): StarterSpeechV
   return value
 }
 
+function isCastMember(value: unknown): value is CastMember {
+  return decodeSchema(schemas.CastMember, value, schemas)
+}
+export function parseCastMember(value: unknown): CastMember {
+  if (!isCastMember(value)) throw new TypeError("Invalid CastMember response")
+  return value
+}
+
 function isPronunciationEntry(value: unknown): value is PronunciationEntry {
   return decodeSchema(schemas.PronunciationEntry, value, schemas)
 }
@@ -12365,6 +12473,22 @@ function isSetAudiobookLanguagesRequest(value: unknown): value is SetAudiobookLa
 }
 export function parseSetAudiobookLanguagesRequest(value: unknown): SetAudiobookLanguagesRequest {
   if (!isSetAudiobookLanguagesRequest(value)) throw new TypeError("Invalid SetAudiobookLanguagesRequest response")
+  return value
+}
+
+function isSetCastRequest(value: unknown): value is SetCastRequest {
+  return decodeSchema(schemas.SetCastRequest, value, schemas)
+}
+export function parseSetCastRequest(value: unknown): SetCastRequest {
+  if (!isSetCastRequest(value)) throw new TypeError("Invalid SetCastRequest response")
+  return value
+}
+
+function isSetChapterTextRequest(value: unknown): value is SetChapterTextRequest {
+  return decodeSchema(schemas.SetChapterTextRequest, value, schemas)
+}
+export function parseSetChapterTextRequest(value: unknown): SetChapterTextRequest {
+  if (!isSetChapterTextRequest(value)) throw new TypeError("Invalid SetChapterTextRequest response")
   return value
 }
 

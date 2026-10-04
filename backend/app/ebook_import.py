@@ -588,7 +588,7 @@ def create_from_draft(identifier: str, body: CreateAudiobookFromDraftRequest) ->
             raise EbookImportError("ebook_chapters_required")
         return audiobooks.create_book(CreateAudiobookRequest(
             title=draft.title, profile_id=body.profile_id, chapters=chapters,
-            author=draft.author, pronunciations=draft.pronunciations),
+            author=draft.author, pronunciations=draft.pronunciations, cast=body.cast),
             source_import_id=identifier, source_import_revision=draft.revision)
 
 

@@ -23,6 +23,7 @@ from .audiobook_contracts import (
     AudiobookBookStatus,
     AudiobookCreateResponse,
     AudiobookJob,
+    CastMember,
     CreateAudiobookRequest,
     PronunciationEntry,
 )
@@ -104,17 +105,17 @@ def _book_columns(connection: sqlite3.Connection) -> set[str]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 3:
+    if version == 4:
         return
-    if version not in (0, 1, 2):
+    if version not in (0, 1, 2, 3):
         raise AudiobookError("audiobook_storage_unavailable", 503)
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 3:
+        if version == 4:
             connection.commit()
             return
-        if version not in (0, 1, 2):
+        if version not in (0, 1, 2, 3):
             raise AudiobookError("audiobook_storage_unavailable", 503)
         if version == 0:
             connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_books (
@@ -156,13 +157,24 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
         present = _book_columns(connection)
         if "language" not in present:
             connection.execute("ALTER TABLE audiobook_books ADD COLUMN language TEXT NOT NULL DEFAULT ''")
+        present = _book_columns(connection)
+        if "cast_json" not in present:
+            connection.execute("ALTER TABLE audiobook_books ADD COLUMN cast_json TEXT NOT NULL DEFAULT '[]'")
+        job_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(audiobook_jobs)")}
+        if "cast_spans_json" not in job_columns:
+            connection.execute("ALTER TABLE audiobook_jobs ADD COLUMN cast_spans_json TEXT NOT NULL DEFAULT '[]'")
+        section_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(audiobook_sections)")}
+        if section_columns and "profile_id" not in section_columns:
+            connection.execute("ALTER TABLE audiobook_sections ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''")
+        if section_columns and "speaker_name" not in section_columns:
+            connection.execute("ALTER TABLE audiobook_sections ADD COLUMN speaker_name TEXT NOT NULL DEFAULT ''")
         connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_chapter_cache (
             cache_key TEXT PRIMARY KEY,
             profile_id TEXT NOT NULL,
             text_sha256 TEXT NOT NULL,
             wav_name TEXT NOT NULL,
             created_at TEXT NOT NULL)""")
-        connection.execute("PRAGMA user_version = 3")
+        connection.execute("PRAGMA user_version = 4")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -171,6 +183,14 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
 
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _cast_members(raw: object) -> list[CastMember]:
+    try:
+        loaded = json.loads(str(raw or "[]"))
+        return [CastMember.model_validate(item) for item in loaded]
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise AudiobookError("audiobook_storage_unavailable", 503) from exc
 
 
 def _pronunciations(raw: object) -> list[PronunciationEntry]:
@@ -197,6 +217,7 @@ def _row_to_book(row: sqlite3.Row) -> AudiobookBook:
         has_cover=bool(row["cover_path"]),
         export_note=str(row["export_note"] or ""),
         language=str(row["language"] or ""),
+        cast=_cast_members(row["cast_json"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -222,6 +243,7 @@ def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
         updated_at=str(row["updated_at"]),
         language=language,
         language_ready=status == "done" and bool(language),
+        chapter_text=str(row["chapter_text"] or ""),
     )
 
 
@@ -293,8 +315,11 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
         ensure_unique(body.pronunciations)
     except PronunciationError as exc:
         raise AudiobookError(exc.code) from exc
+    from .audiobook_cast import require_cast
+    require_cast(body.cast)
     author = body.author.strip()[:200]
     spoken_map = json.dumps([entry.model_dump() for entry in body.pronunciations], ensure_ascii=False)
+    cast_map = json.dumps([member.model_dump() for member in body.cast], ensure_ascii=False)
 
     book_id = uuid.uuid4().hex
     stamp = _now()
@@ -312,10 +337,10 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
             """
             INSERT INTO audiobook_books (
                 id, title, profile_id, chapter_count, status, export_path, created_at, updated_at, source_import_id,
-                author, pronunciations_json
-            ) VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?)
+                author, pronunciations_json, cast_json
+            ) VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?, ?)
             """,
-            (book_id, title[:200], body.profile_id, len(body.chapters), stamp, stamp, source_import_id, author, spoken_map),
+            (book_id, title[:200], body.profile_id, len(body.chapters), stamp, stamp, source_import_id, author, spoken_map, cast_map),
         )
         for index, chapter in enumerate(body.chapters):
             text = chapter.text.strip()
@@ -348,6 +373,7 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
                     created_at=stamp,
                     updated_at=stamp,
                     language=body.language,
+                    chapter_text=text[:MAX_CHAPTER_CHARS],
                 )
             )
         if body.language:
@@ -559,6 +585,70 @@ def finish_book(book_id: str, *, wav: Path, mp3: Path | None, m4b: Path | None, 
         connection.commit()
 
 
+def set_cast(book_id: str, members: list[CastMember]) -> AudiobookBook:
+    """Replace the cast. Finished chapter audio stays until that chapter is regenerated."""
+    from .audiobook_cast import require_cast
+    require_cast(members)
+    if not _ID.fullmatch(book_id):
+        raise AudiobookError("invalid_book_id", 404)
+    payload = json.dumps([member.model_dump() for member in members], ensure_ascii=False)
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute("SELECT status FROM audiobook_books WHERE id = ?", (book_id,)).fetchone()
+        if row is None:
+            raise AudiobookError("book_not_found", 404)
+        if row["status"] in {"queued", "running"}:
+            raise AudiobookError("audiobook_busy", 409)
+        connection.execute(
+            "UPDATE audiobook_books SET cast_json = ?, updated_at = ? WHERE id = ?",
+            (payload, _now(), book_id),
+        )
+        connection.execute(
+            """
+            DELETE FROM audiobook_sections WHERE job_id IN (
+                SELECT id FROM audiobook_jobs WHERE book_id = ? AND status != 'done'
+            )
+            """,
+            (book_id,),
+        )
+        connection.commit()
+    return get_book(book_id)
+
+
+def set_chapter_text(book_id: str, chapter_index: int, text: str) -> AudiobookBook:
+    """Replace one chapter's lines. A finished chapter keeps its audio until regenerate."""
+    cleaned = text.strip()
+    if not cleaned:
+        raise AudiobookError("chapter_text_required")
+    if len(cleaned) > MAX_CHAPTER_CHARS:
+        raise AudiobookError("chapter_text_too_long")
+    if not _ID.fullmatch(book_id) or chapter_index < 0:
+        raise AudiobookError("chapter_not_found", 404)
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute("SELECT status FROM audiobook_books WHERE id = ?", (book_id,)).fetchone()
+        if row is None:
+            raise AudiobookError("book_not_found", 404)
+        if row["status"] in {"queued", "running"}:
+            raise AudiobookError("audiobook_busy", 409)
+        job = connection.execute(
+            "SELECT id, status FROM audiobook_jobs WHERE book_id = ? AND chapter_index = ?",
+            (book_id, chapter_index),
+        ).fetchone()
+        if job is None:
+            raise AudiobookError("chapter_not_found", 404)
+        connection.execute(
+            "UPDATE audiobook_jobs SET chapter_text = ?, updated_at = ? WHERE id = ?",
+            (cleaned, _now(), job["id"]),
+        )
+        if job["status"] != "done":
+            connection.execute("DELETE FROM audiobook_sections WHERE job_id = ?", (job["id"],))
+        connection.commit()
+    return get_book(book_id)
+
+
 def set_pronunciations(book_id: str, entries: list[PronunciationEntry]) -> AudiobookBook:
     from .audiobook_pronounce import PronunciationError, ensure_unique
     try:
@@ -607,6 +697,8 @@ def regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
         profile = voice_profiles.get_profile(str(row["profile_id"]))
         if not profile.consent_confirmed:
             raise AudiobookError("consent_required", 403)
+        from .audiobook_cast import require_cast
+        require_cast(_cast_members(row["cast_json"]))
         job = connection.execute(
             "SELECT id FROM audiobook_jobs WHERE book_id = ? AND chapter_index = ?",
             (book_id, chapter_index),
@@ -750,6 +842,54 @@ def save_pause_spans(job_id: str, spans: list[dict[str, int]]) -> None:
         _ensure_schema(connection)
         connection.execute("UPDATE audiobook_jobs SET pause_json = ? WHERE id = ?", (payload, job_id))
         connection.commit()
+
+
+def save_cast_spans(job_id: str, spans: list[dict[str, object]]) -> None:
+    if not _ID.fullmatch(job_id):
+        raise AudiobookError("invalid_book_id", 404)
+    payload_spans = []
+    for item in spans[:500]:
+        start = item.get("start_ms")
+        end = item.get("end_ms")
+        speaker = str(item.get("speaker") or "")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+        if not speaker or len(speaker) > 40 or not 0 <= start <= end <= 86_400_000:
+            continue
+        payload_spans.append({"speaker": speaker, "start_ms": start, "end_ms": end})
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        connection.execute(
+            "UPDATE audiobook_jobs SET cast_spans_json = ? WHERE id = ?",
+            (json.dumps(payload_spans), job_id),
+        )
+        connection.commit()
+
+
+def cast_spans(job_id: str) -> list[dict[str, object]]:
+    if not _ID.fullmatch(job_id):
+        return []
+    with _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        row = connection.execute("SELECT cast_spans_json FROM audiobook_jobs WHERE id = ?", (job_id,)).fetchone()
+    if row is None:
+        return []
+    try:
+        loaded = json.loads(str(row["cast_spans_json"] or "[]"))
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(loaded, list):
+        return []
+    spans: list[dict[str, object]] = []
+    for item in loaded:
+        if not isinstance(item, dict):
+            continue
+        start = item.get("start_ms")
+        end = item.get("end_ms")
+        speaker = item.get("speaker")
+        if isinstance(start, int) and isinstance(end, int) and isinstance(speaker, str) and 0 <= start <= end:
+            spans.append({"speaker": speaker, "start_ms": start, "end_ms": end})
+    return spans
 
 
 def pause_spans(job_id: str) -> list[dict[str, int]]:

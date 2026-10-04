@@ -20,6 +20,8 @@ from ..audiobook_contracts import (
     CreateAudiobookFromDraftRequest,
     EbookDraft, EbookDraftsResponse, ImportPastedTextRequest, PatchEbookDraftRequest,
     SetAudiobookLanguagesRequest,
+    SetCastRequest,
+    SetChapterTextRequest,
     SetPronunciationsRequest,
 )
 from ..job_lifecycle import await_cleanup
@@ -232,6 +234,24 @@ def list_audiobook_jobs(book_id: str) -> AudiobookJobsResponse:
     except audiobooks.AudiobookError as exc:
         _raise(exc)
         raise  # pragma: no cover
+
+
+@router.put("/{book_id}/cast", response_model=AudiobookBook)
+def set_audiobook_cast(book_id: str, body: SetCastRequest) -> AudiobookBook:
+    try:
+        return audiobooks.set_cast(book_id, body.cast)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/{book_id}/chapters/{chapter_index}/text", response_model=AudiobookBook)
+def set_chapter_text(book_id: str, chapter_index: int, body: SetChapterTextRequest) -> AudiobookBook:
+    try:
+        return audiobooks.set_chapter_text(book_id, chapter_index, body.text)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
 
 
 @router.put("/{book_id}/pronunciations", response_model=AudiobookBook)

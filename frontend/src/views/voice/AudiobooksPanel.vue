@@ -41,6 +41,12 @@ const bookSpeech = ref<SpeechPair[]>([])
 const bookLanguage = ref('')
 const chapterLanguages = ref<Record<string, string>>({})
 const savingLanguages = ref(false)
+type CastRow = { name: string; profile_id: string }
+const castDraft = ref<CastRow[]>([])
+const bookCast = ref<CastRow[]>([])
+const savingCast = ref(false)
+const chapterTexts = ref<Record<string, string>>({})
+const savingLineId = ref('')
 const savingSpeech = ref(false)
 const regeneratingIndex = ref<number | null>(null)
 const titleInput = ref<HTMLInputElement | null>(null)
@@ -98,6 +104,11 @@ function safeError(err: unknown, fallback: string): string {
       case 'invalid_book_id': return t('audiobookWorkspace.errors.bookMissing')
       case 'nothing_to_retry': return t('audiobookWorkspace.errors.nothingToRetry')
       case 'duplicate_pronunciation': return t('audiobookWorkspace.errors.duplicate_pronunciation')
+      case 'duplicate_cast_name': return t('audiobookWorkspace.errors.duplicate_cast_name')
+      case 'invalid_cast_name': return t('audiobookWorkspace.errors.invalid_cast_name')
+      case 'cast_too_large': return t('audiobookWorkspace.errors.cast_too_large')
+      case 'chapter_text_required':
+      case 'chapter_text_too_long': return t('audiobookWorkspace.errors.emptyChapter')
       case 'audiobook_busy': return t('audiobookWorkspace.errors.audiobook_busy')
       case 'export_codec_missing': return t('audiobookWorkspace.errors.export_codec_missing')
       case 'unsupported_cover': return t('audiobookWorkspace.errors.unsupported_cover')
@@ -332,6 +343,9 @@ async function onCreate() {
   const body: CreateAudiobookRequest = { title: trimmedTitle, profile_id: profileId.value, chapters: payloadChapters }
   if (author.value.trim()) body.author = author.value.trim()
   if (speech.length) body.pronunciations = speech
+  const cast = castMembers(castDraft.value)
+  if (!cast) { error.value = t('audiobookWorkspace.errors.invalid_cast_name'); return }
+  if (cast.length) body.cast = cast
   const controller = new AbortController()
   createController = controller
   const generation = selectionGeneration
@@ -341,12 +355,13 @@ async function onCreate() {
   try {
     const reviewedDraft = await saveReviewedDraft(controller.signal)
     if (!isCurrent()) return
-    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal) : await audiobooksApi.createAudiobook(body, controller.signal)
+    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal, ...(cast.length ? [cast] as [typeof cast] : [])) : await audiobooksApi.createAudiobook(body, controller.signal)
     if (!isCurrent()) return
     upsertBook(created.book)
     title.value = ''
     author.value = ''
     pronunciations.value = []
+    castDraft.value = []
     chapters.value = [newChapter(1)]
     importedDraft.value = null; preview.value = null
     notice.value = t('audiobooks.created')
@@ -370,6 +385,34 @@ function exportNote(note: string | undefined): string {
   if (!note) return ''
   if (note.includes('export_codec_missing')) return t('audiobookWorkspace.codecMissing')
   return t('audiobookWorkspace.exportFailed')
+}
+async function onSaveCast() {
+  const book = selectedBook.value
+  const cast = castMembers(bookCast.value)
+  if (!book || !cast || savingCast.value || book.status === 'queued' || book.status === 'running') return
+  savingCast.value = true; error.value = ''; notice.value = ''
+  try {
+    const updated = await audiobooksApi.setAudiobookCast(book.id, cast)
+    if (!mounted) return
+    upsertBook(updated)
+    bookCast.value = (updated.cast ?? []).map(item => ({ name: item.name, profile_id: item.profile_id }))
+    notice.value = t('audiobookWorkspace.castSaved')
+  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.invalid_cast_name') }
+  finally { if (mounted) savingCast.value = false }
+}
+async function onSaveLines(job: AudiobookJob) {
+  const book = selectedBook.value
+  const textValue = (chapterTexts.value[job.id] ?? '').trim()
+  if (!book || !textValue || savingLineId.value || book.status === 'queued' || book.status === 'running') return
+  savingLineId.value = job.id; error.value = ''; notice.value = ''
+  try {
+    const updated = await audiobooksApi.setAudiobookChapterText(book.id, job.chapter_index, textValue)
+    if (!mounted) return
+    upsertBook(updated)
+    chapterTexts.value = { ...chapterTexts.value, [job.id]: textValue }
+    notice.value = t('audiobookWorkspace.linesSaved')
+  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.emptyChapter') }
+  finally { if (mounted) savingLineId.value = '' }
 }
 async function onSaveSpeech() {
   const book = selectedBook.value
@@ -412,18 +455,40 @@ async function onCover(event: Event) {
     notice.value = t('audiobookWorkspace.coverSaved')
   } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.unsupported_cover') }
 }
+function castMembers(rows: CastRow[]): CastRow[] | null {
+  const cleaned = rows.map(row => ({ name: row.name.trim(), profile_id: row.profile_id })).filter(row => row.name || row.profile_id)
+  if (cleaned.some(row => !row.name || !row.profile_id || row.name.includes(':') || row.name.length > 40)) return null
+  const names = cleaned.map(row => row.name.toLowerCase())
+  if (new Set(names).size !== names.length || cleaned.length > 16) return null
+  return cleaned
+}
+function labeledLineCount(source: string, rows: CastRow[]): number {
+  const names = new Set(rows.map(row => row.name.trim().toLowerCase()).filter(Boolean))
+  if (!names.size || !source.trim()) return 0
+  let count = 0
+  for (const line of source.split('\n')) {
+    const match = /^([^:]{1,40}):/.exec(line.trim())
+    if (match && names.has(match[1].trim().toLowerCase())) count += 1
+  }
+  return count
+}
 watch(selectedBookId, () => {
   const book = books.value.find(item => item.id === selectedBookId.value)
   bookSpeech.value = (book?.pronunciations ?? []).map(item => ({ written: item.written, spoken: item.spoken }))
   bookLanguage.value = book?.language ?? ''
   chapterLanguages.value = {}
+  bookCast.value = (book?.cast ?? []).map(item => ({ name: item.name, profile_id: item.profile_id }))
+  chapterTexts.value = {}
 })
 watch(jobs, rows => {
   const next = { ...chapterLanguages.value }
+  const texts = { ...chapterTexts.value }
   for (const job of rows) {
     if (!(job.id in next)) next[job.id] = job.language ?? ''
+    if (!(job.id in texts)) texts[job.id] = job.chapter_text ?? ''
   }
   chapterLanguages.value = next
+  chapterTexts.value = texts
 })
 async function onSaveLanguages() {
   const book = selectedBook.value
@@ -541,6 +606,19 @@ onBeforeUnmount(() => {
           <p v-if="loadingProfiles" role="status" class="text-xs text-text-dim">{{ t('audiobookWorkspace.loadingNarrators') }}</p>
           <p v-if="!narrators.length" class="text-sm text-text-dim">{{ t('audiobookWorkspace.noProfiles') }}</p>
           <p v-else-if="profileId && !draftNarratorAvailable" class="text-sm text-status-failed">{{ t('audiobookWorkspace.errors.profileMissing') }}</p>
+          <div class="space-y-2 rounded-lg border border-border bg-panel-2 p-3">
+            <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.cast') }}</p>
+            <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.castHint') }}</p>
+            <div v-for="(row, index) in castDraft" :key="index" class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+              <input v-model="row.name" type="text" maxlength="40" :aria-label="t('audiobookWorkspace.castName', { number: index + 1 })" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.castName', { number: index + 1 })">
+              <select v-model="row.profile_id" :aria-label="t('audiobookWorkspace.castVoice', { number: index + 1 })" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text">
+                <option disabled value="">{{ t('audiobooks.profilePlaceholder') }}</option>
+                <option v-for="profile in narrators" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+              </select>
+              <button type="button" class="min-h-11 rounded-md px-2 text-xs text-text-dim" :aria-label="t('audiobookWorkspace.removeCast', { number: index + 1 })" @click="castDraft.splice(index, 1)">{{ t('common.delete') }}</button>
+            </div>
+            <button type="button" class="min-h-11 rounded-md px-2 text-xs text-text-dim hover:text-text hover:underline" :disabled="castDraft.length >= 16" @click="castDraft.push({ name: '', profile_id: profileId })">{{ t('audiobookWorkspace.addCast') }}</button>
+          </div>
           <div class="flex flex-wrap items-center gap-3"><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="previewing || !draftNarratorAvailable || !includedChapters[0]?.text.trim()" @click="onPreview">{{ previewing ? t('audiobookWorkspace.previewing') : t('audiobookWorkspace.preview') }}</button><span v-if="preview?.status === 'mock_completed'" class="text-xs text-status-queued">{{ t('audiobookWorkspace.mockPreview') }}</span></div>
           <p v-if="previewError" role="alert" class="text-sm text-status-failed">{{ previewError }}</p>
           <audio v-if="previewUrl" ref="audioPlayers" :src="previewUrl" controls preload="none" :aria-label="t('audiobookWorkspace.previewReady')" class="h-10 w-full" />
@@ -571,6 +649,7 @@ onBeforeUnmount(() => {
                 <textarea v-model="chapter.text" rows="5" maxlength="20000" :required="chapter.included" :disabled="!chapter.included" :aria-label="t('audiobookWorkspace.chapterText', { number: index + 1 })" class="w-full rounded-lg border border-border bg-panel p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" :placeholder="t('audiobooks.chapterTextPlaceholder')" />
               </label>
               <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.characters', { count: chapter.text.length }) }}</p>
+              <p v-if="labeledLineCount(chapter.text, castDraft)" class="text-xs text-text-dim">{{ t('audiobookWorkspace.castLines', { count: labeledLineCount(chapter.text, castDraft) }) }}</p>
             </div>
             <button type="button" class="min-h-11 rounded-md px-2 text-xs font-medium text-text-dim hover:text-text hover:underline focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-40" :disabled="chapters.length >= 100" @click="addChapter">{{ t('audiobooks.addChapter') }}</button>
             <p v-if="chapters.length <= 1" id="audiobook-chapter-minimum" class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterMinimum') }}</p>
@@ -606,6 +685,22 @@ onBeforeUnmount(() => {
         <p v-if="selectedBook.status !== 'done'" class="text-xs text-text-dim">{{ t('audiobookWorkspace.exportHint') }}</p>
         <p v-if="exportNote(selectedBook.export_note)" class="text-xs text-status-queued">{{ exportNote(selectedBook.export_note) }}</p>
         <label v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" class="flex min-h-11 flex-wrap items-center gap-3 text-sm text-text"><span>{{ t('audiobookWorkspace.cover') }}</span><input type="file" accept="image/png,image/jpeg" :aria-label="t('audiobookWorkspace.cover')" class="text-xs" @change="onCover"></label>
+        <div class="space-y-2 rounded-lg border border-border p-3">
+          <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.cast') }}</p>
+          <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.castHint') }}</p>
+          <div v-for="(row, index) in bookCast" :key="index" class="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
+            <input v-model="row.name" type="text" maxlength="40" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :aria-label="t('audiobookWorkspace.castName', { number: index + 1 })" class="min-h-11 rounded-lg border border-border bg-panel-2 px-3 text-sm text-text">
+            <select v-model="row.profile_id" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :aria-label="t('audiobookWorkspace.castVoice', { number: index + 1 })" class="min-h-11 rounded-lg border border-border bg-panel-2 px-3 text-sm text-text">
+              <option v-if="row.profile_id && !narrators.some(profile => profile.id === row.profile_id)" disabled :value="row.profile_id">{{ t('audiobookWorkspace.unavailableNarrator') }}</option>
+              <option v-for="profile in narrators" :key="profile.id" :value="profile.id">{{ profile.name }}</option>
+            </select>
+            <button type="button" class="min-h-11 text-xs text-text-dim" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :aria-label="t('audiobookWorkspace.removeCast', { number: index + 1 })" @click="bookCast.splice(index, 1)">{{ t('common.delete') }}</button>
+          </div>
+          <div class="flex flex-wrap gap-3">
+            <button type="button" class="min-h-11 text-xs text-text-dim hover:underline" :disabled="bookCast.length >= 16 || selectedBook.status === 'queued' || selectedBook.status === 'running'" @click="bookCast.push({ name: '', profile_id: '' })">{{ t('audiobookWorkspace.addCast') }}</button>
+            <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingCast || selectedBook.status === 'queued' || selectedBook.status === 'running'" @click="onSaveCast">{{ t('audiobookWorkspace.saveCast') }}</button>
+          </div>
+        </div>
         <div v-if="selectedBook.status !== 'queued' && selectedBook.status !== 'running'" class="space-y-2 rounded-lg border border-border p-3">
           <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.pronunciations') }}</p>
           <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pronunciationHint') }}</p>
@@ -642,6 +737,9 @@ onBeforeUnmount(() => {
                 <span data-language-chip class="rounded-full border border-border px-2 py-0.5 text-xs text-text-dim">{{ (chapterLanguages[job.id] || job.language) || t('audiobookWorkspace.languageMissing') }} · {{ job.language_ready ? t('audiobookWorkspace.languageReady') : t('audiobookWorkspace.languageNotReady') }}</span>
               </div>
               <label class="mt-2 block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 }) }}</span><input v-model="chapterLanguages[job.id]" maxlength="35" type="text" :aria-label="t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 })" class="min-h-11 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.languagePlaceholder')"></label>
+              <label class="mt-2 block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLines', { number: job.chapter_index + 1 }) }}</span><textarea v-model="chapterTexts[job.id]" rows="4" maxlength="20000" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :aria-label="t('audiobookWorkspace.chapterLines', { number: job.chapter_index + 1 })" class="w-full rounded-lg border border-border bg-panel p-2 text-sm text-text disabled:opacity-50"></textarea></label>
+              <p v-if="labeledLineCount(chapterTexts[job.id] || '', bookCast)" class="text-xs text-text-dim">{{ t('audiobookWorkspace.castLines', { count: labeledLineCount(chapterTexts[job.id] || '', bookCast) }) }}</p>
+              <button v-if="selectedBook.status !== 'queued' && selectedBook.status !== 'running'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingLineId === job.id" @click="onSaveLines(job)">{{ t('audiobookWorkspace.saveLines') }}</button>
               <p v-if="chapterHint(job)" class="mt-2 text-xs text-text-dim">{{ chapterHint(job) }}</p>
               <p v-if="job.total_sections" class="mt-2 text-xs text-text-dim">{{ t('audiobookWorkspace.sections', { done: job.completed_sections ?? 0, total: job.total_sections }) }}</p>
               <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>

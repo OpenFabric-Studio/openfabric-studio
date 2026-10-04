@@ -170,7 +170,7 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
             identifier = self.create()
         job = audiobooks.list_jobs(book_id=identifier)[0]
         with audiobooks._LOCK, audiobooks._connect() as connection:
-            connection.execute("INSERT INTO audiobook_sections VALUES (?, 0, 'changed', ?, 'done', NULL)", (job.id, '0' * 64))
+            connection.execute("INSERT INTO audiobook_sections (job_id, section_index, section_text, text_sha256, status, output_path) VALUES (?, 0, 'changed', ?, 'done', NULL)", (job.id, '0' * 64))
         await asyncio.to_thread(audiobook_narration.run_sync, identifier)
         self.assertEqual(audiobooks.get_book(identifier).status, "failed")
         self.assertEqual(audiobooks.list_jobs(book_id=identifier)[0].detail, "narration_sections_changed")

@@ -8,6 +8,21 @@ from . import audiobooks
 from .audiobook_cue import render_cue
 
 
+def speaker_note(spans: list[dict[str, object]]) -> str:
+    changes: list[tuple[str, int]] = []
+    for span in spans:
+        name = str(span.get("speaker") or "").replace("\t", " ").replace("\n", " ")
+        start = span.get("start_ms")
+        if not name or not isinstance(start, int):
+            continue
+        if changes and changes[-1][0] == name:
+            continue
+        changes.append((name, start))
+    if len(changes) <= 1:
+        return ""
+    return "\tspeakers " + ";".join(f"{name} {start}" for name, start in changes)
+
+
 def _safe(value: str) -> str:
     cleaned = "".join(char if char.isalnum() or char in "-_ " else "_" for char in value).strip()
     return cleaned or "audiobook"
@@ -20,6 +35,7 @@ def write_collection(book_id: str) -> Path:
     jobs = audiobooks.list_jobs(book_id=book_id)
     root = audiobooks.book_dir(book_id)
     chapters: list[tuple[str, Path]] = []
+    chapter_speakers: list[list[dict[str, object]]] = []
     lines = [
         "OpenFabric audiobook collection",
         f"title: {book.title}",
@@ -35,12 +51,13 @@ def write_collection(book_id: str) -> Path:
             continue
         name = path.name
         chapters.append((job.chapter_title, path))
+        chapter_speakers.append(audiobooks.cast_spans(job.id))
         spans = audiobooks.pause_spans(job.id)
         span_text = ",".join(f"{item['start_ms']}-{item['end_ms']}" for item in spans)
         ready = "ready" if job.language_ready else "not_ready"
-        lines.append(f"{job.chapter_index + 1}\t{job.chapter_title}\t{job.language}\t{ready}\t{name}\t{span_text}")
+        lines.append(f"{job.chapter_index + 1}\t{job.chapter_title}\t{job.language}\t{ready}\t{name}\t{span_text}{speaker_note(chapter_speakers[-1])}")
     manifest = "\n".join(lines) + "\n"
-    cue = render_cue(book.title, book.author, chapters)
+    cue = render_cue(book.title, book.author, chapters, speakers=chapter_speakers)
     target = root / "collection.zip"
     temporary = root / ".collection.zip.partial"
     try:
@@ -63,7 +80,7 @@ def cue_text(book_id: str) -> str:
         raise audiobooks.AudiobookError("export_not_ready", 404)
     jobs = audiobooks.list_jobs(book_id=book_id)
     chapters = [(job.chapter_title, audiobooks.chapter_audio_path(book_id, job.chapter_index)) for job in jobs]
-    return render_cue(book.title, book.author, chapters)
+    return render_cue(book.title, book.author, chapters, speakers=[audiobooks.cast_spans(job.id) for job in jobs])
 
 
 def download_name(book_id: str, suffix: str) -> str:
