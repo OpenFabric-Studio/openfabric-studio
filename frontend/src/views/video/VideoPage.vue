@@ -5,6 +5,8 @@ import { useVideoWorkspace } from './useVideoWorkspace'
 import VideoPreviewPlayer from './VideoPreviewPlayer.vue'
 import VideoProjectLibrary from './VideoProjectLibrary.vue'
 import VideoDirectionPanel from './VideoDirectionPanel.vue'
+import VideoSoundtrackPanel from './VideoSoundtrackPanel.vue'
+import VideoCharacterPanel from './VideoCharacterPanel.vue'
 import { videoWorkspaceSteps, videoClipLengths, changeShotLength, splitShot, duplicateShot, moveShot, newVideoId, frameTime, shotProblem, characterLockIssue, type VideoWorkspaceStep, type VideoClipLength } from './videoWorkspace'
 import { videoErrorText, videoRequestError, deleteVideo, isVideoActive } from '../../api/videos'
 import type { VideoProjectJob, VideoMarker } from '../../api/contracts'
@@ -15,7 +17,7 @@ import { notePhasePace, phaseRemaining, type VideoPhasePace } from './videoJobTi
 const { t } = useI18n()
 const { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
   selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-  save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, editShots, undo, addShot } = useVideoWorkspace()
+  save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, editShots, undo, addShot } = useVideoWorkspace()
 const ripple = ref(true)
 const audio = ref<HTMLAudioElement | null>(null)
 const position = ref(0)
@@ -200,12 +202,6 @@ function seek(seconds: number) { if (audio.value) { audio.value.currentTime = se
 function addMarker() {
   if (draft.value) draft.value.markers.push({ id: newVideoId(), time_sec: frameTime(position.value), kind: 'manual', label: t('videoWorkspace.manualMarker'), confidence: 1 })
 }
-function speechChosen(event: Event) {
-  if (!(event.target instanceof HTMLInputElement)) return
-  const file = event.target.files?.[0]
-  event.target.value = ''
-  if (file) void uploadSpeech(file)
-}
 function addOverlay() {
   if (draft.value && project.value) draft.value.overlays.push({ id: newVideoId(), kind: 'title', text: project.value.track_title || project.value.name,
     start_sec: 0, end_sec: Math.min(4, project.value.duration_sec), position: 'bottom', font_size: 36, color: '#ffffff' })
@@ -304,7 +300,11 @@ onBeforeUnmount(stopSource)
           <div class="video-actions"><button type="button" class="primary" @click="changeStep('direction', true)">{{ t('videoWorkspace.continue') }}</button><button type="button" :disabled="acting || saving" @click="startNewProject">{{ t('videoExperience.newProject') }}</button></div>
         </div>
       </template>
-      <VideoDirectionPanel v-else-if="draft && project && step === 'direction'" v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @duplicate="duplicate" />
+      <template v-else-if="draft && project && step === 'direction'">
+        <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @duplicate="duplicate" />
+        <VideoSoundtrackPanel v-if="pictureProject" :project="project" :draft="draft" :read-only="readOnly" @upload="uploadSpeech" @clear="clearSpeech" @speak="speakLine" />
+        <VideoCharacterPanel v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyCharacter" />
+      </template>
       <template v-else-if="draft && project && step === 'storyboard'">
 
         <div class="video-card space-y-3">
@@ -356,7 +356,7 @@ onBeforeUnmount(stopSource)
       <template v-else-if="draft && project && step === 'export'">
 <p class="text-sm font-medium text-text">{{ t('videoExperience.approvalProgress', { approved: approvalCount, total: draft.shots.length }) }}</p>
         <fieldset :disabled="readOnly" class="rounded-xl bg-panel p-4 space-y-4"><div class="grid gap-4 sm:grid-cols-2"><label>{{ t('videoWorkspace.aspect') }}<select v-model="draft.export_settings.aspect"><option value="landscape">16:9</option><option value="portrait">9:16</option><option value="square">1:1</option></select></label><label>{{ t('videoWorkspace.encodeQuality') }}<select v-model="draft.export_settings.quality"><option value="fast">{{ t('video.qualityFaster') }}</option><option value="standard">{{ t('video.qualityStandard') }}</option><option value="high">{{ t('videoWorkspace.high') }}</option></select></label></div><p class="text-xs text-text-dim">{{ reelProject && draft.export_settings.aspect === 'portrait' ? t('videoDirection.reelSizeHint') : pictureProject ? t('videoExperience.silentExport') : t('videoWorkspace.exportHint') }}</p>
-          <div v-if="pictureProject" data-talking-voice class="space-y-3 border-t border-border pt-4"><h3 class="font-semibold">{{ t('videoExperience.speechTitle') }}</h3><p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.speechHint') }}</p><label>{{ t('videoExperience.speechFile') }}<input data-speech-file type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" @change="speechChosen"></label><p v-if="project.speech_clip">{{ project.speech_clip.name }} · {{ clockText(project.speech_clip.duration_sec) }}</p><audio v-if="project.speech_clip" controls preload="none" class="w-full" :src="`/api/videos/projects/${project.id}/speech`" :aria-label="t('videoExperience.speechFile')"></audio><label class="inline-check"><input v-model="draft.export_settings.attach_speech" type="checkbox" :disabled="!project.speech_clip">{{ t('videoExperience.speechAttach') }}</label><p v-if="draft.export_settings.attach_speech && !project.speech_clip" role="alert" class="text-sm text-status-failed">{{ t('video.err.speech_missing') }}</p><button type="button" :disabled="!project.speech_clip" @click="clearSpeech">{{ t('videoExperience.speechClear') }}</button></div>
+          <div v-if="pictureProject" data-talking-voice class="space-y-3 border-t border-border pt-4"><h3 class="font-semibold">{{ t('videoExperience.speechTitle') }}</h3><p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.speechHint') }}</p><p v-if="project.speech_clip">{{ project.speech_clip.name }} · {{ clockText(project.speech_clip.duration_sec) }}</p><audio v-if="project.speech_clip" controls preload="none" class="w-full" :src="`/api/videos/projects/${project.id}/speech`" :aria-label="t('videoExperience.speechFile')"></audio><label class="inline-check"><input v-model="draft.export_settings.attach_speech" type="checkbox" :disabled="!project.speech_clip">{{ t('videoExperience.speechAttach') }}</label><p class="text-sm text-text-dim">{{ draft.export_settings.attach_speech && project.speech_clip ? t('videoExperience.soundtrackOn') : t('videoExperience.soundtrackOff') }}</p></div>
           <details class="video-secondary"><summary>{{ t('videoExperience.textOptions') }}</summary><div class="mt-4 space-y-4"><label class="inline-check"><input v-model="draft.export_settings.include_overlays" type="checkbox">{{ t('videoWorkspace.includeText') }}</label><div class="flex justify-between gap-2"><h3>{{ t('videoWorkspace.overlays') }}</h3><button :disabled="draft.overlays.length >= 100" @click="addOverlay">{{ t('videoWorkspace.addText') }}</button></div>
           <div v-for="overlay in draft.overlays" :key="overlay.id" class="space-y-2 rounded-lg bg-panel-2 p-3"><label>{{ t('videoWorkspace.text') }}<textarea v-model="overlay.text" rows="2" maxlength="500"></textarea></label><div class="grid gap-2 sm:grid-cols-4"><label>{{ t('video.start') }}<input v-model.number="overlay.start_sec" type="number" min="0" :max="project.duration_sec" step="0.1"></label><label>{{ t('videoWorkspace.end') }}<input v-model.number="overlay.end_sec" type="number" min="0" :max="project.duration_sec" step="0.1"></label><label>{{ t('videoWorkspace.position') }}<select v-model="overlay.position"><option value="top">{{ t('videoWorkspace.top') }}</option><option value="center">{{ t('videoWorkspace.center') }}</option><option value="bottom">{{ t('videoWorkspace.bottom') }}</option></select></label><label>{{ t('videoWorkspace.textSize') }}<input v-model.number="overlay.font_size" type="number" min="14" max="96"></label></div><label>{{ t('videoWorkspace.color') }}<input v-model="overlay.color" type="color"></label><button @click="draft.overlays = draft.overlays.filter((item) => item.id !== overlay.id)">{{ t('video.removeShot') }}</button></div>
           </div></details>

@@ -9,7 +9,7 @@ export const videoDirectionEn = {
   generatedReferences: 'Optional for generated scenes',
   stillHint: 'Add one still to guide the picture. It is used for every shot that does not name another image. No still means the shot is made from the prompt only. Audio is not sent to the model.',
   characterLock: 'Keep one character',
-  characterLockHint: 'One saved still is required on every shot, at a fixed high strength. This is image conditioning, not a trained face.',
+  characterLockHint: 'One saved still is required on every shot, at a fixed high strength. This is image conditioning. A saved character uses the same lock. It is not a trained video model.',
   characterMissing: 'A shot has no still. Character lock needs the same saved image on every shot.',
   characterMismatch: 'These shots use different stills. Character lock needs one image.',
   reelSizeHint: 'Reels are generated at 704×1280. This size stays fixed so the vertical frame is not a crop of a landscape picture.',

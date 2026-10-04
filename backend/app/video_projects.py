@@ -23,6 +23,8 @@ from .video_contracts import (
     VideoRenderRequest,
     VideoExportSettings,
     VideoSeconds,
+    VideoSpeechLineRequest,
+    ApplyVideoCharacterRequest,
 )
 from .video_media import tool, probe_media
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
@@ -967,7 +969,12 @@ async def _upload_speech(
                 bytes=size,
                 duration_sec=duration,
                 sha256=digest,
+                kind="upload",
             )
+            document.project.export_settings.attach_speech = True
+            document.project.warnings = [
+                item for item in document.project.warnings if item != "speech_mock"
+            ]
             document.project.file_url = ""
             document.project.poster_url = ""
 
@@ -991,6 +998,9 @@ def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
         document.speech_path = ""
         document.project.speech_clip = None
         document.project.export_settings.attach_speech = False
+        document.project.warnings = [
+            item for item in document.project.warnings if item != "speech_mock"
+        ]
         document.project.file_url = ""
         document.project.poster_url = ""
 
@@ -998,3 +1008,160 @@ def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
     for old in removed:
         artifact(project_id, old).unlink(missing_ok=True)
     return result
+
+
+def _drop_speech_warning(project: VideoProject, code: str) -> None:
+    project.warnings = [item for item in project.warnings if item != code]
+
+
+async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProject:
+    """Synthesize one talking line into the export track. Not a model input."""
+    from . import speech_clone, video_characters, voice_profiles
+
+    text = body.text.strip()
+    if not text:
+        raise VideoProjectError("text_required")
+    profile = video_characters.require_voice(body.profile_id)
+    with _lock:
+        ensure_open(project_id)
+        document = load(project_id)
+        if document.project.track_id is not None:
+            raise VideoProjectError("speech_picture_only")
+        if body.revision != document.project.revision:
+            raise VideoProjectError("revision_conflict")
+        if document.project.job is not None and document.project.job.status in {"queued", "running"}:
+            raise VideoProjectError("busy")
+    speech_id = uuid.uuid4().hex
+    root = project_dir(project_id)
+    temporary = root / f".{speech_id}.line.wav"
+    output = artifact(project_id, f"speech/{speech_id}.wav")
+    proc: asyncio.subprocess.Process | None = None
+    published = False
+    removed: list[str] = []
+    try:
+        try:
+            outcome = await asyncio.to_thread(
+                speech_clone.synthesize_to_path,
+                profile_id=profile.id,
+                text=text,
+                output_path=temporary,
+                require_consent=True,
+            )
+        except voice_profiles.VoiceProfileError as exc:
+            code = "voice_missing" if exc.code == "profile_not_found" else exc.code
+            raise VideoProjectError(code) from exc
+        if outcome.status not in {"completed", "mock_completed"} or outcome.output_path is None:
+            code = (
+                "speech_engine_missing"
+                if outcome.status in {"engine_not_installed", "api_unavailable"}
+                else "speech_failed"
+            )
+            raise VideoProjectError(code)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        proc = await spawn_process(
+            tool("ffmpeg"),
+            "-v", "error", "-y", "-i", str(temporary),
+            "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(output),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await communicate_process(proc, 120)
+        if proc.returncode != 0 or not output.is_file():
+            raise VideoProjectError("speech_failed")
+        import wave
+
+        with wave.open(str(output), "rb") as decoded:
+            duration = decoded.getnframes() / decoded.getframerate()
+        size = output.stat().st_size
+        if size > 80 * 1024 * 1024 or not 0.2 <= duration <= 600:
+            raise VideoProjectError("invalid_speech")
+        digest = file_hash(output)
+        relative = str(output.relative_to(root))
+        mock = outcome.status == "mock_completed"
+
+        def change(stored: StoredVideoProject) -> None:
+            if stored.project.track_id is not None:
+                raise VideoProjectError("speech_picture_only")
+            if stored.speech_path and stored.speech_path != relative:
+                removed.append(stored.speech_path)
+            stored.speech_path = relative
+            stored.project.speech_clip = VideoSpeechClip(
+                id=speech_id,
+                name=f"{profile.name}.wav"[:160],
+                bytes=size,
+                duration_sec=duration,
+                sha256=digest,
+                kind="voice",
+                voice_profile_id=profile.id,
+                line=text[:500],
+            )
+            stored.project.export_settings.attach_speech = True
+            _drop_speech_warning(stored.project, "speech_mock")
+            if mock:
+                stored.project.warnings = list(dict.fromkeys([*stored.project.warnings, "speech_mock"]))
+            stored.project.file_url = ""
+            stored.project.poster_url = ""
+
+        result = mutate(project_id, change, revision=body.revision)
+        published = True
+        for old in removed:
+            artifact(project_id, old).unlink(missing_ok=True)
+        return result
+    finally:
+        temporary.unlink(missing_ok=True)
+        if proc is not None:
+            await await_cleanup(kill_process_tree(proc))
+        if not published:
+            output.unlink(missing_ok=True)
+
+
+def apply_character(project_id: str, body: ApplyVideoCharacterRequest) -> VideoProject:
+    """Copy the character still onto every shot and turn on Keep one character."""
+    from . import video_characters
+
+    character = video_characters.get_character(body.character_id)
+    video_characters.require_voice(character.voice_profile_id)
+    if not character.consent_confirmed:
+        raise VideoProjectError("consent_required")
+    source = video_characters.still_file(character.id)
+    reference_id = uuid.uuid4().hex
+    relative = f"references/{reference_id}.png"
+    output = artifact(project_id, relative)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, output)
+    published = False
+    try:
+        size = output.stat().st_size
+        if size < 1 or size > 20 * 1024 * 1024:
+            raise VideoProjectError("reference_too_large")
+
+        def change(document: StoredVideoProject) -> None:
+            if document.project.track_id is not None:
+                raise VideoProjectError("character_picture_only")
+            if len(document.project.references) >= 6:
+                raise VideoProjectError("too_many_references")
+            document.reference_paths[reference_id] = relative
+            document.project.references.append(
+                VideoReference(
+                    id=reference_id,
+                    name=character.still_name,
+                    bytes=size,
+                    width=character.still_width,
+                    height=character.still_height,
+                    url=f"/api/videos/projects/{project_id}/references/{reference_id}",
+                )
+            )
+            for shot in document.project.shots:
+                shot.reference_id = reference_id
+                shot.reference_strength = CHARACTER_LOCK_STRENGTH
+            document.project.character_lock = True
+            document.project.character_id = character.id
+            document.project.file_url = ""
+            document.project.poster_url = ""
+
+        result = mutate(project_id, change, revision=body.revision)
+        published = True
+        return result
+    finally:
+        if not published:
+            output.unlink(missing_ok=True)

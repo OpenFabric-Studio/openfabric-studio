@@ -9,9 +9,11 @@ import { applyStatus, isVoiceActive, listVoices } from './voices'
 import { parseVideosResponse, parseVideoActivityResponse, parseVideoPlanResponse, parseVideoJobResponse } from './contracts'
 import type { VideoJobResponse, VideoPlanResponse, VideoShot as BackendVideoShot, CreateVideoRequest, PlanRequest } from './contracts'
 import { parseVideoReadinessResponse, parseVideoProject, parseVideoProjectsResponse, parseCreateVideoProjectRequest, parseUpdateVideoProjectRequest,
-  parseVideoRenderRequest, parseVideoRevisionRequest, parseApproveVideoVariantRequest, parseVideoExportRequest } from './contracts'
+  parseVideoRenderRequest, parseVideoRevisionRequest, parseApproveVideoVariantRequest, parseVideoExportRequest,
+  parseVideoSpeechLineRequest, parseApplyVideoCharacterRequest, parseVideoCharacter, parseVideoCharactersResponse } from './contracts'
 import type { VideoReadinessResponse, VideoProject, VideoProjectsResponse, CreateVideoProjectRequest, UpdateVideoProjectRequest,
-  VideoRenderRequest, VideoRevisionRequest, ApproveVideoVariantRequest, VideoExportRequest } from './contracts'
+  VideoRenderRequest, VideoRevisionRequest, ApproveVideoVariantRequest, VideoExportRequest, VideoSpeechLineRequest,
+  ApplyVideoCharacterRequest, VideoCharacter, VideoCharactersResponse } from './contracts'
 
 export type VideoJob = VideoJobResponse
 export type VideoStatus = VideoJob['status']
@@ -181,4 +183,25 @@ export async function exportVideoProject(id: string, body: VideoExportRequest, s
 
 export async function deleteVideoProject(id: string, signal?: AbortSignal): Promise<void> {
   await apiFetch(projectPath(id), { method: 'DELETE', signal })
+}
+
+export function speakVideoLine(id: string, body: VideoSpeechLineRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'speech/line', parseVideoSpeechLineRequest(body), signal)
+}
+
+export function listVideoCharacters(signal?: AbortSignal): Promise<VideoCharactersResponse> {
+  return apiFetch('/api/videos/characters', { signal }, parseVideoCharactersResponse)
+}
+
+export async function createVideoCharacter(input: { name: string; voiceProfileId: string; consentConfirmed: boolean; still: File }, signal?: AbortSignal): Promise<VideoCharacter> {
+  const form = new FormData()
+  form.append('name', input.name)
+  form.append('voice_profile_id', input.voiceProfileId)
+  form.append('consent_confirmed', input.consentConfirmed ? 'true' : 'false')
+  form.append('file', input.still, input.still.name)
+  return apiFetch('/api/videos/characters', { method: 'POST', body: form, signal }, parseVideoCharacter)
+}
+
+export function applyVideoCharacter(id: string, body: ApplyVideoCharacterRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'character', parseApplyVideoCharacterRequest(body), signal)
 }

@@ -117,7 +117,7 @@ export function useVideoWorkspace() {
     error.value = ''
     selectedShotId.value = draft.value?.shots[0]?.id ?? ''
     selectedPreviewIds.value = selectedShotId.value ? [selectedShotId.value] : []
-    trackId.value = row.track_id
+    trackId.value = row.track_id ?? null
     undoStack.value = []
   }
   function accept(row: VideoProject, version: number, preserveDraft = false) {
@@ -312,6 +312,16 @@ export function useVideoWorkspace() {
     if (project.value?.track_id != null) return
     return action((row, signal) => api.clearVideoSpeech(row.id, { revision: row.revision }, signal))
   }
+  function speakLine(profileId: string, text: string) {
+    if (project.value?.track_id != null) return
+    const line = text.trim()
+    if (!/^[0-9a-f]{32}$/.test(profileId) || !line) { error.value = 'text_required'; return }
+    return action((row, signal) => api.speakVideoLine(row.id, { revision: row.revision, profile_id: profileId, text: line }, signal))
+  }
+  function applyCharacter(characterId: string) {
+    if (project.value?.track_id != null) return
+    return action((row, signal) => api.applyVideoCharacter(row.id, { revision: row.revision, character_id: characterId }, signal))
+  }
   function editShots(shots: VideoShotDraft[]) {
     if (!draft.value || readOnly.value) return
     undoStack.value.push(draft.value.shots.map((shot) => ({ ...shot })))
@@ -366,5 +376,5 @@ export function useVideoWorkspace() {
   onUnmounted(() => { alive = false; generation++; lifetime.abort(); actionController?.abort(); loop.stop(); if (clock !== undefined) clearInterval(clock); if (saveTimer !== undefined) clearTimeout(saveTimer) })
   return { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
     selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, editShots, undo, addShot }
+    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, editShots, undo, addShot }
 }

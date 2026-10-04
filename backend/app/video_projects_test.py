@@ -447,7 +447,7 @@ class PictureProjectTests(VideoProjectTests):
         self.assertEqual(strength, self.p.CHARACTER_LOCK_STRENGTH)
         self.p.ensure_character_lock(project)
 
-    async def test_speech_clip_attaches_without_becoming_the_default_soundtrack(self) -> None:
+    async def test_speech_clip_is_stored_and_can_be_cleared(self) -> None:
         from fastapi import UploadFile
         from app.video_contracts import CreateVideoProjectRequest, VideoRevisionRequest
 
@@ -460,7 +460,8 @@ class PictureProjectTests(VideoProjectTests):
         self.assertIsNotNone(project.speech_clip)
         assert project.speech_clip is not None
         self.assertGreater(project.speech_clip.duration_sec, 1)
-        self.assertFalse(project.export_settings.attach_speech)
+        self.assertTrue(project.export_settings.attach_speech)
+        self.assertEqual(project.speech_clip.kind, "upload")
         self.assertTrue(self.p.speech_file(project.id).is_file())
         cleared = self.p.clear_speech(
             project.id, VideoRevisionRequest(revision=project.revision)
@@ -468,3 +469,135 @@ class PictureProjectTests(VideoProjectTests):
         self.assertIsNone(cleared.speech_clip)
         with self.assertRaises(self.p.VideoProjectError):
             self.p.speech_file(project.id)
+
+
+    async def test_uploaded_speech_is_mixed_unless_the_export_stays_silent(self) -> None:
+        from fastapi import UploadFile
+        from app.video_contracts import CreateVideoProjectRequest, VideoExportSettings, UpdateVideoProjectRequest
+
+        project = await self.p.create(CreateVideoProjectRequest(name="Silent", duration_sec=8))
+        project = await self.p.upload_speech(
+            project.id,
+            project.revision,
+            UploadFile(io.BytesIO(self.audio.read_bytes()), filename="line.wav"),
+        )
+        assert project.speech_clip is not None
+        self.assertEqual(project.speech_clip.kind, "upload")
+        self.assertTrue(project.export_settings.attach_speech)
+        silent = self.p.update(
+            project.id,
+            UpdateVideoProjectRequest(
+                revision=project.revision,
+                export_settings=VideoExportSettings(attach_speech=False),
+            ),
+        )
+        self.assertFalse(silent.export_settings.attach_speech)
+        self.assertIsNotNone(silent.speech_clip)
+
+    async def test_spoken_line_uses_a_saved_voice_and_is_not_model_audio(self) -> None:
+        from app import speech_clone, voice_profiles
+        from app.video_contracts import CreateVideoProjectRequest, VideoSpeechLineRequest
+        from app.video_render import generation_audio
+
+        self.enterContext(patch.object(voice_profiles, "PROFILES_ROOT", self.root / "voice-profiles"))
+        profile = voice_profiles.create_profile(
+            name="Ada",
+            consent_confirmed=True,
+            audio_bytes=b"RIFF....WAVE",
+            filename="ref.wav",
+            notes="Reference.",
+        )
+
+        def fake_synth(**kwargs):
+            speech_clone._write_silent_wav(kwargs["output_path"], duration_s=0.4)
+            return speech_clone.SynthesisOutcome(
+                status="mock_completed", detail="mock", output_path=kwargs["output_path"]
+            )
+
+        song = await self.p.create(CreateVideoProjectRequest(track_id=1))
+        with patch("app.speech_clone.synthesize_to_path", side_effect=AssertionError("song")):
+            with self.assertRaises(self.p.VideoProjectError) as blocked:
+                await self.p.speak_line(
+                    song.id,
+                    VideoSpeechLineRequest(revision=song.revision, profile_id=profile.id, text="Hello"),
+                )
+        self.assertEqual(blocked.exception.code, "speech_picture_only")
+
+        project = await self.p.create(CreateVideoProjectRequest(name="Silent", duration_sec=8))
+        with patch("app.speech_clone.synthesize_to_path", side_effect=fake_synth):
+            spoken = await self.p.speak_line(
+                project.id,
+                VideoSpeechLineRequest(revision=project.revision, profile_id=profile.id, text="Hello there"),
+            )
+        assert spoken.speech_clip is not None
+        self.assertEqual(spoken.speech_clip.kind, "voice")
+        self.assertEqual(spoken.speech_clip.voice_profile_id, profile.id)
+        self.assertEqual(spoken.speech_clip.line, "Hello there")
+        self.assertTrue(spoken.export_settings.attach_speech)
+        self.assertIn("speech_mock", spoken.warnings)
+        self.assertIsNone(generation_audio(spoken, self.p.speech_file(project.id)))
+
+    async def test_character_record_locks_one_still_and_keeps_song_projects_alone(self) -> None:
+        from fastapi import UploadFile
+        from app import video_characters, voice_profiles
+        from app.video_contracts import (
+            ApplyVideoCharacterRequest,
+            CreateVideoProjectRequest,
+            UpdateVideoProjectRequest,
+            VideoShotDraft,
+        )
+
+        self.enterContext(patch.object(voice_profiles, "PROFILES_ROOT", self.root / "voice-profiles"))
+        self.enterContext(patch.object(video_characters, "DATA_DIR", self.root))
+        profile = voice_profiles.create_profile(
+            name="Ada",
+            consent_confirmed=True,
+            audio_bytes=b"RIFF....WAVE",
+            filename="ref.wav",
+            notes="Reference.",
+        )
+        still = self.root / "face.png"
+        subprocess.run(
+            [shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=32x32", "-frames:v", "1", str(still)],
+            check=True,
+        )
+        with self.assertRaises(self.p.VideoProjectError) as denied:
+            await video_characters.create_character(
+                name="Ada",
+                voice_profile_id=profile.id,
+                consent_confirmed=False,
+                upload=UploadFile(io.BytesIO(still.read_bytes()), filename="face.png"),
+            )
+        self.assertEqual(denied.exception.code, "consent_required")
+        character = await video_characters.create_character(
+            name="Ada",
+            voice_profile_id=profile.id,
+            consent_confirmed=True,
+            upload=UploadFile(io.BytesIO(still.read_bytes()), filename="face.png"),
+        )
+        self.assertEqual(character.look, "locked_still")
+        self.assertTrue(character.voice_ready)
+        self.assertTrue(video_characters.still_file(character.id).is_file())
+
+        song = await self.p.create(CreateVideoProjectRequest(track_id=1))
+        with self.assertRaises(self.p.VideoProjectError) as song_block:
+            self.p.apply_character(
+                song.id, ApplyVideoCharacterRequest(revision=song.revision, character_id=character.id)
+            )
+        self.assertEqual(song_block.exception.code, "character_picture_only")
+
+        project = await self.p.create(CreateVideoProjectRequest(name="Silent", duration_sec=8))
+        shot = VideoShotDraft(id="b" * 32, start_sec=0, seconds=4, prompt="A person walks.")
+        project = self.p.update(
+            project.id, UpdateVideoProjectRequest(revision=project.revision, shots=[shot])
+        )
+        applied = self.p.apply_character(
+            project.id, ApplyVideoCharacterRequest(revision=project.revision, character_id=character.id)
+        )
+        self.assertTrue(applied.character_lock)
+        self.assertEqual(applied.character_id, character.id)
+        self.assertEqual(applied.shots[0].reference_id, applied.references[0].id)
+        still_id, strength = self.p.effective_still(applied, applied.shots[0])
+        self.assertEqual(still_id, applied.references[0].id)
+        self.assertEqual(strength, self.p.CHARACTER_LOCK_STRENGTH)
+        self.p.ensure_character_lock(applied)

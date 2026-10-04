@@ -95,6 +95,11 @@ export type ApplyStatusResponse = {
   "job_progress"?: (VoiceJobProgress | null)
 }
 
+export type ApplyVideoCharacterRequest = {
+  "revision": number
+  "character_id": string
+}
+
 export type ApplyVoiceRequest = {
   "voice_id": string
   "track_id": number
@@ -990,6 +995,26 @@ export type VideoActivityResponse = {
   "busy": boolean
 }
 
+export type VideoCharacter = {
+  "id": string
+  "name": string
+  "voice_profile_id": string
+  "voice_name": string
+  "voice_ready"?: boolean
+  "still_name": string
+  "still_width": number
+  "still_height": number
+  "still_url": string
+  "consent_confirmed": boolean
+  "look"?: "locked_still"
+  "created_at": string
+  "updated_at": string
+}
+
+export type VideoCharactersResponse = {
+  "characters": Array<VideoCharacter>
+}
+
 export type VideoEnergyPoint = {
   "time_sec": number
   "value": number
@@ -1088,6 +1113,7 @@ export type VideoProject = {
   "mode"?: "generated" | "cover" | "visualizer"
   "direction"?: string
   "character_lock"?: boolean
+  "character_id"?: (string | null)
   "seed"?: number
   "duration_sec": number
   "source_fingerprint": string
@@ -1215,6 +1241,15 @@ export type VideoSpeechClip = {
   "bytes": number
   "duration_sec": number
   "sha256": string
+  "kind"?: "upload" | "voice"
+  "voice_profile_id"?: (string | null)
+  "line"?: string
+}
+
+export type VideoSpeechLineRequest = {
+  "revision": number
+  "profile_id": string
+  "text": string
 }
 
 export type VideoVariant = {
@@ -3435,7 +3470,7 @@ const schemas = {
   },
   "VideoSpeechClip": {
     "additionalProperties": false,
-    "description": "An existing speech file attached for export. It never drives the picture.",
+    "description": "Speech mixed at export. It is never sent to the video model.",
     "properties": {
       "id": {
         "pattern": "^[0-9a-f]{32}$",
@@ -3462,6 +3497,34 @@ const schemas = {
       "sha256": {
         "pattern": "^[0-9a-f]{64}$",
         "title": "Sha256",
+        "type": "string"
+      },
+      "kind": {
+        "default": "upload",
+        "enum": [
+          "upload",
+          "voice"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "voice_profile_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Voice Profile Id"
+      },
+      "line": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Line",
         "type": "string"
       }
     },
@@ -3687,6 +3750,19 @@ const schemas = {
         "default": false,
         "title": "Character Lock",
         "type": "boolean"
+      },
+      "character_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Character Id"
       },
       "seed": {
         "default": 0,
@@ -4228,6 +4304,161 @@ const schemas = {
       "revision"
     ],
     "title": "VideoExportRequest",
+    "type": "object"
+  },
+  "VideoSpeechLineRequest": {
+    "additionalProperties": false,
+    "description": "Speak one line with a saved voice. The wav is an export track, not model audio.",
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 500,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "profile_id",
+      "text"
+    ],
+    "title": "VideoSpeechLineRequest",
+    "type": "object"
+  },
+  "VideoCharacter": {
+    "additionalProperties": false,
+    "description": "A local record: one consented voice plus one still. Not a video trainer.",
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 80,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "voice_profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Voice Profile Id",
+        "type": "string"
+      },
+      "voice_name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Voice Name",
+        "type": "string"
+      },
+      "voice_ready": {
+        "default": false,
+        "title": "Voice Ready",
+        "type": "boolean"
+      },
+      "still_name": {
+        "maxLength": 160,
+        "minLength": 1,
+        "title": "Still Name",
+        "type": "string"
+      },
+      "still_width": {
+        "maximum": 8192,
+        "minimum": 1,
+        "title": "Still Width",
+        "type": "integer"
+      },
+      "still_height": {
+        "maximum": 8192,
+        "minimum": 1,
+        "title": "Still Height",
+        "type": "integer"
+      },
+      "still_url": {
+        "title": "Still Url",
+        "type": "string"
+      },
+      "consent_confirmed": {
+        "title": "Consent Confirmed",
+        "type": "boolean"
+      },
+      "look": {
+        "const": "locked_still",
+        "default": "locked_still",
+        "title": "Look",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "voice_profile_id",
+      "voice_name",
+      "still_name",
+      "still_width",
+      "still_height",
+      "still_url",
+      "consent_confirmed",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "VideoCharacter",
+    "type": "object"
+  },
+  "VideoCharactersResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "characters": {
+        "items": {
+          "$ref": "#/$defs/VideoCharacter"
+        },
+        "title": "Characters",
+        "type": "array"
+      }
+    },
+    "required": [
+      "characters"
+    ],
+    "title": "VideoCharactersResponse",
+    "type": "object"
+  },
+  "ApplyVideoCharacterRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "character_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Character Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "character_id"
+    ],
+    "title": "ApplyVideoCharacterRequest",
     "type": "object"
   },
   "VideoEngineOption": {
@@ -11992,6 +12223,38 @@ function isVideoExportRequest(value: unknown): value is VideoExportRequest {
 }
 export function parseVideoExportRequest(value: unknown): VideoExportRequest {
   if (!isVideoExportRequest(value)) throw new TypeError("Invalid VideoExportRequest response")
+  return value
+}
+
+function isVideoSpeechLineRequest(value: unknown): value is VideoSpeechLineRequest {
+  return decodeSchema(schemas.VideoSpeechLineRequest, value, schemas)
+}
+export function parseVideoSpeechLineRequest(value: unknown): VideoSpeechLineRequest {
+  if (!isVideoSpeechLineRequest(value)) throw new TypeError("Invalid VideoSpeechLineRequest response")
+  return value
+}
+
+function isVideoCharacter(value: unknown): value is VideoCharacter {
+  return decodeSchema(schemas.VideoCharacter, value, schemas)
+}
+export function parseVideoCharacter(value: unknown): VideoCharacter {
+  if (!isVideoCharacter(value)) throw new TypeError("Invalid VideoCharacter response")
+  return value
+}
+
+function isVideoCharactersResponse(value: unknown): value is VideoCharactersResponse {
+  return decodeSchema(schemas.VideoCharactersResponse, value, schemas)
+}
+export function parseVideoCharactersResponse(value: unknown): VideoCharactersResponse {
+  if (!isVideoCharactersResponse(value)) throw new TypeError("Invalid VideoCharactersResponse response")
+  return value
+}
+
+function isApplyVideoCharacterRequest(value: unknown): value is ApplyVideoCharacterRequest {
+  return decodeSchema(schemas.ApplyVideoCharacterRequest, value, schemas)
+}
+export function parseApplyVideoCharacterRequest(value: unknown): ApplyVideoCharacterRequest {
+  if (!isApplyVideoCharacterRequest(value)) throw new TypeError("Invalid ApplyVideoCharacterRequest response")
   return value
 }
 

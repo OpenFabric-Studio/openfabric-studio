@@ -98,8 +98,13 @@ from ..video_contracts import (
     VideoRenderRequest,
     ApproveVideoVariantRequest,
     VideoExportRequest,
+    VideoSpeechLineRequest,
+    ApplyVideoCharacterRequest,
+    VideoCharacter,
+    VideoCharactersResponse,
     VideoReadinessResponse,
 )
+from .. import video_characters
 
 
 def _project_error(exc: projects.VideoProjectError) -> NoReturn:
@@ -122,7 +127,10 @@ def _project_error(exc: projects.VideoProjectError) -> NoReturn:
             "shot_not_found",
             "variant_not_found",
             "reference_not_found",
+            "voice_missing",
         }
+        else 403
+        if code == "consent_required"
         else 400
     )
     raise HTTPException(status_code=status, detail=code) from exc
@@ -220,6 +228,62 @@ async def upload_speech(
 def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
     try:
         return projects.clear_speech(project_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/speech/line", response_model=VideoProject)
+async def speak_project_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProject:
+    try:
+        return await projects.speak_line(project_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/characters", response_model=VideoCharactersResponse)
+def get_characters() -> VideoCharactersResponse:
+    return VideoCharactersResponse(characters=video_characters.list_characters())
+
+
+@router.post("/characters", response_model=VideoCharacter)
+async def create_character(
+    name: Annotated[str, Form(min_length=1, max_length=80)],
+    voice_profile_id: Annotated[str, Form(min_length=32, max_length=32)],
+    consent_confirmed: Annotated[bool, Form()],
+    file: Annotated[UploadFile, File()],
+) -> VideoCharacter:
+    try:
+        return await video_characters.create_character(
+            name=name,
+            voice_profile_id=voice_profile_id,
+            consent_confirmed=consent_confirmed,
+            upload=file,
+        )
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/characters/{character_id}/still")
+def character_still(character_id: str) -> FileResponse:
+    try:
+        return FileResponse(video_characters.still_file(character_id), media_type="image/png")
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.delete("/characters/{character_id}")
+def remove_character(character_id: str) -> dict[str, str]:
+    try:
+        video_characters.delete_character(character_id)
+        return {"deleted": character_id}
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/character", response_model=VideoProject)
+def apply_project_character(project_id: str, body: ApplyVideoCharacterRequest) -> VideoProject:
+    try:
+        return projects.apply_character(project_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 

@@ -155,13 +155,16 @@ class VideoReference(VideoContract):
 
 
 class VideoSpeechClip(VideoContract):
-    """An existing speech file attached for export. It never drives the picture."""
+    """Speech mixed at export. It is never sent to the video model."""
 
     id: VideoId
     name: str = Field(max_length=160)
     bytes: int = Field(ge=1, le=83886080)
     duration_sec: float = Field(gt=0, le=600)
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    kind: Literal["upload", "voice"] = "upload"
+    voice_profile_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    line: str = Field(default="", max_length=500)
 
 
 class VideoProjectJob(VideoContract):
@@ -190,6 +193,7 @@ class VideoProject(VideoContract):
     mode: VideoMode = "generated"
     direction: str = Field(default="", max_length=2000)
     character_lock: bool = False
+    character_id: VideoId | None = None
     seed: int = Field(default=0, ge=0, le=2147483647)
     duration_sec: float = Field(gt=0, le=21600)
     source_fingerprint: str
@@ -268,6 +272,39 @@ class VideoExportRequest(VideoRevisionRequest):
     settings: VideoExportSettings = Field(default_factory=VideoExportSettings)
 
 
+class VideoSpeechLineRequest(VideoRevisionRequest):
+    """Speak one line with a saved voice. The wav is an export track, not model audio."""
+
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    text: str = Field(min_length=1, max_length=500)
+
+
+class VideoCharacter(VideoContract):
+    """A local record: one consented voice plus one still. Not a video trainer."""
+
+    id: VideoId
+    name: str = Field(min_length=1, max_length=80)
+    voice_profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    voice_name: str = Field(min_length=1, max_length=120)
+    voice_ready: bool = False
+    still_name: str = Field(min_length=1, max_length=160)
+    still_width: int = Field(ge=1, le=8192)
+    still_height: int = Field(ge=1, le=8192)
+    still_url: str
+    consent_confirmed: bool
+    look: Literal["locked_still"] = "locked_still"
+    created_at: str
+    updated_at: str
+
+
+class VideoCharactersResponse(VideoContract):
+    characters: list[VideoCharacter]
+
+
+class ApplyVideoCharacterRequest(VideoRevisionRequest):
+    character_id: VideoId
+
+
 class VideoEngineOption(VideoContract):
     id: Literal["ltx23", "ltx25"]
     name: str
@@ -300,6 +337,10 @@ VIDEO_CLIENT_MODELS: list[type[BaseModel]] = [
     VideoRenderRequest,
     ApproveVideoVariantRequest,
     VideoExportRequest,
+    VideoSpeechLineRequest,
+    VideoCharacter,
+    VideoCharactersResponse,
+    ApplyVideoCharacterRequest,
     VideoSongAnalysis,
     VideoReadinessResponse,
 ]
