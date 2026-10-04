@@ -15,8 +15,8 @@ let alive = true, generation = 0, controller: AbortController | null = null
 const steps = ['computer', 'features', 'review', 'install']
 const groups: { label: string; ids: ModuleId[] }[] = [
   { label: 'music', ids: ['ace_step', 'yue2'] },
-  { label: 'voices', ids: ['speech', 'singing', 'separation'] },
-  { label: 'videoTools', ids: ['video', 'media', 'transcription', 'source_import', 'ebooks'] },
+  { label: 'voices', ids: ['speech', 'singing', 'separation', 'kokoro', 'chatterbox', 'rvc'] },
+  { label: 'videoTools', ids: ['video', 'wan22', 'media', 'transcription', 'source_import', 'ebooks'] },
 ]
 const modules = computed(() => store.inventory?.modules ?? [])
 const route = inject(routeLocationKey, undefined)

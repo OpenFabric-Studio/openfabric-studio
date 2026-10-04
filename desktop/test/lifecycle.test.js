@@ -26,4 +26,9 @@ test('fixed optional setup wrappers preserve operator flags and the video CLI co
   assert.match(video.args[0], /setup_video\.py$/);
   assert.deepEqual(video.args.slice(1), ['--preflight', '--pack', 'ltx25']);
   assert.throws(() => setupCommand('/repo', 'arbitrary-command', [], { PYTHON_BIN: '/python' }), /Unsupported/);
+  const kokoro = setupCommand('/repo', 'kokoro', [], { PYTHON_BIN: '/python' });
+  assert.match(kokoro.args[0], /setup_modules\.py$/);
+  assert.deepEqual(kokoro.args.slice(1), ['--feature', 'kokoro', '--install']);
+  const wan = setupCommand('/repo', 'wan22', ['--download-models'], { PYTHON_BIN: '/python' });
+  assert.deepEqual(wan.args.slice(1), ['--feature', 'wan22', '--install', '--download-models']);
 });

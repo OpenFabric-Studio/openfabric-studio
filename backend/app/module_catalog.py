@@ -29,11 +29,12 @@ from .module_evidence import environment_verified
 from .module_runtime import configured_targets, RuntimeEvidence, runtime_status
 
 CATALOG_VERSION = 'openfabric-modules-1'
-MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks')
+MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc')
 ENGINE_FOLDERS: Mapping[ModuleId, str] = {
     'ace_step': 'ACE-Step-1.5', 'yue2': 'YuE2', 'speech': 'gpt-sovits', 'singing': 'seed-vc',
     'separation': 'Demucs', 'video': 'ltx-2-mlx', 'media': 'ffmpeg', 'transcription': 'whisper.cpp',
     'source_import': 'reference-tools', 'ebooks': 'calibre',
+    'kokoro': 'kokoro', 'chatterbox': 'chatterbox', 'wan22': 'mlx-video', 'rvc': 'rvc',
 }
 
 
@@ -61,6 +62,10 @@ DEFINITIONS: Mapping[ModuleId, ModuleDefinition] = {
     'transcription': ModuleDefinition('transcription', 'Transcription', 'Optional local whisper.cpp transcript preparation.', ('media',), (), (), None, 'Install whisper.cpp whisper-cli and a compatible local model; set REFERENCE_WHISPER_BIN and REFERENCE_WHISPER_MODEL server-side. No transcription weights are silently downloaded.', 'https://github.com/ggml-org/whisper.cpp'),
     'source_import': ModuleDefinition('source_import', 'Source imports', 'Pinned YouTube audio and subtitle import tools.', ('media',), (), (), None, 'Install backend/requirements-reference.txt into the backend environment and Deno 2.6.6 or newer. Provider availability remains separate from tool readiness.', 'https://docs.deno.com/runtime/getting_started/installation/'),
     'ebooks': ModuleDefinition('ebooks', 'Ebooks', 'Calibre normalization of unencrypted MOBI books.', (), (), (), None, 'Install Calibre separately from its official installer. Confirm ebook-convert is on PATH or set OPENFABRIC_EBOOK_CONVERT to its executable. Do not bypass document encryption.', 'https://calibre-ebook.com/download'),
+    'kokoro': ModuleDefinition('kokoro', 'Kokoro', 'Preset narration from Kokoro-82M (Apache-2.0, hexgrad). It does not clone a person. On a Mac, set PYTORCH_ENABLE_MPS_FALLBACK=1.', ('media',), ('pyproject.toml', 'kokoro/pipeline.py'), ('kokoro', 'soundfile'), None, 'Clone the pinned Kokoro checkout with ./setup_kokoro.sh or Settings. No voice weights are downloaded. Install espeak-ng yourself. This does not replace GPT-SoVITS. The community MLX port is not the path this setup installs.', 'https://github.com/hexgrad/kokoro'),
+    'chatterbox': ModuleDefinition('chatterbox', 'Chatterbox', 'Zero-shot voice clone from Chatterbox (MIT, Resemble AI). Original and multilingual can use cuda, cpu, or mps. Turbo is not a Mac path.', ('media',), ('pyproject.toml', 'src/chatterbox/tts.py'), ('chatterbox-tts',), None, 'Clone the pinned Chatterbox checkout with ./setup_chatterbox.sh or Settings. Weights are not downloaded. Turbo is not called and is not claimed to work on a Mac. This does not replace GPT-SoVITS.', 'https://github.com/resemble-ai/chatterbox'),
+    'wan22': ModuleDefinition('wan22', 'Wan 2.2 5B', 'Text and image to video with Wan 2.2 TI2V-5B through mlx-video on Apple Silicon. 14B, S2V, and Animate are not wired.', ('media',), ('pyproject.toml', 'mlx_video/models/wan_2/generate.py'), ('mlx-video',), None, 'Clone the pinned mlx-video checkout with ./setup_wan22.sh or Settings. Apple Silicon only. OpenFabric does not download Wan 2.2 TI2V-5B weights and does not set up 14B, S2V, or Animate.', 'https://github.com/Blaizzy/mlx-video'),
+    'rvc': ModuleDefinition('rvc', 'RVC', 'Timbre conversion with RVC (MIT). On a Mac this is CPU, not GPU. Seed-VC singing stays separate.', ('media',), ('webui.py', 'infer'), ('torch', 'soundfile', 'librosa', 'faiss-cpu'), None, 'Clone the pinned RVC checkout with ./setup_rvc.sh or Settings and install CPU packages from PyPI. HuBERT, RMVPE, and trained voices are not downloaded. On a Mac this does not use the GPU. Seed-VC is unchanged.', 'https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI'),
 }
 
 
@@ -94,6 +99,8 @@ def configured_environment() -> ModuleEnvironment:
     paths: Mapping[ModuleId, Path] = {
         'ace_step': config.ACE_STEP_DIR, 'yue2': config.YUE2_DIR, 'speech': config.GPT_SOVITS_DIR,
         'singing': config.SEED_VC_DIR, 'separation': config.DEMUCS_DIR, 'video': config.LTX_DIR,
+        'kokoro': config.KOKORO_DIR, 'chatterbox': config.CHATTERBOX_DIR, 'wan22': config.WAN22_DIR,
+        'rvc': config.RVC_DIR,
     }
     base = ModuleEnvironment.for_root(root, paths=paths, data_dir=config.DATA_DIR)
     return ModuleEnvironment(base.root, base.data_dir, base.platform, base.architecture, base.paths,
@@ -146,11 +153,11 @@ def platform_key(environment: ModuleEnvironment) -> str:
 
 
 def supported(identifier: ModuleId, environment: ModuleEnvironment) -> bool:
-    if identifier == 'video':
+    if identifier in ('video', 'wan22'):
         return platform_key(environment) == 'darwin-arm64'
     if identifier == 'singing':
         return platform_key(environment) in ('darwin-arm64', 'linux-x64', 'win32-x64')
-    if identifier in ('ace_step', 'yue2', 'separation', 'speech'):
+    if identifier in ('ace_step', 'yue2', 'separation', 'speech', 'kokoro', 'chatterbox', 'rvc'):
         return platform_key(environment) in ('darwin-arm64', 'linux-x64', 'win32-x64')
     return environment.platform in ('win32', 'darwin', 'linux')
 
@@ -258,12 +265,12 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
                 elif runtime.installed:
                     state = 'installed'
         prerequisites = env.uv is not None and (identifier == 'separation' or shutil.which('git') is not None)
-        automatic = support and managed and ((identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing') and prerequisites)
+        automatic = support and managed and ((identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc') and prerequisites)
         automation: Literal['unsupported', 'automatic', 'manual'] = 'unsupported' if not support else 'automatic' if automatic else 'manual'
         actions = [] if state == 'ready' else [_manual(definition)]
         if automatic and state != 'ready':
             actions.insert(0, ModuleAction(kind='install', label='Install managed components', detail='Review the fixed dependency plan before starting downloads. Existing external checkouts are preserved.'))
-        if support and managed and identifier in ('ace_step', 'separation', 'video', 'speech', 'singing') and not prerequisites:
+        if support and managed and identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc') and not prerequisites:
             missing = 'uv' if env.uv is None else 'Git'
             evidence.append(_evidence('installer_prerequisite', f'{missing} is required before automatic setup.'))
             actions.insert(0, ModuleAction(kind='manual', label=f'Install {missing}', detail=f'Install {missing} and restart the app so its executable is available. Review the updated plan before source or model downloads.', url='https://docs.astral.sh/uv/getting-started/installation/' if missing == 'uv' else 'https://git-scm.com/downloads'))

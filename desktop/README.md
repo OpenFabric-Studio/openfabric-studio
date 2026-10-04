@@ -69,6 +69,7 @@ The [Desktop app workflow](../.github/workflows/desktop.yml) requires CI verific
 | `engines/Demucs` | Demucs environment |
 | `engines/seed-vc`, `engines/gpt-sovits` | Optional singing and speech environments |
 | `engines/ltx-2-mlx`, `engines/Music-Source-Separation-Training` | Optional video and RoFormer environments |
+| `engines/kokoro`, `engines/chatterbox`, `engines/mlx-video`, `engines/rvc` | Optional Kokoro, Chatterbox, Wan 2.2 TI2V-5B, and RVC checkouts. Setup does not download their weights. |
 | `backend-venv` | Backend Python environment |
 | `data`, `logs` | Library catalog, generated media and logs |
 | `cache/` | Model/download/uv caches |

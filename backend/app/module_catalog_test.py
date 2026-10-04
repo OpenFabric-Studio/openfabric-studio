@@ -127,3 +127,23 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class OptionalEngineCatalogTests(unittest.IsolatedAsyncioTestCase):
+    def test_new_local_engines_match_their_mac_limits(self) -> None:
+        linux = catalog.ModuleEnvironment.for_root(Path('/tmp/openfabric-linux-modules'), platform='linux', architecture='x86_64')
+        mac = catalog.ModuleEnvironment.for_root(Path('/tmp/openfabric-mac-modules'), platform='darwin', architecture='arm64')
+        self.assertFalse(catalog.supported('wan22', linux))
+        self.assertTrue(catalog.supported('wan22', mac))
+        for identifier in ('kokoro', 'chatterbox', 'rvc'):
+            self.assertTrue(catalog.supported(identifier, mac))
+            self.assertTrue(catalog.supported(identifier, linux))
+        self.assertIn('does not clone a person', catalog.DEFINITIONS['kokoro'].description)
+        self.assertIn('Turbo', catalog.DEFINITIONS['chatterbox'].description)
+        self.assertIn('TI2V-5B', catalog.DEFINITIONS['wan22'].description)
+        self.assertIn('CPU', catalog.DEFINITIONS['rvc'].description)
+        self.assertLessEqual(len(catalog.DEFINITIONS['kokoro'].description), 300)
+        self.assertLessEqual(len(catalog.DEFINITIONS['chatterbox'].guidance), 1000)
+        from app.optional_engines import PACKAGES
+        for identifier, packages in PACKAGES.items():
+            self.assertEqual(catalog.DEFINITIONS[identifier].packages, packages)

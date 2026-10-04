@@ -78,6 +78,11 @@ class ModuleInstallTests(unittest.IsolatedAsyncioTestCase):
     def test_platform_interpreter_and_source_pins_are_fixed(self) -> None:
         self.assertEqual(install.SOURCE_PINS['speech'].commit, '48b1a0169a28582a8984402f82cf438d3bfa6aca')
         self.assertEqual(install.SOURCE_PINS['singing'].commit, '51383efd921027683c89e5348211d93ff12ac2a8')
+        self.assertEqual(install.SOURCE_PINS['kokoro'].commit, 'dfb907a02bba8152ca444717ca5d78747ccb4bec')
+        self.assertEqual(install.SOURCE_PINS['chatterbox'].commit, '5de7a54aa4e5e2baadb0182dde554908b48b85c2')
+        self.assertEqual(install.SOURCE_PINS['wan22'].commit, '87db56a51758fefb748a359b90a5283bb8ba4837')
+        self.assertEqual(install.SOURCE_PINS['rvc'].commit, '81eed5e8f68b6bed1789f682fe78cdd324495afc')
+        self.assertNotIn('14B', install.SOURCE_PINS['wan22'].repository)
         self.assertEqual(install.venv_python(Path('/engine'), 'win32'), Path('/engine/.venv/Scripts/python.exe'))
 
     async def test_explicit_external_verification_changes_only_managed_receipt(self) -> None:

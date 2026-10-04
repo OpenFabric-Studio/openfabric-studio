@@ -99,6 +99,14 @@ GPT_SOVITS_DIR = _env_path_prefer(
 # Apple Silicon video engine (LTX-2.3 via the MLX port). setup_video.sh clones it here.
 LTX_DIR = _env_path("LTX_DIR", engine_default('ltx-2-mlx', str(_REPO_ROOT / "external" / "ltx-2-mlx")))
 
+# Optional local engines. setup_kokoro.sh, setup_chatterbox.sh, setup_wan22.sh,
+# and setup_rvc.sh clone these. Importing the app does not download weights.
+# They do not replace GPT-SoVITS, Seed-VC, or the LTX video engine.
+KOKORO_DIR = _env_path("OPENFABRIC_KOKORO_DIR", engine_default('kokoro', str(_REPO_ROOT / "external" / "kokoro")))
+CHATTERBOX_DIR = _env_path("OPENFABRIC_CHATTERBOX_DIR", engine_default('chatterbox', str(_REPO_ROOT / "external" / "chatterbox")))
+WAN22_DIR = _env_path("OPENFABRIC_WAN22_DIR", engine_default('mlx-video', str(_REPO_ROOT / "external" / "mlx-video")))
+RVC_DIR = _env_path("OPENFABRIC_RVC_DIR", engine_default('rvc', str(_REPO_ROOT / "external" / "rvc")))
+
 # MuScriptor (audio -> MIDI) is loaded into YuE2's own audiocpp_server rather
 # than being launched separately, so it gets no MODELS entry - only the spec
 # that server needs to resolve the weights.

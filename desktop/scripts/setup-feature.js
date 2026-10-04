@@ -5,7 +5,7 @@ const { runCommand } = require('../src/proc');
 const { sourceLayout } = require('./launch-source');
 
 function setupCommand(root, feature, args, env = process.env, platform = process.platform) {
-  if (!['speech', 'singing', 'video'].includes(feature)) throw new Error('Unsupported setup feature');
+  if (!['speech', 'singing', 'video', 'kokoro', 'chatterbox', 'wan22', 'rvc'].includes(feature)) throw new Error('Unsupported setup feature');
   const python = env.PYTHON_BIN || sourceLayout(root, platform).python;
   if (!env.PYTHON_BIN && !fs.existsSync(python)) throw new Error('Prepare the backend first with prod_run.sh / prod_run.bat, or select a configured Python using PYTHON_BIN. Optional engines can also be installed in Settings.');
   const script = feature === 'video' ? 'setup_video.py' : 'setup_modules.py';

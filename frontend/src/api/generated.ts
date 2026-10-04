@@ -514,14 +514,14 @@ export type ModuleEvidence = {
 }
 
 export type ModuleInfo = {
-  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
   "name": string
   "description": string
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
   "automation": "automatic" | "manual" | "unsupported"
-  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
   "capabilities": Array<string>
   "evidence": Array<ModuleEvidence>
   "actions": Array<ModuleAction>
@@ -534,7 +534,7 @@ export type ModuleInstallJob = {
   "state": "queued" | "running" | "completed" | "awaiting_manual" | "failed" | "cancelled" | "interrupted"
   "created_at": string
   "updated_at": string
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
   "download_models": boolean
   "steps": Array<ModuleJobStep>
   "current_step"?: (number | null)
@@ -543,7 +543,7 @@ export type ModuleInstallJob = {
 }
 
 export type ModuleInstallRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
   "download_models"?: boolean
   "plan_token": string
 }
@@ -559,7 +559,7 @@ export type ModuleInventory = {
 }
 
 export type ModuleJobStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
   "name": string
   "state": "queued" | "running" | "verified" | "manual" | "skipped" | "failed"
   "detail": string
@@ -571,7 +571,7 @@ export type ModuleJobsResponse = {
 }
 
 export type ModulePlan = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
   "download_models": boolean
   "plan_token": string
   "steps": Array<ModulePlanStep>
@@ -584,12 +584,12 @@ export type ModulePlan = {
 }
 
 export type ModulePlanRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
   "download_models"?: boolean
 }
 
 export type ModulePlanStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks"
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
   "name": string
   "operation": "install" | "verify" | "manual" | "unsupported"
   "estimated_download_bytes"?: (number | null)
@@ -11611,7 +11611,11 @@ const schemas = {
           "media",
           "transcription",
           "source_import",
-          "ebooks"
+          "ebooks",
+          "kokoro",
+          "chatterbox",
+          "wan22",
+          "rvc"
         ],
         "title": "Id",
         "type": "string"
@@ -11666,7 +11670,11 @@ const schemas = {
             "media",
             "transcription",
             "source_import",
-            "ebooks"
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc"
           ],
           "type": "string"
         },
@@ -11804,11 +11812,15 @@ const schemas = {
             "media",
             "transcription",
             "source_import",
-            "ebooks"
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc"
           ],
           "type": "string"
         },
-        "maxItems": 10,
+        "maxItems": 16,
         "minItems": 1,
         "title": "Features",
         "type": "array"
@@ -11838,7 +11850,11 @@ const schemas = {
           "media",
           "transcription",
           "source_import",
-          "ebooks"
+          "ebooks",
+          "kokoro",
+          "chatterbox",
+          "wan22",
+          "rvc"
         ],
         "title": "Module Id",
         "type": "string"
@@ -11906,7 +11922,11 @@ const schemas = {
             "media",
             "transcription",
             "source_import",
-            "ebooks"
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc"
           ],
           "type": "string"
         },
@@ -11996,11 +12016,15 @@ const schemas = {
             "media",
             "transcription",
             "source_import",
-            "ebooks"
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc"
           ],
           "type": "string"
         },
-        "maxItems": 10,
+        "maxItems": 16,
         "minItems": 1,
         "title": "Features",
         "type": "array"
@@ -12036,7 +12060,11 @@ const schemas = {
           "media",
           "transcription",
           "source_import",
-          "ebooks"
+          "ebooks",
+          "kokoro",
+          "chatterbox",
+          "wan22",
+          "rvc"
         ],
         "title": "Module Id",
         "type": "string"
@@ -12123,7 +12151,11 @@ const schemas = {
             "media",
             "transcription",
             "source_import",
-            "ebooks"
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc"
           ],
           "type": "string"
         },
