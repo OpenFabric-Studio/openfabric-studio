@@ -7,6 +7,7 @@ import VideoProjectLibrary from './VideoProjectLibrary.vue'
 import VideoDirectionPanel from './VideoDirectionPanel.vue'
 import VideoSoundtrackPanel from './VideoSoundtrackPanel.vue'
 import VideoCharacterPanel from './VideoCharacterPanel.vue'
+import VideoCharacterTrainer from './VideoCharacterTrainer.vue'
 import { videoWorkspaceSteps, videoClipLengths, changeShotLength, splitShot, duplicateShot, moveShot, newVideoId, frameTime, shotProblem, characterLockIssue, type VideoWorkspaceStep, type VideoClipLength } from './videoWorkspace'
 import { videoErrorText, videoRequestError, deleteVideo, isVideoActive } from '../../api/videos'
 import type { VideoProjectJob, VideoMarker } from '../../api/contracts'
@@ -17,7 +18,7 @@ import { notePhasePace, phaseRemaining, type VideoPhasePace } from './videoJobTi
 const { t } = useI18n()
 const { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
   selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-  save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, editShots, undo, addShot } = useVideoWorkspace()
+  save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, addShot } = useVideoWorkspace()
 const ripple = ref(true)
 const audio = ref<HTMLAudioElement | null>(null)
 const position = ref(0)
@@ -304,6 +305,7 @@ onBeforeUnmount(stopSource)
         <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @duplicate="duplicate" />
         <VideoSoundtrackPanel v-if="pictureProject" :project="project" :draft="draft" :read-only="readOnly" @upload="uploadSpeech" @clear="clearSpeech" @speak="speakLine" />
         <VideoCharacterPanel v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyCharacter" />
+        <VideoCharacterTrainer v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyTrainedCharacter" />
       </template>
       <template v-else-if="draft && project && step === 'storyboard'">
 

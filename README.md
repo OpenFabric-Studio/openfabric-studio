@@ -32,7 +32,7 @@ Derived from [mchosc/remiqora](https://github.com/mchosc/remiqora), itself based
 |------|-----------|
 | **Voice** | Clone singing voices; preview speech narrators and create recoverable audiobooks. |
 | **Music** | Local ACE-Step / YuE2 generation, stems, DAW mixing (heritage from Remiqora). |
-| **Video / characters** | Generate images and train **consistent characters** for music videos and short-form reels. |
+| **Video / characters** | Silent videos and reels. A local character LoRA trains on this Mac when the video engine Python is configured. A locked still is not training. |
 
 Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI) for reusable MIT-compatible ideas — always attributed.
 

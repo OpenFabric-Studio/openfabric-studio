@@ -194,6 +194,7 @@ class VideoProject(VideoContract):
     direction: str = Field(default="", max_length=2000)
     character_lock: bool = False
     character_id: VideoId | None = None
+    character_adapter_id: VideoId | None = None
     seed: int = Field(default=0, ge=0, le=2147483647)
     duration_sec: float = Field(gt=0, le=21600)
     source_fingerprint: str
@@ -305,6 +306,42 @@ class ApplyVideoCharacterRequest(VideoRevisionRequest):
     character_id: VideoId
 
 
+class VideoCharacterTrainingJob(VideoContract):
+    """A local LoRA job. mock means the photos were saved and nothing was trained."""
+
+    id: VideoId
+    name: str = Field(min_length=1, max_length=80)
+    status: Literal["queued", "running", "completed", "mock_completed", "failed", "cancelled"]
+    consent_confirmed: bool
+    photo_count: int = Field(ge=3, le=12)
+    clip_count: int = Field(ge=0, le=6)
+    adapter_ready: bool = False
+    mock: bool = False
+    error_code: str = ""
+    detail: str = Field(default="", max_length=500)
+    created_at: str
+    updated_at: str
+
+
+class VideoCharacterTrainingResponse(VideoContract):
+    jobs: list[VideoCharacterTrainingJob]
+
+
+class VideoCharacterTrainerStatus(VideoContract):
+    configured: bool
+    source: Literal["env", "settings", "none"]
+    command_name: str = ""
+    missing: bool = False
+
+
+class VideoCharacterTrainerSettingsRequest(VideoContract):
+    command: str = Field(default="", max_length=500)
+
+
+class ApplyVideoCharacterAdapterRequest(VideoRevisionRequest):
+    training_id: VideoId
+
+
 class VideoEngineOption(VideoContract):
     id: Literal["ltx23", "ltx25"]
     name: str
@@ -341,6 +378,11 @@ VIDEO_CLIENT_MODELS: list[type[BaseModel]] = [
     VideoCharacter,
     VideoCharactersResponse,
     ApplyVideoCharacterRequest,
+    VideoCharacterTrainingJob,
+    VideoCharacterTrainingResponse,
+    VideoCharacterTrainerStatus,
+    VideoCharacterTrainerSettingsRequest,
+    ApplyVideoCharacterAdapterRequest,
     VideoSongAnalysis,
     VideoReadinessResponse,
 ]

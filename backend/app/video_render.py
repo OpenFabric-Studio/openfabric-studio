@@ -364,6 +364,12 @@ def fingerprint(
         value["character_lock"] = True
         value["locked_reference"] = _still or ""
         value["locked_strength"] = strength
+    if project.track_id is None and project.character_adapter_id:
+        from .video_character_training import ready_adapter_file
+
+        adapter = ready_adapter_file(project.character_adapter_id)
+        value["character_adapter_id"] = project.character_adapter_id
+        value["character_adapter_sha256"] = store.file_hash(adapter) if adapter is not None else ""
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
@@ -596,6 +602,11 @@ async def _generate(
                     variant_id=variant_id,
                 )
             frames = shot.seconds * 24 + 1
+            adapter = None
+            if project.track_id is None and mode != "a2v":
+                from .video_character_training import ready_adapter_file
+
+                adapter = ready_adapter_file(project.character_adapter_id)
             settings = RenderSettings(
                 output=partial,
                 prompt=_prompt(project, shot),
@@ -613,6 +624,7 @@ async def _generate(
                 negative_prompt=project.settings.negative_prompt or None,
                 temporal_tiles=2 if frames > 145 else 1,
                 spatial_tiles=2 if max(project.settings.width, project.settings.height) >= 1280 else 1,
+                adapter=adapter,
             )
             await _command(
                 project.id,

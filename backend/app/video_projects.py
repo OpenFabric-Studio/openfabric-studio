@@ -25,6 +25,7 @@ from .video_contracts import (
     VideoSeconds,
     VideoSpeechLineRequest,
     ApplyVideoCharacterRequest,
+    ApplyVideoCharacterAdapterRequest,
 )
 from .video_media import tool, probe_media
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
@@ -278,8 +279,14 @@ def view(document: StoredVideoProject) -> VideoProject:
     project = document.project.model_copy(deep=True)
     project.source_changed = source_changed(document)
     extra = character_lock_warnings(project)
+    from .video_character_training import adapter_warning
+
+    trained = adapter_warning(project.character_adapter_id, project.track_id is None)
+    if trained:
+        extra = [*extra, trained]
     if extra:
-        project.warnings = list(dict.fromkeys([*project.warnings, *extra]))
+        kept = [item for item in project.warnings if item not in {"character_adapter_mock", "character_adapter_missing", "character_still_missing", "character_still_mismatch"}]
+        project.warnings = list(dict.fromkeys([*kept, *extra]))
     return project
 
 
@@ -1156,6 +1163,63 @@ def apply_character(project_id: str, body: ApplyVideoCharacterRequest) -> VideoP
                 shot.reference_strength = CHARACTER_LOCK_STRENGTH
             document.project.character_lock = True
             document.project.character_id = character.id
+            document.project.file_url = ""
+            document.project.poster_url = ""
+
+        result = mutate(project_id, change, revision=body.revision)
+        published = True
+        return result
+    finally:
+        if not published:
+            output.unlink(missing_ok=True)
+
+
+def apply_character_adapter(project_id: str, body: ApplyVideoCharacterAdapterRequest) -> VideoProject:
+    """Use a trained adapter when one exists. Otherwise keep the still lock, and say so."""
+    from . import video_character_training as training
+
+    job = training.get_job(body.training_id)
+    if not job.consent_confirmed:
+        raise VideoProjectError("consent_required")
+    source = training.still_file(job.id)
+    reference_id = uuid.uuid4().hex
+    relative = f"references/{reference_id}.png"
+    output = artifact(project_id, relative)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, output)
+    published = False
+    try:
+        size = output.stat().st_size
+        header = output.read_bytes()[:24]
+        if not header.startswith(b"\x89PNG\r\n\x1a\n") and not header.startswith(bytes.fromhex("89504e470d0a1a0a")):
+            raise VideoProjectError("invalid_reference")
+        width = int.from_bytes(header[16:20], "big")
+        height = int.from_bytes(header[20:24], "big")
+        if size < 1 or size > 20 * 1024 * 1024 or not 1 <= width <= 8192 or not 1 <= height <= 8192:
+            raise VideoProjectError("reference_too_large")
+
+        def change(document: StoredVideoProject) -> None:
+            if document.project.track_id is not None:
+                raise VideoProjectError("character_adapter_picture_only")
+            if len(document.project.references) >= 6:
+                raise VideoProjectError("too_many_references")
+            document.reference_paths[reference_id] = relative
+            document.project.references.append(
+                VideoReference(
+                    id=reference_id,
+                    name=f"{job.name}.png"[:160],
+                    bytes=size,
+                    width=width,
+                    height=height,
+                    url=f"/api/videos/projects/{project_id}/references/{reference_id}",
+                )
+            )
+            for shot in document.project.shots:
+                shot.reference_id = reference_id
+                shot.reference_strength = CHARACTER_LOCK_STRENGTH
+                shot.approved_variant_id = None
+            document.project.character_lock = True
+            document.project.character_adapter_id = job.id
             document.project.file_url = ""
             document.project.poster_url = ""
 

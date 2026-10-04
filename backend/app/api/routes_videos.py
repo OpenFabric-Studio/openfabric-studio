@@ -100,11 +100,17 @@ from ..video_contracts import (
     VideoExportRequest,
     VideoSpeechLineRequest,
     ApplyVideoCharacterRequest,
+    ApplyVideoCharacterAdapterRequest,
     VideoCharacter,
     VideoCharactersResponse,
+    VideoCharacterTrainingJob,
+    VideoCharacterTrainingResponse,
+    VideoCharacterTrainerStatus,
+    VideoCharacterTrainerSettingsRequest,
     VideoReadinessResponse,
 )
 from .. import video_characters
+from .. import video_character_training as character_training
 
 
 def _project_error(exc: projects.VideoProjectError) -> NoReturn:
@@ -276,6 +282,56 @@ def remove_character(character_id: str) -> dict[str, str]:
     try:
         video_characters.delete_character(character_id)
         return {"deleted": character_id}
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/character-training/status", response_model=VideoCharacterTrainerStatus)
+def character_trainer_status() -> VideoCharacterTrainerStatus:
+    return character_training.trainer_status()
+
+
+@router.put("/character-training/trainer", response_model=VideoCharacterTrainerStatus)
+def put_character_trainer(body: VideoCharacterTrainerSettingsRequest) -> VideoCharacterTrainerStatus:
+    try:
+        return character_training.save_trainer_command(body.command)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/character-training", response_model=VideoCharacterTrainingResponse)
+def character_training_jobs() -> VideoCharacterTrainingResponse:
+    return VideoCharacterTrainingResponse(jobs=character_training.list_jobs())
+
+
+@router.post("/character-training", response_model=VideoCharacterTrainingJob)
+async def start_character_training(
+    name: Annotated[str, Form(min_length=1, max_length=80)],
+    consent_confirmed: Annotated[bool, Form()],
+    files: list[UploadFile] = File(...),
+) -> VideoCharacterTrainingJob:
+    try:
+        return await character_training.create_job(
+            name=name,
+            consent_confirmed=consent_confirmed,
+            uploads=files,
+        )
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/character-training/{job_id}/cancel", response_model=VideoCharacterTrainingJob)
+async def cancel_character_training(job_id: str) -> VideoCharacterTrainingJob:
+    try:
+        return await character_training.cancel_job(job_id)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/character-adapter", response_model=VideoProject)
+def apply_project_character_adapter(project_id: str, body: ApplyVideoCharacterAdapterRequest) -> VideoProject:
+    try:
+        return projects.apply_character_adapter(project_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 

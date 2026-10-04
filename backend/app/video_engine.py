@@ -158,6 +158,9 @@ class RenderSettings:
     negative_prompt: str | None = None
     temporal_tiles: int = 1
     spatial_tiles: int = 1
+    # Local character LoRA. Songs (a2v) never receive it.
+    adapter: Path | None = None
+    adapter_strength: float = 1.0
 
 
 def validate_settings(settings: RenderSettings) -> None:
@@ -178,7 +181,13 @@ def validate_settings(settings: RenderSettings) -> None:
             or not 1 <= settings.cfg_scale <= 8
             or not 1 <= settings.temporal_tiles <= 4 or not 1 <= settings.spatial_tiles <= 4
             or len(settings.references) > 6
-            or settings.negative_prompt is not None and len(settings.negative_prompt) > 2000):
+            or settings.negative_prompt is not None and len(settings.negative_prompt) > 2000
+            or (settings.adapter is not None and settings.mode == 'a2v')
+            or (settings.adapter is not None and (
+                isinstance(settings.adapter_strength, bool)
+                or not isinstance(settings.adapter_strength, (int, float))
+                or not math.isfinite(float(settings.adapter_strength))
+                or not 0 < float(settings.adapter_strength) <= 2))):
         raise VideoEngineError('bad_settings')
     for reference in settings.references:
         if (isinstance(reference.frame_index, bool) or not isinstance(reference.frame_index, int)
@@ -292,6 +301,14 @@ def model_packs() -> dict[str, ModelPack]:
 
 def _pack_dir(cache_dir: Path, pack: ModelPack) -> Path:
     return cache_dir / 'hub' / ('models--' + pack.repo_id.replace('/', '--')) / 'snapshots' / pack.revision
+
+
+def local_snapshot(cache_dir: Path, key: str) -> Path:
+    """Pinned local snapshot directory. This does not download weights."""
+    packs = model_packs()
+    if key not in packs:
+        raise VideoEngineError('bad_settings')
+    return _pack_dir(cache_dir, packs[key])
 
 
 def required_artifacts(cache_dir: Path, profile_id: ProfileId = 'ltx23') -> tuple[RequiredArtifact, ...]:
@@ -552,4 +569,11 @@ def render_argv(engine_dir: Path, cache_dir: Path, settings: RenderSettings) -> 
         argv.extend(['--negative-prompt', settings.negative_prompt])
     for reference in settings.references:
         argv.extend(['--image', str(reference.path), str(reference.frame_index), str(reference.strength)])
+    if settings.adapter is not None:
+        if settings.mode == 'a2v':
+            raise VideoEngineError('bad_settings')
+        adapter = settings.adapter.resolve()
+        if not adapter.is_file() or adapter.suffix != '.safetensors' or adapter.stat().st_size < 1024:
+            raise VideoEngineError('adapter_missing')
+        argv.extend(['--lora', str(adapter), str(float(settings.adapter_strength))])
     return argv

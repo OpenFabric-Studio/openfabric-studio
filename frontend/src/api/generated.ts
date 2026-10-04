@@ -95,6 +95,11 @@ export type ApplyStatusResponse = {
   "job_progress"?: (VoiceJobProgress | null)
 }
 
+export type ApplyVideoCharacterAdapterRequest = {
+  "revision": number
+  "training_id": string
+}
+
 export type ApplyVideoCharacterRequest = {
   "revision": number
   "character_id": string
@@ -1011,6 +1016,36 @@ export type VideoCharacter = {
   "updated_at": string
 }
 
+export type VideoCharacterTrainerSettingsRequest = {
+  "command"?: string
+}
+
+export type VideoCharacterTrainerStatus = {
+  "configured": boolean
+  "source": "env" | "settings" | "none"
+  "command_name"?: string
+  "missing"?: boolean
+}
+
+export type VideoCharacterTrainingJob = {
+  "id": string
+  "name": string
+  "status": "queued" | "running" | "completed" | "mock_completed" | "failed" | "cancelled"
+  "consent_confirmed": boolean
+  "photo_count": number
+  "clip_count": number
+  "adapter_ready"?: boolean
+  "mock"?: boolean
+  "error_code"?: string
+  "detail"?: string
+  "created_at": string
+  "updated_at": string
+}
+
+export type VideoCharacterTrainingResponse = {
+  "jobs": Array<VideoCharacterTrainingJob>
+}
+
 export type VideoCharactersResponse = {
   "characters": Array<VideoCharacter>
 }
@@ -1114,6 +1149,7 @@ export type VideoProject = {
   "direction"?: string
   "character_lock"?: boolean
   "character_id"?: (string | null)
+  "character_adapter_id"?: (string | null)
   "seed"?: number
   "duration_sec": number
   "source_fingerprint": string
@@ -3764,6 +3800,19 @@ const schemas = {
         "default": null,
         "title": "Character Id"
       },
+      "character_adapter_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Character Adapter Id"
+      },
       "seed": {
         "default": 0,
         "maximum": 2147483647,
@@ -4459,6 +4508,177 @@ const schemas = {
       "character_id"
     ],
     "title": "ApplyVideoCharacterRequest",
+    "type": "object"
+  },
+  "VideoCharacterTrainingJob": {
+    "additionalProperties": false,
+    "description": "A local LoRA job. mock means the photos were saved and nothing was trained.",
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 80,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "mock_completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "consent_confirmed": {
+        "title": "Consent Confirmed",
+        "type": "boolean"
+      },
+      "photo_count": {
+        "maximum": 12,
+        "minimum": 3,
+        "title": "Photo Count",
+        "type": "integer"
+      },
+      "clip_count": {
+        "maximum": 6,
+        "minimum": 0,
+        "title": "Clip Count",
+        "type": "integer"
+      },
+      "adapter_ready": {
+        "default": false,
+        "title": "Adapter Ready",
+        "type": "boolean"
+      },
+      "mock": {
+        "default": false,
+        "title": "Mock",
+        "type": "boolean"
+      },
+      "error_code": {
+        "default": "",
+        "title": "Error Code",
+        "type": "string"
+      },
+      "detail": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Detail",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "status",
+      "consent_confirmed",
+      "photo_count",
+      "clip_count",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "VideoCharacterTrainingJob",
+    "type": "object"
+  },
+  "VideoCharacterTrainingResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/VideoCharacterTrainingJob"
+        },
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "title": "VideoCharacterTrainingResponse",
+    "type": "object"
+  },
+  "VideoCharacterTrainerStatus": {
+    "additionalProperties": false,
+    "properties": {
+      "configured": {
+        "title": "Configured",
+        "type": "boolean"
+      },
+      "source": {
+        "enum": [
+          "env",
+          "settings",
+          "none"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "command_name": {
+        "default": "",
+        "title": "Command Name",
+        "type": "string"
+      },
+      "missing": {
+        "default": false,
+        "title": "Missing",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "configured",
+      "source"
+    ],
+    "title": "VideoCharacterTrainerStatus",
+    "type": "object"
+  },
+  "VideoCharacterTrainerSettingsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "command": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Command",
+        "type": "string"
+      }
+    },
+    "title": "VideoCharacterTrainerSettingsRequest",
+    "type": "object"
+  },
+  "ApplyVideoCharacterAdapterRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "training_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Training Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "training_id"
+    ],
+    "title": "ApplyVideoCharacterAdapterRequest",
     "type": "object"
   },
   "VideoEngineOption": {
@@ -12255,6 +12475,46 @@ function isApplyVideoCharacterRequest(value: unknown): value is ApplyVideoCharac
 }
 export function parseApplyVideoCharacterRequest(value: unknown): ApplyVideoCharacterRequest {
   if (!isApplyVideoCharacterRequest(value)) throw new TypeError("Invalid ApplyVideoCharacterRequest response")
+  return value
+}
+
+function isVideoCharacterTrainingJob(value: unknown): value is VideoCharacterTrainingJob {
+  return decodeSchema(schemas.VideoCharacterTrainingJob, value, schemas)
+}
+export function parseVideoCharacterTrainingJob(value: unknown): VideoCharacterTrainingJob {
+  if (!isVideoCharacterTrainingJob(value)) throw new TypeError("Invalid VideoCharacterTrainingJob response")
+  return value
+}
+
+function isVideoCharacterTrainingResponse(value: unknown): value is VideoCharacterTrainingResponse {
+  return decodeSchema(schemas.VideoCharacterTrainingResponse, value, schemas)
+}
+export function parseVideoCharacterTrainingResponse(value: unknown): VideoCharacterTrainingResponse {
+  if (!isVideoCharacterTrainingResponse(value)) throw new TypeError("Invalid VideoCharacterTrainingResponse response")
+  return value
+}
+
+function isVideoCharacterTrainerStatus(value: unknown): value is VideoCharacterTrainerStatus {
+  return decodeSchema(schemas.VideoCharacterTrainerStatus, value, schemas)
+}
+export function parseVideoCharacterTrainerStatus(value: unknown): VideoCharacterTrainerStatus {
+  if (!isVideoCharacterTrainerStatus(value)) throw new TypeError("Invalid VideoCharacterTrainerStatus response")
+  return value
+}
+
+function isVideoCharacterTrainerSettingsRequest(value: unknown): value is VideoCharacterTrainerSettingsRequest {
+  return decodeSchema(schemas.VideoCharacterTrainerSettingsRequest, value, schemas)
+}
+export function parseVideoCharacterTrainerSettingsRequest(value: unknown): VideoCharacterTrainerSettingsRequest {
+  if (!isVideoCharacterTrainerSettingsRequest(value)) throw new TypeError("Invalid VideoCharacterTrainerSettingsRequest response")
+  return value
+}
+
+function isApplyVideoCharacterAdapterRequest(value: unknown): value is ApplyVideoCharacterAdapterRequest {
+  return decodeSchema(schemas.ApplyVideoCharacterAdapterRequest, value, schemas)
+}
+export function parseApplyVideoCharacterAdapterRequest(value: unknown): ApplyVideoCharacterAdapterRequest {
+  if (!isApplyVideoCharacterAdapterRequest(value)) throw new TypeError("Invalid ApplyVideoCharacterAdapterRequest response")
   return value
 }
 

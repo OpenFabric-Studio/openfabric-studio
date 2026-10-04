@@ -68,3 +68,15 @@ Use the actual data folder displayed in the app. Setup downloads only the pinned
 - Elapsed time uses persisted timestamps. Remaining-time estimates describe only a measured current phase; overall time remains “estimating” when comparable evidence is absent.
 
 CPU media tests verify stream/duration/frame-rate/dimension validation, covers, visualizers, timed text, framing, reuse and recovery. Installed-engine CPU tests verify the real tiling wrappers. **Perceptual quality, full-song GPU time and peak memory have not been established by these tests.** Compare a few fixed-seed short shots with the same source, prompts and references before committing to a full song.
+
+## Character trainer
+
+Silent videos and reels can train one person's look on this Mac. Add at least three photos, and optional clips of eight seconds or less. Consent is required.
+
+Set `OPENFABRIC_VIDEO_CHARACTER_TRAINER` to the video engine Python (`ltx-2-mlx/.venv/bin/python`), or save that path in Direction. OpenFabric then runs `backend/scripts/train_character_adapter.py`, which calls the pinned engine's own `preprocess` and `train` commands. Install `ltx-trainer-mlx` in that environment. The model files must already be on disk (`./setup_video.sh --download-models`). The trainer does not download weights, does not use a cloud, and does not lip-sync.
+
+The adapter is a LoRA file under the OpenFabric data folder. A finished adapter is passed to the local generate command with `--lora` for silent videos and reels only. Song videos are unchanged.
+
+If no trainer command is configured, the job is saved as a dry run. That is not an adapter. The first photo can still pin every shot. A locked still is not training.
+
+`OPENFABRIC_VIDEO_CHARACTER_TRAIN_STEPS` defaults to 800 (100–3000). `OPENFABRIC_VIDEO_CHARACTER_TRAIN_RANK` defaults to 32 (8–64).

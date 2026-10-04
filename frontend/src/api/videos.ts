@@ -10,10 +10,10 @@ import { parseVideosResponse, parseVideoActivityResponse, parseVideoPlanResponse
 import type { VideoJobResponse, VideoPlanResponse, VideoShot as BackendVideoShot, CreateVideoRequest, PlanRequest } from './contracts'
 import { parseVideoReadinessResponse, parseVideoProject, parseVideoProjectsResponse, parseCreateVideoProjectRequest, parseUpdateVideoProjectRequest,
   parseVideoRenderRequest, parseVideoRevisionRequest, parseApproveVideoVariantRequest, parseVideoExportRequest,
-  parseVideoSpeechLineRequest, parseApplyVideoCharacterRequest, parseVideoCharacter, parseVideoCharactersResponse } from './contracts'
+  parseVideoSpeechLineRequest, parseApplyVideoCharacterRequest, parseApplyVideoCharacterAdapterRequest, parseVideoCharacter, parseVideoCharactersResponse, parseVideoCharacterTrainingJob, parseVideoCharacterTrainingResponse, parseVideoCharacterTrainerStatus, parseVideoCharacterTrainerSettingsRequest } from './contracts'
 import type { VideoReadinessResponse, VideoProject, VideoProjectsResponse, CreateVideoProjectRequest, UpdateVideoProjectRequest,
   VideoRenderRequest, VideoRevisionRequest, ApproveVideoVariantRequest, VideoExportRequest, VideoSpeechLineRequest,
-  ApplyVideoCharacterRequest, VideoCharacter, VideoCharactersResponse } from './contracts'
+  ApplyVideoCharacterRequest, VideoCharacter, VideoCharactersResponse, VideoCharacterTrainingJob, VideoCharacterTrainingResponse, VideoCharacterTrainerStatus } from './contracts'
 
 export type VideoJob = VideoJobResponse
 export type VideoStatus = VideoJob['status']
@@ -204,4 +204,32 @@ export async function createVideoCharacter(input: { name: string; voiceProfileId
 
 export function applyVideoCharacter(id: string, body: ApplyVideoCharacterRequest, signal?: AbortSignal): Promise<VideoProject> {
   return projectPost(id, 'character', parseApplyVideoCharacterRequest(body), signal)
+}
+
+export function characterTrainerStatus(signal?: AbortSignal): Promise<VideoCharacterTrainerStatus> {
+  return apiFetch('/api/videos/character-training/status', { signal }, parseVideoCharacterTrainerStatus)
+}
+
+export function saveCharacterTrainer(command: string, signal?: AbortSignal): Promise<VideoCharacterTrainerStatus> {
+  return apiFetch('/api/videos/character-training/trainer', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parseVideoCharacterTrainerSettingsRequest({ command })), signal }, parseVideoCharacterTrainerStatus)
+}
+
+export function listCharacterTraining(signal?: AbortSignal): Promise<VideoCharacterTrainingResponse> {
+  return apiFetch('/api/videos/character-training', { signal }, parseVideoCharacterTrainingResponse)
+}
+
+export async function startCharacterTraining(input: { name: string; consentConfirmed: boolean; files: File[] }, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
+  const form = new FormData()
+  form.append('name', input.name)
+  form.append('consent_confirmed', input.consentConfirmed ? 'true' : 'false')
+  for (const file of input.files) form.append('files', file, file.name)
+  return apiFetch('/api/videos/character-training', { method: 'POST', body: form, signal }, parseVideoCharacterTrainingJob)
+}
+
+export function cancelCharacterTraining(id: string, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
+  return apiFetch(`/api/videos/character-training/${encodeURIComponent(id)}/cancel`, { method: 'POST', signal }, parseVideoCharacterTrainingJob)
+}
+
+export function applyCharacterAdapter(id: string, body: { revision: number; training_id: string }, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'character-adapter', parseApplyVideoCharacterAdapterRequest(body), signal)
 }

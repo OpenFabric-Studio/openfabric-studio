@@ -1835,10 +1835,13 @@ def workers_unverified() -> bool:
 def work_busy() -> bool:
     from .video_render import work_busy as project_work_busy
 
+    from .video_character_training import training_busy
+
     return (
         bool(_unverified)
         or (_current is not None and _current.status in _ACTIVE)
         or project_work_busy()
+        or training_busy()
     )
 
 

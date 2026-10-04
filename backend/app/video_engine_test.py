@@ -49,6 +49,27 @@ class EngineTests(unittest.TestCase):
                     render_argv(ENGINE, root / 'cache', settings)
             self.assertEqual(failure.exception.code, 'model_not_installed')
 
+    def test_character_adapter_is_passed_only_to_picture_generation(self) -> None:
+        from app.video_engine import EngineReadiness, ImageReference, RenderSettings, VideoEngineError, render_argv
+        with tempfile.TemporaryDirectory() as scratch:
+            root = Path(scratch)
+            image = root / 'reference.png'
+            image.write_bytes(b'isolated boundary fixture')
+            adapter = root / 'adapter.safetensors'
+            adapter.write_bytes(b'lora' * 400)
+            ready = EngineReadiness('ltx23', True, True, 'f' * 64, 'a' * 40, 'b' * 40, 1, 0, 1000000000, (), ())
+            picture = RenderSettings(root / 'out.mp4', 'a person walks', 97, references=(ImageReference(image),), mode='i2v', adapter=adapter)
+            song = RenderSettings(root / 'out.mp4', 'a person walks', 97, source_audio=image, mode='a2v', adapter=adapter)
+            with patch('app.video_engine.inspect_readiness', return_value=ready):
+                argv = render_argv(ENGINE, root / 'cache', picture)
+                self.assertEqual(argv[argv.index('--lora') + 1], str(adapter.resolve()))
+                self.assertEqual(argv[argv.index('--lora') + 2], '1.0')
+                self.assertIn('generate', argv)
+                self.assertNotIn('a2v', argv)
+                with self.assertRaises(VideoEngineError) as failure:
+                    render_argv(ENGINE, root / 'cache', song)
+            self.assertEqual(failure.exception.code, 'bad_settings')
+
     def test_verified_receipt_is_reused_only_for_unchanged_pinned_file_identities(self) -> None:
         from app.video_engine import RequiredArtifact
         import app.video_engine as engine

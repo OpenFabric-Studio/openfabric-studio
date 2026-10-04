@@ -322,6 +322,10 @@ export function useVideoWorkspace() {
     if (project.value?.track_id != null) return
     return action((row, signal) => api.applyVideoCharacter(row.id, { revision: row.revision, character_id: characterId }, signal))
   }
+  function applyTrainedCharacter(trainingId: string) {
+    if (project.value?.track_id != null) return
+    return action((row, signal) => api.applyCharacterAdapter(row.id, { revision: row.revision, training_id: trainingId }, signal))
+  }
   function editShots(shots: VideoShotDraft[]) {
     if (!draft.value || readOnly.value) return
     undoStack.value.push(draft.value.shots.map((shot) => ({ ...shot })))
@@ -376,5 +380,5 @@ export function useVideoWorkspace() {
   onUnmounted(() => { alive = false; generation++; lifetime.abort(); actionController?.abort(); loop.stop(); if (clock !== undefined) clearInterval(clock); if (saveTimer !== undefined) clearTimeout(saveTimer) })
   return { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
     selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, editShots, undo, addShot }
+    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, addShot }
 }
