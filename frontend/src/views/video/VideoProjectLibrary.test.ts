@@ -253,3 +253,12 @@ it('keeps focus on the user-selected actions summary when pending deletion fails
   busy.value = false; await settle()
   expect(document.activeElement).toBe(summary)
 })
+
+it('versions export thumbnails and downloads after replacement or history restore', async () => {
+  const saved: VideoProject = { ...project(1, 'ready'), file_url: '/video.mp4', poster_url: '/poster.jpg', output_version: 'a'.repeat(64) }
+  await mount([saved])
+  expect(row(saved.id).querySelector('img')?.getAttribute('src')).toBe('/poster.jpg?version=' + saved.output_version)
+  expect(row(saved.id).querySelector('a[download]')?.getAttribute('href')).toBe('/video.mp4?version=' + saved.output_version)
+  rows.value = [{ ...saved, output_version: 'b'.repeat(64) }]; await settle()
+  expect(row(saved.id).querySelector('a[download]')?.getAttribute('href')).toBe('/video.mp4?version=' + 'b'.repeat(64))
+})

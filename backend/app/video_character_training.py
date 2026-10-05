@@ -28,6 +28,8 @@ from .video_process import WorkerIdentity, spawn_owned, terminate_verified
 from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
 from .stems import gpu_lock
 from .video_contracts import (
+    CharacterDatasetReview,
+    ReviewCharacterAdapterRequest,
     VideoCharacterTrainerStatus,
     VideoCharacterTrainingJob,
 )
@@ -157,11 +159,15 @@ def resolve_trainer() -> tuple[Path | None, Literal["env", "settings", "none"], 
 
 def trainer_status() -> VideoCharacterTrainerStatus:
     path, source, missing = resolve_trainer()
+    from .video_training_review import dependency_status
+    dependencies_ready, reason = dependency_status(path) if path is not None else (False, "trainer_missing")
     return VideoCharacterTrainerStatus(
         configured=path is not None,
         source=source,
         command_name=_command_name(path),
         missing=missing,
+        dependencies_ready=dependencies_ready,
+        reason=reason,
     )
 
 
@@ -207,6 +213,7 @@ def training_argv(
     name: str,
     images: list[Path],
     clips: list[Path],
+    manifest: Path | None = None,
 ) -> list[str]:
     flags = ["--output", str(output), "--name", name]
     for image in images:
@@ -222,11 +229,15 @@ def training_argv(
             "--model-cache", str(DATA_DIR / "models" / "ltx"),
             *flags,
         ]
+        if manifest is not None:
+            flags += ["--dataset-manifest", str(manifest)]
         return [str(command), str(script), *flags]
+    if manifest is not None:
+        flags += ["--dataset-manifest", str(manifest)]
     return [str(command), *flags]
 
 
-def ready_adapter_file(job_id: str | None) -> Path | None:
+def ready_adapter_file(job_id: str | None, profile_id: Literal["ltx23", "ltx25"] = "ltx23") -> Path | None:
     """A real LoRA file only. A dry-run job and a still pin are not adapters."""
     if not job_id:
         return None
@@ -236,6 +247,14 @@ def ready_adapter_file(job_id: str | None) -> Path | None:
         return None
     if job.mock or job.status != "completed" or not job.adapter_ready:
         return None
+    # The shipped trainer targets LTX-2.3. Similar model names do not prove
+    # adapter compatibility with another base model or revision.
+    if profile_id != "ltx23":
+        raise VideoProjectError("character_adapter_incompatible")
+    if job.provenance is not None:
+        from .video_engine import model_packs
+        if job.provenance.settings.base_profile != profile_id or job.provenance.base_revision != model_packs()[profile_id].revision:
+            raise VideoProjectError("character_adapter_incompatible")
     try:
         path = _artifact(job_id, "adapter/adapter.safetensors")
         if path.is_file() and _MIN_ADAPTER <= path.stat().st_size <= _MAX_ADAPTER:
@@ -423,6 +442,7 @@ async def create_job(
     name: str,
     consent_confirmed: bool,
     uploads: list[UploadFile],
+    review: CharacterDatasetReview | None = None,
 ) -> VideoCharacterTrainingJob:
     async with admission_lock:
         require_setup_idle()
@@ -432,7 +452,7 @@ async def create_job(
         from .work_busy import other_work_busy
         if video_busy() or await other_work_busy():
             raise VideoProjectError("busy")
-        task = asyncio.create_task(_create_job(name=name, consent_confirmed=consent_confirmed, uploads=uploads))
+        task = asyncio.create_task(_create_job(name=name, consent_confirmed=consent_confirmed, uploads=uploads, review=review))
         _UPLOADS.add(task)
     try:
         return await asyncio.shield(task)
@@ -446,7 +466,7 @@ async def create_job(
             await await_cleanup(upload.close())
 
 
-async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[UploadFile]) -> VideoCharacterTrainingJob:
+async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[UploadFile], review: CharacterDatasetReview | None = None) -> VideoCharacterTrainingJob:
     cleaned = " ".join(name.split())
     if not cleaned or len(cleaned) > 80:
         raise VideoProjectError("invalid_draft")
@@ -454,14 +474,22 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
         raise VideoProjectError("consent_required")
     if not uploads:
         raise VideoProjectError("too_few_photos")
+    if len(uploads) > 18:
+        raise VideoProjectError("too_many_photos")
+    if review is not None and {item.upload_index for item in review.items} != set(range(len(uploads))):
+        raise VideoProjectError("dataset_item_mismatch")
+    reviewed_items = {item.upload_index: item for item in review.items} if review is not None else {}
     job_id = uuid.uuid4().hex
     root = job_dir(job_id)
     photos: list[Path] = []
     clips: list[Path] = []
+    dataset_paths: list[Path] = []
+    dataset_kinds: list[Literal["photo", "clip"]] = []
     published = False
     try:
         root.mkdir(parents=True, exist_ok=False)
         for index, upload in enumerate(uploads):
+            held_out = index in reviewed_items and reviewed_items[index].role == "held_out"
             filename = upload.filename or f"file-{index}"
             if len(filename) > 160 or "/" in filename or "\\" in filename or filename in {".", ".."}:
                 raise VideoProjectError("invalid_reference")
@@ -479,7 +507,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                     raise VideoProjectError("invalid_reference") from exc
                 if not 1 <= info.width <= 8192 or not 1 <= info.height <= 8192:
                     raise VideoProjectError("reference_too_large")
-                target = root / "photos" / f"{len(photos):02d}.png"
+                target = root / ("held_out" if held_out else "photos") / f"{index:02d}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 proc = await spawn_process(
                     tool("ffmpeg"), "-v", "error", "-y", "-i", str(temporary),
@@ -490,7 +518,10 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                 await communicate_process(proc, 30)
                 if proc.returncode != 0 or not target.is_file():
                     raise VideoProjectError("invalid_reference")
-                photos.append(target)
+                if not held_out:
+                    photos.append(target)
+                dataset_paths.append(target)
+                dataset_kinds.append("photo")
             elif _looks_like_video(header):
                 try:
                     info = await probe_media(temporary)
@@ -503,10 +534,13 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                     raise VideoProjectError("invalid_clip")
                 if not 0.4 <= info.video_duration <= 8:
                     raise VideoProjectError("clip_too_long")
-                target = root / "clips" / f"{len(clips):02d}.mp4"
+                target = root / ("held_out" if held_out else "clips") / f"{index:02d}.mp4"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 temporary.replace(target)
-                clips.append(target)
+                if not held_out:
+                    clips.append(target)
+                dataset_paths.append(target)
+                dataset_kinds.append("clip")
             else:
                 raise VideoProjectError("invalid_reference")
             temporary.unlink(missing_ok=True)
@@ -520,6 +554,23 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
         if not still.exists():
             still.write_bytes(photos[0].read_bytes())
         command, source, missing = resolve_trainer()
+        provenance = None
+        manifest = None
+        if review is not None:
+            from .video_training_review import build_provenance
+            try:
+                provenance = build_provenance(root, dataset_paths, dataset_kinds, review)
+            except ValueError as exc:
+                raise VideoProjectError(str(exc)) from exc
+            manifest = root / "dataset.json"
+            atomic_text(manifest, provenance.model_dump_json())
+        if command is not None and _uses_engine_python(command):
+            if review is None:
+                raise VideoProjectError("dataset_review_required")
+            from .video_training_review import dependency_status
+            ready, reason = dependency_status(command)
+            if not ready:
+                raise VideoProjectError(reason)
         stamp = now()
         output = root / "adapter"
         output.mkdir(parents=True, exist_ok=True)
@@ -529,6 +580,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                 name=cleaned,
                 status="mock_completed",
                 consent_confirmed=True,
+                provenance=provenance,
                 photo_count=len(photos),
                 clip_count=len(clips),
                 adapter_ready=False,
@@ -547,6 +599,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                 name=cleaned,
                 status="failed",
                 consent_confirmed=True,
+                provenance=provenance,
                 photo_count=len(photos),
                 clip_count=len(clips),
                 adapter_ready=False,
@@ -564,6 +617,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
             name=cleaned,
             status="queued",
             consent_confirmed=True,
+            provenance=provenance,
             photo_count=len(photos),
             clip_count=len(clips),
             adapter_ready=False,
@@ -572,7 +626,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
             updated_at=stamp,
         )
         _save(job)
-        argv = training_argv(command, output, cleaned, photos, clips)
+        argv = training_argv(command, output, cleaned, photos, clips, manifest)
         _TASKS[job_id] = asyncio.create_task(_run(job_id, argv, output))
         published = True
         return job

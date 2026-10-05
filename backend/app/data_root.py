@@ -213,9 +213,10 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
         for table, candidates in (("tracks", (*_PATH_COLUMNS, *_JSON_COLUMNS)), ("projects", ("data_json",)),
                                   ('audio_versions', ('audio_path', 'captured_source_path')),
                                   ('voice_profiles', ('reference_audio_path',)),
-                                  ('audiobook_books', ('export_path',)),
+                                  ('audiobook_books', ('export_path', 'mp3_export_path', 'm4b_export_path', 'cover_path')),
                                   ('audiobook_jobs', ('output_path',)),
-                                  ('audiobook_sections', ('output_path',))):
+                                  ('audiobook_sections', ('output_path', 'snapshot_json')),
+                                  ('audiobook_workflows', ('payload',))):
             if table not in tables:
                 continue
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -226,7 +227,7 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                 for rowid, value in connection.execute(f"SELECT rowid, {column} FROM {table}").fetchall():
                     if not isinstance(value, str) or not value:
                         continue
-                    if column not in (*_JSON_COLUMNS, 'data_json'):
+                    if column not in (*_JSON_COLUMNS, 'data_json', 'snapshot_json', 'payload'):
                         rewritten = _rewrite_path(value, src, dest)
                     else:
                         try:

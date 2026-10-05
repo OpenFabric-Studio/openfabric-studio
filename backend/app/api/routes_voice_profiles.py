@@ -36,6 +36,8 @@ async def create_voice_profile(
     consent_confirmed: Annotated[bool, Form()],
     audio: Annotated[UploadFile, File()],
     notes: Annotated[str, Form(max_length=2000)] = "",
+    reference_transcript: Annotated[str, Form(max_length=2000)] = "",
+    reference_language: Annotated[str, Form(min_length=2, max_length=16, pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$")] = "en",
 ) -> SpeechVoiceProfile:
     raw = await audio.read()
     try:
@@ -45,6 +47,8 @@ async def create_voice_profile(
             audio_bytes=raw,
             filename=audio.filename or "reference.wav",
             notes=notes,
+            reference_transcript=reference_transcript,
+            reference_language=reference_language,
         )
     except voice_profiles.VoiceProfileError as exc:
         _raise(exc)

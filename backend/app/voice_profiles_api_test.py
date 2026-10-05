@@ -48,7 +48,7 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
     async def _create(self, name: str = "Narrator", consent: str = "true") -> httpx.Response:
         return await self.client.post(
             "/api/voice-profiles",
-            data={"name": name, "consent_confirmed": consent, "notes": "demo"},
+            data={"name": name, "consent_confirmed": consent, "notes": "demo", "reference_transcript": "Reference."},
             files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
         )
 
@@ -80,6 +80,18 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self._create(consent="false")
         self.assertEqual(response.status_code, 400, response.text)
         self.assertEqual(response.json()["detail"], "consent_required")
+
+    async def test_explicit_reference_fields_survive_create_and_patch(self) -> None:
+        response = await self.client.post("/api/voice-profiles", data={"name": "Reader", "consent_confirmed": "true",
+            "notes": "A descriptive note", "reference_transcript": "Spoken reference words.", "reference_language": "ja"},
+            files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["reference_transcript"], "Spoken reference words.")
+        changed = await self.client.patch(f"/api/voice-profiles/{response.json()['id']}",
+            json={"reference_transcript": "Corrected reference.", "reference_language": "en"})
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(changed.json()["reference_language"], "en")
+        self.assertEqual(changed.json()["notes"], "A descriptive note")
 
     async def test_speech_clone_trial_returns_engine_not_installed(self) -> None:
         created = await self._create()

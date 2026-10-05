@@ -9,6 +9,47 @@ from app import main
 
 
 class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_codec_recovery_precedes_narration_and_final_drain_follows_workers(self) -> None:
+        self.enterContext(patch.object(main, 'ensure_layout'))
+        self.enterContext(patch.object(main, 'place_seed_models'))
+        for module, method in [(main.yue_upload, 'start'), (main.ace_jobs, 'recover'),
+                               (main.yue_jobs, 'recover'), (main.speech_clone, 'start'),
+                               (main.speech_clone, 'begin_shutdown'), (main.ebook_import, 'start'),
+                               (main.manager, 'start_watchdog')]:
+            self.enterContext(patch.object(module, method))
+        for module, method in [(main.audio_versions, 'recover'), (main.audio_exports, 'recover_exports'),
+                               (main.reference_imports, 'start'), (main.video_jobs, 'recover'),
+                               (main.optional_engines, 'recover'), (main.video_character_training, 'recover'), (main.video_character_comparison, 'recover'),
+                               (main.audiobook_workflows, 'start'), (main.audiobook_review, 'start'),
+                               (main.module_jobs, 'recover')]:
+            self.enterContext(patch.object(module, method, new=AsyncMock()))
+        recovery = self.enterContext(patch.object(main.audiobook_publish, 'start', new=AsyncMock()))
+        stopped = asyncio.Event()
+        async def start_narration() -> None:
+            recovery.assert_awaited_once()
+        async def stop_narration() -> None:
+            await asyncio.sleep(0)
+            stopped.set()
+        async def final_codec_drain() -> None:
+            self.assertTrue(stopped.is_set(), 'Encoder quarantine must drain after narration exits')
+        self.enterContext(patch.object(main.audiobooks, 'start', side_effect=start_narration))
+        self.enterContext(patch.object(main.audiobooks, 'shutdown', side_effect=stop_narration))
+        drain = self.enterContext(patch.object(main.audiobook_publish, 'shutdown', side_effect=final_codec_drain))
+        for module, method in [(main.ace_jobs, 'shutdown'), (main.yue_jobs, 'shutdown'),
+                               (main.voice_build, 'shutdown'), (main.audio_exports, 'shutdown_exports'),
+                               (main.voice_comparisons, 'shutdown'), (main.video_jobs, 'shutdown'),
+                               (main.stems, 'shutdown'), (main.midi, 'shutdown'), (main.tagging, 'shutdown'),
+                               (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
+                               (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'),
+                               (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'),
+                               (main.speech_clone, 'shutdown'), (main.yue_upload, 'shutdown'),
+                               (main.optional_engines, 'shutdown'), (main.video_character_training, 'shutdown'), (main.video_character_comparison, 'shutdown'),
+                               (main.manager, 'stop_all')]:
+            self.enterContext(patch.object(module, method, new=AsyncMock()))
+        async with main.lifespan(main.app):
+            pass
+        drain.assert_awaited_once()
+
     async def test_recovery_failure_drains_already_recovered_workers(self) -> None:
         entered = asyncio.Event()
         exited = asyncio.Event()
@@ -53,6 +94,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
             (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
             (main.audiobooks, 'shutdown'), (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'), (main.speech_clone, 'shutdown'),
             (main.yue_upload, 'shutdown'), (main.optional_engines, 'shutdown'), (main.video_character_training, 'shutdown'),
+            (main.video_character_comparison, 'shutdown'), (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'), (main.audiobook_publish, 'shutdown'),
         ]]
         stop = self.enterContext(patch.object(main.manager, 'stop_all', new=AsyncMock()))
 

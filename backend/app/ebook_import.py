@@ -19,6 +19,7 @@ import zipfile
 from contextlib import closing
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from html import unescape
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 from xml.etree import ElementTree as ET
@@ -392,6 +393,12 @@ def chapters_from_plain_text(raw: str, book_title: str) -> ExtractedEbook:
 
 def extract_uploaded(filename: str, source: bytes) -> ExtractedEbook:
     suffix = Path(filename).suffix.lower()
+    if not source or len(source) > MAX_UPLOAD_BYTES:
+        raise EbookImportError("ebook_too_large" if source else "invalid_ebook", 413 if source else 400)
+    if suffix == ".docx":
+        return extract_docx(source, Path(filename).stem)
+    if suffix in {".srt", ".vtt"}:
+        return extract_subtitles(source, Path(filename).stem, suffix)
     if suffix == ".epub":
         return extract_epub(source)
     if suffix != ".txt":
@@ -406,6 +413,174 @@ def extract_uploaded(filename: str, source: bytes) -> ExtractedEbook:
     return chapters_from_plain_text(text, stem)
 
 
+def _archive_read(archive: zipfile.ZipFile, name: str) -> bytes:
+    info = archive.getinfo(name)
+    if info.file_size > MAX_MEMBER_BYTES:
+        raise EbookImportError("ebook_too_large", 413)
+    with archive.open(info) as handle:
+        raw = handle.read(MAX_MEMBER_BYTES + 1)
+    if len(raw) > MAX_MEMBER_BYTES:
+        raise EbookImportError("ebook_too_large", 413)
+    return raw
+
+
+def extract_docx(source: bytes, title: str) -> ExtractedEbook:
+    """Read paragraphs/headings without extracting files or following relations."""
+    word = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+    try:
+        with zipfile.ZipFile(io.BytesIO(source)) as archive:
+            entries = archive.infolist()
+            if len(entries) > MAX_ARCHIVE_MEMBERS or sum(entry.file_size for entry in entries) > MAX_EXPANDED_BYTES:
+                raise EbookImportError("ebook_too_large", 413)
+            names: set[str] = set()
+            for entry in entries:
+                name = entry.filename
+                if (name in names or "\\" in name or "\x00" in name or name.startswith("/") or ".." in name.split("/")
+                        or stat.S_ISLNK(entry.external_attr >> 16) or entry.flag_bits & 1):
+                    raise EbookImportError("unsafe_ebook")
+                if entry.file_size > MAX_MEMBER_BYTES:
+                    raise EbookImportError("ebook_too_large", 413)
+                names.add(name)
+            document = _xml(_archive_read(archive, "word/document.xml"))
+            if document.tag != word + "document":
+                raise EbookImportError("invalid_docx")
+            body = document.find(word + "body")
+            if body is None:
+                raise EbookImportError("invalid_docx")
+            heading_styles: set[str] = {f"Heading{index}" for index in range(1, 10)}
+            if "word/styles.xml" in names:
+                styles = _xml(_archive_read(archive, "word/styles.xml"))
+                for style in styles.iter(word + "style"):
+                    label = style.find(word + "name")
+                    if label is not None and re.fullmatch(r"heading\s*[1-9]", label.get(word + "val", ""), re.IGNORECASE):
+                        heading_styles.add(style.get(word + "styleId", ""))
+            unsupported = any(_local(element.tag) in {"tbl", "drawing", "pict", "object", "footnotereference", "endnotereference", "del", "ins", "instrtext", "altchunk"}
+                              for element in body.iter()) or any(name.startswith(("word/footnotes", "word/endnotes", "word/header", "word/footer")) for name in names)
+            ignored = {"drawing", "pict", "object", "del", "txbxcontent", "instrtext", "altchunk"}
+
+            def prose_paragraphs(element: ET.Element) -> list[ET.Element]:
+                if _local(element.tag) in ignored:
+                    return []
+                if element.tag == word + "p":
+                    return [element]
+                return [paragraph for child in element for paragraph in prose_paragraphs(child)]
+
+            def prose_text(element: ET.Element) -> str:
+                if _local(element.tag) in ignored:
+                    return ""
+                if element.tag == word + "t":
+                    return element.text or ""
+                if element.tag == word + "tab":
+                    return "\t"
+                if element.tag in {word + "br", word + "cr"}:
+                    return "\n"
+                return "".join(prose_text(child) for child in element)
+
+            paragraphs: list[str] = []
+            for paragraph in prose_paragraphs(body):
+                text = prose_text(paragraph).strip()
+                if not text:
+                    continue
+                paragraph_style = paragraph.find(word + "pPr/" + word + "pStyle")
+                heading = paragraph_style is not None and paragraph_style.get(word + "val", "") in heading_styles
+                paragraphs.append(("# " if heading else "") + text)
+            extracted = chapters_from_plain_text("\n\n".join(paragraphs), title)
+            if unsupported:
+                extracted.warnings.append(EbookImportWarning(code="unsupported_content", message="DOCX images, embedded objects, footnotes, headers, fields and tracked changes are not fully represented. Table paragraphs retain text without layout. Review against the preserved original before narration."))
+            return extracted
+    except EbookImportError:
+        raise
+    except (zipfile.BadZipFile, KeyError, OSError, RuntimeError, ValueError) as error:
+        raise EbookImportError("invalid_docx") from error
+
+
+_SUBTITLE_TIME = re.compile(r"(?:(\d{1,3}):)?(\d{2}):(\d{2})[,.](\d{3})")
+
+
+def _subtitle_ms(value: str) -> int:
+    match = _SUBTITLE_TIME.fullmatch(value)
+    if match is None:
+        raise EbookImportError("invalid_subtitles")
+    hour, minute, second, millisecond = match.groups()
+    if int(minute) > 59 or int(second) > 59:
+        raise EbookImportError("invalid_subtitles")
+    return ((int(hour or 0) * 60 + int(minute)) * 60 + int(second)) * 1000 + int(millisecond)
+
+
+def extract_subtitles(source: bytes, title: str, suffix: str) -> ExtractedEbook:
+    from .audiobook_contracts import SubtitleSourceCue
+    try:
+        text = source.decode("utf-8-sig").replace("\r\n", "\n").replace("\r", "\n")
+    except UnicodeError as error:
+        raise EbookImportError("invalid_subtitles") from error
+    if "\x00" in text or len(text) > MAX_BOOK_CHARS:
+        raise EbookImportError("invalid_subtitles")
+    if suffix == ".vtt":
+        header_block, separator, text = text.partition("\n\n")
+        header_lines = header_block.splitlines()
+        if not separator or not header_lines or re.fullmatch(r"WEBVTT(?:[ \t].*)?", header_lines[0]) is None or any("-->" in line for line in header_lines[1:]):
+            raise EbookImportError("invalid_subtitles")
+    cues: list[SubtitleSourceCue] = []
+    overlap = False
+    previous_end = 0
+    for block in re.split(r"\n[ \t]*\n", text.strip("\n")):
+        lines = block.splitlines()
+        if not lines:
+            continue
+        if suffix == ".vtt" and (lines[0] in {"STYLE", "REGION", "NOTE"} or lines[0].startswith(("NOTE ", "NOTE\t"))):
+            continue
+        timing_index = 0 if "-->" in lines[0] else 1
+        if len(lines) <= timing_index + 1:
+            raise EbookImportError("invalid_subtitles")
+        timing = re.fullmatch(r"\s*(\S+)\s+-->\s+(\S+)(?:\s+[^\n]*)?", lines[timing_index])
+        if timing is None:
+            raise EbookImportError("invalid_subtitles")
+        start, end = _subtitle_ms(timing.group(1)), _subtitle_ms(timing.group(2))
+        if end <= start:
+            raise EbookImportError("invalid_subtitles")
+        raw_text = "\n".join(lines[timing_index + 1:])
+        labels = re.findall(r"<v(?:\.[^\s>]*)?\s+([^>]+)>", raw_text)
+        if len({label.strip().casefold() for label in labels}) > 1:
+            raise EbookImportError("ambiguous_subtitle_speaker")
+        speaker = labels[0].strip() if labels else ""
+        plain = unescape(re.sub(r"</?(?:b|i|u|c|v|ruby|rt|lang|font)(?:\.[^\s>]*)?(?:\s+[^>]*)?>|<(?:(?:\d{2,3}:)?\d{2}:\d{2}\.\d{3})>", "", raw_text)).strip()
+        prefix = re.match(r"^([\w][\w .'-]{0,79}):\s+(.+)$", plain, re.DOTALL)
+        if not speaker and prefix:
+            speaker, plain = prefix.group(1).strip(), prefix.group(2).strip()
+        if len(speaker) > 40 or ":" in speaker or any(ord(char) < 32 for char in speaker):
+            raise EbookImportError("invalid_subtitle_speaker")
+        if not plain or len(plain) > audiobooks.MAX_CHAPTER_CHARS or len(cues) >= 20_000:
+            raise EbookImportError("ebook_too_large" if plain else "invalid_subtitles", 413 if plain else 400)
+        cue_id = lines[0] if timing_index else f"cue-{len(cues) + 1}"
+        if len(cue_id) > 200:
+            raise EbookImportError("invalid_subtitles")
+        cues.append(SubtitleSourceCue(cue_id=cue_id, order=len(cues), speaker=speaker, start_ms=start, end_ms=end, text=plain))
+        overlap |= start < previous_end
+        previous_end = max(previous_end, end)
+    if not cues:
+        raise EbookImportError("invalid_subtitles")
+    chapters: list[EbookChapterDraft] = []
+    chunk: list[SubtitleSourceCue] = []
+    size = 0
+    for cue in cues:
+        line = f"{cue.speaker}: {cue.text}" if cue.speaker else cue.text
+        if len(line) > audiobooks.MAX_CHAPTER_CHARS:
+            raise EbookImportError("ebook_too_large", 413)
+        if chunk and (size + len(line) + 2 > audiobooks.MAX_CHAPTER_CHARS or len(chunk) >= 1000):
+            chapters.append(EbookChapterDraft(title=f"Cues {chunk[0].order + 1}–{chunk[-1].order + 1}", text="\n\n".join(f"{row.speaker}: {row.text}" if row.speaker else row.text for row in chunk), source_cues=chunk))
+            chunk, size = [], 0
+        chunk.append(cue)
+        size += len(line) + (2 if len(chunk) > 1 else 0)
+    if chunk:
+        chapters.append(EbookChapterDraft(title=f"Cues {chunk[0].order + 1}–{chunk[-1].order + 1}", text="\n\n".join(f"{row.speaker}: {row.text}" if row.speaker else row.text for row in chunk), source_cues=chunk))
+    if len(chapters) > audiobooks.MAX_CHAPTERS:
+        raise EbookImportError("ebook_too_large", 413)
+    warnings = [EbookImportWarning(code="cast_review_required", message="Review every subtitle speaker and assign a consent-backed voice before rendering. Source cue order and times are preserved; generated speech is not forced to match those timings.")]
+    if overlap:
+        warnings.append(EbookImportWarning(code="subtitle_overlap", message="Source cues overlap or are out of timestamp order. The import retains original order and times; review dialogue order before narration."))
+    return ExtractedEbook(title[:200] or "Imported subtitles", chapters, warnings)
+
+
 def save_draft(filename: str, source: bytes, extracted: ExtractedEbook) -> EbookDraft:
     safe_name = Path(filename.replace("\\", "/")).name
     if not safe_name or len(safe_name) > 240:
@@ -418,6 +593,10 @@ def save_draft(filename: str, source: bytes, extracted: ExtractedEbook) -> Ebook
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         _ensure_schema(connection)
         connection.execute("BEGIN IMMEDIATE")
+        if any(EbookDraft.model_validate_json(row[0]).source_filename == safe_name for row in connection.execute("SELECT payload FROM ebook_drafts")):
+            draft.warnings.append(EbookImportWarning(code="independent_reimport", message="This is a new independent import. Previous drafts, chapter edits and source files have been preserved; edits are not automatically merged."))
+        draft.subtitle_import = Path(safe_name).suffix.lower() in {".srt", ".vtt"}
+        draft.cast_review_required = draft.subtitle_import
         if connection.execute("SELECT COUNT(*) FROM ebook_drafts").fetchone()[0] >= MAX_DRAFTS:
             raise EbookImportError("ebook_draft_limit", 409)
         directory = _draft_dir(identifier)
@@ -473,6 +652,15 @@ def patch_draft(identifier: str, body: PatchEbookDraftRequest) -> EbookDraft:
         current = get_draft(identifier)
         if current.revision != body.revision:
             raise EbookImportError("ebook_draft_conflict", 409)
+        if current.subtitle_import:
+            if len(current.chapters) != len(body.chapters):
+                raise EbookImportError("subtitle_provenance_conflict", 409)
+            for original, edited in zip(current.chapters, body.chapters, strict=True):
+                if edited.source_cues and edited.source_cues != original.source_cues:
+                    raise EbookImportError("subtitle_provenance_conflict", 409)
+                # Defaulted/missing metadata from an editor never discards the
+                # original cue IDs, order, speaker labels and source timings.
+                edited.source_cues = original.source_cues
         changes: dict[str, object] = {"title": body.title.strip(), "chapters": body.chapters,
                                       "revision": current.revision + 1, "updated_at": audiobooks._now()}
         if "author" in body.model_fields_set and body.author is not None:
@@ -583,12 +771,23 @@ def create_from_draft(identifier: str, body: CreateAudiobookFromDraftRequest) ->
         draft = get_draft(identifier)
         if draft.revision != body.revision:
             raise EbookImportError("ebook_draft_conflict", 409)
+        if draft.cast_review_required:
+            labels = {cue.speaker.casefold() for chapter in draft.chapters if chapter.included for cue in chapter.source_cues if cue.speaker}
+            for chapter in draft.chapters:
+                if chapter.included:
+                    for line in chapter.text.splitlines():
+                        prefix = re.match(r"^([\w][\w .'-]{0,39}):\s+", line)
+                        if prefix:
+                            labels.add(prefix.group(1).strip().casefold())
+            mapped = {member.name.casefold() for member in body.cast}
+            if not body.cast_reviewed or not labels.issubset(mapped):
+                raise EbookImportError("subtitle_cast_review_required", 409)
         chapters = [AudiobookChapterInput(title=chapter.title, text=chapter.text) for chapter in draft.chapters if chapter.included]
         if not chapters:
             raise EbookImportError("ebook_chapters_required")
         return audiobooks.create_book(CreateAudiobookRequest(
             title=draft.title, profile_id=body.profile_id, chapters=chapters,
-            author=draft.author, pronunciations=draft.pronunciations, cast=body.cast),
+            author=draft.author, pronunciations=draft.pronunciations, cast=body.cast, language=body.language),
             source_import_id=identifier, source_import_revision=draft.revision)
 
 
@@ -678,7 +877,7 @@ async def import_document(filename: str, source: bytes) -> EbookDraft:
     suffix = Path(filename).suffix.lower()
     if suffix == ".mobi":
         return await import_mobi(filename, source)
-    if suffix not in {".epub", ".txt"}:
+    if suffix not in {".epub", ".txt", ".docx", ".srt", ".vtt"}:
         raise EbookImportError("unsupported_ebook_format")
     if _SHUTTING_DOWN or len(_TASKS) >= 2:
         raise EbookImportError("ebook_import_busy", 409)

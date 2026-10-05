@@ -7,6 +7,8 @@ import { getSeparationStatus } from './stems'
 import { applyStatus, isVoiceActive, listVoices } from './voices'
 
 import { parseVideosResponse, parseVideoActivityResponse } from './contracts'
+import { parseAudiobookPassagesResponse, parseCreateDialogueReelRequest, parseRefreshDialogueCueRequest, parseCharacterDatasetReview, parseReviewCharacterAdapterRequest } from './contracts'
+import type { AudiobookPassagesResponse, CreateDialogueReelRequest, RefreshDialogueCueRequest, CharacterDatasetReview, ReviewCharacterAdapterRequest } from './contracts'
 import type { VideoJobResponse, VideoPlanResponse, VideoShot as BackendVideoShot } from './contracts'
 import { parseVideoReadinessResponse, parseVideoProject, parseVideoProjectsResponse, parseCreateVideoProjectRequest, parseUpdateVideoProjectRequest,
   parseVideoRenderRequest, parseVideoRevisionRequest, parseApproveVideoVariantRequest, parseVideoExportRequest,
@@ -206,11 +208,12 @@ export function listCharacterTraining(signal?: AbortSignal): Promise<VideoCharac
   return apiFetch('/api/videos/character-training', { signal }, parseVideoCharacterTrainingResponse)
 }
 
-export async function startCharacterTraining(input: { name: string; consentConfirmed: boolean; files: File[] }, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
+export async function startCharacterTraining(input: { name: string; consentConfirmed: boolean; files: File[]; review?: CharacterDatasetReview }, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
   const form = new FormData()
   form.append('name', input.name)
   form.append('consent_confirmed', input.consentConfirmed ? 'true' : 'false')
   for (const file of input.files) form.append('files', file, file.name)
+  if (input.review) form.append('dataset_review', JSON.stringify(parseCharacterDatasetReview(input.review)))
   return apiFetch('/api/videos/character-training', { method: 'POST', body: form, signal }, parseVideoCharacterTrainingJob)
 }
 
@@ -220,4 +223,36 @@ export function cancelCharacterTraining(id: string, signal?: AbortSignal): Promi
 
 export function applyCharacterAdapter(id: string, body: { revision: number; training_id: string }, signal?: AbortSignal): Promise<VideoProject> {
   return projectPost(id, 'character-adapter', parseApplyVideoCharacterAdapterRequest(body), signal)
+}
+
+
+export function createDialogueReel(body: CreateDialogueReelRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return apiFetch('/api/videos/dialogue-reels', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parseCreateDialogueReelRequest(body)), signal }, parseVideoProject)
+}
+
+export function refreshDialogueCue(id: string, shotId: string, body: RefreshDialogueCueRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, `dialogue-cues/${encodeURIComponent(shotId)}`, parseRefreshDialogueCueRequest(body), signal)
+}
+
+export function undoVideoProject(id: string, body: VideoRevisionRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'undo', parseVideoRevisionRequest(body), signal)
+}
+
+export function redoVideoProject(id: string, body: VideoRevisionRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'redo', parseVideoRevisionRequest(body), signal)
+}
+
+export function createCharacterComparison(id: string, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
+  return apiFetch(`/api/videos/character-training/${encodeURIComponent(id)}/comparison`, { method: 'POST', signal }, parseVideoCharacterTrainingJob)
+}
+
+export function reviewCharacterComparison(id: string, body: ReviewCharacterAdapterRequest, signal?: AbortSignal): Promise<VideoCharacterTrainingJob> {
+  return apiFetch(`/api/videos/character-training/${encodeURIComponent(id)}/review`, { method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parseReviewCharacterAdapterRequest(body)) }, parseVideoCharacterTrainingJob)
+}
+
+
+export function dialoguePassages(bookId: string, chapterIndex: number, signal?: AbortSignal): Promise<AudiobookPassagesResponse> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/passages`, { signal }, parseAudiobookPassagesResponse)
 }

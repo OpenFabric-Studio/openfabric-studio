@@ -22,6 +22,7 @@ from urllib.parse import urljoin
 import httpx
 
 from . import voice_profiles
+from .speech_references import SpeechRenderSettings, SpeechRenderSnapshot, file_digest, normalize_language
 from .config import DATA_DIR, GPT_SOVITS_DIR
 from .module_evidence import record_capability_success
 from .job_lifecycle import await_cleanup
@@ -147,7 +148,7 @@ def _resolve_prompt_text(prompt_text: str | None, notes: str) -> str:
         return prompt_text.strip()
     if notes.strip():
         return notes.strip()
-    return "Reference audio."
+    raise voice_profiles.VoiceProfileError("reference_transcript_required")
 
 
 def _looks_like_wav(data: bytes | bytearray) -> bool:
@@ -171,7 +172,7 @@ def _validate_pcm_wav(data: bytes | bytearray) -> None:
         raise RuntimeError("invalid_speech_audio") from exc
 
 
-async def _request_speech_audio(url: str, payload: dict[str, str]) -> bytearray:
+async def _request_speech_audio(url: str, payload: dict[str, str | int | float]) -> bytearray:
     """An absolute request deadline includes headers and every streamed byte."""
     body = bytearray()
     async with asyncio.timeout(API_TIMEOUT_S):
@@ -194,16 +195,19 @@ def _synthesize_via_api(
     text: str,
     text_language: str,
     output_path: Path | None = None,
+    settings: SpeechRenderSettings | None = None,
 ) -> Path:
     out = Path(output_path) if output_path is not None else trials_root() / f"{uuid.uuid4().hex}.wav"
     out.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
+    payload: dict[str, str | int | float] = {
         "refer_wav_path": refer_wav_path,
         "prompt_text": prompt_text,
         "prompt_language": prompt_language,
         "text": text,
         "text_language": text_language,
     }
+    if settings is not None:
+        payload.update(top_k=settings.top_k, top_p=settings.top_p, temperature=settings.temperature, speed=settings.speed)
     url = urljoin(api_base_url() + "/", "")
     # This synchronous boundary is called from a request/owned narration
     # worker thread. Async I/O supplies cancellable absolute timeout behavior.
@@ -246,6 +250,7 @@ def _synthesize_unlocked(
     prompt_language: str | None = None,
     text_language: str | None = None,
     require_consent: bool = True,
+    snapshot: SpeechRenderSnapshot | None = None,
 ) -> SynthesisOutcome:
     """Synthesize talking speech into ``output_path`` (mock, API, or structured failure).
 
@@ -258,6 +263,15 @@ def _synthesize_unlocked(
     cleaned = text.strip()
     if not cleaned:
         raise voice_profiles.VoiceProfileError("text_required")
+    resolved_prompt = snapshot.prompt_text if snapshot is not None else _resolve_prompt_text(prompt_text, profile.reference_transcript)
+    target_language = normalize_language(text_language or "en")
+    reference_language = normalize_language(prompt_language or profile.reference_language)
+    if snapshot is not None:
+        if snapshot.profile_id != profile_id or snapshot.engine_identity != known_engine_identity():
+            raise voice_profiles.VoiceProfileError("speech_engine_changed", 409)
+        reference = Path(snapshot.reference_audio_path)
+        if reference.is_symlink() or not reference.is_file() or file_digest(reference) != snapshot.reference_sha256:
+            raise voice_profiles.VoiceProfileError("speech_reference_changed", 409)
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -292,10 +306,9 @@ def _synthesize_unlocked(
             install_hints=list(INSTALL_HINTS),
         )
 
-    resolved_prompt = _resolve_prompt_text(prompt_text, profile.notes)
-    prompt_language_value = (prompt_language or "en").strip() or "en"
-    text_language_value = (text_language or "en").strip() or "en"
-    refer = str(Path(profile.reference_audio_path).resolve())
+    prompt_language_value = snapshot.prompt_language if snapshot is not None else reference_language
+    text_language_value = snapshot.text_language if snapshot is not None else target_language
+    refer = snapshot.reference_audio_path if snapshot is not None else str(Path(profile.reference_audio_path).resolve())
     try:
         produced = _synthesize_via_api(
             refer_wav_path=refer,
@@ -304,6 +317,7 @@ def _synthesize_unlocked(
             text=cleaned,
             text_language=text_language_value,
             output_path=output_path,
+            **({"settings": snapshot.settings} if snapshot is not None else {}),
         )
         try:
             record_capability_success("speech")
@@ -327,6 +341,7 @@ def synthesize_to_path(
     *, profile_id: str, text: str, output_path: Path,
     prompt_text: str | None = None, prompt_language: str | None = None,
     text_language: str | None = None, require_consent: bool = True,
+    snapshot: SpeechRenderSnapshot | None = None,
 ) -> SynthesisOutcome:
     """Serialize books and speech trials, rechecking consent inside the lock."""
     from .module_jobs import ModuleSetupError, speech_admission
@@ -338,9 +353,15 @@ def synthesize_to_path(
                 return SynthesisOutcome(status="failed", detail="speech_backend_stopping")
             return _synthesize_unlocked(profile_id=profile_id, text=text, output_path=output_path,
                                         prompt_text=prompt_text, prompt_language=prompt_language,
-                                        text_language=text_language, require_consent=require_consent)
+                                        text_language=text_language, require_consent=require_consent,
+                                        **({"snapshot": snapshot} if snapshot is not None else {}))
     except ModuleSetupError as exc:
         return SynthesisOutcome(status="failed", detail=exc.code)
+
+
+def known_engine_identity() -> str | None:
+    """Only identities of the actual active renderer may authorize cache reuse."""
+    return "openfabric-mock-pcm-v1" if mock_enabled() else None
 
 
 def start() -> None:

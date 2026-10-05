@@ -32,6 +32,8 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   await fs.copyFile(path.join(repo, 'backend', 'scripts', 'setup_yue_native.py'), path.join(fixture, 'backend', 'scripts', 'setup_yue_native.py'));
   const starterAssets = path.join(repo, 'backend', 'assets', 'starter-voices');
   await fs.cp(starterAssets, path.join(fixture, 'backend', 'assets', 'starter-voices'), { recursive: true });
+  const fontAssets = path.join(repo, 'backend', 'assets', 'fonts');
+  await fs.cp(fontAssets, path.join(fixture, 'backend', 'assets', 'fonts'), { recursive: true });
   const patches = ['ace-step.patch', 'yue-model-resume.patch', 'yue-workspace-release.patch', 'yue-progress.patch'];
   await fs.mkdir(path.join(fixture, 'external', 'patches'), { recursive: true });
   for (const name of [...patches, 'README.md']) {
@@ -43,6 +45,7 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   assert.deepEqual(await fs.readFile(path.join(resources, 'backend', 'requirements.lock')), await fs.readFile(path.join(repo, 'backend', 'requirements.lock')));
   const packagedStarters = path.join(resources, 'backend', 'assets', 'starter-voices');
   await assertDirectoryCopy(starterAssets, packagedStarters);
+  await assertDirectoryCopy(fontAssets, path.join(resources, 'backend', 'assets', 'fonts'));
   const helper = await fs.readFile(path.join(resources, 'backend', 'scripts', 'setup_yue_native.py'), 'utf8');
   assert.match(helper, /PATCH_DIR = Path\(__file__\)\.resolve\(\)\.parents\[2\] \/ 'external\/patches'/);
   for (const name of ['yue-workspace-release.patch', 'yue-progress.patch']) {

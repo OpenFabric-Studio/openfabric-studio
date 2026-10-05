@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from typing import Annotated, NoReturn
 from fastapi.responses import FileResponse
+from pydantic import ValidationError
 from ..video_media import VideoMediaError
 
 from ..video_jobs import (
@@ -93,6 +94,8 @@ from ..video_contracts import (
     VideoProject,
     VideoProjectsResponse,
     CreateVideoProjectRequest,
+    CreateDialogueReelRequest,
+    RefreshDialogueCueRequest,
     UpdateVideoProjectRequest,
     VideoRevisionRequest,
     VideoRenderRequest,
@@ -107,6 +110,8 @@ from ..video_contracts import (
     VideoCharacterTrainingResponse,
     VideoCharacterTrainerStatus,
     VideoCharacterTrainerSettingsRequest,
+    CharacterDatasetReview,
+    ReviewCharacterAdapterRequest,
     VideoReadinessResponse,
 )
 from .. import video_characters
@@ -145,6 +150,15 @@ def _project_error(exc: projects.VideoProjectError) -> NoReturn:
 @router.get("/readiness", response_model=VideoReadinessResponse)
 def video_readiness() -> VideoReadinessResponse:
     return renders.readiness()
+
+
+@router.post("/dialogue-reels", response_model=VideoProject)
+def create_dialogue_reel(body: CreateDialogueReelRequest) -> VideoProject:
+    from .. import video_dialogue
+    try:
+        return video_dialogue.create(body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
 
 
 @router.get("/projects", response_model=VideoProjectsResponse)
@@ -309,13 +323,35 @@ async def start_character_training(
     name: Annotated[str, Form(min_length=1, max_length=80)],
     consent_confirmed: Annotated[bool, Form()],
     files: list[UploadFile] = File(...),
+    dataset_review: Annotated[str | None, Form(max_length=15000)] = None,
 ) -> VideoCharacterTrainingJob:
     try:
         return await character_training.create_job(
             name=name,
             consent_confirmed=consent_confirmed,
             uploads=files,
+            review=CharacterDatasetReview.model_validate_json(dataset_review) if dataset_review is not None else None,
         )
+    except ValidationError as exc:
+        raise HTTPException(422, detail="dataset_review_required") from exc
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/character-training/{job_id}/comparison", response_model=VideoCharacterTrainingJob)
+def character_comparison(job_id: str) -> VideoCharacterTrainingJob:
+    from .. import video_character_comparison
+    try:
+        return video_character_comparison.create(job_id)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/character-training/{job_id}/review", response_model=VideoCharacterTrainingJob)
+async def review_character(job_id: str, body: ReviewCharacterAdapterRequest) -> VideoCharacterTrainingJob:
+    from .. import video_character_comparison
+    try:
+        return await video_character_comparison.review(job_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 
@@ -348,6 +384,31 @@ def apply_project_character(project_id: str, body: ApplyVideoCharacterRequest) -
 def speech_file(project_id: str) -> FileResponse:
     try:
         return FileResponse(projects.speech_file(project_id), media_type="audio/wav")
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/dialogue-cues/{shot_id}", response_model=VideoProject)
+def refresh_dialogue_cue(project_id: str, shot_id: str, body: RefreshDialogueCueRequest) -> VideoProject:
+    from .. import video_dialogue
+    try:
+        return video_dialogue.refresh(project_id, shot_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/undo", response_model=VideoProject)
+def undo_project(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    try:
+        return projects.undo(project_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/redo", response_model=VideoProject)
+def redo_project(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    try:
+        return projects.redo(project_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 
@@ -441,6 +502,14 @@ def variant_file(project_id: str, shot_id: str, variant_id: str) -> FileResponse
             renders.variant_file(project_id, shot_id, variant_id),
             media_type="video/mp4",
         )
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.get("/projects/{project_id}/shots/{shot_id}/variants/{variant_id}/filmstrip")
+def variant_filmstrip(project_id: str, shot_id: str, variant_id: str) -> FileResponse:
+    try:
+        return FileResponse(renders.filmstrip_file(project_id, shot_id, variant_id), media_type="image/png")
     except projects.VideoProjectError as exc:
         _project_error(exc)
 

@@ -18,8 +18,9 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import audiobooks, speech_clone, voice_profiles
-from .audiobook_contracts import AudiobookBook
+from .audiobook_contracts import AudiobookBook, CastMember, PronunciationEntry
 from .job_lifecycle import await_cleanup
+from .speech_references import SpeechRenderSnapshot, capture
 
 SECTION_CHARS = 1200
 _TASKS: dict[str, asyncio.Task[None]] = {}
@@ -31,6 +32,9 @@ class _Chapter(BaseModel):
     id: str
     chapter_index: int
     chapter_text: str
+    language: str = ""
+    bypass_cache: bool = False
+    revision: int = 1
 
 
 class _Section(BaseModel):
@@ -41,6 +45,10 @@ class _Section(BaseModel):
     output_path: str | None = None
     profile_id: str = ""
     speaker_name: str = ""
+    passage_id: str = ""
+    snapshot_json: str | None = None
+    start_ms: int = 0
+    end_ms: int = 0
 
 
 class _Stopped(Exception):
@@ -136,14 +144,28 @@ def concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled:
         temporary.unlink(missing_ok=True)
 
 
-def _planned(identifier: str, chapter_text: str) -> list[tuple[str, str, str]]:
+def _planned(identifier: str, chapter_text: str, job_id: str | None = None) -> list[tuple[str, str, str]]:
     """Spoken pieces as (text, profile id, speaker label)."""
+    book = audiobooks.get_book(identifier)
+    planned = plan_text(chapter_text, book.profile_id, book.cast, book.pronunciations)
+    if job_id is not None:
+        with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+            rows = connection.execute("SELECT * FROM audiobook_reviewed_text WHERE job_id=?", (job_id,)).fetchall()
+        replacements = {int(row["section_index"]): row for row in rows}
+        for index, (text, profile, speaker) in enumerate(planned):
+            replacement = replacements.get(index)
+            if replacement is not None and replacement["source_sha256"] == hashlib.sha256(text.encode()).hexdigest() and replacement["profile_id"] == profile and replacement["speaker_name"] == speaker:
+                planned[index] = (str(replacement["text"]), profile, speaker)
+    return planned
+
+
+def plan_text(chapter_text: str, narrator_id: str, cast: list[CastMember], pronunciations: list[PronunciationEntry]) -> list[tuple[str, str, str]]:
+    """The same speaker routing, spoken replacements and sectioning for previews."""
     from .audiobook_cast import split_turns
     from .audiobook_pronounce import apply_pronunciations
-    book = audiobooks.get_book(identifier)
     pieces: list[tuple[str, str, str]] = []
-    for profile_id, speaker, spoken in split_turns(chapter_text, book.profile_id, book.cast):
-        pronounced = apply_pronunciations(spoken, audiobooks.pronunciations_for(identifier))
+    for profile_id, speaker, spoken in split_turns(chapter_text, narrator_id, cast):
+        pronounced = apply_pronunciations(spoken, pronunciations)
         if not pronounced.strip():
             continue
         for piece in split_sections(pronounced):
@@ -166,7 +188,7 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         audiobooks._ensure_schema(connection)
         rows = connection.execute(
-            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name
+            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms
                FROM audiobook_sections WHERE job_id = ? ORDER BY section_index""",
             (chapter.id,),
         ).fetchall()
@@ -177,15 +199,37 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
                 for index, (section, (text, profile_id, speaker)) in enumerate(zip(sections, planned, strict=True))
             ):
                 raise audiobooks.AudiobookError("narration_sections_changed")
+            pending = [section for section in sections if section.snapshot_json is None and
+                (section.status != "done" or section.output_path is None or not Path(section.output_path).is_file())]
+            if pending:
+                book_id = str(connection.execute("SELECT book_id FROM audiobook_jobs WHERE id=?", (chapter.id,)).fetchone()[0])
+                from .speech_references import normalize_language
+                language = normalize_language(chapter.language or audiobooks.get_book(book_id).language or "en")
+                reference_root = _contained(audiobooks.book_dir(book_id) / "references", audiobooks.book_dir(book_id))
+                snapshots = {voice: capture(voice, language, reference_root, speech_clone.known_engine_identity())
+                    for voice in dict.fromkeys(section.profile_id or narrator_id for section in pending)}
+                for section in pending:
+                    section.snapshot_json = snapshots[section.profile_id or narrator_id].model_dump_json()
+                    connection.execute("UPDATE audiobook_sections SET snapshot_json=? WHERE job_id=? AND section_index=?", (section.snapshot_json, chapter.id, section.section_index))
+                # Historical PCM has no verified language/reference provenance.
+                if all(section.snapshot_json is not None for section in sections):
+                    connection.execute("UPDATE audiobook_jobs SET render_language=? WHERE id=?", (language, chapter.id))
+                connection.commit()
             return sections
+        book_id = str(connection.execute("SELECT book_id FROM audiobook_jobs WHERE id = ?", (chapter.id,)).fetchone()[0])
+        from .speech_references import normalize_language
+        language = normalize_language(chapter.language or audiobooks.get_book(book_id).language or "en")
+        reference_root = _contained(audiobooks.book_dir(book_id) / "references", audiobooks.book_dir(book_id))
+        snapshots = {voice_id: capture(voice_id, language, reference_root, speech_clone.known_engine_identity()) for voice_id in dict.fromkeys(voice for _, voice, _ in planned)}
         for index, (text, profile_id, speaker) in enumerate(planned):
             connection.execute("""INSERT INTO audiobook_sections
-                (job_id, section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name)
-                VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?)""",
-                (chapter.id, index, text, hashlib.sha256(text.encode()).hexdigest(), profile_id, speaker))
+                (job_id, section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json)
+                VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?)""",
+                (chapter.id, index, text, hashlib.sha256(text.encode()).hexdigest(), profile_id, speaker, uuid.uuid5(uuid.UUID(chapter.id), str(index)).hex, snapshots[profile_id].model_dump_json()))
+        connection.execute("UPDATE audiobook_jobs SET render_language = ? WHERE id = ?", (language, chapter.id))
         connection.commit()
         rows = connection.execute(
-            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name
+            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms
                FROM audiobook_sections WHERE job_id = ? ORDER BY section_index""",
             (chapter.id,),
         ).fetchall()
@@ -195,6 +239,13 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
 def _section_status(job_id: str, index: int, status: str, path: Path | None = None) -> None:
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         connection.execute("UPDATE audiobook_sections SET status = ?, output_path = ? WHERE job_id = ? AND section_index = ?", (status, str(path) if path else None, job_id, index))
+        if status == "done" and path is not None:
+            row = connection.execute("SELECT snapshot_json,section_text,passage_id FROM audiobook_sections WHERE job_id=? AND section_index=?", (job_id, index)).fetchone()
+            if row is not None and row[0]:
+                snapshot = SpeechRenderSnapshot.model_validate_json(str(row[0]))
+                from .speech_references import file_digest
+                identity = hashlib.sha256(f"{snapshot.identity}\n{row[1]}\n{file_digest(path)}\n{path.name}".encode()).hexdigest()
+                connection.execute("UPDATE audiobook_sections SET render_identity=? WHERE job_id=? AND section_index=?", (identity, job_id, index))
         connection.commit()
 
 
@@ -212,13 +263,14 @@ def _job_status(job_id: str, status: str, detail: str = "", path: Path | None = 
         connection.commit()
 
 
-def _synthesize(identifier: str, profile_id: str, text: str, target: Path) -> None:
+def _synthesize(identifier: str, profile_id: str, text: str, target: Path, snapshot: SpeechRenderSnapshot | None = None) -> None:
     # Check the control flag after acquiring the shared lock: a waiting book
     # may have been paused while another book or speech trial used the engine.
     with speech_clone.SYNTHESIS_LOCK:
         if not _active(identifier):
             raise _Stopped()
-        outcome = speech_clone.synthesize_to_path(profile_id=profile_id, text=text, output_path=target, require_consent=True)
+        outcome = speech_clone.synthesize_to_path(profile_id=profile_id, text=text, output_path=target, require_consent=True,
+            text_language=snapshot.text_language if snapshot else "en", snapshot=snapshot)
         if outcome.status not in {"completed", "mock_completed"} or outcome.output_path is None:
             _LOG.warning("Audiobook section failed: %s", outcome.status)
             code = outcome.status if outcome.status in {"engine_not_installed", "api_unavailable"} else "setup_busy" if outcome.detail == "setup_busy" else "chapter_synthesis_failed"
@@ -246,7 +298,7 @@ def _collapse_spans(spans: list[dict[str, object]]) -> list[dict[str, object]]:
 def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> None:
     from .audiobook_pronounce import PronunciationError
     try:
-        planned = _planned(identifier, chapter.chapter_text)
+        planned = _planned(identifier, chapter.chapter_text, chapter.id)
     except PronunciationError as exc:
         _job_status(chapter.id, "failed", exc.code)
         return
@@ -268,28 +320,32 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
             profile = voice_profiles.get_profile(voice_id)
             if not profile.consent_confirmed:
                 raise audiobooks.AudiobookError("consent_required", 403)
-            target = _contained(sections_root / f"{chapter.id}-{section.section_index:04d}.wav", output_root)
-            if section.status == "done" and section.output_path == str(target) and target.is_file():
-                paths.append(target)
-                continue
+            target = _contained(sections_root / f"{section.passage_id or chapter.id}-{chapter.revision}-{section.section_index:04d}.wav", output_root)
+            if section.status == "done" and section.output_path is not None:
+                retained = _contained(Path(section.output_path), output_root)
+                if retained.is_file():
+                    paths.append(retained)
+                    continue
             _section_status(chapter.id, section.section_index, "running")
             temporary = target.with_name(f".{target.stem}.{uuid.uuid4().hex}.partial.wav")
             try:
                 from .audiobook_cache import reuse, store
-                if not reuse(voice_id, section.section_text, temporary):
-                    _synthesize(identifier, voice_id, section.section_text, temporary)
+                snapshot = SpeechRenderSnapshot.model_validate_json(section.snapshot_json) if section.snapshot_json else None
+                identity = snapshot.identity if snapshot is not None and snapshot.engine_identity is not None else None
+                if chapter.bypass_cache or not reuse(voice_id, section.section_text, temporary, render_identity=identity):
+                    _synthesize(identifier, voice_id, section.section_text, temporary, snapshot)
                 # The upstream reply must be real PCM WAV before publication.
                 with wave.open(str(temporary), "rb") as handle:
                     if handle.getnframes() <= 0:
                         raise audiobooks.AudiobookError("invalid_speech_audio")
                 temporary.replace(target)
-                store(voice_id, section.section_text, target)
+                store(voice_id, section.section_text, target, render_identity=identity)
             finally:
                 temporary.unlink(missing_ok=True)
             _section_status(chapter.id, section.section_index, "done", target)
             paths.append(target)
         _require_current_consent(identifier)
-        target = concat_wavs(identifier, paths, output_root / f"{chapter.chapter_index:04d}.wav")
+        target = concat_wavs(identifier, paths, output_root / f"{chapter.chapter_index:04d}-{uuid.uuid4().hex}.wav")
         try:
             from .narration_pauses import chunk_wav
             audiobooks.save_pause_spans(chapter.id, chunk_wav(target))
@@ -300,6 +356,9 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
         for section, path in zip(_sections(chapter, planned, profile_id), paths, strict=True):
             duration = _wav_ms(path)
             spans.append({"speaker": section.speaker_name or "Narrator", "start_ms": cursor, "end_ms": cursor + duration})
+            with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+                connection.execute("UPDATE audiobook_sections SET start_ms = ?, end_ms = ? WHERE job_id = ? AND section_index = ?", (cursor, cursor + duration, chapter.id, section.section_index))
+                connection.commit()
             cursor += duration
         audiobooks.save_cast_spans(chapter.id, _collapse_spans(spans))
         # Publication and revocation use the same profile lock. Keep the
@@ -326,9 +385,16 @@ def _process_book(identifier: str) -> None:
         if transition.rowcount == 0:
             return
         connection.commit()
-        rows = connection.execute("SELECT id, chapter_index, chapter_text FROM audiobook_jobs WHERE book_id = ? AND status != 'done' ORDER BY chapter_index", (identifier,)).fetchall()
+        rows = connection.execute("SELECT id, chapter_index, chapter_text, language, revision, bypass_cache FROM audiobook_jobs WHERE book_id = ? AND status != 'done' ORDER BY chapter_index", (identifier,)).fetchall()
         chapters = [_Chapter.model_validate(dict(row)) for row in rows]
     profile_id = audiobooks.get_book(identifier).profile_id
+    # Freeze every chapter's reference inputs before the first upstream call.
+    for chapter in chapters:
+        try:
+            _sections(chapter, _planned(identifier, chapter.chapter_text, chapter.id), profile_id)
+        except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+            _job_status(chapter.id, "failed", exc.code)
+            continue
     for chapter in chapters:
         if not _active(identifier):
             return

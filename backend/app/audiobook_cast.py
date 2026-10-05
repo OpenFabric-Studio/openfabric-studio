@@ -63,6 +63,4 @@ def split_turns(text: str, narrator_id: str, cast: list[CastMember]) -> list[tup
                     append(found[0], found[1], spoken)
                 continue
         append(narrator_id, NARRATOR, stripped)
-    if not turns and text.strip():
-        return [(narrator_id, NARRATOR, text.strip())]
     return turns

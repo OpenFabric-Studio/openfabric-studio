@@ -63,18 +63,18 @@ def _connect() -> sqlite3.Connection:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 1:
+    if version == 2:
         return
-    if version != 0:
+    if version not in (0, 1):
         raise VoiceProfileError("profile_storage_unavailable", 503)
     # SQLite protects the entire schema upgrade, including concurrent processes.
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 1:
+        if version == 2:
             connection.commit()
             return
-        if version != 0:
+        if version not in (0, 1):
             raise VoiceProfileError("profile_storage_unavailable", 503)
         connection.execute(
             """
@@ -101,7 +101,12 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             """CREATE UNIQUE INDEX IF NOT EXISTS voice_profiles_starter_voice_id
             ON voice_profiles(starter_voice_id) WHERE starter_voice_id IS NOT NULL"""
         )
-        connection.execute("PRAGMA user_version = 1")
+        if "reference_transcript" not in columns:
+            connection.execute("ALTER TABLE voice_profiles ADD COLUMN reference_transcript TEXT NOT NULL DEFAULT ''")
+            connection.execute("UPDATE voice_profiles SET reference_transcript = notes")
+        if "reference_language" not in columns:
+            connection.execute("ALTER TABLE voice_profiles ADD COLUMN reference_language TEXT NOT NULL DEFAULT 'en'")
+        connection.execute("PRAGMA user_version = 2")
         connection.commit()
     except Exception:
         connection.rollback()
@@ -134,6 +139,8 @@ def _row_to_profile(row: sqlite3.Row) -> SpeechVoiceProfile:
         consent_confirmed=bool(row["consent_confirmed"]),
         reference_audio_path=str(row["reference_audio_path"]),
         notes=str(row["notes"] or ""),
+        reference_transcript=str(row["reference_transcript"] or ""),
+        reference_language=str(row["reference_language"] or "en"),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         engine_hints=hints,
@@ -170,6 +177,8 @@ def create_profile(
     notes: str = "",
     engine_hints: EngineHintMap | None = None,
     starter_voice_id: str | None = None,
+    reference_transcript: str = "",
+    reference_language: str = "en",
 ) -> SpeechVoiceProfile:
     cleaned = (name or "").strip()
     if not cleaned:
@@ -210,8 +219,8 @@ def create_profile(
                 """
                 INSERT INTO voice_profiles (
                     id, name, consent_confirmed, reference_audio_path, notes,
-                    created_at, updated_at, engine_hints, starter_voice_id
-                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, engine_hints, starter_voice_id, reference_transcript, reference_language
+                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     profile_id,
@@ -222,6 +231,8 @@ def create_profile(
                     stamp,
                     hints_json,
                     starter_voice_id,
+                    reference_transcript.strip(),
+                    reference_language,
                 ),
             )
             row = connection.execute(
@@ -247,7 +258,7 @@ def create_profile(
 def patch_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest) -> SpeechVoiceProfile:
     if not _ID.fullmatch(profile_id):
         raise VoiceProfileError("invalid_profile_id", 404)
-    if body.name is None and body.notes is None and body.consent_confirmed is None:
+    if all(value is None for value in (body.name, body.notes, body.consent_confirmed, body.reference_transcript, body.reference_language)):
         raise VoiceProfileError("nothing_to_patch")
     with _profile_store() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -266,13 +277,15 @@ def patch_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest) -> Spee
             else int(row["consent_confirmed"])
         )
         stamp = _now()
+        transcript = body.reference_transcript if body.reference_transcript is not None else str(row["reference_transcript"] or "")
+        language = body.reference_language if body.reference_language is not None else str(row["reference_language"] or "en")
         connection.execute(
             """
             UPDATE voice_profiles
-            SET name = ?, notes = ?, consent_confirmed = ?, updated_at = ?
+            SET name = ?, notes = ?, consent_confirmed = ?, updated_at = ?, reference_transcript = ?, reference_language = ?
             WHERE id = ?
             """,
-            (name[:120], notes[:2000], consent, stamp, profile_id),
+            (name[:120], notes[:2000], consent, stamp, transcript.strip(), language, profile_id),
         )
         connection.commit()
         updated = connection.execute(

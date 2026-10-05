@@ -25,6 +25,8 @@ class SpeechVoiceProfile(Contract):
     consent_confirmed: bool
     reference_audio_path: str = Field(min_length=1, max_length=1024)
     notes: str = Field(default="", max_length=2000)
+    reference_transcript: str = Field(default="", max_length=2000)
+    reference_language: str = Field(default="en", min_length=2, max_length=16, pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$")
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
     engine_hints: EngineHintMap | None = None
@@ -58,6 +60,8 @@ class PatchSpeechVoiceProfileRequest(Contract):
     name: str | None = Field(default=None, min_length=1, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
     consent_confirmed: bool | None = None
+    reference_transcript: str | None = Field(default=None, max_length=2000)
+    reference_language: str | None = Field(default=None, min_length=2, max_length=16, pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$")
 
 
 class SpeechCloneTrialRequest(Contract):

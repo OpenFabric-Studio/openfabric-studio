@@ -5,6 +5,7 @@ import { createI18n } from 'vue-i18n'
 import AudiobooksPanel from './AudiobooksPanel.vue'
 import * as api from '../../api/audiobooks'
 import * as profilesApi from '../../api/voiceProfiles'
+import * as workflowApi from '../../api/audiobookWorkflow'
 import type { AudiobookBook, AudiobookCreateResponse, AudiobookJob } from '../../api/audiobooks'
 import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
 import type { EbookDraft } from '../../api/contracts'
@@ -19,6 +20,7 @@ vi.mock('../../api/audiobooks', async (original) => ({ ...await original<typeof 
   setAudiobookLanguages: vi.fn(), setAudiobookCast: vi.fn(), setAudiobookChapterText: vi.fn(), setAudiobookPronunciations: vi.fn(), regenerateAudiobookChapter: vi.fn(), uploadAudiobookCover: vi.fn(),
 }))
 vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(), listSpeechVoiceProfiles: vi.fn(), startSpeechCloneTrial: vi.fn() }))
+vi.mock('../../api/audiobookWorkflow', async original => ({ ...await original<typeof import('../../api/audiobookWorkflow')>(), __v_isRef: false, auditionDraft: vi.fn(), getAudition: vi.fn(), listBookAuditions: vi.fn() }))
 
 let app: App | undefined
 let hidden = ref(false)
@@ -39,6 +41,7 @@ function deferred<T>() {
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); activities.length = 0; hidden = ref(false)
   vi.mocked(api.listAudiobooks).mockResolvedValue([book()])
+  vi.mocked(workflowApi.listBookAuditions).mockResolvedValue([])
   vi.mocked(api.listEbookDrafts).mockResolvedValue([])
   vi.mocked(api.listAudiobookJobs).mockImplementation(async id => [job(book(id, id === 'b'.repeat(32) ? 'Second book' : 'First book'))])
   vi.mocked(profilesApi.listSpeechVoiceProfiles).mockResolvedValue([profile])
@@ -168,7 +171,7 @@ it('aborts a pending creation on unmount and never resumes polling from its comp
 
 it('uses the actual chapter audio route and only exports the selected completed book', async () => {
   const container = await mount()
-  expect(container.querySelector('audio')?.getAttribute('src')).toBe(api.audiobookChapterAudioUrl(book().id, 0))
+  expect(container.querySelector('audio')?.getAttribute('src')).toBe(api.audiobookChapterAudioUrl(book().id, 0) + '?revision=1')
   expect(container.querySelector('[data-export-book]')?.getAttribute('href')).toBe(api.audiobookExportUrl(book().id))
   expect(container.textContent).not.toContain('/private/reference.wav')
 })
@@ -374,7 +377,7 @@ it('saves reviewed inclusion choices and creates narration against the resulting
   submit(container); await settle()
   expect(api.createAudiobook).not.toHaveBeenCalled()
   expect(api.saveEbookDraft).toHaveBeenCalledWith(ebook.id, expect.objectContaining({ revision: 1, chapters: expect.arrayContaining([expect.objectContaining({ included: false })]) }), expect.any(AbortSignal))
-  expect(api.createAudiobookFromDraft).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }), profile.id, expect.any(AbortSignal))
+  expect(api.createAudiobookFromDraft).toHaveBeenCalledWith(expect.objectContaining({ revision: 2 }), profile.id, expect.any(AbortSignal), undefined, {})
 })
 
 it('preserves reviewed text when another session changes the saved draft', async () => {
@@ -382,6 +385,35 @@ it('preserves reviewed text when another session changes the saved draft', async
   vi.mocked(api.saveEbookDraft).mockRejectedValue(new (await import('../../api/http')).ApiError('ebook_draft_conflict', 409))
   await click(container, 'Save reviewed draft')
   expect(field(container, 'Chapter 2 text').value).toBe('Keep my newer text'); expect(container.textContent).toContain('changed in another session'); expect(api.createAudiobookFromDraft).not.toHaveBeenCalled()
+})
+
+it('requires reviewed subtitle cast mapping and retains fixed cue boundaries when creating narration', async () => {
+  const actor = { ...profile, id: 'd'.repeat(32), name: 'Alice voice' }
+  const imported: EbookDraft = {
+    ...ebook, source_filename: 'dialogue.vtt', subtitle_import: true, cast_review_required: true,
+    chapters: [{ title: 'Scene', text: '[Alice] Hello there.', included: true, source_cues: [{ cue_id: 'cue-1', order: 0, speaker: 'Alice', start_ms: 1000, end_ms: 3000, text: 'Hello there.' }] }],
+  }
+  vi.mocked(profilesApi.listSpeechVoiceProfiles).mockResolvedValue([profile, actor])
+  vi.mocked(api.listEbookDrafts).mockResolvedValue([{ id: imported.id, title: imported.title, source_filename: imported.source_filename, chapter_count: 1, revision: 1, created_at: 'now', updated_at: 'now' }])
+  vi.mocked(api.getEbookDraft).mockResolvedValue(imported)
+  const node = await mount(); await draft(node)
+  await change(node, 'Saved ebook drafts', imported.id); await click(node, 'Use imported chapters')
+  expect(field(node, 'Cast name 1').value).toBe('Alice')
+  expect(button(node, 'Add chapter').disabled).toBe(true)
+  expect(button(node, 'Remove chapter 1').disabled).toBe(true)
+  await change(node, 'Cast voice 1', actor.id)
+  submit(node); await settle()
+  expect(api.saveEbookDraft).not.toHaveBeenCalled()
+  expect(api.createAudiobookFromDraft).not.toHaveBeenCalled()
+  const review = field(node, audiobookWorkspaceEn.subtitleCastReview)
+  if (!(review instanceof HTMLInputElement)) throw new Error('Missing cast review')
+  review.click(); await settle()
+  await change(node, 'Narration language', 'en-GB')
+  vi.mocked(api.saveEbookDraft).mockResolvedValue({ ...imported, revision: 2 })
+  vi.mocked(api.createAudiobookFromDraft).mockResolvedValue({ book: book('e'.repeat(32), imported.title, 'queued'), jobs: [] })
+  submit(node); await settle()
+  expect(api.saveEbookDraft).toHaveBeenCalledWith(imported.id, expect.objectContaining({ revision: 1, chapters: [{ title: 'Scene', text: '[Alice] Hello there.', included: true }] }), expect.any(AbortSignal))
+  expect(api.createAudiobookFromDraft).toHaveBeenCalledWith(expect.objectContaining({ revision: 2, chapters: imported.chapters }), profile.id, expect.any(AbortSignal), [{ name: 'Alice', profile_id: actor.id }], { language: 'en-GB', cast_reviewed: true })
 })
 
 it('pauses and resumes saved narration with honest section-boundary guidance', async () => {
@@ -414,14 +446,17 @@ it('keeps the imported chapter editor visible after deleting its last chapter an
   await click(node, 'Add chapter'); expect(field(node, 'Chapter to review').value).toBe('1')
 })
 
-it('previews the selected narrator and invalidates late audio when its text changes', async () => {
-  const response = deferred<Awaited<ReturnType<typeof profilesApi.startSpeechCloneTrial>>>()
-  vi.mocked(profilesApi.startSpeechCloneTrial).mockReturnValue(response.promise)
-  const node = await mount(); await draft(node); await click(node, 'Preview narrator')
-  expect(profilesApi.startSpeechCloneTrial).toHaveBeenCalledWith(profile.id, 'Draft chapter text', expect.any(AbortSignal))
+function completedAudition(): Awaited<ReturnType<typeof workflowApi.auditionDraft>> {
+  return { id: '1'.repeat(32), mode: 'cast', status: 'done', created_at: 'now', updated_at: 'now', clips: [{ index: 0, speaker: 'Narrator', profile_id: profile.id, text: 'Draft chapter text', language: 'en', status: 'done', audio_url: `/api/audiobooks/auditions/${'1'.repeat(32)}/clips/0/audio` }] }
+}
+it('auditions the current draft and invalidates late audio when its text changes', async () => {
+  const response = deferred<Awaited<ReturnType<typeof workflowApi.auditionDraft>>>()
+  vi.mocked(workflowApi.auditionDraft).mockReturnValue(response.promise)
+  const node = await mount(); await draft(node); await click(node, 'Audition cast')
+  expect(workflowApi.auditionDraft).toHaveBeenCalledWith(expect.objectContaining({ profile_id: profile.id, chapters: [{ title: 'Chapter 1', text: 'Draft chapter text' }], mode: 'cast' }), expect.any(AbortSignal))
   await change(node, 'Chapter 1 text', 'Updated chapter text')
-  expect(vi.mocked(profilesApi.startSpeechCloneTrial).mock.calls[0]?.[2]?.aborted).toBe(true)
-  response.resolve({ status: 'completed', detail: '', engine: 'gpt-sovits', profile_id: profile.id, trial_id: '1'.repeat(32) }); await settle()
+  expect(vi.mocked(workflowApi.auditionDraft).mock.calls[0]?.[1]?.aborted).toBe(true)
+  response.resolve(completedAudition()); await settle()
   expect(node.querySelector('audio')).toBeNull()
 })
 
@@ -438,9 +473,9 @@ it('keeps the editor mounted during confirmed import deletion and retains its te
   expect(button(node, 'Back to books').disabled).toBe(false)
 })
 
-it.each(['hide', 'close', 'unmount'] as const)('pauses a completed narrator preview on %s', async action => {
-  vi.mocked(profilesApi.startSpeechCloneTrial).mockResolvedValue({ status: 'completed', detail: '', engine: 'gpt-sovits', profile_id: profile.id, trial_id: '1'.repeat(32) })
-  const node = await mount(); await draft(node); await click(node, 'Preview narrator')
+it.each(['hide', 'close', 'unmount'] as const)('pauses a completed cast audition on %s', async action => {
+  vi.mocked(workflowApi.auditionDraft).mockResolvedValue(completedAudition())
+  const node = await mount(); await draft(node); await click(node, 'Audition cast')
   const audio = node.querySelector('audio')
   if (!audio) throw new Error('Missing narrator preview')
   const pause = vi.spyOn(audio, 'pause').mockImplementation(() => undefined)

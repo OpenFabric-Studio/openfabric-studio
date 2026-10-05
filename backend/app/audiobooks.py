@@ -27,6 +27,7 @@ from .audiobook_contracts import (
     CastMember,
     CreateAudiobookRequest,
     PronunciationEntry,
+    EbookDraft,
 )
 from .config import DATA_DIR
 from .atomic_files import document_lock
@@ -115,17 +116,17 @@ def _book_columns(connection: sqlite3.Connection) -> set[str]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 4:
+    if version == 7:
         return
-    if version not in (0, 1, 2, 3):
+    if version not in (0, 1, 2, 3, 4, 5, 6):
         raise AudiobookError("audiobook_storage_unavailable", 503)
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 4:
+        if version == 7:
             connection.commit()
             return
-        if version not in (0, 1, 2, 3):
+        if version not in (0, 1, 2, 3, 4, 5, 6):
             raise AudiobookError("audiobook_storage_unavailable", 503)
         if version == 0:
             connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_books (
@@ -154,6 +155,7 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             ("mp3_export_path", "ALTER TABLE audiobook_books ADD COLUMN mp3_export_path TEXT"),
             ("m4b_export_path", "ALTER TABLE audiobook_books ADD COLUMN m4b_export_path TEXT"),
             ("export_note", "ALTER TABLE audiobook_books ADD COLUMN export_note TEXT NOT NULL DEFAULT ''"),
+            ("source_snapshot_json", "ALTER TABLE audiobook_books ADD COLUMN source_snapshot_json TEXT"),
         )
         present = _book_columns(connection)
         for name, statement in additions:
@@ -184,7 +186,31 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             text_sha256 TEXT NOT NULL,
             wav_name TEXT NOT NULL,
             created_at TEXT NOT NULL)""")
-        connection.execute("PRAGMA user_version = 4")
+        for name, definition in (("revision", "INTEGER NOT NULL DEFAULT 1"),
+                                 ("render_language", "TEXT NOT NULL DEFAULT ''"),
+                                 ("bypass_cache", "INTEGER NOT NULL DEFAULT 0")):
+            if name not in job_columns:
+                connection.execute(f"ALTER TABLE audiobook_jobs ADD COLUMN {name} {definition}")
+        for name, definition in (("passage_id", "TEXT NOT NULL DEFAULT ''"),
+                                 ("snapshot_json", "TEXT"), ("start_ms", "INTEGER NOT NULL DEFAULT 0"),
+                                 ("end_ms", "INTEGER NOT NULL DEFAULT 0"), ("render_identity", "TEXT")):
+            if name not in section_columns:
+                connection.execute(f"ALTER TABLE audiobook_sections ADD COLUMN {name} {definition}")
+        connection.execute("UPDATE audiobook_sections SET passage_id = lower(hex(randomblob(16))) WHERE passage_id = ''")
+        connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS audiobook_passage_id ON audiobook_sections(passage_id)")
+        connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_workflows (
+            id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('audition','repair')),
+            payload TEXT NOT NULL, created_at TEXT NOT NULL)""")
+        workflow_columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(audiobook_workflows)")}
+        for name, definition in (("book_id", "TEXT"), ("chapter_index", "INTEGER"), ("passage_id", "TEXT"), ("revision", "INTEGER")):
+            if name not in workflow_columns:
+                connection.execute(f"ALTER TABLE audiobook_workflows ADD COLUMN {name} {definition}")
+        connection.execute("CREATE INDEX IF NOT EXISTS audiobook_workflow_sources ON audiobook_workflows(kind,book_id,chapter_index,passage_id,revision)")
+        connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_reviewed_text (
+            job_id TEXT NOT NULL,section_index INTEGER NOT NULL,source_sha256 TEXT NOT NULL,
+            profile_id TEXT NOT NULL,speaker_name TEXT NOT NULL,text TEXT NOT NULL,
+            PRIMARY KEY(job_id,section_index), FOREIGN KEY(job_id) REFERENCES audiobook_jobs(id) ON DELETE CASCADE)""")
+        connection.execute("PRAGMA user_version = 7")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -240,6 +266,11 @@ def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
     override = str(row["language"] or "")
     language = override or (str(book["language"] or "") if book is not None else "")
     status = _JOB_STATUS.validate_python(row["status"])
+    from .speech_references import normalize_language
+    try:
+        language_ready = bool(language) and str(row["render_language"]) == normalize_language(language)
+    except voice_profiles.VoiceProfileError:
+        language_ready = False
     return AudiobookJob(
         id=str(row["id"]),
         book_id=str(row["book_id"]),
@@ -252,7 +283,8 @@ def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         language=language,
-        language_ready=status == "done" and bool(language),
+        language_ready=status == "done" and language_ready,
+        render_language=str(row["render_language"] or ""), revision=int(row["revision"]),
         chapter_text=str(row["chapter_text"] or ""),
     )
 
@@ -309,6 +341,8 @@ def _update_job(
 
 def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = None,
                 source_import_revision: int | None = None) -> AudiobookCreateResponse:
+    from .speech_references import normalize_language
+    normalize_language(body.language)
     title = body.title.strip()
     if not title:
         raise AudiobookError("title_required")
@@ -340,8 +374,11 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
         _ensure_schema(connection)
         connection.execute("BEGIN IMMEDIATE")
         if source_import_id is not None:
-            source = connection.execute("SELECT json_extract(payload, '$.revision') FROM ebook_drafts WHERE id = ?", (source_import_id,)).fetchone()
-            if source is None or source_import_revision is None or source[0] != source_import_revision:
+            source = connection.execute("SELECT payload FROM ebook_drafts WHERE id = ?", (source_import_id,)).fetchone()
+            if source is None or source_import_revision is None:
+                raise AudiobookError("ebook_draft_conflict", 409)
+            source_draft = EbookDraft.model_validate_json(str(source[0]))
+            if source_draft.revision != source_import_revision:
                 raise AudiobookError("ebook_draft_conflict", 409)
         connection.execute(
             """
@@ -352,6 +389,8 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
             """,
             (book_id, title[:200], body.profile_id, len(body.chapters), stamp, stamp, source_import_id, author, spoken_map, cast_map),
         )
+        if source_import_id is not None:
+            connection.execute("UPDATE audiobook_books SET source_snapshot_json=? WHERE id=?", (source_draft.model_dump_json(), book_id))
         for index, chapter in enumerate(body.chapters):
             text = chapter.text.strip()
             if not text:
@@ -410,6 +449,14 @@ def list_books() -> list[AudiobookBook]:
             "SELECT * FROM audiobook_books ORDER BY created_at DESC, id DESC"
         ).fetchall()
         return [_row_to_book(row) for row in rows]
+
+
+def source_draft_snapshot(book_id: str) -> EbookDraft | None:
+    """The reviewed source at creation, independent of later import draft edits."""
+    with _LOCK, closing(_connect()) as connection:
+        get_book(book_id)
+        row = connection.execute("SELECT source_snapshot_json FROM audiobook_books WHERE id=?", (book_id,)).fetchone()
+        return EbookDraft.model_validate_json(str(row[0])) if row is not None and row[0] else None
 
 
 def get_book(book_id: str) -> AudiobookBook:
@@ -614,6 +661,7 @@ def set_cast(book_id: str, members: list[CastMember]) -> AudiobookBook:
             "UPDATE audiobook_books SET cast_json = ?, updated_at = ? WHERE id = ?",
             (payload, _now(), book_id),
         )
+        connection.execute("UPDATE audiobook_jobs SET revision=revision+1 WHERE book_id=?", (book_id,))
         connection.execute(
             """
             DELETE FROM audiobook_sections WHERE job_id IN (
@@ -650,7 +698,7 @@ def set_chapter_text(book_id: str, chapter_index: int, text: str) -> AudiobookBo
         if job is None:
             raise AudiobookError("chapter_not_found", 404)
         connection.execute(
-            "UPDATE audiobook_jobs SET chapter_text = ?, updated_at = ? WHERE id = ?",
+            "UPDATE audiobook_jobs SET chapter_text = ?, updated_at = ?, revision=revision+1 WHERE id = ?",
             (cleaned, _now(), job["id"]),
         )
         if job["status"] != "done":
@@ -680,6 +728,7 @@ def set_pronunciations(book_id: str, entries: list[PronunciationEntry]) -> Audio
             "UPDATE audiobook_books SET pronunciations_json = ?, updated_at = ? WHERE id = ?",
             (payload, _now(), book_id),
         )
+        connection.execute("UPDATE audiobook_jobs SET revision=revision+1 WHERE book_id=?", (book_id,))
         connection.execute(
             """
             DELETE FROM audiobook_sections WHERE job_id IN (
@@ -725,7 +774,7 @@ def _regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
         connection.execute(
             """
             UPDATE audiobook_jobs
-            SET status = 'queued', detail = ?, output_path = NULL, updated_at = ?
+            SET status = 'queued', detail = ?, output_path = NULL, updated_at = ?, bypass_cache = 1, revision = revision + 1
             WHERE id = ?
             """,
             ("Regenerating this chapter.", stamp, job["id"]),
@@ -856,6 +905,8 @@ def set_languages(book_id: str, language: str, chapters: list[tuple[int, str]]) 
             "UPDATE audiobook_books SET language = ?, updated_at = ? WHERE id = ?",
             (language, _now(), book_id),
         )
+        connection.execute("UPDATE audiobook_jobs SET revision=revision+1 WHERE book_id=?", (book_id,))
+        connection.execute("DELETE FROM audiobook_sections WHERE job_id IN (SELECT id FROM audiobook_jobs WHERE book_id=? AND status != 'done')", (book_id,))
         connection.commit()
     return get_book(book_id)
 

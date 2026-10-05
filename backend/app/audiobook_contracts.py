@@ -86,6 +86,8 @@ class AudiobookJob(Contract):
     language: str = Field(default="", max_length=35)
     language_ready: bool = False
     chapter_text: str = Field(default="", max_length=20_000)
+    revision: int = Field(default=1, ge=1)
+    render_language: str = Field(default="", max_length=35)
 
 
 class AudiobookBook(Contract):
@@ -141,12 +143,28 @@ class AudiobookCreateResponse(Contract):
     jobs: list[AudiobookJob]
 
 
+class SubtitleSourceCue(Contract):
+    cue_id: str = Field(min_length=1, max_length=200)
+    order: int = Field(ge=0)
+    speaker: str = Field(default="", max_length=80)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(gt=0)
+    text: str = Field(min_length=1, max_length=20_000)
+
+    @model_validator(mode="after")
+    def ordered_time(self) -> SubtitleSourceCue:
+        if self.end_ms <= self.start_ms:
+            raise ValueError("invalid_subtitle_time")
+        return self
+
+
 class EbookChapterDraft(AudiobookChapterInput):
     included: bool = True
+    source_cues: list[SubtitleSourceCue] = Field(default_factory=list, max_length=1000)
 
 
 class EbookImportWarning(Contract):
-    code: Literal["chapter_detection", "chapter_split", "non_narrative_content", "nonlinear_content"]
+    code: Literal["chapter_detection", "chapter_split", "non_narrative_content", "nonlinear_content", "unsupported_content", "subtitle_overlap", "cast_review_required", "independent_reimport"]
     message: str = Field(min_length=1, max_length=400)
 
 
@@ -176,6 +194,8 @@ class EbookDraft(Contract):
     pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
     created_at: str = Field(min_length=1, max_length=64)
     updated_at: str = Field(min_length=1, max_length=64)
+    subtitle_import: bool = False
+    cast_review_required: bool = False
 
 
 class ImportPastedTextRequest(Contract):
@@ -214,6 +234,104 @@ class CreateAudiobookFromDraftRequest(Contract):
     profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     revision: int = Field(ge=1)
     cast: list[CastMember] = Field(default_factory=list, max_length=16)
+    cast_reviewed: bool = False
+    language: str = Field(default="", max_length=35)
+
+    @model_validator(mode="after")
+    def language_code(self) -> CreateAudiobookFromDraftRequest:
+        self.language = _language_code(self.language)
+        return self
+
+
+class AudiobookPassage(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    section_index: int = Field(ge=0)
+    text: str = Field(min_length=1, max_length=1200)
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    speaker: str = Field(min_length=1, max_length=40)
+    start_ms: int = Field(ge=0)
+    end_ms: int = Field(ge=0)
+    status: Literal["queued", "running", "done"]
+    audio_url: str | None = Field(default=None, max_length=300)
+    render_identity: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    language: str = Field(default="", max_length=35)
+
+
+class AudiobookPassagesResponse(Contract):
+    book_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    chapter_index: int = Field(ge=0)
+    revision: int = Field(ge=1)
+    passages: list[AudiobookPassage]
+
+
+class AudiobookAuditionOptions(Contract):
+    chapter_index: int = Field(default=0, ge=0, le=99)
+    mode: Literal["cast", "scene"] = "cast"
+    max_chars: int = Field(default=600, ge=40, le=1200)
+
+
+class CreateAudiobookAuditionRequest(CreateAudiobookRequest):
+    chapter_index: int = Field(default=0, ge=0, le=99)
+    mode: Literal["cast", "scene"] = "cast"
+    max_chars: int = Field(default=600, ge=40, le=1200)
+
+
+class AudiobookAuditionClip(Contract):
+    index: int = Field(ge=0)
+    speaker: str = Field(min_length=1, max_length=40)
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    text: str = Field(min_length=1, max_length=1200)
+    language: str = Field(min_length=2, max_length=35)
+    status: Literal["queued", "running", "done", "failed"] = "queued"
+    audio_url: str | None = Field(default=None, max_length=300)
+    mock: bool = False
+
+
+class AudiobookAudition(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    mode: Literal["cast", "scene"]
+    status: Literal["queued", "running", "done", "failed", "cancelled"]
+    detail: str = Field(default="", max_length=200)
+    clips: list[AudiobookAuditionClip] = Field(default_factory=list, max_length=17)
+    scene_audio_url: str | None = Field(default=None, max_length=300)
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str = Field(min_length=1, max_length=64)
+    book_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    chapter_index: int = Field(default=0, ge=0)
+    revision: int | None = Field(default=None, ge=1)
+    skipped_speakers: list[str] = Field(default_factory=list, max_length=17)
+
+
+class CreateAudiobookRepairRequest(Contract):
+    revision: int = Field(ge=1)
+    text: str | None = Field(default=None, min_length=1, max_length=1200)
+
+
+class AcceptAudiobookRepairRequest(Contract):
+    revision: int = Field(ge=1)
+
+
+class AudiobookRepair(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    book_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    chapter_index: int = Field(ge=0)
+    passage_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision: int = Field(ge=1)
+    status: Literal["queued", "running", "ready", "accepted", "failed", "cancelled"]
+    detail: str = Field(default="", max_length=200)
+    text: str = Field(min_length=1, max_length=1200)
+    audio_url: str | None = Field(default=None, max_length=300)
+    mock: bool = False
+    created_at: str = Field(min_length=1, max_length=64)
+    updated_at: str = Field(min_length=1, max_length=64)
+
+
+class AudiobookAuditionsResponse(Contract):
+    auditions: list[AudiobookAudition]
+
+
+class AudiobookRepairsResponse(Contract):
+    repairs: list[AudiobookRepair]
 
 
 AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
@@ -239,4 +357,16 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     SetAudiobookLanguagesRequest,
     SetCastRequest,
     SetChapterTextRequest,
+    SubtitleSourceCue,
+    AudiobookPassage,
+    AudiobookPassagesResponse,
+    AudiobookAuditionOptions,
+    CreateAudiobookAuditionRequest,
+    AudiobookAuditionClip,
+    AudiobookAudition,
+    CreateAudiobookRepairRequest,
+    AcceptAudiobookRepairRequest,
+    AudiobookRepair,
+    AudiobookAuditionsResponse,
+    AudiobookRepairsResponse,
 ]

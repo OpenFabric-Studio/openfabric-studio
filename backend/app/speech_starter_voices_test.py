@@ -421,7 +421,9 @@ print(speech_starter_voices.import_starter_voice('vctk-p225').id)
         self.assertEqual(old.engine_hints, {"mode": "legacy"})
         self.assertEqual(reference.read_bytes(), b"existing user recording")
         with sqlite3.connect(profiles / "profiles.db") as connection:
-            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(connection.execute("PRAGMA user_version").fetchone()[0], 2)
+            transcript, language = connection.execute("SELECT reference_transcript, reference_language FROM voice_profiles WHERE id=?", (profile_id,)).fetchone()
+            self.assertEqual((transcript, language), ("Old notes", "en"))
             with self.assertRaises(sqlite3.IntegrityError):
                 connection.execute(
                     "UPDATE voice_profiles SET starter_voice_id = 'vctk-p225' WHERE id = ?", (profile_id,)

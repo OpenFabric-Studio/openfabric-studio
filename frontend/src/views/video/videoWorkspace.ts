@@ -106,3 +106,8 @@ export function characterLockIssue(
   if (new Set(ids).size > 1) return 'mismatch'
   return ''
 }
+
+/** Current export endpoints select an immutable artifact; version its identity. */
+export function videoMediaUrl(source: string, version: string | undefined): string {
+  return version ? `${source}${source.includes('?') ? '&' : '?'}version=${encodeURIComponent(version)}` : source
+}

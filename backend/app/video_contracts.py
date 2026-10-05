@@ -123,6 +123,7 @@ class VideoVariant(VideoContract):
     fingerprint: str = ""
     file_url: str = ""
     poster_url: str = ""
+    filmstrip_url: str = ""
     created_at: str
     prompt: str = ""
     settings: VideoProjectSettings = Field(default_factory=VideoProjectSettings)
@@ -167,6 +168,50 @@ class VideoSpeechClip(VideoContract):
     line: str = Field(default="", max_length=500)
 
 
+class VideoDialogueCue(VideoContract):
+    """Copied, completed cast audio; model generation stays silent."""
+
+    shot_id: VideoId
+    book_id: VideoId
+    chapter_index: int = Field(ge=0, le=99)
+    passage_id: VideoId
+    source_revision: int = Field(ge=1)
+    render_identity: str = Field(min_length=1, max_length=256)
+    profile_id: VideoId
+    speaker: str = Field(min_length=1, max_length=80)
+    text: str = Field(min_length=1, max_length=1200)
+    language: str = Field(default="", max_length=35)
+    source_start_ms: int = Field(ge=0)
+    source_duration_ms: int | None = Field(default=None, ge=0, le=600000)
+    source_end_ms: int = Field(gt=0)
+    start_sec: float = Field(ge=0, le=15)
+    end_sec: float = Field(gt=0, le=15)
+    audio_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    waveform_peaks: list[Annotated[float, Field(ge=0, le=1)]] = Field(default_factory=list, max_length=160)
+
+
+class DialogueReelSelection(VideoContract):
+    passage_id: VideoId
+    clip_start_ms: int = Field(default=0, ge=0, le=600000)
+    clip_end_ms: int | None = Field(default=None, gt=0, le=600000)
+    prompt: str = Field(default="A character speaking naturally", min_length=1, max_length=2000)
+    caption: str | None = Field(default=None, min_length=1, max_length=500)
+
+
+class CreateDialogueReelRequest(VideoContract):
+    book_id: VideoId
+    chapter_index: int = Field(ge=0, le=99)
+    revision: int = Field(ge=1)
+    name: str = Field(default="Dialogue reel", min_length=1, max_length=120)
+    selections: list[DialogueReelSelection] = Field(min_length=1, max_length=4)
+
+    @model_validator(mode="after")
+    def unique_passages(self) -> CreateDialogueReelRequest:
+        if len({selection.passage_id for selection in self.selections}) != len(self.selections):
+            raise ValueError("duplicate_passage")
+        return self
+
+
 class VideoProjectJob(VideoContract):
     id: VideoId
     operation: Literal["preview", "render", "export"]
@@ -186,6 +231,8 @@ class VideoProjectJob(VideoContract):
 class VideoProject(VideoContract):
     id: VideoId
     revision: int = Field(ge=1)
+    undo_available: bool = False
+    redo_available: bool = False
     track_id: int | None = Field(default=None, ge=1)
     track_title: str
     name: str = Field(min_length=1, max_length=120)
@@ -206,12 +253,14 @@ class VideoProject(VideoContract):
     shots: list[VideoProjectShot] = Field(default_factory=list, max_length=40)
     references: list[VideoReference] = Field(default_factory=list, max_length=6)
     speech_clip: VideoSpeechClip | None = None
+    dialogue_cues: list[VideoDialogueCue] = Field(default_factory=list, max_length=4)
     overlays: list[VideoOverlay] = Field(default_factory=list, max_length=100)
     markers: list[VideoMarker] = Field(default_factory=list, max_length=4000)
     analysis: VideoSongAnalysis | None = None
     job: VideoProjectJob | None = None
     file_url: str = ""
     poster_url: str = ""
+    output_version: str = ""
     warnings: list[str] = Field(default_factory=list, max_length=30)
 
 
@@ -256,6 +305,16 @@ class UpdateVideoProjectRequest(VideoRevisionRequest):
                 for prev, nxt in zip(ordered, ordered[1:])
             ):
                 raise ValueError("overlap")
+        return self
+
+
+class RefreshDialogueCueRequest(VideoRevisionRequest):
+    source: CreateDialogueReelRequest
+
+    @model_validator(mode="after")
+    def one_cue(self) -> RefreshDialogueCueRequest:
+        if len(self.source.selections) != 1:
+            raise ValueError("one_dialogue_cue_required")
         return self
 
 
@@ -306,6 +365,83 @@ class ApplyVideoCharacterRequest(VideoRevisionRequest):
     character_id: VideoId
 
 
+class CharacterTrainingSettings(VideoContract):
+    base_profile: Literal["ltx23"] = "ltx23"
+    steps: int = Field(default=800, ge=100, le=3000)
+    rank: int = Field(default=32, ge=8, le=64)
+
+
+class CharacterDatasetItem(VideoContract):
+    upload_index: int = Field(ge=0, le=17)
+    caption: str = Field(min_length=1, max_length=500)
+    role: Literal["training", "held_out"] = "training"
+
+    @field_validator("caption")
+    @classmethod
+    def clean_caption(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("caption_required")
+        return value.strip()
+
+
+class CharacterDatasetReview(VideoContract):
+    reviewed: bool
+    items: list[CharacterDatasetItem] = Field(min_length=4, max_length=18)
+    settings: CharacterTrainingSettings = Field(default_factory=CharacterTrainingSettings)
+
+    @model_validator(mode="after")
+    def reviewed_items(self) -> CharacterDatasetReview:
+        if not self.reviewed:
+            raise ValueError("dataset_review_required")
+        if len({item.upload_index for item in self.items}) != len(self.items):
+            raise ValueError("duplicate_dataset_item")
+        if not any(item.role == "held_out" for item in self.items):
+            raise ValueError("held_out_required")
+        return self
+
+
+class CharacterDatasetArtifact(VideoContract):
+    path: str = Field(min_length=1, max_length=160)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    caption: str = Field(min_length=1, max_length=500)
+    role: Literal["training", "held_out"]
+    kind: Literal["photo", "clip"]
+
+
+class CharacterTrainingProvenance(VideoContract):
+    engine_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    base_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    settings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    settings: CharacterTrainingSettings
+    artifacts: list[CharacterDatasetArtifact] = Field(min_length=4, max_length=18)
+    comparison_prompts: list[str] = Field(min_length=1, max_length=4)
+    evaluated: bool = False
+    evaluation_notes: str = Field(default="", max_length=2000)
+    evaluation_updated_at: str = ""
+
+
+class VideoCharacterComparison(VideoContract):
+    id: VideoId
+    baseline_project_id: VideoId
+    adapted_project_id: VideoId
+    dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    held_out_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    prompts: list[str] = Field(min_length=1, max_length=4)
+    seeds: list[int] = Field(min_length=1, max_length=4)
+    created_at: str
+    baseline_revision: int | None = None
+    adapted_revision: int | None = None
+    reviewed_media_sha256: list[Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]] = Field(default_factory=list, max_length=8)
+    reviewed_variant_ids: list[VideoId] = Field(default_factory=list, max_length=8)
+
+
+class ReviewCharacterAdapterRequest(VideoContract):
+    comparison_id: VideoId
+    notes: str = Field(min_length=1, max_length=2000)
+    reviewed: bool
+
+
 class VideoCharacterTrainingJob(VideoContract):
     """A local LoRA job. mock means the photos were saved and nothing was trained."""
 
@@ -316,6 +452,8 @@ class VideoCharacterTrainingJob(VideoContract):
     photo_count: int = Field(ge=3, le=12)
     clip_count: int = Field(ge=0, le=6)
     adapter_ready: bool = False
+    provenance: CharacterTrainingProvenance | None = None
+    comparison: VideoCharacterComparison | None = None
     mock: bool = False
     error_code: str = ""
     detail: str = Field(default="", max_length=500)
@@ -332,6 +470,8 @@ class VideoCharacterTrainerStatus(VideoContract):
     source: Literal["env", "settings", "none"]
     command_name: str = ""
     missing: bool = False
+    dependencies_ready: bool = False
+    reason: str = ""
 
 
 class VideoCharacterTrainerSettingsRequest(VideoContract):
@@ -367,6 +507,8 @@ class VideoReadinessResponse(VideoContract):
 
 VIDEO_CLIENT_MODELS: list[type[BaseModel]] = [
     VideoProject,
+    CreateDialogueReelRequest,
+    RefreshDialogueCueRequest,
     VideoProjectsResponse,
     CreateVideoProjectRequest,
     UpdateVideoProjectRequest,
@@ -379,6 +521,8 @@ VIDEO_CLIENT_MODELS: list[type[BaseModel]] = [
     VideoCharactersResponse,
     ApplyVideoCharacterRequest,
     VideoCharacterTrainingJob,
+    CharacterDatasetReview,
+    ReviewCharacterAdapterRequest,
     VideoCharacterTrainingResponse,
     VideoCharacterTrainerStatus,
     VideoCharacterTrainerSettingsRequest,

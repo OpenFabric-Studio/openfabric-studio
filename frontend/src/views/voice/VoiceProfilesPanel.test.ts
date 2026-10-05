@@ -250,7 +250,7 @@ it('searches the profile library and selects the synthesis profile without a sec
   await click(container, 'Second narrator')
   expect(container.querySelector('[aria-pressed=true]')?.textContent).toContain('Second narrator')
   expect(form(container, 'Speech synthesis').textContent).toContain('Second narrator')
-  expect([...container.querySelectorAll('select')].filter(input => !input.closest('[data-local-engines]'))).toEqual([])
+  expect([...container.querySelectorAll('select')].filter(input => !input.closest('[data-local-engines]')).map(input => input.getAttribute('aria-label'))).toEqual(['Narration language'])
   await change(container, 'Search speech profiles', '')
   expect(button(container, 'First narrator')).toBeDefined()
 })
@@ -264,7 +264,7 @@ it('shows installed, mock and API state independently without exposing engine pa
   expect(status?.textContent).toContain('Speech APIConnected')
   expect(container.textContent).not.toContain('synthesis invoke coming next')
   expect(container.textContent).not.toContain('/private/engine')
-  expect(container.querySelector('details')?.hasAttribute('open')).toBe(false)
+  expect(status?.querySelector('details')?.hasAttribute('open')).toBe(false)
 })
 
 it('requires a named deletion confirmation and restores keyboard focus on Escape', async () => {

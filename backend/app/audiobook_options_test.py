@@ -57,7 +57,7 @@ class AudiobookOptionsApiTests(unittest.IsolatedAsyncioTestCase):
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
         created = await self.client.post(
             "/api/voice-profiles",
-            data={"name": "Reader", "consent_confirmed": "true"},
+            data={"name": "Reader", "consent_confirmed": "true", "reference_transcript": "Reference."},
             files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
         )
         self.assertEqual(created.status_code, 200, created.text)
@@ -131,7 +131,7 @@ class AudiobookOptionsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.spoken.count("Meet Doctor Smith."), 1)
 
     async def test_removed_cast_actor_consent_is_checked_for_retained_chapter_publication(self) -> None:
-        actor = await self.client.post("/api/voice-profiles", data={"name": "Alice", "consent_confirmed": "true"},
+        actor = await self.client.post("/api/voice-profiles", data={"name": "Alice", "consent_confirmed": "true", "reference_transcript": "Reference."},
             files={"audio": ("alice.wav", b"RIFF....WAVE", "audio/wav")})
         self.assertEqual(actor.status_code, 200, actor.text)
         actor_id = actor.json()["id"]

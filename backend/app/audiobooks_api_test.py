@@ -14,6 +14,7 @@ import httpx
 from fastapi import FastAPI
 
 from app import audiobooks, speech_clone, voice_profiles
+from app.speech_references import SpeechRenderSnapshot
 from app.api import routes_audiobooks, routes_voice_profiles
 
 
@@ -22,13 +23,13 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         original = speech_clone._synthesize_unlocked
 
         def synthesis(*, profile_id: str, text: str, output_path: Path, prompt_text: str | None,
-                      prompt_language: str | None, text_language: str | None, require_consent: bool) -> speech_clone.SynthesisOutcome:
+                      prompt_language: str | None, text_language: str | None, require_consent: bool, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
             with self.assertRaises(RuntimeError):
                 asyncio.get_running_loop()
             return original(profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
-                            prompt_language=prompt_language, text_language=text_language, require_consent=require_consent)
+                            prompt_language=prompt_language, text_language=text_language, require_consent=require_consent, snapshot=snapshot)
 
-        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference")
+        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference")
         with patch.object(speech_clone, "_synthesize_unlocked", side_effect=synthesis):
             response = await self.client.post("/api/audiobooks", json={"title": "Book", "profile_id": profile.id, "chapters": [{"text": "Hello."}]})
             identifier = response.json()["book"]["id"]
@@ -89,7 +90,7 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
     async def _profile(self) -> str:
         response = await self.client.post(
             "/api/voice-profiles",
-            data={"name": "Reader", "consent_confirmed": "true"},
+            data={"name": "Reader", "consent_confirmed": "true", "reference_transcript": "Reference."},
             files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
         )
         self.assertEqual(response.status_code, 200, response.text)

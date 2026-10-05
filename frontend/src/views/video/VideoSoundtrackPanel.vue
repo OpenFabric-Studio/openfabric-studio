@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
+import SpeechAudioPreview from '../voice/SpeechAudioPreview.vue'
 import { useI18n } from 'vue-i18n'
 import { listSpeechVoiceProfiles } from '../../api/voiceProfiles'
 import type { SpeechVoiceProfile, VideoProject } from '../../api/contracts'
@@ -13,13 +14,18 @@ const voiceId = ref('')
 const line = ref('')
 const voiceError = ref(false)
 
+const lifetime = new AbortController()
+let alive = true
+onBeforeUnmount(() => { alive = false; lifetime.abort() })
 onMounted(async () => {
   try {
-    voices.value = (await listSpeechVoiceProfiles()).filter((voice) => voice.consent_confirmed)
+    const response = await listSpeechVoiceProfiles(lifetime.signal)
+    if (!alive) return
+    voices.value = response.filter((voice) => voice.consent_confirmed)
     const bound = props.project.speech_clip?.voice_profile_id
     voiceId.value = bound && voices.value.some((voice) => voice.id === bound) ? bound : (voices.value[0]?.id ?? '')
   } catch {
-    voiceError.value = true
+    if (alive) voiceError.value = true
   }
 })
 
@@ -50,7 +56,7 @@ function speak() {
     <button type="button" data-speak-line :disabled="readOnly || !voiceId || !line.trim()" @click="speak">{{ t('videoExperience.speak') }}</button>
     <p v-if="project.speech_clip">{{ project.speech_clip.name }} · {{ project.speech_clip.kind === 'voice' ? t('videoExperience.spokenLine') : t('videoExperience.uploadedClip') }}</p>
     <p v-if="project.speech_clip?.line" class="text-sm text-text-dim">{{ project.speech_clip.line }}</p>
-    <audio v-if="project.speech_clip" controls preload="none" class="w-full" :src="`/api/videos/projects/${project.id}/speech`" :aria-label="t('videoExperience.speechFile')"></audio>
+    <SpeechAudioPreview v-if="project.speech_clip" :key="project.speech_clip.id" :src="`/api/videos/projects/${project.id}/speech?clip=${project.speech_clip.id}`" :label="t('videoExperience.speechFile')" />
     <p v-if="project.warnings?.includes('speech_mock')" role="status" class="text-sm text-text-dim">{{ t('video.err.speech_mock') }}</p>
     <label class="inline-check"><input v-model="draft.export_settings.attach_speech" data-attach-speech type="checkbox" :disabled="readOnly || !project.speech_clip">{{ t('videoExperience.speechAttach') }}</label>
     <p class="text-sm text-text-dim">{{ draft.export_settings.attach_speech && project.speech_clip ? t('videoExperience.soundtrackOn') : t('videoExperience.soundtrackOff') }}</p>

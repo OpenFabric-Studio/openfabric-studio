@@ -336,7 +336,14 @@ export function useVideoWorkspace() {
   function undo() {
     if (!draft.value || readOnly.value) return
     const previous = undoStack.value.pop()
-    if (previous) { draft.value.shots = previous; reconcileSelection(previous) }
+    if (previous && dirty.value) { draft.value.shots = previous; reconcileSelection(previous); return }
+    return action((row, signal) => api.undoVideoProject(row.id, { revision: row.revision }, signal), undefined, false)
+  }
+  function redo() {
+    return action((row, signal) => api.redoVideoProject(row.id, { revision: row.revision }, signal), undefined, false)
+  }
+  function refreshCue(shotId: string, source: import('../../api/contracts').CreateDialogueReelRequest) {
+    return action((row, signal) => api.refreshDialogueCue(row.id, shotId, { revision: row.revision, source }, signal))
   }
   function addShot() {
     const cap = project.value?.preset === 'reel' ? 4 : 40
@@ -380,5 +387,5 @@ export function useVideoWorkspace() {
   onUnmounted(() => { alive = false; generation++; lifetime.abort(); actionController?.abort(); loop.stop(); if (clock !== undefined) clearInterval(clock); if (saveTimer !== undefined) clearTimeout(saveTimer) })
   return { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
     selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, addShot }
+    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot }
 }

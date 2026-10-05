@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { VideoProject, VideoProjectJob } from '../../api/contracts'
+import { videoMediaUrl } from './videoWorkspace'
 import { isVideoActive } from '../../api/videos'
 import { formatClock } from '../../composables/voicePace'
 import PaginationBar from '../../components/shared/PaginationBar.vue'
@@ -101,7 +102,7 @@ function deleteProject(row: VideoProject, event: Event): void {
     <ul v-else class="project-rows">
       <li v-for="row in visibleProjects" :key="row.id" :data-video-project="row.id" :aria-current="row.id === selectedId ? 'true' : undefined" class="project-row" :class="{ 'is-selected': row.id === selectedId }">
         <button type="button" :data-open-project="row.id" :disabled="actionsBusy" :aria-label="t('videoLibrary.openNamed', { name: row.name })" :aria-current="row.id === selectedId ? 'true' : undefined" :aria-describedby="`video-project-${row.id}-source video-project-${row.id}-status`" class="project-open" @click="openProject(row.id)">
-          <img v-if="row.poster_url" :src="row.poster_url" alt="" loading="lazy" width="48" height="56" class="project-thumbnail">
+          <img v-if="row.poster_url" :src="videoMediaUrl(row.poster_url, row.output_version)" alt="" loading="lazy" width="48" height="56" class="project-thumbnail">
           <span class="project-copy">
             <span class="project-name">{{ row.name }}</span>
             <span :id="`video-project-${row.id}-source`" class="project-source">{{ row.track_title }} · {{ formatClock(row.duration_sec) }}</span>
@@ -116,7 +117,7 @@ function deleteProject(row: VideoProject, event: Event): void {
           <summary :aria-label="t('videoLibrary.projectActionsNamed', { name: row.name })">{{ t('videoLibrary.projectActions') }}<span aria-hidden="true" class="disclosure-arrow">⌄</span></summary>
           <div class="secondary-actions">
             <p v-if="isVideoActive(row.job?.status)" :id="`video-project-${row.id}-cancel-hint`" class="text-sm text-text-dim">{{ t('videoWorkspace.cancelBeforeDelete') }}</p>
-            <a v-if="row.file_url" :href="actionsBusy ? undefined : row.file_url" :aria-disabled="actionsBusy ? 'true' : undefined" :tabindex="actionsBusy ? -1 : undefined" :aria-label="t('videoWorkspace.downloadProject', { name: row.name })" download :class="{ 'is-disabled': actionsBusy }">{{ t('common.download') }}</a>
+            <a v-if="row.file_url" :href="actionsBusy ? undefined : videoMediaUrl(row.file_url, row.output_version)" :aria-disabled="actionsBusy ? 'true' : undefined" :tabindex="actionsBusy ? -1 : undefined" :aria-label="t('videoWorkspace.downloadProject', { name: row.name })" download :class="{ 'is-disabled': actionsBusy }">{{ t('common.download') }}</a>
             <button type="button" data-delete-project :disabled="actionsBusy || isVideoActive(row.job?.status)" :aria-label="t('videoWorkspace.deleteProjectNamed', { name: row.name })" :aria-describedby="isVideoActive(row.job?.status) ? `video-project-${row.id}-cancel-hint` : undefined" class="text-status-failed" @click="deleteProject(row, $event)">{{ t('videoWorkspace.deleteProject') }}</button>
           </div>
         </details>
