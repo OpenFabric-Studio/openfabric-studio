@@ -5,12 +5,14 @@ import { videoExperienceEn } from './videoExperience'
 import { videoDirectionEn } from './videoDirection'
 import { videoLibraryEn } from './videoLibrary'
 import { audiobookWorkspaceEn } from './audiobookWorkspace'
+import { audiobookReviewEn } from './audiobookReview'
 import { speechWorkspaceEn } from './speechWorkspace'
 import { localEnginesEn } from './localEngines'
 import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
 import { referenceWorkspaceEn } from './referenceWorkspace'
 import { generationWorkspaceEn } from './generationWorkspace'
 import { videoWorkspaceEn, videoErrorsEn } from './videoWorkspace'
+import { videoDialogueEn, videoDialogueErrorsEn } from './videoDialogue'
 import { settingsWorkspaceEn } from './settingsWorkspace'
 import { moduleWorkspaceEn } from './moduleWorkspace'
 import { trackAudioEn } from './trackAudio'
@@ -25,6 +27,7 @@ export default {
   videoDirection: videoDirectionEn,
   videoLibrary: videoLibraryEn,
   audiobookWorkspace: audiobookWorkspaceEn,
+  audiobookReview: audiobookReviewEn,
   speechWorkspace: speechWorkspaceEn,
   localEngines: localEnginesEn,
   singingWorkspace: singingWorkspaceEn, voiceStudio: voiceStudioEn,
@@ -35,6 +38,7 @@ export default {
   trackFavorites: trackFavoritesEn,
   trackAudio: trackAudioEn,
   videoWorkspace: videoWorkspaceEn,
+  videoDialogue: videoDialogueEn,
   settingsWorkspace: settingsWorkspaceEn,
   moduleWorkspace: moduleWorkspaceEn,
   common: {
@@ -417,6 +421,7 @@ voiceProfiles: {
     confirmDelete: 'Delete this video?',
     err: {
       ...videoErrorsEn,
+      ...videoDialogueErrorsEn,
       busy: 'A video is already being created.',
       engine_missing: 'The video engine is not installed. From the OpenFabric Studio folder, run setup_video.sh once.',
       ffmpeg_missing: 'ffmpeg was not found.',

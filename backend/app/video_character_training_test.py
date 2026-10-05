@@ -207,6 +207,34 @@ class CharacterTrainingTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("character_still_missing", applied.warnings)
 
 
+    async def test_reviewed_uploads_keep_evaluation_media_out_of_the_actual_worker_inputs(self) -> None:
+        from app.video_contracts import CharacterDatasetItem, CharacterDatasetReview
+        import json
+        held_out = self.root / 'evaluation.png'; _png(held_out, 'yellow')
+        command = self.root / 'reviewed-trainer'
+        command.write_text('#!/usr/bin/env python3\nimport sys,json\nfrom pathlib import Path\nout=Path(sys.argv[sys.argv.index("--output")+1]);out.mkdir(exist_ok=True)\n(out/"argv.json").write_text(json.dumps(sys.argv))\n(out/"adapter.safetensors").write_bytes(b"lora"*400)\n')
+        command.chmod(command.stat().st_mode | stat.S_IEXEC)
+        self.training.save_trainer_command(str(command))
+        review = CharacterDatasetReview(reviewed=True, items=[CharacterDatasetItem(upload_index=index, caption=f'Reviewed pose {index}', role='held_out' if index==3 else 'training') for index in range(4)])
+        job = await self.training.create_job(name='Reviewed',consent_confirmed=True,uploads=[*self._files(),_upload(held_out)],review=review)
+        async with asyncio.timeout(5):
+            while self.training.get_job(job.id).status in {'queued','running'}:
+                await asyncio.sleep(.01)
+        done = self.training.get_job(job.id)
+        self.assertEqual(done.status,'completed')
+        self.assertEqual(done.photo_count,3)
+        self.assertIsNotNone(done.provenance)
+        if done.provenance is None: raise AssertionError('Missing reviewed provenance')
+        argv=json.loads((self.training.job_dir(job.id)/'adapter/argv.json').read_text())
+        images=[Path(argv[index+1]) for index,item in enumerate(argv) if item=='--image']
+        self.assertEqual(len(images),3)
+        self.assertTrue(all(path.parent.name=='photos' for path in images))
+        self.assertTrue((self.training.job_dir(job.id)/'held_out/03.png').exists())
+        self.assertIn('--dataset-manifest',argv)
+        self.assertEqual(done.provenance.artifacts[3].caption,'Reviewed pose 3')
+        with self.assertRaisesRegex(self.projects.VideoProjectError,'character_adapter_incompatible'):
+            self.training.ready_adapter_file(job.id,'ltx25')
+
     async def test_song_project_rejects_the_adapter_and_a_dry_run_keeps_the_still(self) -> None:
         from app.video_contracts import ApplyVideoCharacterAdapterRequest, CreateVideoProjectRequest
 

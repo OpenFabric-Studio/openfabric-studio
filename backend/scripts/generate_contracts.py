@@ -21,8 +21,9 @@ from app.yue_contracts import YUE_CLIENT_MODELS
 from app.reference_contracts import REFERENCE_CLIENT_MODELS
 from app.module_contracts import MODULE_CLIENT_MODELS
 from app.optional_engine_contracts import OPTIONAL_ENGINE_CLIENT_MODELS
+from app.audiobook_review_contracts import AUDIOBOOK_REVIEW_CLIENT_MODELS
 
-ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS]
+ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS]
 
 DEST = Path(__file__).resolve().parents[2] / 'frontend/src/api/generated.ts'
 SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}

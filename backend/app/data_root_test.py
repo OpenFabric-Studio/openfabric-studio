@@ -30,6 +30,31 @@ from app.data_root import (
 
 
 class DataRootTests(unittest.TestCase):
+    def test_library_move_rewrites_repair_exports_and_captured_reference_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            dest.mkdir()
+            database = dest / 'audiobooks.db'
+            snapshot = {'reference_audio_path': str(src / 'audiobooks' / 'references' / 'input.wav'), 'prompt_text': 'Story mentions ' + str(src)}
+            with sqlite3.connect(database) as connection:
+                connection.execute('CREATE TABLE audiobook_books(export_path TEXT, mp3_export_path TEXT, m4b_export_path TEXT, cover_path TEXT)')
+                connection.execute('INSERT INTO audiobook_books VALUES(?,?,?,?)', tuple(str(src / 'audiobooks' / name) for name in ('repaired.wav','repaired.mp3','repaired.m4b','cover.png')))
+                connection.execute('CREATE TABLE audiobook_sections(output_path TEXT, snapshot_json TEXT)')
+                connection.execute('INSERT INTO audiobook_sections VALUES(?,?)', (str(src / 'audiobooks' / 'section.wav'), json.dumps(snapshot)))
+                connection.execute('CREATE TABLE audiobook_workflows(payload TEXT)')
+                connection.execute('INSERT INTO audiobook_workflows VALUES(?)', (json.dumps({'snapshot': snapshot}),))
+            rewrite_library_paths(database, src, dest)
+            with sqlite3.connect(database) as connection:
+                paths = connection.execute('SELECT * FROM audiobook_books').fetchone()
+                self.assertEqual(paths, tuple(str(dest / 'audiobooks' / name) for name in ('repaired.wav','repaired.mp3','repaired.m4b','cover.png')))
+                output, captured = connection.execute('SELECT * FROM audiobook_sections').fetchone()
+                self.assertEqual(output, str(dest / 'audiobooks' / 'section.wav'))
+                restored = json.loads(captured)
+                self.assertEqual(restored['reference_audio_path'], str(dest / 'audiobooks' / 'references' / 'input.wav'))
+                self.assertEqual(restored['prompt_text'], snapshot['prompt_text'])
+                workflow = json.loads(connection.execute('SELECT payload FROM audiobook_workflows').fetchone()[0])
+                self.assertEqual(workflow['snapshot'], restored)
+
     def _speech_library(self, src: Path) -> None:
         for folder in ('audiobooks', 'voice-profiles', 'speech-clone-trials'):
             (src / folder).mkdir(parents=True, exist_ok=True)

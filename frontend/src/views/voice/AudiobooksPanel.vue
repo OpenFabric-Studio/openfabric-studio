@@ -8,17 +8,18 @@ import type { AudiobookBook, AudiobookJob, CreateAudiobookRequest } from '../../
 import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
 import { createPollingLoop } from '../../composables/polling'
 import EbookImportPanel from './EbookImportPanel.vue'
-import type { EbookDraft, SpeechCloneTrialResponse } from '../../api/contracts'
+import CastAuditionPanel from './CastAuditionPanel.vue'
+import AudiobookPassages from './AudiobookPassages.vue'
+import type { EbookDraft, EbookChapterDraft } from '../../api/contracts'
 
 const emit = defineEmits<{ activity: [message: string] }>()
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const { t } = useI18n()
-type ChapterDraft = { id: number; title: string; text: string; included: boolean }
+type ChapterDraft = { id: number; title: string; text: string; included: boolean; sourceCues?: EbookChapterDraft['source_cues'] }
 const importedDraft = ref<EbookDraft | null>(null), draftSaving = ref(false), deletingImport = ref(false), previewing = ref(false), controlling = ref(false)
-const preview = ref<SpeechCloneTrialResponse | null>(null), previewError = ref('')
 const chapterEditorIndex = ref(0)
-let draftController: AbortController | undefined, previewController: AbortController | undefined, controlController: AbortController | undefined
-let draftGeneration = 0, previewGeneration = 0
+let draftController: AbortController | undefined, controlController: AbortController | undefined
+let draftGeneration = 0
 const profiles = ref<SpeechVoiceProfile[]>([])
 const books = ref<AudiobookBook[]>([])
 const jobs = ref<AudiobookJob[]>([])
@@ -35,6 +36,8 @@ const jobsError = ref('')
 const notice = ref('')
 const title = ref('')
 const author = ref('')
+const draftLanguage = ref(''), castReviewed = ref(false)
+const chapterPlayback = ref<Record<string, number>>({})
 type SpeechPair = { written: string; spoken: string }
 const pronunciations = ref<SpeechPair[]>([])
 const bookSpeech = ref<SpeechPair[]>([])
@@ -52,7 +55,6 @@ const regeneratingIndex = ref<number | null>(null)
 const titleInput = ref<HTMLInputElement | null>(null)
 const newBookButton = ref<HTMLButtonElement | null>(null)
 const audioPlayers = ref<HTMLAudioElement[]>([])
-const previewPlayer = ref<HTMLAudioElement | null>(null)
 const profileId = ref('')
 let chapterSequence = 0
 function newChapter(number: number): ChapterDraft {
@@ -80,8 +82,12 @@ const selectedNarrator = computed(() => profiles.value.find(profile => profile.i
 const completedChapters = computed(() => jobs.value.filter(job => job.status === 'done').length)
 const finishingSection = computed(() => ['paused', 'cancelled'].includes(selectedBook.value?.status ?? '') && jobs.value.some(job => job.status === 'running'))
 const includedChapters = computed(() => chapters.value.filter(chapter => chapter.included))
-const previewUrl = computed(() => preview.value ? profilesApi.speechTrialAudioUrl(preview.value.trial_id) : null)
-watch([profileId, () => includedChapters.value[0]?.text], () => { previewGeneration++; previewController?.abort(); preview.value = null; previewing.value = false; previewError.value = '' })
+const auditionDraft = computed<CreateAudiobookRequest | null>(() => {
+  const cast = castMembers(castDraft.value), speech = speechRows(pronunciations.value)
+  if (!draftNarratorAvailable.value || !includedChapters.value.length || !cast || !speech || includedChapters.value.some(chapter => !chapter.text.trim())) return null
+  return { title: title.value.trim() || t('audiobookReview.audition'), profile_id: profileId.value, language: draftLanguage.value.trim(), cast, pronunciations: speech, chapters: includedChapters.value.map(chapter => ({ title: chapter.title, text: chapter.text })) }
+})
+watch([castDraft, chapters], () => { castReviewed.value = false }, { deep: true })
 const activity = computed(() => {
   if (saving.value) return t('audiobookWorkspace.creating')
   if (retrying.value) return t('audiobookWorkspace.retrying')
@@ -93,8 +99,10 @@ const activity = computed(() => {
 })
 watch(activity, message => { if (mounted) emit('activity', message) }, { immediate: true })
 function pauseAudio() {
-  previewPlayer.value?.pause()
   for (const player of audioPlayers.value) player.pause()
+}
+function updateChapterTime(jobId: string, event: Event) {
+  if (event.target instanceof HTMLAudioElement) chapterPlayback.value[jobId] = event.target.currentTime
 }
 watch([() => props.active, creating, selectedBookId], pauseAudio)
 watch(() => props.active, active => { if (active && creating.value) void refreshNarrators() })
@@ -119,6 +127,9 @@ function safeError(err: unknown, fallback: string): string {
       case 'unsupported_cover': return t('audiobookWorkspace.errors.unsupported_cover')
       case 'cover_too_large': return t('audiobookWorkspace.errors.cover_too_large')
       case 'ebook_draft_conflict': return t('audiobookWorkspace.errors.draftConflict')
+      case 'subtitle_cast_review_required': return t('audiobookWorkspace.importErrors.subtitle_cast_review_required')
+      case 'speech_language_unsupported': return t('audiobookWorkspace.errors.speech_language_unsupported')
+      case 'reference_transcript_required': return t('audiobookReview.referenceRequired')
     }
   }
   return t(fallback)
@@ -128,6 +139,8 @@ function chapterHint(job: AudiobookJob): string {
   // Worker detail may contain local paths, server addresses or raw exceptions.
   if (job.detail?.startsWith('Dry-run speech clone wrote a silent placeholder WAV')) return t('audiobookWorkspace.mockAudio')
   if (job.status === 'failed') {
+    if (job.detail === 'reference_transcript_required') return t('audiobookReview.referenceRequired')
+    if (job.detail === 'speech_language_unsupported') return t('audiobookReview.languageUnsupported')
     if (job.detail === 'consent_required') return t('audiobookWorkspace.errors.consent')
     if (job.detail === 'engine_not_installed' || job.detail?.startsWith('engine_not_installed:')) return t('audiobookWorkspace.errors.engineMissing')
     if (job.detail === 'api_unavailable' || job.detail?.startsWith('api_unavailable:')) return t('audiobookWorkspace.errors.apiUnavailable')
@@ -249,9 +262,15 @@ function useDraft(draft: EbookDraft) {
   draftGeneration++; draftController?.abort(); importedDraft.value = draft; title.value = draft.title
   author.value = draft.author ?? ''
   pronunciations.value = (draft.pronunciations ?? []).map(item => ({ written: item.written, spoken: item.spoken }))
-  chapters.value = draft.chapters.map(chapter => ({ title: chapter.title ?? '', text: chapter.text, included: chapter.included ?? true, id: ++chapterSequence }))
+  chapters.value = draft.chapters.map(chapter => ({ title: chapter.title ?? '', text: chapter.text, included: chapter.included ?? true, sourceCues: chapter.source_cues, id: ++chapterSequence }))
+  castReviewed.value = false
+  if (draft.cast_review_required) {
+    const prior = new Map(castDraft.value.map(member => [member.name.toLocaleLowerCase(), member.profile_id]))
+    const names = [...new Set(draft.chapters.flatMap(chapter => (chapter.source_cues ?? []).map(cue => cue.speaker ?? '').filter(name => name.length > 0)))]
+    castDraft.value = names.map(name => ({ name, profile_id: prior.get(name.toLocaleLowerCase()) ?? '' }))
+  }
   chapterEditorIndex.value = 0
-  error.value = ''; notice.value = ''; preview.value = null
+  error.value = ''; notice.value = ''
 }
 async function saveReviewedDraft(signal?: AbortSignal): Promise<EbookDraft | null> {
   const draft = importedDraft.value
@@ -268,18 +287,6 @@ async function onSaveDraft() {
   try { await saveReviewedDraft(controller.signal); if (mounted && token === draftGeneration) notice.value = t('audiobookWorkspace.draftSaved') }
   catch (err) { if (mounted && token === draftGeneration) error.value = safeError(err, 'audiobookWorkspace.errors.draftSave') }
   finally { if (mounted && token === draftGeneration) { draftSaving.value = false; draftController = undefined } }
-}
-async function onPreview() {
-  const text = includedChapters.value[0]?.text.trim().slice(0, 500)
-  if (!text || previewing.value || !draftNarratorAvailable.value) return
-  const token = ++previewGeneration, controller = new AbortController(); previewController = controller; previewing.value = true; previewError.value = ''; preview.value = null
-  try {
-    const response = await profilesApi.startSpeechCloneTrial(profileId.value, text, controller.signal)
-    if (!mounted || token !== previewGeneration || controller.signal.aborted) return
-    if (response.status === 'completed' || response.status === 'mock_completed') preview.value = response
-    else previewError.value = t('audiobookWorkspace.previewFailed')
-  } catch { if (mounted && token === previewGeneration) previewError.value = t('audiobookWorkspace.previewFailed') }
-  finally { if (mounted && token === previewGeneration) { previewing.value = false; previewController = undefined } }
 }
 async function onControl(action: 'pause' | 'resume' | 'cancel') {
   const book = selectedBook.value
@@ -317,12 +324,12 @@ async function refreshNarrators() {
   }
 }
 function addChapter() {
-  if (saving.value || chapters.value.length >= 100) return
+  if (saving.value || chapters.value.length >= 100 || importedDraft.value?.subtitle_import) return
   chapters.value.push(newChapter(chapters.value.length + 1))
   chapterEditorIndex.value = chapters.value.length - 1
 }
 function removeChapter(index: number) {
-  if (saving.value || chapters.value.length <= 1) return
+  if (saving.value || chapters.value.length <= 1 || importedDraft.value?.subtitle_import) return
   chapters.value.splice(index, 1)
   if (index < chapterEditorIndex.value) chapterEditorIndex.value--
   chapterEditorIndex.value = Math.min(chapterEditorIndex.value, chapters.value.length - 1)
@@ -366,6 +373,8 @@ async function onCreate() {
   const cast = castMembers(castDraft.value)
   if (!cast) { error.value = t('audiobookWorkspace.errors.invalid_cast_name'); return }
   if (cast.length) body.cast = cast
+  if (draftLanguage.value.trim()) body.language = draftLanguage.value.trim()
+  if (importedDraft.value?.cast_review_required && !castReviewed.value) { error.value = t('audiobookWorkspace.importErrors.subtitle_cast_review_required'); return }
   const controller = new AbortController()
   createController = controller
   const generation = selectionGeneration
@@ -375,7 +384,7 @@ async function onCreate() {
   try {
     const reviewedDraft = await saveReviewedDraft(controller.signal)
     if (!isCurrent()) return
-    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal, ...(cast.length ? [cast] as [typeof cast] : [])) : await audiobooksApi.createAudiobook(body, controller.signal)
+    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal, cast.length ? cast : undefined, { ...(body.language ? { language: body.language } : {}), ...(reviewedDraft.cast_review_required ? { cast_reviewed: castReviewed.value } : {}) }) : await audiobooksApi.createAudiobook(body, controller.signal)
     if (!isCurrent()) return
     upsertBook(created.book)
     title.value = ''
@@ -383,7 +392,7 @@ async function onCreate() {
     pronunciations.value = []
     castDraft.value = []
     chapters.value = [newChapter(1)]
-    importedDraft.value = null; preview.value = null
+    importedDraft.value = null; draftLanguage.value = ''; castReviewed.value = false
     notice.value = t('audiobooks.created')
     if (selectionGeneration === generation && creating.value) {
       jobsController?.abort()
@@ -572,7 +581,7 @@ onBeforeUnmount(() => {
   profilesController?.abort()
   for (const controller of bookActionControllers) controller.abort()
   bookActionControllers.clear()
-  draftGeneration++; previewGeneration++; draftController?.abort(); previewController?.abort(); controlController?.abort()
+  draftGeneration++; draftController?.abort(); controlController?.abort()
   pauseAudio()
   emit('activity', '')
 })
@@ -652,9 +661,9 @@ onBeforeUnmount(() => {
             </div>
             <button type="button" class="min-h-11 rounded-md px-2 text-xs text-text-dim hover:text-text hover:underline" :disabled="castDraft.length >= 16" @click="castDraft.push({ name: '', profile_id: profileId })">{{ t('audiobookWorkspace.addCast') }}</button>
           </div>
-          <div class="flex flex-wrap items-center gap-3"><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="previewing || !draftNarratorAvailable || !includedChapters[0]?.text.trim()" @click="onPreview">{{ previewing ? t('audiobookWorkspace.previewing') : t('audiobookWorkspace.preview') }}</button><span v-if="preview?.status === 'mock_completed'" class="text-xs text-status-queued">{{ t('audiobookWorkspace.mockPreview') }}</span></div>
-          <p v-if="previewError" role="alert" class="text-sm text-status-failed">{{ previewError }}</p>
-          <audio v-if="previewUrl" ref="previewPlayer" :src="previewUrl" controls preload="none" :aria-label="t('audiobookWorkspace.previewReady')" class="h-10 w-full" />
+          <label v-if="importedDraft?.cast_review_required" class="flex items-start gap-2 rounded-lg border border-status-queued/40 p-3 text-sm text-text"><input v-model="castReviewed" type="checkbox" :aria-label="t('audiobookWorkspace.subtitleCastReview')" class="mt-1"><span>{{ t('audiobookWorkspace.subtitleCastReview') }}</span></label>
+          <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><input v-model="draftLanguage" maxlength="35" :aria-label="t('audiobookReview.outputLanguage')" placeholder="en" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><span class="block text-xs text-text-dim">{{ t('audiobookReview.outputLanguageHint') }}</span></label>
+          <CastAuditionPanel :draft="auditionDraft" :active="active && creating" :disabled="saving || draftSaving || !!importedDraft?.cast_review_required && !castReviewed" @busy="value => previewing = value" />
           <div class="space-y-2 rounded-lg border border-border bg-panel-2 p-3">
             <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.pronunciations') }}</p>
             <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pronunciationHint') }}</p>
@@ -675,7 +684,7 @@ onBeforeUnmount(() => {
                   <span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterTitle', { number: index + 1 }) }}</span>
                   <input v-model="chapter.title" type="text" maxlength="200" :aria-label="t('audiobookWorkspace.chapterTitle', { number: index + 1 })" class="w-full rounded-lg border border-border bg-panel p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" :placeholder="t('audiobooks.chapterTitlePlaceholder')" />
                 </label>
-                <button type="button" class="min-h-11 shrink-0 rounded-md px-2 text-xs text-text-dim hover:underline focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-40" :disabled="chapters.length <= 1" :aria-describedby="chapters.length <= 1 ? 'audiobook-chapter-minimum' : undefined" :aria-label="t('audiobookWorkspace.removeChapter', { number: index + 1 })" @click="removeChapter(index)">{{ t('common.delete') }}</button>
+                <button type="button" class="min-h-11 shrink-0 rounded-md px-2 text-xs text-text-dim hover:underline focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-40" :disabled="chapters.length <= 1 || !!importedDraft?.subtitle_import" :aria-describedby="chapters.length <= 1 ? 'audiobook-chapter-minimum' : undefined" :aria-label="t('audiobookWorkspace.removeChapter', { number: index + 1 })" @click="removeChapter(index)">{{ t('common.delete') }}</button>
               </div>
               <label class="block space-y-1">
                 <span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterText', { number: index + 1 }) }}</span>
@@ -684,7 +693,8 @@ onBeforeUnmount(() => {
               <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.characters', { count: chapter.text.length }) }}</p>
               <p v-if="labeledLineCount(chapter.text, castDraft)" class="text-xs text-text-dim">{{ t('audiobookWorkspace.castLines', { count: labeledLineCount(chapter.text, castDraft) }) }}</p>
             </div>
-            <button type="button" class="min-h-11 rounded-md px-2 text-xs font-medium text-text-dim hover:text-text hover:underline focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-40" :disabled="chapters.length >= 100" @click="addChapter">{{ t('audiobooks.addChapter') }}</button>
+            <button type="button" class="min-h-11 rounded-md px-2 text-xs font-medium text-text-dim hover:text-text hover:underline focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-40" :disabled="chapters.length >= 100 || !!importedDraft?.subtitle_import" @click="addChapter">{{ t('audiobooks.addChapter') }}</button>
+            <p v-if="importedDraft?.subtitle_import" class="text-xs text-text-dim">{{ t('audiobookWorkspace.subtitleChaptersHint') }}</p>
             <p v-if="chapters.length <= 1" id="audiobook-chapter-minimum" class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterMinimum') }}</p>
             <p v-if="chapters.length >= 100" class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLimit') }}</p>
           </div>
@@ -718,6 +728,11 @@ onBeforeUnmount(() => {
         <p v-if="selectedBook.status !== 'done'" class="text-xs text-text-dim">{{ t('audiobookWorkspace.exportHint') }}</p>
         <p v-if="exportNote(selectedBook.export_note)" class="text-xs text-status-queued">{{ exportNote(selectedBook.export_note) }}</p>
         <label v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" class="flex min-h-11 flex-wrap items-center gap-3 text-sm text-text"><span>{{ t('audiobookWorkspace.cover') }}</span><input type="file" accept="image/png,image/jpeg" :aria-label="t('audiobookWorkspace.cover')" class="text-xs" @change="onCover"></label>
+        <p class="text-xs text-text-dim">{{ t('audiobookReview.savedAuditionHint') }}</p>
+        <CastAuditionPanel :book-id="selectedBook.id" :active="active && !creating" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :revision="Math.max(1, ...jobs.map(job => job.revision ?? 1))" />
+        <details class="rounded-lg border border-border p-3">
+          <summary class="cursor-pointer text-sm font-medium text-text focus-visible:outline-2 focus-visible:outline-accent1">{{ t('audiobookReview.bookInputs') }}</summary>
+          <div class="mt-3 space-y-3">
         <div class="space-y-2 rounded-lg border border-border p-3">
           <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.cast') }}</p>
           <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.castHint') }}</p>
@@ -753,6 +768,8 @@ onBeforeUnmount(() => {
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.language') }}</span><input v-model="bookLanguage" maxlength="35" type="text" :aria-label="t('audiobookWorkspace.language')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.languagePlaceholder')"></label>
           <button type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingLanguages || selectedBook.status === 'queued' || selectedBook.status === 'running'" @click="onSaveLanguages">{{ t('audiobookWorkspace.saveLanguages') }}</button>
         </div>
+          </div>
+        </details>
         <div class="border-t border-border pt-4">
           <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h3 class="text-sm font-semibold text-text">{{ t('audiobooks.jobsTitle') }}</h3>
@@ -769,14 +786,18 @@ onBeforeUnmount(() => {
                 <span class="text-xs" :class="job.status === 'failed' ? 'text-status-failed' : job.status === 'done' ? 'text-status-done' : 'text-text-dim'">{{ t(`audiobookWorkspace.status.${job.status}`) }}</span>
                 <span data-language-chip class="rounded-full border border-border px-2 py-0.5 text-xs text-text-dim">{{ (chapterLanguages[job.id] || job.language) || t('audiobookWorkspace.languageMissing') }} · {{ job.language_ready ? t('audiobookWorkspace.languageReady') : t('audiobookWorkspace.languageNotReady') }}</span>
               </div>
+              <details class="mt-3 rounded-lg border border-border p-3">
+                <summary class="cursor-pointer text-xs font-medium text-text-dim">{{ t('audiobookReview.chapterInputs') }}</summary>
               <label class="mt-2 block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 }) }}</span><input v-model="chapterLanguages[job.id]" maxlength="35" type="text" :aria-label="t('audiobookWorkspace.chapterLanguage', { number: job.chapter_index + 1 })" class="min-h-11 w-full rounded-lg border border-border bg-panel px-3 text-sm text-text" :placeholder="t('audiobookWorkspace.languagePlaceholder')"></label>
               <label class="mt-2 block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookWorkspace.chapterLines', { number: job.chapter_index + 1 }) }}</span><textarea v-model="chapterTexts[job.id]" rows="4" maxlength="20000" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :aria-label="t('audiobookWorkspace.chapterLines', { number: job.chapter_index + 1 })" class="w-full rounded-lg border border-border bg-panel p-2 text-sm text-text disabled:opacity-50"></textarea></label>
               <p v-if="labeledLineCount(chapterTexts[job.id] || '', bookCast)" class="text-xs text-text-dim">{{ t('audiobookWorkspace.castLines', { count: labeledLineCount(chapterTexts[job.id] || '', bookCast) }) }}</p>
               <button v-if="selectedBook.status !== 'queued' && selectedBook.status !== 'running'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="savingLineId === job.id" @click="onSaveLines(job)">{{ t('audiobookWorkspace.saveLines') }}</button>
+              </details>
               <p v-if="chapterHint(job)" class="mt-2 text-xs text-text-dim">{{ chapterHint(job) }}</p>
               <p v-if="job.total_sections" class="mt-2 text-xs text-text-dim">{{ t('audiobookWorkspace.sections', { done: job.completed_sections ?? 0, total: job.total_sections }) }}</p>
               <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>
-              <audio v-if="job.status === 'done'" ref="audioPlayers" class="mt-3 h-9 w-full" controls preload="none" :aria-label="t('audiobookWorkspace.playChapter', { title: job.chapter_title || t('audiobookWorkspace.chapterName', { number: job.chapter_index + 1 }) })" :src="audiobooksApi.audiobookChapterAudioUrl(selectedBook.id, job.chapter_index)" />
+              <audio v-if="job.status === 'done'" ref="audioPlayers" class="mt-3 h-9 w-full" controls preload="none" :aria-label="t('audiobookWorkspace.playChapter', { title: job.chapter_title || t('audiobookWorkspace.chapterName', { number: job.chapter_index + 1 }) })" :src="audiobooksApi.audiobookChapterAudioUrl(selectedBook.id, job.chapter_index) + '?revision=' + (job.revision ?? 1)" @timeupdate="updateChapterTime(job.id, $event)" />
+              <AudiobookPassages v-if="job.status === 'done'" :key="selectedBook.id + job.id" :book-id="selectedBook.id" :chapter-index="job.chapter_index" :chapter-revision="job.revision" :active="active && !creating" :playback-seconds="chapterPlayback[job.id] ?? 0" @updated="loadJobs(selectedBook.id)" />
             </li>
           </ol>
         </div>

@@ -428,3 +428,11 @@ it('allows approved export during other model work while generation stays blocke
   button('Export approved clips').click(); await flush()
   expect(api.exportVideoProject).toHaveBeenCalledWith(project.id, { revision: 1, settings: { ...project.export_settings, attach_speech: false } }, expect.any(AbortSignal))
 })
+
+it('versions retained export media and cast previews with their artifact identity', async () => {
+  project = { ...videoProjectFixture(undefined, null), output_version: 'a'.repeat(64), file_url: '/stable-file', poster_url: '/stable-poster', speech_clip: { id: 'b'.repeat(32), name: 'Cast', bytes: 100, duration_sec: 2, sha256: 'c'.repeat(64) } }
+  await mount(); button('5 Export').click(); await flush()
+  expect(document.querySelector('video')?.getAttribute('src')).toContain('version=' + project.output_version)
+  expect(document.querySelector('[data-talking-voice] audio')?.getAttribute('src')).toContain('clip=' + project.speech_clip?.id)
+  expect(document.querySelector('a[download]')?.getAttribute('href')).toContain('version=' + project.output_version)
+})

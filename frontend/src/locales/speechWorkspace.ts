@@ -5,7 +5,7 @@ export const speechWorkspaceEn = {
   noMatches: 'No profiles match this search.',
   createTitle: 'Create speech profile',
   createIntro: 'Save a reference recording with permission from its speaker.',
-  notesHelp: 'Include the words spoken in the reference clip when available. The speech engine uses these notes as its reference transcript.',
+  notesHelp: 'Optional recording notes. Enter the spoken words separately in Reference transcript.',
   synthesis: 'Speech synthesis',
   synthesisIntro: 'Generate a short speech trial using this profile’s reference recording.',
   selectOrCreate: 'Select a speech profile or create one to begin.',

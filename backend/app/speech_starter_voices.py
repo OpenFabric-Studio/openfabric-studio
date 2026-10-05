@@ -124,5 +124,7 @@ def import_starter_voice(starter_id: str) -> SpeechVoiceProfile:
         audio_bytes=audio,
         filename=path.name,
         notes=asset.transcript,
+        reference_transcript=asset.transcript,
+        reference_language=asset.language,
         starter_voice_id=asset.id,
     )

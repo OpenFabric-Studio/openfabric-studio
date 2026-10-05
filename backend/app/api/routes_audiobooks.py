@@ -10,8 +10,17 @@ from fastapi.routing import APIRoute
 from starlette.responses import Response
 from starlette.types import Message
 
-from .. import audiobooks, ebook_import, voice_profiles
+from .. import audiobook_workflows, audiobooks, ebook_import, voice_profiles
 from ..audiobook_contracts import (
+    AcceptAudiobookRepairRequest,
+    AudiobookAudition,
+    AudiobookAuditionOptions,
+    AudiobookAuditionsResponse,
+    AudiobookPassagesResponse,
+    AudiobookRepair,
+    AudiobookRepairsResponse,
+    CreateAudiobookAuditionRequest,
+    CreateAudiobookRepairRequest,
     AudiobookBook,
     AudiobookBooksResponse,
     AudiobookCreateResponse,
@@ -96,7 +105,7 @@ async def _disconnected(request: Request) -> None:
 @router.post("/imports", response_model=EbookDraft)
 async def import_ebook(request: Request, file: UploadFile = File(...)) -> EbookDraft:
     filename = file.filename or ""
-    if Path(filename).suffix.lower() not in {".mobi", ".epub", ".txt"}:
+    if Path(filename).suffix.lower() not in {".mobi", ".epub", ".txt", ".docx", ".srt", ".vtt"}:
         raise HTTPException(400, "unsupported_ebook_format")
     raw = bytearray()
     try:
@@ -174,7 +183,8 @@ async def narrate_ebook_draft(draft_id: str, body: CreateAudiobookFromDraftReque
 def download_ebook_source(draft_id: str) -> FileResponse:
     try:
         draft = ebook_import.get_draft(draft_id)
-        media = {".mobi": "application/x-mobipocket-ebook", ".epub": "application/epub+zip", ".txt": "text/plain"}.get(
+        media = {".mobi": "application/x-mobipocket-ebook", ".epub": "application/epub+zip", ".txt": "text/plain",
+                 ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".srt": "application/x-subrip", ".vtt": "text/vtt"}.get(
             Path(draft.source_filename).suffix.lower(), "application/octet-stream")
         return FileResponse(ebook_import.source_path(draft_id), media_type=media, filename=draft.source_filename)
     except (ebook_import.EbookImportError, audiobooks.AudiobookError) as exc:
@@ -368,3 +378,152 @@ def download_chapter_audio(book_id: str, chapter_index: int) -> FileResponse:
         _raise(exc)
         raise  # pragma: no cover
     return FileResponse(path, media_type="audio/wav", filename=f"chapter-{chapter_index:04d}.wav")
+
+
+@router.post("/auditions", response_model=AudiobookAudition)
+async def create_draft_audition(body: CreateAudiobookAuditionRequest) -> AudiobookAudition:
+    try:
+        from ..resource_admission import admission_lock
+        async with admission_lock:
+            if audiobooks._sync_worker():
+                return await await_cleanup(asyncio.to_thread(audiobook_workflows.start_audition, body))
+            return audiobook_workflows.start_audition(body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/auditions", response_model=AudiobookAudition)
+async def create_saved_audition(book_id: str, body: AudiobookAuditionOptions) -> AudiobookAudition:
+    try:
+        from ..resource_admission import admission_lock
+        async with admission_lock:
+            if audiobooks._sync_worker():
+                return await await_cleanup(asyncio.to_thread(audiobook_workflows.start_book_audition, book_id, body))
+            return audiobook_workflows.start_book_audition(book_id, body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/{book_id}/auditions", response_model=AudiobookAuditionsResponse)
+def list_saved_auditions(book_id: str, chapter_index: int | None = None) -> AudiobookAuditionsResponse:
+    try:
+        return AudiobookAuditionsResponse(auditions=audiobook_workflows.list_auditions(book_id, chapter_index))
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/auditions/{identifier}", response_model=AudiobookAudition)
+def get_cast_audition(identifier: str) -> AudiobookAudition:
+    try:
+        return audiobook_workflows.get_audition(identifier)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/auditions/{identifier}/cancel", response_model=AudiobookAudition)
+def cancel_cast_audition(identifier: str) -> AudiobookAudition:
+    try:
+        audiobook_workflows.cancel(identifier, "audition")
+        return audiobook_workflows.get_audition(identifier)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/auditions/{identifier}/clips/{index}/audio")
+def download_audition_clip(identifier: str, index: int) -> FileResponse:
+    try:
+        return FileResponse(audiobook_workflows.audition_audio_path(identifier, index), media_type="audio/wav")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/auditions/{identifier}/audio")
+def download_audition_scene(identifier: str) -> FileResponse:
+    try:
+        return FileResponse(audiobook_workflows.audition_audio_path(identifier), media_type="audio/wav")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/{book_id}/chapters/{chapter_index}/passages", response_model=AudiobookPassagesResponse)
+def list_chapter_passages(book_id: str, chapter_index: int) -> AudiobookPassagesResponse:
+    try:
+        return audiobook_workflows.get_passages(book_id, chapter_index)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/{book_id}/passages/{passage_id}/audio")
+def download_passage(book_id: str, passage_id: str, revision: int | None = None) -> FileResponse:
+    try:
+        return FileResponse(audiobook_workflows.passage_audio_path(book_id, passage_id, revision), media_type="audio/wav")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/chapters/{chapter_index}/passages/{passage_id}/repairs", response_model=AudiobookRepair)
+async def generate_passage_repair(book_id: str, chapter_index: int, passage_id: str, body: CreateAudiobookRepairRequest) -> AudiobookRepair:
+    try:
+        from ..resource_admission import admission_lock
+        async with admission_lock:
+            if audiobooks._sync_worker():
+                return await await_cleanup(asyncio.to_thread(audiobook_workflows.start_repair, book_id, chapter_index, passage_id, body))
+            return audiobook_workflows.start_repair(book_id, chapter_index, passage_id, body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/{book_id}/chapters/{chapter_index}/passages/{passage_id}/repairs", response_model=AudiobookRepairsResponse)
+def list_passage_repairs(book_id: str, chapter_index: int, passage_id: str, revision: int | None = None) -> AudiobookRepairsResponse:
+    try:
+        return AudiobookRepairsResponse(repairs=audiobook_workflows.list_repairs(book_id, chapter_index, passage_id, revision))
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/repairs/{identifier}", response_model=AudiobookRepair)
+def get_passage_repair(identifier: str) -> AudiobookRepair:
+    try:
+        return audiobook_workflows.get_repair(identifier)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.get("/repairs/{identifier}/audio")
+def download_passage_repair(identifier: str) -> FileResponse:
+    try:
+        return FileResponse(audiobook_workflows.repair_audio_path(identifier), media_type="audio/wav")
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/repairs/{identifier}/cancel", response_model=AudiobookRepair)
+def cancel_passage_repair(identifier: str) -> AudiobookRepair:
+    try:
+        audiobook_workflows.cancel(identifier, "repair")
+        return audiobook_workflows.get_repair(identifier)
+    except audiobooks.AudiobookError as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/repairs/{identifier}/accept", response_model=AudiobookPassagesResponse)
+async def accept_passage_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> AudiobookPassagesResponse:
+    try:
+        return await await_cleanup(asyncio.to_thread(audiobook_workflows.accept_repair, identifier, body))
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise

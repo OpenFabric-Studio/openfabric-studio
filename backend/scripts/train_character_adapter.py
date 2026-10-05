@@ -111,11 +111,34 @@ def main() -> int:
     parser.add_argument("--rank", type=int, default=32)
     parser.add_argument("--image", action="append", default=[], type=Path)
     parser.add_argument("--clip", action="append", default=[], type=Path)
+    parser.add_argument("--dataset-manifest", type=Path)
     args = parser.parse_args()
     if not args.image and not args.clip:
         return _fail("invalid_reference", "Add photos or a short clip.", 2)
     steps = min(3000, max(100, args.steps))
     rank = min(64, max(8, args.rank))
+    captions_by_path: dict[Path, str] = {}
+    if args.dataset_manifest is not None:
+        from app.video_contracts import CharacterTrainingProvenance
+        from app.video_engine import ENGINE_COMMIT, model_packs
+        from pydantic import ValidationError
+        import hashlib
+        try:
+            provenance = CharacterTrainingProvenance.model_validate_json(args.dataset_manifest.read_bytes())
+            if provenance.engine_commit != ENGINE_COMMIT or provenance.base_revision != model_packs()['ltx23'].revision:
+                return _fail('character_adapter_incompatible', 'The reviewed base model does not match this trainer.', 2)
+            dataset_root = args.dataset_manifest.parent.resolve()
+            for item in provenance.artifacts:
+                path = (dataset_root / item.path).resolve()
+                if not path.is_relative_to(dataset_root) or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != item.sha256:
+                    return _fail('source_changed', 'A reviewed dataset file changed.', 2)
+                if item.role == 'training':
+                    captions_by_path[path] = item.caption
+            if set(captions_by_path) != {path.resolve() for path in [*args.image, *args.clip]}:
+                return _fail('held_out_overlap', 'Training inputs differ from the reviewed training split.', 2)
+            steps, rank = provenance.settings.steps, provenance.settings.rank
+        except (OSError, ValidationError):
+            return _fail('dataset_review_required', 'The reviewed dataset manifest could not be validated.', 2)
     model = _snapshot_with_weights(args.model_cache, "ltx23")
     gemma = _snapshot_with_weights(args.model_cache, "gemma3")
     if model is None or gemma is None:
@@ -146,12 +169,12 @@ def main() -> int:
         for image in args.image:
             dest = videos / f"photo_{index:02d}.mp4"
             _still_to_clip(ffmpeg, image, dest)
-            (captions / f"{dest.stem}.txt").write_text(caption + "\n", encoding="utf-8")
+            (captions / f"{dest.stem}.txt").write_text(captions_by_path.get(image.resolve(), caption) + "\n", encoding="utf-8")
             index += 1
         for clip in args.clip:
             dest = videos / f"clip_{index:02d}.mp4"
             _trim_clip(ffmpeg, clip, dest)
-            (captions / f"{dest.stem}.txt").write_text(caption + "\n", encoding="utf-8")
+            (captions / f"{dest.stem}.txt").write_text(captions_by_path.get(clip.resolve(), caption) + "\n", encoding="utf-8")
             index += 1
     except (OSError, subprocess.CalledProcessError) as exc:
         return _fail("invalid_reference", f"Could not prepare training clips: {exc}", 4)

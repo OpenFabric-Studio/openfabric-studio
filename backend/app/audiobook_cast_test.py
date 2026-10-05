@@ -8,11 +8,17 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from app.speech_references import SpeechRenderSnapshot
+
 from app import audiobook_cast, audiobook_collection, audiobooks, speech_clone, voice_profiles
 from app.audiobook_contracts import AudiobookChapterInput, CastMember, CreateAudiobookRequest
 
 
 class SplitTurnTests(unittest.TestCase):
+    def test_empty_assigned_speaker_labels_are_not_narrated_as_dialogue(self) -> None:
+        cast = [CastMember(name="Alice", profile_id="a" * 32)]
+        self.assertEqual(audiobook_cast.split_turns("Alice:\nAlice:  ", "b" * 32, cast), [])
+
     def test_unlabeled_lines_stay_with_the_narrator_and_labels_are_not_spoken(self) -> None:
         narrator = "b" * 32
         alice = "a" * 32
@@ -41,21 +47,21 @@ class CastNarrationTests(unittest.TestCase):
         for item in self.patches:
             item.start()
         self.narrator = voice_profiles.create_profile(
-            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference.",
+            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
         )
         self.alice = voice_profiles.create_profile(
-            name="Alice", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="alice.wav", notes="Reference.",
+            name="Alice", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="alice.wav", notes="Reference.", reference_transcript="Reference.",
         )
         self.calls: list[tuple[str, str]] = []
         original = speech_clone.synthesize_to_path
 
         def counted(*, profile_id: str, text: str, output_path: Path, prompt_text: str | None = None,
                     prompt_language: str | None = None, text_language: str | None = None,
-                    require_consent: bool = True) -> object:
+                    require_consent: bool = True, snapshot: SpeechRenderSnapshot | None = None) -> object:
             self.calls.append((profile_id, text))
             return original(
                 profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
-                prompt_language=prompt_language, text_language=text_language, require_consent=require_consent,
+                prompt_language=prompt_language, text_language=text_language, require_consent=require_consent, snapshot=snapshot,
             )
 
         self.synth = patch.object(speech_clone, "synthesize_to_path", side_effect=counted)

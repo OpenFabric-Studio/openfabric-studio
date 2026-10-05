@@ -1,0 +1,31 @@
+{
+  "engine_commit": "1724ca673d59f023a8a95efee06e5d36d61c2765",
+  "engine_version": "0.15.12",
+  "system": "Darwin",
+  "machine": "Mac16,5",
+  "physical_memory_bytes": 137438953472,
+  "readiness": {
+    "profile_id": "ltx23",
+    "ready": true,
+    "engine_ready": true,
+    "model_fingerprint": "725182c94820ea0df7dcc655e72272ed6de77147e6da22b9f2e71cc7623b172f",
+    "model_revision": "6671a7572a530862d1d60ce393b5d93491e3f76b",
+    "text_revision": "86cc6a8dedbc456dd0e4af01a9d09f396f77e558",
+    "expected_bytes": 58419728001,
+    "uncached_bytes": 0,
+    "free_bytes": 641156923392,
+    "missing_files": [],
+    "warnings": [
+      "visual_quality_unverified",
+      "model_fingerprint_uses_file_metadata"
+    ]
+  },
+  "inference_executed": false,
+  "inference_skip_reason": "inventory_only",
+  "elapsed_sec": null,
+  "peak_child_rss_bytes": null,
+  "peak_mlx_memory_bytes": null,
+  "output": "",
+  "output_validated": false,
+  "error_code": ""
+}

@@ -5,6 +5,7 @@ import {
   parseAudiobookBooksResponse,
   parseAudiobookCreateResponse,
   parseAudiobookJobsResponse,
+  parseCreateAudiobookFromDraftRequest,
   parseEbookDraft, parseEbookDraftsResponse, parsePatchEbookDraftRequest,
 } from './contracts'
 import type {
@@ -12,6 +13,7 @@ import type {
   AudiobookCreateResponse,
   AudiobookJob,
   CreateAudiobookRequest,
+  CreateAudiobookFromDraftRequest,
   EbookDraft, EbookDraftSummary, PatchEbookDraftRequest,
 } from './contracts'
 
@@ -34,9 +36,8 @@ export function saveEbookDraft(id: string, body: PatchEbookDraftRequest, signal?
   const validated = parsePatchEbookDraftRequest(body)
   return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { method: 'PATCH', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validated) }, parseEbookDraft)
 }
-export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal, cast?: Array<{ name: string; profile_id: string }>): Promise<AudiobookCreateResponse> {
-  const body: { profile_id: string; revision: number; cast?: Array<{ name: string; profile_id: string }> } = { profile_id: profileId, revision: draft.revision }
-  if (cast?.length) body.cast = cast
+export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal, cast?: CreateAudiobookRequest['cast'], options?: Pick<CreateAudiobookFromDraftRequest, 'language' | 'cast_reviewed'>): Promise<AudiobookCreateResponse> {
+  const body = parseCreateAudiobookFromDraftRequest({ profile_id: profileId, revision: draft.revision, ...(cast?.length ? { cast } : {}), ...options })
   return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(draft.id)}/create`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, parseAudiobookCreateResponse)
 }
 export function ebookSourceUrl(id: string): string { return `/api/audiobooks/imports/${encodeURIComponent(id)}/source` }

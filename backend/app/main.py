@@ -33,6 +33,7 @@ from .api.routes_voice_trials import router as voice_trials_router
 from .api.routes_voice_profiles import router as voice_profiles_router
 from .api.routes_speech_clone import router as speech_clone_router
 from .api.routes_audiobooks import router as audiobooks_router
+from .api.routes_audiobook_review import router as audiobook_review_router
 from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
@@ -40,7 +41,8 @@ from .desktop_runtime import router as desktop_runtime_router
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
-from . import ace_jobs, audio_exports, audio_versions, audiobooks, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
+from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
+from .job_lifecycle import await_cleanup
 
 
 @asynccontextmanager
@@ -60,9 +62,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await video_jobs.recover()
         await optional_engines.recover()
         await video_character_training.recover()
+        await video_character_comparison.recover()
         speech_clone.start()
         ebook_import.start()
+        await audiobook_publish.start()
         await audiobooks.start()
+        await audiobook_workflows.start()
+        await audiobook_review.start()
         await module_jobs.recover()
         manager.start_watchdog()
         yield
@@ -76,12 +82,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 await ace_jobs.shutdown()
         finally:
             try:
-                outcomes = await asyncio.gather(
-                    voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
-                    stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
-                    audiobooks.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
-                    optional_engines.shutdown(), video_character_training.shutdown(), yue_upload.shutdown(), return_exceptions=True,
-                )
+                try:
+                    outcomes = await asyncio.gather(
+                        voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
+                        stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
+                        audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
+                        optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
+                    )
+                finally:
+                    # A narration worker can quarantine an encoder while its
+                    # sibling repair registry is already shutting down.
+                    await await_cleanup(audiobook_publish.shutdown())
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
                         logging.getLogger(__name__).error("Job cleanup failed", exc_info=outcome)
@@ -123,6 +134,7 @@ app.include_router(voices_router)
 app.include_router(voice_profiles_router)
 app.include_router(speech_clone_router)
 app.include_router(audiobooks_router)
+app.include_router(audiobook_review_router)
 app.include_router(modules_router)
 app.include_router(optional_engines_router)
 app.include_router(videos_router)

@@ -506,6 +506,7 @@ class PictureProjectTests(VideoProjectTests):
             audio_bytes=b"RIFF....WAVE",
             filename="ref.wav",
             notes="Reference.",
+            reference_transcript="Reference.",
         )
 
         def fake_synth(**kwargs):
@@ -555,6 +556,7 @@ class PictureProjectTests(VideoProjectTests):
             audio_bytes=b"RIFF....WAVE",
             filename="ref.wav",
             notes="Reference.",
+            reference_transcript="Reference.",
         )
         still = self.root / "face.png"
         subprocess.run(

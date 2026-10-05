@@ -36,6 +36,31 @@ it('requires explicit chapter replacement after a successful upload', async () =
   expect(useDraft).toHaveBeenCalledWith(draft)
 })
 
+it.each(['docx', 'srt', 'vtt'])('accepts %s documents while retaining explicit review before use', async format => {
+  vi.mocked(api.importEbook).mockResolvedValue(draft)
+  const node = await mount(); await upload(node, `story.${format}`)
+  expect(api.importEbook).toHaveBeenCalled()
+  expect(useDraft).not.toHaveBeenCalled()
+  expect(node.querySelector('input[type="file"]')?.getAttribute('accept')).toContain(`.${format}`)
+})
+
+it('shows source review warnings and only a bounded preview of preserved subtitle cues', async () => {
+  const subtitle: EbookDraft = { ...draft, subtitle_import: true, cast_review_required: true,
+    warnings: [{ code: 'subtitle_overlap', message: 'Source cues overlap; review dialogue order.' }],
+    chapters: [{ title: 'Scene', text: 'Alice: Hello.', included: true,
+      source_cues: Array.from({ length: 51 }, (_, index) => ({ cue_id: `source-${index}`, order: index,
+        speaker: 'Alice', start_ms: 1000 + index * 1000, end_ms: 1500 + index * 1000, text: `Line ${index}` })) }] }
+  vi.mocked(api.importEbook).mockResolvedValue(subtitle)
+  const node = await mount(); await upload(node, 'scene.vtt')
+  expect(node.textContent).toContain('Source cues overlap; review dialogue order.')
+  expect(node.querySelectorAll('tbody tr')).toHaveLength(50)
+  expect(node.querySelector('tbody')?.textContent).toContain('source-0')
+  expect(node.querySelector('tbody')?.textContent).not.toContain('source-50')
+  expect(useDraft).not.toHaveBeenCalled()
+  button(node, 'Use imported chapters').click(); await settle()
+  expect(useDraft).toHaveBeenCalledWith(subtitle)
+})
+
 it('shows safe converter guidance and leaves editor data untouched on failure', async () => {
   vi.mocked(api.importEbook).mockRejectedValue(new ApiError('ebook_converter_missing', 503))
   const node = await mount(); await upload(node)

@@ -7,6 +7,8 @@ import { useDialogA11y } from '../../composables/useDialogA11y'
 import StarterSpeechVoices from './StarterSpeechVoices.vue'
 import SpeechAudioPreview from './SpeechAudioPreview.vue'
 import LocalEnginePanel from './LocalEnginePanel.vue'
+import { ApiError } from '../../api/http'
+import SpeechReferenceDetails from './SpeechReferenceDetails.vue'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const emit = defineEmits<{ activity: [message: string] }>()
@@ -35,11 +37,13 @@ const createVisited = ref(false)
 const createOpen = ref(false)
 const name = ref('')
 const notes = ref('')
+const referenceTranscript = ref(''), referenceLanguage = ref('en')
 const consent = ref(false)
 const file = ref<File | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const nameInput = ref<HTMLInputElement | null>(null)
 const trialText = ref('')
+const trialLanguage = ref('en')
 const trialTextInput = ref<HTMLTextAreaElement | null>(null)
 const trialResult = ref<SpeechCloneTrialResponse | null>(null)
 const trialAudioUrl = computed(() => {
@@ -166,10 +170,11 @@ async function onCreate() {
   try {
     const created = await profilesApi.createSpeechVoiceProfile({
       name: trimmed, consentConfirmed: true, audio: file.value, notes: notes.value.trim() || undefined,
+      referenceTranscript: referenceTranscript.value.trim(), referenceLanguage: referenceLanguage.value.trim(),
     }, controller.signal)
     if (!alive || controller.signal.aborted) return
     profiles.value = [...profiles.value.filter(profile => profile.id !== created.id), created]
-    name.value = ''; notes.value = ''; consent.value = false; file.value = null
+    name.value = ''; notes.value = ''; referenceTranscript.value = ''; referenceLanguage.value = 'en'; consent.value = false; file.value = null
     if (fileInput.value) fileInput.value.value = ''
     createOpen.value = false
     if (selection === selectionGeneration) selectProfile(created.id)
@@ -247,7 +252,7 @@ async function onTrial() {
   cloning.value = true
   const current = () => alive && !controller.signal.aborted && generation === trialGeneration && selectedId.value === profile.id
   try {
-    const result = await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal)
+    const result = await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal, trialLanguage.value)
     if (!current()) return
     if (result.profile_id !== profile.id) { error.value = t('voiceProfiles.err.trial'); return }
     trialResult.value = result
@@ -257,10 +262,10 @@ async function onTrial() {
       case 'engine_ready': notice.value = t('speechWorkspace.trialEngineReady'); break
       case 'api_unavailable': error.value = t('speechWorkspace.trialApiUnavailable'); break
       case 'engine_not_installed': error.value = t('speechWorkspace.trialMissing'); break
-      case 'failed': error.value = t('voiceProfiles.err.trial'); break
+      case 'failed': error.value = t(result.detail === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : result.detail === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'voiceProfiles.err.trial'); break
     }
-  } catch {
-    if (current()) error.value = t('voiceProfiles.err.trial')
+  } catch (err) {
+    if (current()) error.value = t(err instanceof ApiError && err.message === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : err instanceof ApiError && err.message === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'voiceProfiles.err.trial')
   } finally {
     if (current()) { cloning.value = false; trialController = null }
   }
@@ -311,6 +316,8 @@ onBeforeUnmount(() => {
         </div>
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.nameLabel') }}</span><input ref="nameInput" v-model="name" type="text" maxlength="120" :aria-label="t('voiceProfiles.nameLabel')" :placeholder="t('voiceProfiles.namePlaceholder')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.notesLabel') }}</span><textarea v-model="notes" rows="2" maxlength="2000" :aria-label="t('voiceProfiles.notesLabel')" :placeholder="t('voiceProfiles.notesPlaceholder')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text focus-visible:outline-2 focus-visible:outline-accent1" /><span class="block text-xs text-text-dim">{{ t('speechWorkspace.notesHelp') }}</span></label>
+        <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.transcript') }}</span><textarea v-model="referenceTranscript" rows="3" maxlength="2000" :aria-label="t('audiobookReview.transcript')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
+        <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.referenceLanguage') }}</span><input v-model="referenceLanguage" maxlength="16" :aria-label="t('audiobookReview.referenceLanguage')" :disabled="saving" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.audioLabel') }}</span><input ref="fileInput" type="file" accept=".wav,.flac,audio/wav,audio/flac" :aria-label="t('voiceProfiles.audioLabel')" :disabled="saving" class="block w-full text-sm text-text-dim file:mr-3 file:rounded-lg file:border-0 file:bg-panel-2 file:px-3 file:py-2 file:text-sm file:text-text focus-visible:outline-2 focus-visible:outline-accent1" @change="onFilePicked" /></label>
         <label class="flex items-start gap-2 text-sm text-text"><input v-model="consent" type="checkbox" :aria-label="t('voiceProfiles.consentLabel')" :disabled="saving" class="mt-1 focus-visible:outline-2 focus-visible:outline-accent1" /><span>{{ t('voiceProfiles.consentLabel') }}</span></label>
         <p v-if="!consent" class="text-xs text-text-dim">{{ t('voiceProfiles.err.consent') }}</p>
@@ -325,7 +332,9 @@ onBeforeUnmount(() => {
         <template v-if="selectedProfile">
           <p class="text-xs" :class="selectedProfile.consent_confirmed ? 'text-text-dim' : 'text-status-failed'">{{ !selectedProfile.consent_confirmed ? t('voiceProfiles.consentMissing') : selectedProfile.starter_voice_id ? t('speechWorkspace.licensedReference') : t('voiceProfiles.consentOk') }}</p>
           <p v-if="selectedProfile.notes" class="whitespace-pre-wrap break-words text-sm text-text-dim">{{ selectedProfile.notes }}</p>
+          <SpeechReferenceDetails :key="selectedProfile.id" :profile="selectedProfile" :disabled="cloning || deleting" @saved="updated => { profiles = profiles.map(profile => profile.id === updated.id ? updated : profile) }" />
           <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea ref="trialTextInput" v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
+          <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><select v-model="trialLanguage" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option></select></label>
           <p v-if="!selectedProfile.consent_confirmed" class="text-xs text-status-failed">{{ t('speechWorkspace.consentRequired') }}</p>
           <p v-else-if="cloning" role="status" class="text-xs text-text-dim">{{ t('speechWorkspace.trialPendingHelp') }}</p>
           <p v-else-if="deleting && deleteTarget?.id === selectedId" class="text-xs text-text-dim">{{ t('speechWorkspace.deletePending') }}</p>

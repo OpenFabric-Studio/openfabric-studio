@@ -310,6 +310,15 @@ async def _engine_fingerprint(project: VideoProject, *, verify: bool = False) ->
     ).hexdigest()
 
 
+
+def _publish_checked(project_id: str, change: Callable[[store.StoredVideoProject], None]) -> None:
+    from . import voice_profiles
+    from .video_dialogue import require_consent
+    with store._lock, voice_profiles._LOCK:
+        require_consent(store.load(project_id).project)
+        store.mutate(project_id, change, busy_ok=True, bump=False)
+
+
 def _prompt(project: VideoProject, shot: VideoProjectShot) -> str:
     return " ".join((project.direction + " " + shot.prompt).split())
 
@@ -359,6 +368,9 @@ def fingerprint(
         "seed": seed,
         "reference_sha256": reference_hash,
     }
+    cue = next((item for item in project.dialogue_cues if item.shot_id == shot.id), None)
+    if cue is not None:
+        value["dialogue_identity"] = cue.model_dump(exclude={"waveform_peaks"})
     if project.character_lock and project.track_id is None:
         _still, strength = store.effective_still(project, shot)
         value["character_lock"] = True
@@ -367,7 +379,7 @@ def fingerprint(
     if project.track_id is None and project.character_adapter_id:
         from .video_character_training import ready_adapter_file
 
-        adapter = ready_adapter_file(project.character_adapter_id)
+        adapter = ready_adapter_file(project.character_adapter_id, project.settings.engine_pack)
         value["character_adapter_id"] = project.character_adapter_id
         value["character_adapter_sha256"] = store.file_hash(adapter) if adapter is not None else ""
     return hashlib.sha256(
@@ -455,6 +467,33 @@ async def _poster(project_id: str, clip: Path, dest: Path) -> None:
         "poster",
         timeout=30,
     )
+
+
+
+async def _filmstrip(project_id: str, clip: Path, dest: Path, seconds: float) -> None:
+    from PIL import Image
+    partial = dest.with_name(f".{dest.stem}-{uuid.uuid4().hex}.partial.png")
+    try:
+        await _command(project_id, [tool("ffmpeg"), "-v", "error", "-y", "-i", str(clip),
+            "-vf", f"fps=5/{seconds},scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2,tile=5x1:nb_frames=5",
+            "-frames:v", "1", str(partial)], "poster")
+        with Image.open(partial) as image:
+            image.load()
+            if image.size != (800, 90):
+                raise store.VideoProjectError("filmstrip_invalid")
+        partial.replace(dest)
+    except OSError as exc:
+        raise store.VideoProjectError("filmstrip_invalid") from exc
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def filmstrip_file(project_id: str, shot_id: str, variant_id: str) -> Path:
+    clip = variant_file(project_id, shot_id, variant_id)
+    path = clip.with_name(clip.stem + ".filmstrip.png")
+    if path.is_symlink() or not path.is_file():
+        raise store.VideoProjectError("not_found")
+    return path
 
 
 async def _cpu_shot(
@@ -606,7 +645,7 @@ async def _generate(
             if project.track_id is None and mode != "a2v":
                 from .video_character_training import ready_adapter_file
 
-                adapter = ready_adapter_file(project.character_adapter_id)
+                adapter = ready_adapter_file(project.character_adapter_id, project.settings.engine_pack)
             settings = RenderSettings(
                 output=partial,
                 prompt=_prompt(project, shot),
@@ -651,6 +690,11 @@ async def _generate(
         partial.replace(path)
         poster = path.with_suffix(".png")
         await _poster(project.id, path, poster)
+        strip = path.with_name(path.stem + ".filmstrip.png")
+        try:
+            await _filmstrip(project.id, path, strip, shot.seconds)
+        except store.VideoProjectError:
+            logger.warning("Optional shot filmstrip unavailable", exc_info=True)
 
         def ready(item: VideoVariant) -> None:
             item.status = "ready"
@@ -658,6 +702,8 @@ async def _generate(
             item.duration_sec = shot.seconds
             item.file_url = f"/api/videos/projects/{project.id}/shots/{shot.id}/variants/{variant_id}/file"
             item.poster_url = f"/api/videos/projects/{project.id}/shots/{shot.id}/variants/{variant_id}/poster"
+            if strip.is_file():
+                item.filmstrip_url = f"/api/videos/projects/{project.id}/shots/{shot.id}/variants/{variant_id}/filmstrip"
             if item.timings and not item.timings[-1].finished_at:
                 timing = item.timings[-1]
                 timing.finished_at = store.now()
@@ -889,6 +935,8 @@ async def _assemble(
     output = store.artifact(project.id, f"exports/{job.id}.mp4")
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.stem + ".partial.mp4")
+    from .video_text import font_identity
+    caption_font = font_identity() if settings.include_overlays and project.overlays else ""
     export_fingerprint = hashlib.sha256(
         (
             project.model_dump_json(
@@ -896,6 +944,7 @@ async def _assemble(
             )
             + settings.model_dump_json()
             + engine
+            + caption_font
         ).encode()
     ).hexdigest()
 
@@ -992,7 +1041,7 @@ async def _assemble(
             saved.project.poster_url = f"/api/videos/projects/{project.id}/poster"
             saved.project.export_settings = settings
 
-        store.mutate(project.id, publish, busy_ok=True, bump=False)
+        _publish_checked(project.id, publish)
     finally:
         partial.unlink(missing_ok=True)
 
@@ -1166,6 +1215,8 @@ async def start(
         store.ensure_open(project_id)
         document = store.load(project_id)
         project = document.project
+        from .video_dialogue import require_consent
+        require_consent(project)
         if document.worker is not None:
             raise store.VideoProjectError("worker_identity_unverified")
         if body.revision != project.revision:
@@ -1525,7 +1576,7 @@ async def recover() -> None:
                         else ""
                     )
 
-                store.mutate(project.id, publish, busy_ok=True, bump=False)
+                _publish_checked(project.id, publish)
                 adopted = True
             except (VideoMediaError, OSError):
                 pass

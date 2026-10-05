@@ -71,6 +71,14 @@ class PendingExport(VideoContract):
     project_revision: int = Field(default=0, ge=0)
 
 
+class VideoHistorySnapshot(VideoContract):
+    project: VideoProject
+    source: SourceIdentity | None = None
+    reference_paths: dict[str, str] = Field(default_factory=dict)
+    speech_path: str = ""
+    published_file: str = ""
+
+
 class StoredVideoProject(VideoContract):
     project: VideoProject
     source: SourceIdentity | None = None
@@ -81,6 +89,8 @@ class StoredVideoProject(VideoContract):
     pending_export: PendingExport | None = None
     render_request: VideoRenderRequest | None = None
     requested_export_settings: VideoExportSettings | None = None
+    undo_history: list[VideoHistorySnapshot] = Field(default_factory=list, max_length=50)
+    redo_history: list[VideoHistorySnapshot] = Field(default_factory=list, max_length=50)
 
 
 def now() -> str:
@@ -277,6 +287,11 @@ def ensure_character_lock(project: VideoProject) -> None:
 
 def view(document: StoredVideoProject) -> VideoProject:
     project = document.project.model_copy(deep=True)
+    project.undo_available = bool(document.undo_history)
+    project.redo_available = bool(document.redo_history)
+    # Export files are immutable, uniquely named artifacts. The version names
+    # the selected artifact without rehashing large videos during every poll.
+    project.output_version = hashlib.sha256(document.published_file.encode()).hexdigest() if document.published_file and project.file_url else ""
     project.source_changed = source_changed(document)
     extra = character_lock_warnings(project)
     from .video_character_training import adapter_warning
@@ -337,12 +352,12 @@ def _enforce_reel(project: VideoProject) -> None:
     if (project.settings.width, project.settings.height) != (704, 1280):
         raise VideoProjectError("reel_size")
     shots = sorted(project.shots, key=lambda shot: shot.start_sec)
-    if not 2 <= len(shots) <= 4:
+    if not (1 if project.dialogue_cues else 2) <= len(shots) <= 4:
         raise VideoProjectError("reel_shots")
     if any(shot.seconds not in (2, 4, 6) for shot in shots):
         raise VideoProjectError("reel_length")
     end = shots[-1].start_sec + shots[-1].seconds
-    if end < 8 - 1e-6 or end > 15 + 1 / 24:
+    if end < (2 if project.dialogue_cues else 8) - 1e-6 or end > 15 + 1 / 24:
         raise VideoProjectError("reel_duration")
     project.duration_sec = end
 
@@ -503,8 +518,12 @@ def mutate(
             and document.project.job.status in {"queued", "running"}
         ):
             raise VideoProjectError("busy")
+        before = history_snapshot(document) if bump else None
         change(document)
         if bump:
+            if before is not None and history_snapshot(document) != before:
+                document.undo_history = [*document.undo_history, before][-50:]
+                document.redo_history = []
             document.project.revision += 1
         document.project.updated_at = now()
         try:
@@ -512,6 +531,73 @@ def mutate(
         except OSError as exc:
             raise VideoProjectError("storage_failed") from exc
         return view(document)
+
+
+
+def history_snapshot(document: StoredVideoProject) -> VideoHistorySnapshot:
+    return VideoHistorySnapshot(project=document.project.model_copy(deep=True),
+        source=document.source.model_copy() if document.source is not None else None,
+        reference_paths=dict(document.reference_paths), speech_path=document.speech_path,
+        published_file=document.published_file)
+
+
+def _restore_history(project_id: str, body: VideoRevisionRequest, *, backwards: bool) -> VideoProject:
+    with _lock:
+        ensure_open(project_id)
+        document = load(project_id)
+        if body.revision != document.project.revision:
+            raise VideoProjectError("revision_conflict")
+        if document.worker is not None or document.project.job is not None and document.project.job.status in {"queued", "running"}:
+            raise VideoProjectError("busy")
+        stack = document.undo_history if backwards else document.redo_history
+        if not stack:
+            raise VideoProjectError("nothing_to_undo" if backwards else "nothing_to_redo")
+        snapshot = stack[-1]
+        if snapshot.project.id != document.project.id:
+            raise VideoProjectError("history_invalid")
+        # History retains immutable artifacts. Missing/escaped files make a
+        # restore fail atomically rather than publishing broken references.
+        required = [*snapshot.reference_paths.values(), snapshot.speech_path, snapshot.published_file]
+        for shot in snapshot.project.shots:
+            required.extend(f"shots/{shot.id}/{variant.id}.mp4" for variant in shot.variants
+                if variant.status == "ready" and variant.file_url)
+        for relative in required:
+            if relative and not artifact(project_id, relative).is_file():
+                raise VideoProjectError("history_media_missing")
+        current = history_snapshot(document)
+        stack.pop()
+        other = document.redo_history if backwards else document.undo_history
+        other.append(current)
+        if len(other) > 50:
+            del other[0]
+        revision = document.project.revision + 1
+        document.project = snapshot.project.model_copy(deep=True,
+            update={"revision": revision, "updated_at": now(), "job": None})
+        document.source = snapshot.source
+        document.reference_paths = dict(snapshot.reference_paths)
+        document.speech_path = snapshot.speech_path
+        document.published_file = snapshot.published_file
+        document.pending_export = None
+        document.render_request = None
+        document.requested_export_settings = None
+        save(document)
+        return view(document)
+
+
+def undo(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    return _restore_history(project_id, body, backwards=True)
+
+
+def redo(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    return _restore_history(project_id, body, backwards=False)
+
+
+def _remove_unreferenced_speech(project_id: str, relative: str) -> None:
+    with _lock:
+        document = load(project_id)
+        protected = {document.speech_path, *(snapshot.speech_path for snapshot in [*document.undo_history, *document.redo_history])}
+        if relative not in protected:
+            artifact(project_id, relative).unlink(missing_ok=True)
 
 
 def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
@@ -531,6 +617,9 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
         if body.seed is not None:
             project.seed = body.seed
         if body.settings is not None:
+            if project.character_adapter_id:
+                from .video_character_training import ready_adapter_file
+                ready_adapter_file(project.character_adapter_id, body.settings.engine_pack)
             project.settings = body.settings
         if body.export_settings is not None:
             if project.track_id is not None and body.export_settings.attach_speech:
@@ -562,6 +651,13 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
                         shot.approved_variant_id = previous.approved_variant_id
                 shots.append(shot)
             project.shots = shots
+        if project.dialogue_cues:
+            by_id = {shot.id: shot for shot in project.shots}
+            for cue in project.dialogue_cues:
+                previous = next((shot for shot in before.shots if shot.id == cue.shot_id), None)
+                current = by_id.get(cue.shot_id)
+                if previous is None or current is None or (previous.start_sec, previous.seconds) != (current.start_sec, current.seconds):
+                    raise VideoProjectError("dialogue_timing_locked")
         _enforce_reel(project)
         if any(
             overlay.end_sec > project.duration_sec + 1 / 24
@@ -606,6 +702,10 @@ def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
         if document.project.revision != body.revision:
             raise VideoProjectError("revision_conflict")
         copied = document.model_copy(deep=True)
+        # A duplicate owns only the copied current references/speech, not the
+        # source project's historical artifacts or identity.
+        copied.undo_history = []
+        copied.redo_history = []
         copied.project.id = uuid.uuid4().hex
         copied.project.revision = 1
         copied.project.name = copied.project.name[:110] + " (copy)"
@@ -874,6 +974,8 @@ async def upload_speech(project_id: str, revision: int, upload: UploadFile) -> V
             document = load(project_id)
             if document.project.track_id is not None:
                 raise VideoProjectError("speech_picture_only")
+            if document.project.dialogue_cues:
+                raise VideoProjectError("dialogue_soundtrack_managed")
             if project_id in _reference_cancelling:
                 raise VideoProjectError("busy")
             if any(_reference_cleanup_failed(item) for item in _reference_tasks.get(project_id, ())):
@@ -967,6 +1069,8 @@ async def _upload_speech(
         def change(document: StoredVideoProject) -> None:
             if document.project.track_id is not None:
                 raise VideoProjectError("speech_picture_only")
+            if document.project.dialogue_cues:
+                raise VideoProjectError("dialogue_soundtrack_managed")
             if document.speech_path and document.speech_path != relative:
                 removed.append(document.speech_path)
             document.speech_path = relative
@@ -988,7 +1092,7 @@ async def _upload_speech(
         result = mutate(project_id, change, revision=revision)
         published = True
         for old in removed:
-            artifact(project_id, old).unlink(missing_ok=True)
+            _remove_unreferenced_speech(project_id, old)
         return result
     finally:
         await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload))
@@ -1000,6 +1104,8 @@ def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
     def change(document: StoredVideoProject) -> None:
         if document.project.track_id is not None:
             raise VideoProjectError("speech_picture_only")
+        if document.project.dialogue_cues:
+            raise VideoProjectError("dialogue_soundtrack_managed")
         if document.speech_path:
             removed.append(document.speech_path)
         document.speech_path = ""
@@ -1013,7 +1119,7 @@ def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
 
     result = mutate(project_id, change, revision=body.revision)
     for old in removed:
-        artifact(project_id, old).unlink(missing_ok=True)
+        _remove_unreferenced_speech(project_id, old)
     return result
 
 
@@ -1034,6 +1140,8 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
         document = load(project_id)
         if document.project.track_id is not None:
             raise VideoProjectError("speech_picture_only")
+        if document.project.dialogue_cues:
+            raise VideoProjectError("dialogue_soundtrack_managed")
         if body.revision != document.project.revision:
             raise VideoProjectError("revision_conflict")
         if document.project.job is not None and document.project.job.status in {"queued", "running"}:
@@ -1112,7 +1220,7 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
         result = mutate(project_id, change, revision=body.revision)
         published = True
         for old in removed:
-            artifact(project_id, old).unlink(missing_ok=True)
+            _remove_unreferenced_speech(project_id, old)
         return result
     finally:
         temporary.unlink(missing_ok=True)
@@ -1220,6 +1328,7 @@ def apply_character_adapter(project_id: str, body: ApplyVideoCharacterAdapterReq
                 shot.reference_strength = CHARACTER_LOCK_STRENGTH
                 shot.approved_variant_id = None
             document.project.character_lock = True
+            training.ready_adapter_file(job.id, document.project.settings.engine_pack)
             document.project.character_adapter_id = job.id
             document.project.file_url = ""
             document.project.poster_url = ""

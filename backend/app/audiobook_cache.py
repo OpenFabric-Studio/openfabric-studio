@@ -19,8 +19,8 @@ from . import audiobooks
 _LOG = logging.getLogger(__name__)
 
 
-def _key(profile_id: str, text: str) -> str:
-    return hashlib.sha256(f"{profile_id}\n{text}".encode()).hexdigest()
+def _key(profile_id: str, text: str, render_identity: str) -> str:
+    return hashlib.sha256(f"v2\n{profile_id}\n{render_identity}\n{text}".encode()).hexdigest()
 
 
 def _root() -> Path:
@@ -41,8 +41,10 @@ def _valid_wav(path: Path) -> bool:
         return False
 
 
-def reuse(profile_id: str, text: str, target: Path) -> bool:
-    key = _key(profile_id, text)
+def reuse(profile_id: str, text: str, target: Path, *, render_identity: str | None = None) -> bool:
+    if render_identity is None:
+        return False
+    key = _key(profile_id, text, render_identity)
     name = f"{key}.wav"
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         audiobooks._ensure_schema(connection)
@@ -59,10 +61,12 @@ def reuse(profile_id: str, text: str, target: Path) -> bool:
     return _valid_wav(target)
 
 
-def store(profile_id: str, text: str, source: Path) -> None:
+def store(profile_id: str, text: str, source: Path, *, render_identity: str | None = None) -> None:
+    if render_identity is None:
+        return
     if not _valid_wav(source):
         return
-    key = _key(profile_id, text)
+    key = _key(profile_id, text, render_identity)
     name = f"{key}.wav"
     root = _root()
     destination = root / name

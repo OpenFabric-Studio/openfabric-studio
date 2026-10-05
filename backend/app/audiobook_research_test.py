@@ -13,6 +13,8 @@ from pathlib import Path
 from pydantic import ValidationError
 from unittest.mock import patch
 
+from app.speech_references import SpeechRenderSnapshot
+
 from app import audiobook_collection, audiobook_narration, audiobooks, narration_pauses, speech_clone, voice_profiles
 from app.audiobook_contracts import AudiobookChapterInput, CreateAudiobookRequest, SetAudiobookLanguagesRequest
 
@@ -65,17 +67,17 @@ class AudiobookResearchTests(unittest.TestCase):
         for item in self.patches:
             item.start()
         self.profile = voice_profiles.create_profile(
-            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference.",
+            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
         )
         self.calls = 0
         original = speech_clone.synthesize_to_path
 
         def counted(*, profile_id: str, text: str, output_path: Path, prompt_text: str | None = None,
                     prompt_language: str | None = None, text_language: str | None = None,
-                    require_consent: bool = True) -> object:
+                    require_consent: bool = True, snapshot: SpeechRenderSnapshot | None = None) -> object:
             self.calls += 1
             return original(profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
-                            prompt_language=prompt_language, text_language=text_language, require_consent=require_consent)
+                            prompt_language=prompt_language, text_language=text_language, require_consent=require_consent, snapshot=snapshot)
 
         self.synth = patch.object(speech_clone, "synthesize_to_path", side_effect=counted)
         self.synth.start()
@@ -109,9 +111,12 @@ class AudiobookResearchTests(unittest.TestCase):
             self.assertIn("\tready\t", manifest)
             self.assertIn("book.cue", handle.namelist())
             self.assertIn("export.wav", handle.namelist())
-        second = self._create("es")
+        same = self._create()
         self.assertEqual(self.calls, 1)
-        self.assertEqual(audiobooks.list_jobs(book_id=second)[0].language, "es")
+        second = self._create("ja")
+        self.assertEqual(self.calls, 2)
+        self.assertEqual(audiobooks.list_jobs(book_id=same)[0].render_language, "en")
+        self.assertEqual(audiobooks.list_jobs(book_id=second)[0].render_language, "ja")
         updated = audiobooks.set_languages(second, "fr", [(0, "de")])
         self.assertEqual(updated.language, "fr")
         self.assertEqual(audiobooks.list_jobs(book_id=second)[0].language, "de")

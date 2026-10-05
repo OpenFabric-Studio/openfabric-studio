@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.speech_references import SpeechRenderSnapshot
+
 from app import audiobook_narration, audiobooks, speech_clone, voice_profiles
 from app.audiobook_contracts import AudiobookChapterInput, CreateAudiobookRequest
 
@@ -22,7 +24,7 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         patch.dict("os.environ", {"OPENFABRIC_AUDIOBOOK_SYNC": "0", "OPENFABRIC_SPEECH_CLONE_MOCK": "1"})]
         for item in self.patches:
             item.start()
-        self.profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference.")
+        self.profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
 
     async def asyncTearDown(self) -> None:
         if hasattr(audiobooks, "shutdown"):
@@ -47,13 +49,13 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         calls = 0
         original = speech_clone.synthesize_to_path
 
-        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True, text_language: str | None = None, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
             nonlocal calls
             calls += 1
             if calls == 1:
                 entered.set()
                 release.wait(5)
-            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
 
         with patch.object(speech_clone, "synthesize_to_path", side_effect=synthesize):
             identifier = self.create()
@@ -120,7 +122,7 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         original = speech_clone._synthesize_unlocked
 
         def synthesize(*, profile_id: str, text: str, output_path: Path, prompt_text: str | None,
-                       prompt_language: str | None, text_language: str | None, require_consent: bool) -> speech_clone.SynthesisOutcome:
+                       prompt_language: str | None, text_language: str | None, require_consent: bool, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
             nonlocal active, peak
             with lock:
                 active += 1
@@ -128,7 +130,7 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
             try:
                 time.sleep(0.005)
                 return original(profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
-                                prompt_language=prompt_language, text_language=text_language, require_consent=require_consent)
+                                prompt_language=prompt_language, text_language=text_language, require_consent=require_consent, snapshot=snapshot)
             finally:
                 with lock:
                     active -= 1
@@ -180,10 +182,10 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         entered, release = threading.Event(), threading.Event()
         original = speech_clone.synthesize_to_path
 
-        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True, text_language: str | None = None, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
             entered.set()
             release.wait(5)
-            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
 
         with patch.object(speech_clone, "synthesize_to_path", side_effect=synthesize):
             identifier = self.create()
@@ -206,15 +208,15 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         original = speech_clone.synthesize_to_path
         calls = 0
 
-        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True, text_language: str | None = None, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
             nonlocal calls
             calls += 1
             if calls == 1:
-                outcome = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+                outcome = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
                 entered.set()
                 release.wait(5)
                 return outcome
-            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+            return original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
 
         with patch.object(speech_clone, "synthesize_to_path", side_effect=synthesize):
             identifier = self.create()
@@ -245,8 +247,8 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         await audiobooks.start()
         original = speech_clone.synthesize_to_path
 
-        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
-            outcome = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True, text_language: str | None = None, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
+            outcome = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
             from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
             voice_profiles.patch_profile(profile_id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
             return outcome
@@ -265,8 +267,8 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_revocation_during_last_section_keeps_pcm_without_publishing_chapter(self) -> None:
         await audiobooks.start()
         original = speech_clone.synthesize_to_path
-        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
-            result = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True, text_language: str | None = None, snapshot: SpeechRenderSnapshot | None = None) -> speech_clone.SynthesisOutcome:
+            result = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent, text_language=text_language, snapshot=snapshot)
             from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
             voice_profiles.patch_profile(profile_id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
             return result
