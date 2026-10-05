@@ -177,9 +177,20 @@ async def list_tracks(model: Optional[str] = None):
 @router.get("/{track_id}/audio")
 async def track_audio(track_id: int):
     row = db.get_track(track_id)
-    if not row or not Path(row["audio_path"]).exists():
+    path = _track_file(row["audio_path"]) if row is not None else None
+    if path is None:
         return JSONResponse({"error": "audio not found"}, status_code=404)
-    return FileResponse(row["audio_path"])
+    return FileResponse(path)
+
+
+def _track_file(value: object) -> Path | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        path = Path(value).resolve()
+        return path if path.is_relative_to(db.FILES_DIR.resolve()) and path.is_file() else None
+    except (OSError, RuntimeError):
+        return None
 
 
 @router.get("/{track_id}/download")
@@ -191,9 +202,10 @@ async def track_download(track_id: Annotated[int, ApiPath(gt=0, le=9_007_199_254
 @router.get("/{track_id}/abc")
 async def track_abc(track_id: int):
     row = db.get_track(track_id)
-    if not row or not row["abc_path"] or not Path(row["abc_path"]).exists():
+    path = _track_file(row["abc_path"]) if row is not None else None
+    if path is None:
         return JSONResponse({"error": "track has no ABC plan"}, status_code=404)
-    return PlainTextResponse(Path(row["abc_path"]).read_text(encoding="utf-8"))
+    return PlainTextResponse(path.read_text(encoding="utf-8"))
 
 
 @router.put("/{track_id}", response_model=SavedTrack)

@@ -10,11 +10,13 @@ import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
 import type { EbookDraft } from '../../api/contracts'
 import en from '../../locales/en'
 import { audiobookWorkspaceEn } from '../../locales/audiobookWorkspace'
+import { ApiError } from '../../api/http'
 
 vi.mock('../../api/audiobooks', async (original) => ({ ...await original<typeof import('../../api/audiobooks')>(),
   __v_isRef: false,
   listAudiobooks: vi.fn(), listAudiobookJobs: vi.fn(), createAudiobook: vi.fn(), retryAudiobook: vi.fn(),
   listEbookDrafts: vi.fn(), getEbookDraft: vi.fn(), deleteEbookDraft: vi.fn(), importEbook: vi.fn(), saveEbookDraft: vi.fn(), createAudiobookFromDraft: vi.fn(), controlAudiobook: vi.fn(),
+  setAudiobookLanguages: vi.fn(), setAudiobookCast: vi.fn(), setAudiobookChapterText: vi.fn(), setAudiobookPronunciations: vi.fn(), regenerateAudiobookChapter: vi.fn(), uploadAudiobookCover: vi.fn(),
 }))
 vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(), listSpeechVoiceProfiles: vi.fn(), startSpeechCloneTrial: vi.fn() }))
 
@@ -30,8 +32,9 @@ function job(value: AudiobookBook, status: AudiobookJob['status'] = 'done'): Aud
 }
 function deferred<T>() {
   let resolve: (value: T) => void = () => { throw new Error('Not initialized') }
-  const promise = new Promise<T>((release) => { resolve = release })
-  return { promise, resolve }
+  let reject: (error: Error) => void = () => { throw new Error('Not initialized') }
+  const promise = new Promise<T>((release, fail) => { resolve = release; reject = fail })
+  return { promise, resolve, reject }
 }
 beforeEach(() => {
   vi.useFakeTimers(); vi.resetAllMocks(); activities.length = 0; hidden = ref(false)
@@ -433,4 +436,80 @@ it('keeps the editor mounted during confirmed import deletion and retains its te
   expect(node.querySelector('a[download]')).toBeNull()
   expect(field(node, 'Chapter 2 text').value).toBe('The story begins here.')
   expect(button(node, 'Back to books').disabled).toBe(false)
+})
+
+it.each(['hide', 'close', 'unmount'] as const)('pauses a completed narrator preview on %s', async action => {
+  vi.mocked(profilesApi.startSpeechCloneTrial).mockResolvedValue({ status: 'completed', detail: '', engine: 'gpt-sovits', profile_id: profile.id, trial_id: '1'.repeat(32) })
+  const node = await mount(); await draft(node); await click(node, 'Preview narrator')
+  const audio = node.querySelector('audio')
+  if (!audio) throw new Error('Missing narrator preview')
+  const pause = vi.spyOn(audio, 'pause').mockImplementation(() => undefined)
+  if (action === 'hide') { hidden.value = true; await settle() }
+  else if (action === 'close') await click(node, 'Back to books')
+  else { app?.unmount(); app = undefined }
+  expect(pause).toHaveBeenCalled()
+})
+
+const editActions = ['languages', 'cast', 'lines', 'pronunciations', 'regenerate', 'cover'] as const
+async function startBookEdit(node: HTMLElement, action: typeof editActions[number], request: Promise<AudiobookBook>) {
+  switch (action) {
+    case 'languages': vi.mocked(api.setAudiobookLanguages).mockReturnValue(request); await click(node, 'Save languages'); return
+    case 'cast': vi.mocked(api.setAudiobookCast).mockReturnValue(request); await click(node, 'Save cast'); return
+    case 'lines': vi.mocked(api.setAudiobookChapterText).mockReturnValue(request); await click(node, 'Save lines'); return
+    case 'pronunciations': vi.mocked(api.setAudiobookPronunciations).mockReturnValue(request); await click(node, 'Save pronunciations'); return
+    case 'regenerate': vi.mocked(api.regenerateAudiobookChapter).mockReturnValue(request); await click(node, 'Regenerate this chapter'); return
+    case 'cover': {
+      vi.mocked(api.uploadAudiobookCover).mockReturnValue(request)
+      const input = field(node, 'Cover image')
+      Object.defineProperty(input, 'files', { value: [new File(['cover'], 'cover.png', { type: 'image/png' })], configurable: true })
+      input.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+    }
+  }
+}
+
+it.each(editActions)('keeps the next book drafts and chapter polling intact after a late %s result', async action => {
+  const first: AudiobookBook = { ...book(), language: 'en', cast: [{ name: 'First cast', profile_id: profile.id }] }
+  const second: AudiobookBook = { ...book('b'.repeat(32), 'Second book'), language: 'es', cast: [{ name: 'Second cast', profile_id: profile.id }] }
+  vi.mocked(api.listAudiobooks).mockResolvedValue([first, second])
+  vi.mocked(api.listAudiobookJobs).mockImplementation(async id => [{ ...job(id === first.id ? first : second), chapter_text: 'Retained lines', language: 'de' }])
+  const request = deferred<AudiobookBook>(), node = await mount()
+  await startBookEdit(node, action, request.promise)
+  await selectBook(node, second.id)
+  await change(node, 'Language', 'it'); await change(node, 'Language for chapter 1', 'pt')
+  await change(node, 'Cast name 1', 'Unsubmitted cast'); await change(node, 'Lines for chapter 1', 'Unsubmitted lines')
+  const jobCalls = vi.mocked(api.listAudiobookJobs).mock.calls.length
+  request.resolve({ ...first, language: 'fr', cast: [{ name: 'Updated first cast', profile_id: profile.id }] }); await settle()
+  expect(field(node, 'Language').value).toBe('it')
+  expect(field(node, 'Language for chapter 1').value).toBe('pt')
+  expect(field(node, 'Cast name 1').value).toBe('Unsubmitted cast')
+  expect(field(node, 'Lines for chapter 1').value).toBe('Unsubmitted lines')
+  expect(api.listAudiobookJobs).toHaveBeenCalledTimes(jobCalls)
+  expect(node.querySelector('[role=status]')).toBeNull()
+  // The accepted mutation still belongs to the original saved book.
+  await selectBook(node, first.id)
+  expect(field(node, 'Language').value).toBe('fr')
+})
+
+it.each(editActions)('does not show a previous book %s failure after selection changes', async action => {
+  const first: AudiobookBook = { ...book(), cast: [{ name: 'Cast', profile_id: profile.id }] }, second = book('b'.repeat(32), 'Second book')
+  vi.mocked(api.listAudiobooks).mockResolvedValue([first, second])
+  vi.mocked(api.listAudiobookJobs).mockResolvedValue([{ ...job(first), chapter_text: 'Retained lines' }])
+  const request = deferred<AudiobookBook>(), node = await mount()
+  await startBookEdit(node, action, request.promise); await selectBook(node, second.id)
+  request.reject(new ApiError('audiobook_busy', 409)); await settle()
+  expect(node.querySelector('[role=alert]')).toBeNull()
+})
+
+it('does not let a pre-edit poll replace an accepted book mutation', async () => {
+  const first: AudiobookBook = { ...book(), cast: [{ name: 'Old cast', profile_id: profile.id }] }, second = book('b'.repeat(32), 'Second book', 'running')
+  const poll = deferred<AudiobookBook[]>()
+  vi.mocked(api.listAudiobooks).mockResolvedValueOnce([first, second]).mockReturnValue(poll.promise)
+  vi.mocked(api.setAudiobookCast).mockResolvedValue({ ...first, cast: [{ name: 'Updated cast', profile_id: profile.id }] })
+  const node = await mount(); await vi.advanceTimersByTimeAsync(2000)
+  const oldSignal = vi.mocked(api.listAudiobooks).mock.calls[1]?.[0]
+  await change(node, 'Cast name 1', 'Updated cast'); await click(node, 'Save cast')
+  poll.resolve([first, second]); await settle()
+  await selectBook(node, second.id); await selectBook(node, first.id)
+  expect(field(node, 'Cast name 1').value).toBe('Updated cast')
+  expect(oldSignal?.aborted).toBe(true)
 })

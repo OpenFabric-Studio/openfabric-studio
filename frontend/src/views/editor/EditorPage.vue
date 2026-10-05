@@ -16,6 +16,7 @@ import { timeStretchBuffer } from '../../audio/timeStretchEngine'
 import { TRACK_COLORS } from '../../utils/trackColors'
 import { detectBpm } from '../../audio/bpmDetector'
 import * as tracksApi from '../../api/tracks'
+import { parseTimelineProject } from '../../api/editorValidation'
 import ChannelStrip from '../../components/shared/ChannelStrip.vue'
 import TimelineLane from '../../components/editor/TimelineLane.vue'
 import LibraryPicker from '../../components/editor/LibraryPicker.vue'
@@ -366,35 +367,34 @@ function onAddLaneClick(): void {
 
 async function onPickForNewLane(payload: { sourceUrl: string; sourceLabel: string }): Promise<void> {
   pickerOpenForNewLane.value = false
-  let buffer = buffers.value.get(payload.sourceUrl)
-  if (!buffer) {
-    try {
+  const currentLoad = loadToken
+  const project = store.project
+  const targetBuffers = buffers.value
+  const isCurrent = () => !unmounted && currentLoad === loadToken && store.project === project && buffers.value === targetBuffers
+  try {
+    let buffer = targetBuffers.get(payload.sourceUrl)
+    if (!buffer) {
       buffer = await decodeStem(payload.sourceUrl)
-    } catch (e) {
-      // The library entry's file is gone or does not decode: say so instead
-      // of the click silently doing nothing.
-      store.error = e instanceof Error ? e.message : String(e)
-      return
+      if (!isCurrent()) return
+      targetBuffers.set(payload.sourceUrl, buffer)
     }
-    buffers.value.set(payload.sourceUrl, buffer)
+    const detectedBpm = await detectBpm(buffer)
+    if (!isCurrent()) return
+    store.error = null
+    const lane = store.addLane()
+    store.renameLane(lane.id, payload.sourceLabel)
+    store.addClip(lane.id, {
+      id: crypto.randomUUID(),
+      sourceUrl: payload.sourceUrl,
+      sourceLabel: payload.sourceLabel,
+      timelineStart: 0,
+      trimStart: 0,
+      trimEnd: buffer.duration,
+      originalBpm: detectedBpm || project.bpm || 120,
+    })
+  } catch (e) {
+    if (isCurrent()) store.error = e instanceof Error ? e.message : String(e)
   }
-  store.error = null
-  const lane = store.addLane()
-  store.renameLane(lane.id, payload.sourceLabel)
-
-  // Auto-detect BPM
-  const detectedBpm = await detectBpm(buffer)
-
-  const clip: Clip = {
-    id: crypto.randomUUID(),
-    sourceUrl: payload.sourceUrl,
-    sourceLabel: payload.sourceLabel,
-    timelineStart: 0,
-    trimStart: 0,
-    trimEnd: buffer.duration,
-    originalBpm: detectedBpm || store.project.bpm || 120,
-  }
-  store.addClip(lane.id, clip)
 }
 
 let unmounted = false
@@ -416,34 +416,50 @@ async function doSave(): Promise<void> {
   }
 }
 
+let exportGeneration = 0
 async function doExport(): Promise<void> {
+  if (exporting.value || unmounted) return
+  const token = ++exportGeneration
+  const currentLoad = loadToken
+  const project = store.project
+  const name = store.projectName
+  const projectId = store.projectId
+  const format = exportFormat.value
+  const duration = store.totalDuration
+  const sourceBuffers = new Map(buffers.value)
+  const isCurrent = () => !unmounted && token === exportGeneration && currentLoad === loadToken && store.project === project
   exporting.value = true
   exportError.value = null
   exportedOk.value = false
   try {
-    const rendered = await engine.render(store.project, buffers.value, store.totalDuration)
-    const blob = exportFormat.value === 'wav' ? encodeWav(rendered) : encodeMp3(rendered)
+    const rendered = await engine.render(parseTimelineProject(project), sourceBuffers, duration)
+    const blob = format === 'wav' ? encodeWav(rendered) : encodeMp3(rendered)
     
     // Automatically trigger file download
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${store.projectName || 'mix'}.${exportFormat.value}`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    if (isCurrent()) {
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      try {
+        a.href = url
+        a.download = `${name || 'mix'}.${format}`
+        document.body.appendChild(a)
+        a.click()
+      } finally {
+        a.remove()
+        URL.revokeObjectURL(url)
+      }
+    }
 
     await tracksApi.saveTrack(
-      { model: 'editor', title: store.projectName, lyrics: '', params: { project_export: true, project_id: store.projectId } },
+      { model: 'editor', title: name, lyrics: '', params: { project_export: true, project_id: projectId } },
       blob,
-      exportFormat.value,
+      format,
     )
-    exportedOk.value = true
+    if (isCurrent()) exportedOk.value = true
   } catch (e) {
-    exportError.value = e instanceof Error ? e.message : String(e)
+    if (isCurrent()) exportError.value = e instanceof Error ? e.message : String(e)
   } finally {
-    exporting.value = false
+    if (!unmounted && token === exportGeneration) exporting.value = false
   }
 }
 
@@ -453,6 +469,10 @@ let loadToken = 0
 
 async function load(): Promise<void> {
   const token = ++loadToken
+  exportGeneration++
+  exporting.value = false
+  exportedOk.value = false
+  exportError.value = null
   pause()
   engine.teardown()
   loadingAudio.value = true
@@ -890,6 +910,7 @@ onBeforeRouteLeave(() => {
       <div class="flex items-center gap-1.5">
         <input
           :value="store.projectName"
+          :aria-label="t('editor.projectName')"
           class="rounded-lg border border-border bg-panel-2 px-2 py-1 text-sm text-text"
           @input="onProjectNameInput"
         />
@@ -939,7 +960,7 @@ onBeforeRouteLeave(() => {
 
       <!-- Export controls -->
       <div class="flex items-center gap-2 ml-auto border-l border-border/60 pl-3">
-        <select v-model="exportFormat" class="rounded-lg border border-border bg-panel-2 px-2 py-1 text-xs text-text">
+        <select v-model="exportFormat" :aria-label="t('editor.exportFormat')" class="rounded-lg border border-border bg-panel-2 px-2 py-1 text-xs text-text">
           <option value="wav">WAV</option>
           <option value="mp3">MP3</option>
         </select>

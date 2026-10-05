@@ -196,7 +196,7 @@ const bcMix = computed({
             {{ t('channelStrip.clip') }}
           </span>
         </div>
-        <input v-model.number="volume" type="range" min="0" max="1.5" step="0.01" class="w-full accent-current" />
+        <input v-model.number="volume" :aria-label="t('timeline.trackVolume', { name: label })" type="range" min="0" max="1.5" step="0.01" class="w-full accent-current" />
         <div v-if="showMeter" class="h-2 w-full overflow-hidden rounded-full bg-panel/80 shadow-inner mt-1">
           <div
             class="h-full transition-all duration-75 ease-out rounded-full shadow-[0_0_8px_currentColor]"

@@ -1,13 +1,13 @@
 import { stats } from './aceStep'
 import { trainingStatus } from './aceStepTraining'
-import { apiFetch, apiJson, ApiError } from './http'
+import { apiFetch, ApiError } from './http'
 import { i18n } from '../i18n'
 import { getMidiStatus } from './midi'
 import { getSeparationStatus } from './stems'
 import { applyStatus, isVoiceActive, listVoices } from './voices'
 
-import { parseVideosResponse, parseVideoActivityResponse, parseVideoPlanResponse, parseVideoJobResponse } from './contracts'
-import type { VideoJobResponse, VideoPlanResponse, VideoShot as BackendVideoShot, CreateVideoRequest, PlanRequest } from './contracts'
+import { parseVideosResponse, parseVideoActivityResponse } from './contracts'
+import type { VideoJobResponse, VideoPlanResponse, VideoShot as BackendVideoShot } from './contracts'
 import { parseVideoReadinessResponse, parseVideoProject, parseVideoProjectsResponse, parseCreateVideoProjectRequest, parseUpdateVideoProjectRequest,
   parseVideoRenderRequest, parseVideoRevisionRequest, parseApproveVideoVariantRequest, parseVideoExportRequest,
   parseVideoSpeechLineRequest, parseApplyVideoCharacterRequest, parseApplyVideoCharacterAdapterRequest, parseVideoCharacter, parseVideoCharactersResponse, parseVideoCharacterTrainingJob, parseVideoCharacterTrainingResponse, parseVideoCharacterTrainerStatus, parseVideoCharacterTrainerSettingsRequest } from './contracts'
@@ -79,18 +79,6 @@ export async function otherWorkBusy(trackIds: number[]): Promise<boolean> {
     }
   }
   return legacyOtherWorkBusy(trackIds)
-}
-
-export function analyzeVideo(trackId: number): Promise<VideoPlan> {
-  return apiJson('/api/videos/plan', { track_id: trackId } satisfies PlanRequest, 'POST', parseVideoPlanResponse)
-}
-
-export function createVideo(body: CreateVideoRequest): Promise<VideoJob> {
-  return apiJson('/api/videos', body, 'POST', parseVideoJobResponse)
-}
-
-export function cancelVideo(id: string): Promise<VideoJob> {
-  return apiJson(`/api/videos/${id}/cancel`, {}, 'POST', parseVideoJobResponse)
 }
 
 export async function deleteVideo(id: string): Promise<void> {

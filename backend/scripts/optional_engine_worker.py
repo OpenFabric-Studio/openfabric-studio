@@ -10,7 +10,61 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True)
+class KokoroJob:
+    text: str
+    lang: str
+    config_path: str
+    model_path: str
+    voice_path: str
+    output_path: str
+
+
+@dataclass(frozen=True)
+class ChatterboxJob:
+    text: str
+    model: str
+    weights: str
+    t3_model: str
+    language_id: str
+    audio_prompt_path: str
+    output_path: str
+
+
+def _field(data: dict[str, object], name: str, *, empty: bool = False) -> str:
+    value = data.get(name)
+    if not isinstance(value, str) or len(value) > 4000 or (not empty and not value.strip()):
+        raise ValueError(f'invalid_request_field:{name}')
+    return value
+
+
+def _parse_request(raw: object) -> KokoroJob | ChatterboxJob:
+    if not isinstance(raw, dict):
+        raise ValueError('invalid_request')
+    data: dict[str, object] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            raise ValueError('invalid_request_key')
+        data[key] = value
+    task = _field(data, 'task')
+    if task == 'kokoro':
+        lang = _field(data, 'lang')
+        if lang not in {'a', 'b'}:
+            raise ValueError('invalid_kokoro_language')
+        return KokoroJob(_field(data, 'text'), lang, _field(data, 'config_path'),
+                         _field(data, 'model_path'), _field(data, 'voice_path'), _field(data, 'output_path'))
+    if task == 'chatterbox':
+        model = _field(data, 'model')
+        if model not in {'original', 'multilingual'}:
+            raise ValueError('chatterbox_model_refused')
+        return ChatterboxJob(_field(data, 'text'), model, _field(data, 'weights'),
+                            _field(data, 't3_model', empty=True), _field(data, 'language_id'),
+                            _field(data, 'audio_prompt_path', empty=True), _field(data, 'output_path'))
+    raise ValueError('unsupported_task')
 
 
 def _device() -> str:
@@ -22,53 +76,52 @@ def _device() -> str:
     return 'cpu'
 
 
-def _kokoro(request: dict[str, object]) -> None:
+def _kokoro(request: KokoroJob) -> None:
     os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1'
     from kokoro import KModel, KPipeline
     import soundfile as sf
     import torch
-    config = str(request['config_path'])
-    model_path = str(request['model_path'])
-    voice = str(request['voice_path'])
+    config = request.config_path
+    model_path = request.model_path
+    voice = request.voice_path
     device = _device()
     model = KModel(repo_id='hexgrad/Kokoro-82M', config=config, model=model_path).to(device).eval()
-    pipeline = KPipeline(lang_code=str(request['lang']), repo_id='hexgrad/Kokoro-82M', model=model)
+    pipeline = KPipeline(lang_code=request.lang, repo_id='hexgrad/Kokoro-82M', model=model)
     chunks: list[torch.Tensor] = []
-    for item in pipeline(str(request['text']), voice=voice):
+    for item in pipeline(request.text, voice=voice):
         audio = item.audio
         if audio is not None:
             chunks.append(audio.detach().cpu())
     if not chunks:
         raise RuntimeError('kokoro_produced_no_audio')
-    output = Path(str(request['output_path']))
+    output = Path(request.output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     sf.write(str(output), torch.cat(chunks).numpy(), 24000)
     print(json.dumps({'device': device, 'runtime': 'pytorch'}), flush=True)
 
 
-def _chatterbox(request: dict[str, object]) -> None:
-    kind = str(request['model'])
+def _chatterbox(request: ChatterboxJob) -> None:
+    kind = request.model
     if kind == 'turbo':
         raise RuntimeError('chatterbox_turbo_refused')
     device = _device()
-    prompt = request.get('audio_prompt_path')
-    prompt_path = str(prompt) if isinstance(prompt, str) and prompt else None
-    output = Path(str(request['output_path']))
+    prompt_path = request.audio_prompt_path or None
+    output = Path(request.output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
     if kind == 'original':
         from chatterbox.tts import ChatterboxTTS
         import torchaudio
-        engine = ChatterboxTTS.from_local(str(request['weights']), device)
-        wav = engine.generate(str(request['text']), audio_prompt_path=prompt_path)
-        torchaudio.save(str(output), wav, engine.sr)
+        engine = ChatterboxTTS.from_local(request.weights, device)
+        wav = engine.generate(request.text, audio_prompt_path=prompt_path)
+        torchaudio.save(str(output), wav, engine.sr, encoding='PCM_S', bits_per_sample=16)
     elif kind == 'multilingual':
         from chatterbox.mtl_tts import ChatterboxMultilingualTTS
         import torchaudio
         engine = ChatterboxMultilingualTTS.from_local(
-            str(request['weights']), device, t3_model=str(request['t3_model']))
+            request.weights, device, t3_model=request.t3_model)
         wav = engine.generate(
-            str(request['text']), language_id=str(request['language_id']), audio_prompt_path=prompt_path)
-        torchaudio.save(str(output), wav, engine.sr)
+            request.text, language_id=request.language_id, audio_prompt_path=prompt_path)
+        torchaudio.save(str(output), wav, engine.sr, encoding='PCM_S', bits_per_sample=16)
     else:
         raise RuntimeError('chatterbox_model_refused')
     print(json.dumps({'device': device, 'runtime': 'pytorch', 'model': kind}), flush=True)
@@ -82,17 +135,15 @@ def main() -> int:
     if len(sys.argv) != 2:
         print('usage: optional_engine_worker.py request.json', file=sys.stderr)
         return 2
-    request = json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-    if not isinstance(request, dict):
-        return 2
-    task = request.get('task')
-    if task == 'kokoro':
+    path = Path(sys.argv[1])
+    if path.stat().st_size > 65536:
+        raise ValueError('request_too_large')
+    raw: object = json.loads(path.read_text(encoding='utf-8'))
+    request = _parse_request(raw)
+    if isinstance(request, KokoroJob):
         _kokoro(request)
-    elif task == 'chatterbox':
-        _chatterbox(request)
     else:
-        print('unsupported task', file=sys.stderr)
-        return 2
+        _chatterbox(request)
     return 0
 
 

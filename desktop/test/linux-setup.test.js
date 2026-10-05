@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { execFileSync, spawnSync } = require('node:child_process');
 
-function setupFixture(t) {
+function setupFixture(t, { failGit = '' } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-linux-setup-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   fs.copyFileSync(path.join(__dirname, '..', '..', 'setup_linux.sh'), path.join(root, 'setup_linux.sh'));
@@ -20,7 +20,8 @@ function setupFixture(t) {
     return target;
   };
   command('uname', 'echo Linux');
-  command('git', `if [[ "$1" == clone ]]; then
+  command('git', `if [[ "$1" == "${failGit}" || "\${3:-}" == "${failGit}" ]]; then echo 'fixture git failure' >&2; exit 9; fi
+if [[ "$1" == clone ]]; then
   mkdir -p "$3/.git" "$3/scripts"
   printf '#!/usr/bin/env bash\\nexit 0\\n' > "$3/scripts/build_linux.sh"
   echo 'fake git clone diagnostic'
@@ -48,6 +49,28 @@ test('Linux setup keeps patch and Git diagnostics out of captured engine paths',
   const env = fs.readFileSync(path.join(root, 'backend', '.env'), 'utf8');
   assert.ok(env.includes(`ACE_STEP_DIR=${root}/external/ACE-Step-1.5\n`));
   assert.doesNotMatch(env, /diagnostic|already applied/);
+});
+
+for (const operation of ['clone', 'fetch', 'checkout', 'apply']) {
+  test(`Linux setup stops after a failed Git ${operation}`, { skip: process.platform === 'win32' }, (t) => {
+    const { root, run } = setupFixture(t, { failGit: operation });
+    const result = run();
+    assert.notEqual(result.status, 0, result.stdout);
+    assert.match(result.stderr, /fixture git failure|Patch cannot/);
+    assert.equal(fs.existsSync(path.join(root, 'backend', '.env')), false);
+    assert.doesNotMatch(result.stdout, /Linux model setup complete/);
+  });
+}
+
+test('Linux setup retains a customized existing Demucs project', { skip: process.platform === 'win32' }, (t) => {
+  const { root, run } = setupFixture(t);
+  const project = path.join(root, 'external', 'Demucs', 'pyproject.toml');
+  fs.mkdirSync(path.dirname(project), { recursive: true });
+  const original = '# reviewed private dependency settings\n';
+  fs.writeFileSync(project, original);
+  const result = run();
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(fs.readFileSync(project, 'utf8'), original);
 });
 
 test('Linux setup reruns retain the complete private environment and stage defaults atomically', { skip: process.platform === 'win32' }, (t) => {

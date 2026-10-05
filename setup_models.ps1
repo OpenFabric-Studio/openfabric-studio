@@ -55,6 +55,33 @@ function Find-FfmpegBinDir {
     return $null
 }
 
+function Write-LegacyEnvironment([string]$FilePath, [System.Collections.IDictionary]$Values) {
+    if (Test-Path -LiteralPath $FilePath) { return $false }
+    $lines = @('# Explicit paths selected by the legacy model setup. Existing configuration is preserved.')
+    foreach ($entry in $Values.GetEnumerator()) {
+        $value = [string]$entry.Value
+        if ($entry.Key -notmatch '^[A-Z][A-Z0-9_]*$' -or $value.Contains("`n") -or $value.Contains("`r")) {
+            throw 'Invalid engine configuration value'
+        }
+        # python-dotenv single quotes decode escaped backslashes and apostrophes.
+        $escaped = $value.Replace('\', '\\').Replace("'", "\'")
+        $lines += "$($entry.Key)='$escaped'"
+    }
+    $temporary = Join-Path (Split-Path -Parent $FilePath) ('.env.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllLines($temporary, $lines, [System.Text.UTF8Encoding]::new($false))
+        # The same-directory move refuses a concurrently created destination.
+        try { [IO.File]::Move($temporary, $FilePath) }
+        catch [IO.IOException] {
+            if ([IO.File]::Exists($FilePath)) { return $false }
+            throw
+        }
+        return $true
+    } finally {
+        Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Initialize-Repo($dirName, $repoUrl, $refName, $patchFile) {
     $dir = Join-Path $externalDir $dirName
     if (-not (Test-Path $dir)) {
@@ -249,7 +276,6 @@ if (Assert-Command "uv" "Install it from https://docs.astral.sh/uv/getting-start
 }
 
 Write-Step "backend/.env"
-$envExample = Join-Path $root "backend\.env.example"
 $envFile = Join-Path $root "backend\.env"
 $ffmpegBinDir = Find-FfmpegBinDir
 if ($ffmpegBinDir) {
@@ -257,15 +283,9 @@ if ($ffmpegBinDir) {
 } else {
     Write-Host "Could not find ffmpeg (install it via setup_prereqs.bat) - FFMPEG_BIN_DIR will need setting by hand." -ForegroundColor Yellow
 }
-if (-not (Test-Path $envFile)) {
-    $envLines = (Get-Content $envExample) `
-        -replace [regex]::Escape("E:\AI\ACE\ACE-Step-1.5"), $aceDir `
-        -replace [regex]::Escape("E:\AI\YuE2-3B"), $audioCppDir `
-        -replace [regex]::Escape("E:\AI\Demucs"), $demucsDir
-    if ($ffmpegBinDir) {
-        $envLines = $envLines -replace [regex]::Escape("E:\AI\ACE\tools\ffmpeg-shared\ffmpeg-master-latest-win64-gpl-shared\bin"), $ffmpegBinDir
-    }
-    $envLines | Set-Content $envFile
+$envValues = [ordered]@{ ACE_STEP_DIR = $aceDir; YUE2_DIR = $audioCppDir; DEMUCS_DIR = $demucsDir }
+if ($ffmpegBinDir) { $envValues['FFMPEG_BIN_DIR'] = $ffmpegBinDir }
+if (Write-LegacyEnvironment -FilePath $envFile -Values $envValues) {
     Write-Host "Wrote backend/.env pointing at the cloned repos."
     if ($ffmpegBinDir) {
         Write-Host "Still check CUDA_BIN_DIR in backend/.env for your machine." -ForegroundColor Yellow

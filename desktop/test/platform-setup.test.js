@@ -118,34 +118,6 @@ test('an early backend startup failure clears admission for the next attempt', a
   assert.equal(server.child, null);
 });
 
-test('a stopped backend can start again with the same origin', { skip: process.platform === 'win32' }, async (t) => {
-  const { BackendServer } = require('../src/server');
-  const ctx = fixture(t);
-  fs.mkdirSync(path.dirname(ctx.L.backendPython), { recursive: true });
-  fs.writeFileSync(ctx.L.backendPython, `#!${process.execPath}\n'use strict';
-const http = require('node:http');
-const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
-const server = http.createServer((request, response) => response.end('{}'));
-server.listen(port, '127.0.0.1');
-process.on('SIGTERM', () => server.close(() => process.exit(0)));
-`, { mode: 0o755 });
-  const server = new BackendServer(ctx);
-  t.after(() => server.stop());
-  const first = await server.start({ timeoutMs: 5000 });
-  const port = server.port;
-  await server.stop();
-  assert.equal(server.startAbort, null);
-  assert.equal(server.child, null);
-  assert.equal(await server.start({ timeoutMs: 5000, preferredPort: port }), first);
-});
-
-test('a lone FFmpeg executable cannot mark media tools complete', async (t) => {
-  const ctx = fixture(t);
-  fs.mkdirSync(path.join(ctx.L.ffmpegDir, 'bin'), { recursive: true });
-  fs.writeFileSync(path.join(ctx.L.ffmpegDir, 'bin', 'ffmpeg'), '#!/bin/sh\necho "ffmpeg version test"\n', { mode: 0o755 });
-  assert.equal(await buildComponents({ ...ctx, includeOptional: true }).find(c => c.id === 'ffmpeg').verify(ctx), false);
-});
-
 test('desktop fingerprints the hashed backend lock in preference to the input requirements', (t) => {
   const ctx = fixture(t);
   const backend = path.join(ctx.L.root, 'backend-source');

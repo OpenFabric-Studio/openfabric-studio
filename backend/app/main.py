@@ -36,10 +36,11 @@ from .api.routes_audiobooks import router as audiobooks_router
 from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
+from .desktop_runtime import router as desktop_runtime_router
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
-from . import ace_jobs, audio_exports, audio_versions, audiobooks, ebook_import, midi, module_jobs, native_yue, speech_clone, reference_imports, stems, tagging, video_jobs, voice_build, voice_comparisons, yue_jobs
+from . import ace_jobs, audio_exports, audio_versions, audiobooks, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 
 
 @asynccontextmanager
@@ -50,12 +51,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         legacy_logs = _LEGACY_LOG_DIR if LOG_DIR.resolve() == (DATA_DIR / "logs").resolve() else None
         ensure_layout(DATA_DIR, legacy_logs)
         place_seed_models(DATA_DIR, SEED_VC_DIR)
+        yue_upload.start()
         await audio_versions.recover()
         await audio_exports.recover_exports()
         ace_jobs.recover()
         yue_jobs.recover()
         await reference_imports.start()
         await video_jobs.recover()
+        await optional_engines.recover()
+        await video_character_training.recover()
         speech_clone.start()
         ebook_import.start()
         await audiobooks.start()
@@ -75,7 +79,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 outcomes = await asyncio.gather(
                     voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
                     stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
-                    audiobooks.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(), return_exceptions=True,
+                    audiobooks.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
+                    optional_engines.shutdown(), video_character_training.shutdown(), yue_upload.shutdown(), return_exceptions=True,
                 )
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
@@ -98,6 +103,7 @@ async def invalid_request(_request: Request, exc: RequestValidationError) -> JSO
     return JSONResponse(status_code=422, content={"detail": "invalid_request", "errors": errors})
 
 app.include_router(orchestrator_router)
+app.include_router(desktop_runtime_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)
 app.include_router(stem_exports_router)

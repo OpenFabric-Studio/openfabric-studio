@@ -9,7 +9,7 @@ import asyncio
 
 import httpx
 
-from . import audio_exports, midi, reference_imports, stems, voice_comparisons, yue_jobs
+from . import audio_exports, midi, optional_engines, reference_imports, stems, video_character_training, voice_comparisons, yue_jobs, yue_upload
 from .config import MODELS
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
@@ -43,7 +43,7 @@ def model_work_busy(stats: dict, training: dict) -> bool:
 def local_work_busy() -> bool:
     from .module_jobs import work_busy as setup_busy
     from .audiobook_narration import work_busy as audiobook_busy
-    return audiobook_busy() or setup_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
+    return audiobook_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict:

@@ -44,13 +44,13 @@ init_repo() {
   local name="$1" url="$2" ref="$3" patch="${4:-}"
   local dir="$EXTERNAL_DIR/$name"
   if [[ ! -d "$dir/.git" ]]; then
-    git clone "$url" "$dir" >&2
+    git clone "$url" "$dir" >&2 || return 1
   fi
-  git -C "$dir" fetch origin >&2
-  git -C "$dir" checkout --detach "$ref" >&2
+  git -C "$dir" fetch origin >&2 || return 1
+  git -C "$dir" checkout --detach "$ref" >&2 || return 1
   if [[ -n "$patch" ]]; then
     if git -C "$dir" apply --check "$patch" >/dev/null 2>&1; then
-      git -C "$dir" apply --whitespace=nowarn "$patch" >&2
+      git -C "$dir" apply --whitespace=nowarn "$patch" >&2 || return 1
     elif git -C "$dir" apply --reverse --check "$patch" >/dev/null 2>&1; then
       echo "Patch already applied: $(basename "$patch")" >&2
     else
@@ -106,6 +106,7 @@ step "YuE2 / SheetSage2 / MuScriptor weights"
 step "Demucs"
 DEMUCS_DIR="$EXTERNAL_DIR/Demucs"
 mkdir -p "$DEMUCS_DIR"
+if [[ ! -e "$DEMUCS_DIR/pyproject.toml" && ! -L "$DEMUCS_DIR/pyproject.toml" ]]; then
 cat > "$DEMUCS_DIR/pyproject.toml" <<"PYPROJECT"
 [project]
 name = "demucs-runner"
@@ -128,6 +129,9 @@ explicit = true
 [tool.uv.sources]
 torch = { index = "pytorch-cu128" }
 PYPROJECT
+else
+  echo "Preserved existing Demucs pyproject.toml."
+fi
 (
   cd "$DEMUCS_DIR"
   "$UV_BIN" sync

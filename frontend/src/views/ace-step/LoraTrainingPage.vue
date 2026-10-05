@@ -67,7 +67,7 @@ watch(isRunning, (running) => {
 })
 
 onMounted(() => {
-  store.refreshTrainingStatus()
+  store.startBackgroundTasks()
   if (isRunning.value) void checkModelReady()
 })
 onBeforeUnmount(() => store.stopBackgroundTasks())

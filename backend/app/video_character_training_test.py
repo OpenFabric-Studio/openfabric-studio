@@ -39,11 +39,116 @@ class CharacterTrainingTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(projects, "DATA_DIR", self.root))
         self.enterContext(patch.dict(os.environ, {"OPENFABRIC_VIDEO_CHARACTER_TRAINER": ""}, clear=False))
         os.environ.pop("OPENFABRIC_VIDEO_CHARACTER_TRAINER", None)
+        if hasattr(training, "recover"):
+            await training.recover()
         self.photos = []
         for index, color in enumerate(("red", "green", "blue")):
             path = self.root / f"photo-{index}.png"
             _png(path, color)
             self.photos.append(path)
+
+    async def asyncTearDown(self) -> None:
+        if hasattr(self.training, "shutdown"):
+            await self.training.shutdown()
+
+    def queued_job(self, identifier: str = "a" * 32) -> Path:
+        from app.video_contracts import VideoCharacterTrainingJob
+        root = self.training.job_dir(identifier)
+        root.mkdir(parents=True)
+        stamp = self.training.now()
+        self.training._save(VideoCharacterTrainingJob(id=identifier, name="Queued", status="queued", consent_confirmed=True,
+            photo_count=3, clip_count=0, created_at=stamp, updated_at=stamp))
+        return root
+
+    async def test_cancel_before_worker_starts_persists_terminal_status(self) -> None:
+        identifier = "a" * 32
+        root = self.queued_job(identifier)
+        task = asyncio.create_task(self.training._run(identifier, [sys.executable, "-c", "print('must not run')"], root / "adapter"))
+        self.training._TASKS[identifier] = task
+        cancelled = await self.training.cancel_job(identifier)
+        self.assertEqual(cancelled.status, "cancelled")
+        self.assertNotIn(identifier, self.training._TASKS)
+
+    async def test_shutdown_drains_running_training_child(self) -> None:
+        identifier = "a" * 32
+        root = self.queued_job(identifier)
+        marker = self.root / "started"
+        argv = [sys.executable, "-c", "import sys,time;from pathlib import Path;Path(sys.argv[1]).write_text('started');time.sleep(30)", str(marker)]
+        task = asyncio.create_task(self.training._run(identifier, argv, root / "adapter"))
+        self.training._TASKS[identifier] = task
+        try:
+            async with asyncio.timeout(3):
+                while not marker.exists():
+                    await asyncio.sleep(.01)
+            self.assertTrue(hasattr(self.training, "shutdown"))
+            await self.training.shutdown()
+            self.assertTrue(task.done())
+            self.assertEqual(self.training.get_job(identifier).status, "cancelled")
+        finally:
+            if not task.done():
+                await self.training.cancel_job(identifier)
+
+    async def test_gpu_lease_and_terminal_status_wait_for_descendant_drain(self) -> None:
+        identifier = "a" * 32
+        root = self.queued_job(identifier)
+        output = root / "adapter"
+        entered, release = asyncio.Event(), asyncio.Event()
+        kill = self.training.kill_process_tree
+        first = True
+        async def drain(proc: asyncio.subprocess.Process | None) -> None:
+            nonlocal first
+            if first:
+                first = False
+                entered.set()
+                await release.wait()
+            await kill(proc)
+        code = "import sys,subprocess;from pathlib import Path;out=Path(sys.argv[1]);out.mkdir();(out/'adapter.safetensors').write_bytes(b'lora'*400);subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'])"
+        with patch.object(self.training, "kill_process_tree", side_effect=drain):
+            task = asyncio.create_task(self.training._run(identifier, [sys.executable, "-c", code, str(output)], output))
+            self.training._TASKS[identifier] = task
+            try:
+                async with asyncio.timeout(3):
+                    await entered.wait()
+                self.assertTrue(self.training.gpu_lock.locked())
+                self.assertEqual(self.training.get_job(identifier).status, "running")
+            finally:
+                release.set()
+                await task
+
+    async def test_completed_adapter_is_regular_and_usable_when_trainer_writes_in_tree_symlink(self) -> None:
+        identifier = "a" * 32
+        root = self.queued_job(identifier)
+        output = root / "adapter"
+        code = "import sys;from pathlib import Path;out=Path(sys.argv[1]);out.mkdir();(out/'lora-final.safetensors').write_bytes(b'lora'*400);(out/'adapter.safetensors').symlink_to('lora-final.safetensors')"
+        task = asyncio.create_task(self.training._run(identifier, [sys.executable, "-c", code, str(output)], output))
+        self.training._TASKS[identifier] = task
+        await task
+        job = self.training.get_job(identifier)
+        self.assertEqual(job.status, "completed")
+        self.assertTrue(job.adapter_ready)
+        self.assertIsNotNone(self.training.ready_adapter_file(identifier))
+        self.assertFalse((output / "adapter.safetensors").is_symlink())
+
+    def test_training_still_refuses_external_symlink(self) -> None:
+        root = self.queued_job()
+        external = self.root / "outside.png"
+        external.write_bytes(b"image")
+        (root / "still.png").symlink_to(external)
+        with self.assertRaises(self.projects.VideoProjectError):
+            self.training.still_file("a" * 32)
+
+    def test_polling_interrupted_job_does_not_mutate_metadata(self) -> None:
+        root = self.queued_job()
+        before = (root / "job.json").read_bytes()
+        self.training.get_job("a" * 32)
+        self.training.list_jobs()
+        self.assertEqual((root / "job.json").read_bytes(), before)
+
+    async def test_recovery_marks_interrupted_job_before_admission(self) -> None:
+        self.queued_job()
+        self.assertTrue(hasattr(self.training, "recover"))
+        await self.training.recover()
+        self.assertEqual(self.training.get_job("a" * 32).error_code, "interrupted")
 
     def _files(self) -> list[UploadFile]:
         return [_upload(path) for path in self.photos]

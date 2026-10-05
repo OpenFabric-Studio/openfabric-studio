@@ -1161,6 +1161,7 @@ def apply_character(project_id: str, body: ApplyVideoCharacterRequest) -> VideoP
             for shot in document.project.shots:
                 shot.reference_id = reference_id
                 shot.reference_strength = CHARACTER_LOCK_STRENGTH
+                shot.approved_variant_id = None
             document.project.character_lock = True
             document.project.character_id = character.id
             document.project.file_url = ""

@@ -76,6 +76,27 @@ def _active(identifier: str) -> bool:
     return audiobooks.get_book(identifier).status in {"queued", "running"}
 
 
+def _require_current_consent(identifier: str) -> None:
+    book = audiobooks.get_book(identifier)
+    # Cast edits deliberately preserve completed chapters. Their original
+    # section provenance remains authoritative when those chapters are reused
+    # in a new publication, even after a speaker leaves the current cast.
+    with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+        rows = connection.execute(
+            """SELECT DISTINCT s.profile_id FROM audiobook_sections s
+               JOIN audiobook_jobs j ON j.id = s.job_id
+               WHERE j.book_id = ? AND j.status = 'done' AND s.status = 'done'
+                     AND s.profile_id != ''""",
+            (identifier,),
+        ).fetchall()
+    used_profiles = {book.profile_id, *(str(row["profile_id"]) for row in rows)}
+    for profile_id in used_profiles:
+        if not voice_profiles.get_profile(profile_id).consent_confirmed:
+            raise audiobooks.AudiobookError("consent_required", 403)
+    from .audiobook_cast import require_cast
+    require_cast(book.cast)
+
+
 def _contained(path: Path, root: Path) -> Path:
     if path.is_symlink() or not path.resolve().is_relative_to(root.resolve()):
         raise audiobooks.AudiobookError("audiobook_storage_unavailable", 503)
@@ -242,6 +263,11 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
             if not _active(identifier):
                 raise _Stopped()
             voice_id = section.profile_id or profile_id
+            # Reusing PCM is still publication of this person's voice. The
+            # synthesis boundary only checks consent on a cache miss.
+            profile = voice_profiles.get_profile(voice_id)
+            if not profile.consent_confirmed:
+                raise audiobooks.AudiobookError("consent_required", 403)
             target = _contained(sections_root / f"{chapter.id}-{section.section_index:04d}.wav", output_root)
             if section.status == "done" and section.output_path == str(target) and target.is_file():
                 paths.append(target)
@@ -262,6 +288,7 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
                 temporary.unlink(missing_ok=True)
             _section_status(chapter.id, section.section_index, "done", target)
             paths.append(target)
+        _require_current_consent(identifier)
         target = concat_wavs(identifier, paths, output_root / f"{chapter.chapter_index:04d}.wav")
         try:
             from .narration_pauses import chunk_wav
@@ -275,7 +302,11 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
             spans.append({"speaker": section.speaker_name or "Narrator", "start_ms": cursor, "end_ms": cursor + duration})
             cursor += duration
         audiobooks.save_cast_spans(chapter.id, _collapse_spans(spans))
-        _job_status(chapter.id, "done", "narration_completed", target)
+        # Publication and revocation use the same profile lock. Keep the
+        # established book→profile lock order and hold neither during encoding.
+        with audiobooks._LOCK, voice_profiles._LOCK:
+            _require_current_consent(identifier)
+            _job_status(chapter.id, "done", "narration_completed", target)
     except _Stopped:
         status = "cancelled" if audiobooks.get_book(identifier).status == "cancelled" else "queued"
         _job_status(chapter.id, status, "stopped_at_section_boundary")
@@ -312,23 +343,27 @@ def _process_book(identifier: str) -> None:
             audiobooks._update_book(connection, identifier, status="failed", clear_export=True)
             connection.commit()
         return
-    paths = [audiobooks.chapter_audio_path(identifier, job.chapter_index) for job in jobs]
-    exported = concat_wavs(identifier, paths, audiobooks.book_dir(identifier) / "export.wav")
-    if not _active(identifier):
-        return
-    from .audiobook_publish import publish_formats
-    book = audiobooks.get_book(identifier)
-    try:
-        mp3, m4b, note = publish_formats(
-            identifier,
-            title=book.title,
-            author=book.author,
-            chapters=[(job.chapter_title, path) for job, path in zip(jobs, paths, strict=True)],
-            cover=audiobooks.cover_path_for(identifier),
-        )
-    except audiobooks.AudiobookError as exc:
-        mp3, m4b, note = None, None, exc.code
-    audiobooks.finish_book(identifier, wav=exported, mp3=mp3, m4b=m4b, note=note)
+    with audiobooks.publication_lock(identifier):
+        _require_current_consent(identifier)
+        paths = [audiobooks.chapter_audio_path(identifier, job.chapter_index) for job in jobs]
+        exported = concat_wavs(identifier, paths, audiobooks.book_dir(identifier) / "export.wav")
+        if not _active(identifier):
+            return
+        from .audiobook_publish import publish_formats
+        book = audiobooks.get_book(identifier)
+        try:
+            mp3, m4b, note = publish_formats(
+                identifier,
+                title=book.title,
+                author=book.author,
+                chapters=[(job.chapter_title, path) for job, path in zip(jobs, paths, strict=True)],
+                cover=audiobooks.cover_path_for(identifier),
+            )
+        except audiobooks.AudiobookError as exc:
+            mp3, m4b, note = None, None, exc.code
+        with audiobooks._LOCK, voice_profiles._LOCK:
+            _require_current_consent(identifier)
+            audiobooks.finish_book(identifier, wav=exported, mp3=mp3, m4b=m4b, note=note)
 
 
 def run_sync(identifier: str) -> None:

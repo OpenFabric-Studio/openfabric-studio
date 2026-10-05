@@ -25,6 +25,29 @@ class NativeRouteAdmissionTests(unittest.IsolatedAsyncioTestCase):
             response = await routes_proxy._make_proxy_route('yue2')(self.request(), 'v1/tasks/run')
         self.assertEqual(response.status_code, 409)
         forward.assert_not_awaited()
+
+    async def test_optional_and_character_work_reject_native_mutations(self) -> None:
+        for provider in ('app.optional_engines.work_busy', 'app.video_character_training.work_busy'):
+            with self.subTest(provider=provider), patch(provider, return_value=True), \
+                 patch('app.video_jobs.work_busy', return_value=False), \
+                 patch.object(routes_proxy.manager.state, 'models', {'yue2': SimpleNamespace(status=ModelStatus.RUNNING)}), \
+                 patch.object(routes_proxy, '_proxy_to', new=AsyncMock(return_value=Response('ok'))) as forward:
+                response = await routes_proxy._make_proxy_route('yue2')(self.request(), 'v1/tasks/run')
+                if response.background:
+                    await response.background()
+                self.assertEqual(response.status_code, 409)
+                forward.assert_not_awaited()
+                self.assertFalse(resource_admission.native_work_inflight())
+
+    async def test_optional_and_character_work_reject_durable_music_submission(self) -> None:
+        for provider in ('app.optional_engines.work_busy', 'app.video_character_training.work_busy'):
+            with self.subTest(provider=provider), patch(provider, return_value=True), \
+                 patch('app.video_jobs.work_busy', return_value=False), \
+                 patch.object(routes_ace_jobs.ace_jobs, 'submit', new=AsyncMock()) as submit:
+                with self.assertRaises(HTTPException) as error:
+                    await routes_ace_jobs.submit(params='{}', title='Test', voice_id=None, ctx_audio=None)
+                self.assertEqual(error.exception.status_code, 409)
+                submit.assert_not_awaited()
     async def test_read_only_native_status_stays_available_while_video_runs(self) -> None:
         with patch.object(routes_proxy.manager.state, 'models', {'yue2': SimpleNamespace(status=ModelStatus.RUNNING)}), patch('app.video_jobs.work_busy', return_value=True, create=True), patch.object(routes_proxy, '_proxy_to', AsyncMock(return_value=Response('ok'))):
             response = await routes_proxy._make_proxy_route('yue2')(self.request('GET'), 'v1/models')

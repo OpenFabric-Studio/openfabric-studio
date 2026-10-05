@@ -11,7 +11,9 @@ function spawnTree(cmd, args, options = {}) {
   const child = spawn(cmd, args, { windowsHide: true, detached: !IS_WINDOWS, ...options });
   // Drain while group identity is still owned; later stop calls reuse this task
   // instead of sending signals to a numeric PID that might have been recycled.
-  if (!IS_WINDOWS) child.once('close', () => { void killTree(child).catch(() => {}); });
+  // `close` also waits for inherited pipes held by descendants. Begin draining
+  // as soon as the leader exits, so those pipes cannot keep ownership stuck.
+  if (!IS_WINDOWS) child.once('exit', () => { void killTree(child).catch(() => {}); });
   return child;
 }
 

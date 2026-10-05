@@ -27,6 +27,7 @@ from .module_catalog import engine_python, is_managed, MODULE_IDS, platform_key,
 from .module_contracts import ModuleId
 from .module_evidence import environment_fingerprint
 from .module_jobs import InstallContext, InstallOutcome, ModuleSetupError
+from .job_lifecycle import await_cleanup
 
 
 class DownloadArtifact(BaseModel):
@@ -260,7 +261,7 @@ async def _clone(context: InstallContext, identifier: ModuleId, pin: SourcePin, 
     staged = context.confined(context.workspace / f'{identifier}-source')
     if staged.exists():
         # Only this job's unpublished scratch source is reset, never a target.
-        await asyncio.to_thread(shutil.rmtree, staged)
+        await await_cleanup(asyncio.to_thread(shutil.rmtree, staged))
     staged.mkdir(parents=True)
     await context.run(['git', '-C', str(staged), 'init'])
     await context.run(['git', '-C', str(staged), 'remote', 'add', 'origin', pin.repository])
@@ -321,7 +322,7 @@ async def _media(context: InstallContext, target: Path, assets: AssetManifest) -
     await download_artifact(artifact, cached, context)
     staged = context.confined(context.workspace / 'media')
     if staged.exists():
-        await asyncio.to_thread(shutil.rmtree, staged)
+        await await_cleanup(asyncio.to_thread(shutil.rmtree, staged))
     (staged / 'bin').mkdir(parents=True)
     suffix = '.exe' if context.environment.platform == 'win32' else ''
     if artifact.kind == 'binary':
@@ -334,7 +335,7 @@ async def _media(context: InstallContext, target: Path, assets: AssetManifest) -
     else:
         extracted = context.confined(context.workspace / 'media-archive')
         if extracted.exists():
-            await asyncio.to_thread(shutil.rmtree, extracted)
+            await await_cleanup(asyncio.to_thread(shutil.rmtree, extracted))
         # Run archive work in an owned process; cancellation drains it before reuse.
         await context.run([str(context.environment.python), '-m', 'app.module_install', '--extract', str(cached), str(extracted)])
         for name in ('ffmpeg', 'ffprobe'):
@@ -361,7 +362,7 @@ async def _native(context: InstallContext, target: Path, assets: AssetManifest, 
         return InstallOutcome('manual', 'Use the documented Linux source build and CUDA toolkit prerequisites.')
     staged = context.confined(context.workspace / 'native')
     if staged.exists():
-        await asyncio.to_thread(shutil.rmtree, staged)
+        await await_cleanup(asyncio.to_thread(shutil.rmtree, staged))
     binary_dir = staged / 'build' / artifact.preset / 'bin'
     binary_dir.mkdir(parents=True)
     for index, file in enumerate(artifact.files):
@@ -369,7 +370,7 @@ async def _native(context: InstallContext, target: Path, assets: AssetManifest, 
         await download_artifact(file, cached, context)
         extracted = context.confined(context.workspace / f'native-archive-{index}')
         if extracted.exists():
-            await asyncio.to_thread(shutil.rmtree, extracted)
+            await await_cleanup(asyncio.to_thread(shutil.rmtree, extracted))
         await context.run([str(context.environment.python), '-m', 'app.module_install', '--extract', str(cached), str(extracted)])
         for source in extracted.iterdir():
             destination = staged / source.name if source.name in ('tools', 'model_specs') else binary_dir / source.name

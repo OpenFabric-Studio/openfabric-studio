@@ -130,6 +130,43 @@ class AudiobookOptionsApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.spoken[before:], ["Leave N A S A today."])
         self.assertEqual(self.spoken.count("Meet Doctor Smith."), 1)
 
+    async def test_removed_cast_actor_consent_is_checked_for_retained_chapter_publication(self) -> None:
+        actor = await self.client.post("/api/voice-profiles", data={"name": "Alice", "consent_confirmed": "true"},
+            files={"audio": ("alice.wav", b"RIFF....WAVE", "audio/wav")})
+        self.assertEqual(actor.status_code, 200, actor.text)
+        actor_id = actor.json()["id"]
+        created = await self.client.post("/api/audiobooks", json={
+            "title": "Retained cast", "profile_id": self.profile_id,
+            "cast": [{"name": "Alice", "profile_id": actor_id}],
+            "chapters": [{"title": "Actor", "text": "Alice: The actor's original chapter."},
+                         {"title": "Narrator", "text": "The narrator's other chapter."}],
+        })
+        self.assertEqual(created.status_code, 200, created.text)
+        identifier = created.json()["book"]["id"]
+        original_chapter = await self.client.get(f"/api/audiobooks/{identifier}/chapters/0/audio")
+        self.assertEqual(original_chapter.status_code, 200, original_chapter.text)
+        removed = await self.client.put(f"/api/audiobooks/{identifier}/cast", json={"cast": []})
+        self.assertEqual(removed.status_code, 200, removed.text)
+        revoked = await self.client.patch(f"/api/voice-profiles/{actor_id}", json={"consent_confirmed": False})
+        self.assertEqual(revoked.status_code, 200, revoked.text)
+        # This change governs new publication; previously completed exports
+        # retain their existing download policy.
+        existing_export = await self.client.get(f"/api/audiobooks/{identifier}/export")
+        self.assertEqual(existing_export.status_code, 200, existing_export.text)
+        regenerated = await self.client.post(f"/api/audiobooks/{identifier}/chapters/1/regenerate")
+        self.assertEqual(regenerated.status_code, 200, regenerated.text)
+        self.assertEqual(regenerated.json()["status"], "failed")
+        refused = await self.client.get(f"/api/audiobooks/{identifier}/export")
+        self.assertEqual(refused.status_code, 404)
+        retained = await self.client.get(f"/api/audiobooks/{identifier}/chapters/0/audio")
+        self.assertEqual(retained.status_code, 200, retained.text)
+        self.assertEqual(retained.content, original_chapter.content)
+        # Replacing the retained actor chapter removes that actor's actual
+        # audio provenance and permits the new narrator-only publication.
+        replaced = await self.client.post(f"/api/audiobooks/{identifier}/chapters/0/regenerate")
+        self.assertEqual(replaced.status_code, 200, replaced.text)
+        self.assertEqual(replaced.json()["status"], "done")
+
     async def test_mp3_and_m4b_exports_keep_wav_and_fail_clearly_without_a_codec(self) -> None:
         created = await self._create([
             {"title": "Dawn", "text": "First light."},

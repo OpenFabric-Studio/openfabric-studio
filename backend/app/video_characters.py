@@ -16,6 +16,7 @@ from fastapi import UploadFile
 from pydantic import ValidationError
 
 from . import voice_profiles
+from .voice_profile_contracts import SpeechVoiceProfile
 from .config import DATA_DIR
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
 from .video_contracts import VideoCharacter
@@ -30,21 +31,26 @@ def now() -> str:
 
 
 def characters_root() -> Path:
-    return DATA_DIR / "video_characters"
+    path = DATA_DIR / "video_characters"
+    if path.is_symlink() or not path.resolve().is_relative_to(DATA_DIR.resolve()):
+        raise VideoProjectError("not_found")
+    return path
 
 
 def character_dir(character_id: str) -> Path:
     if not _ID.fullmatch(character_id):
         raise VideoProjectError("not_found")
     root = characters_root().resolve()
-    path = (root / character_id).resolve()
-    if not path.is_relative_to(root):
+    path = root / character_id
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise VideoProjectError("not_found")
     return path
 
 
 def _load(character_id: str) -> VideoCharacter:
     path = character_dir(character_id) / "character.json"
+    if path.is_symlink():
+        raise VideoProjectError("not_found")
     try:
         character = VideoCharacter.model_validate_json(path.read_bytes())
     except (OSError, ValidationError) as exc:
@@ -56,7 +62,7 @@ def _load(character_id: str) -> VideoCharacter:
 
 def still_file(character_id: str) -> Path:
     path = character_dir(character_id) / "still.png"
-    if not path.is_file():
+    if path.is_symlink() or not path.resolve().is_relative_to(character_dir(character_id).resolve()) or not path.is_file():
         raise VideoProjectError("not_found")
     return path
 
@@ -94,7 +100,7 @@ def get_character(character_id: str) -> VideoCharacter:
     return _with_voice(_load(character_id))
 
 
-def require_voice(profile_id: str) -> voice_profiles.SpeechVoiceProfile:
+def require_voice(profile_id: str) -> SpeechVoiceProfile:
     try:
         profile = voice_profiles.get_profile(profile_id)
     except voice_profiles.VoiceProfileError as exc:

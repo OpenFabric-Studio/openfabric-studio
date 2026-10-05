@@ -41,6 +41,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     preprocessCurrent: 0,
     preprocessTotal: 0,
     preprocessOutputDir: '',
+    preprocessTaskOutputDir: '',
     preprocessError: '',
 
     // Training
@@ -53,6 +54,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     exportError: '',
     lastExportedPath: '',
     _backgroundGeneration: 0,
+    _backgroundWatching: false,
   }),
   getters: {
     isTraining(state): boolean {
@@ -104,7 +106,6 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     },
 
     async startAutoLabel(req: api.AutoLabelRequest) {
-      const generation = this._backgroundGeneration
       this.autoLabelError = ''
       this.autoLabelLastSample = null
       this.autoLabelStarting = true
@@ -118,7 +119,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.autoLabelRunning = true
         this.autoLabelCurrent = 0
         this.autoLabelTotal = res.total
-        if (generation === this._backgroundGeneration) this._pollAutoLabel()
+        if (this._backgroundWatching) this._pollAutoLabel()
       } catch (err) {
         this.autoLabelError = err instanceof Error ? err.message : String(err)
       } finally {
@@ -160,7 +161,6 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     },
 
     async startPreprocess(req: api.PreprocessRequest) {
-      const generation = this._backgroundGeneration
       this.preprocessError = ''
       this.preprocessStarting = true
       try {
@@ -170,10 +170,11 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
           return
         }
         this.preprocessTaskId = res.task_id
+        this.preprocessTaskOutputDir = req.output_dir
         this.preprocessRunning = true
         this.preprocessCurrent = 0
         this.preprocessTotal = res.total
-        if (generation === this._backgroundGeneration) this._pollPreprocess(req.output_dir)
+        if (this._backgroundWatching) this._pollPreprocess(req.output_dir)
       } catch (err) {
         this.preprocessError = err instanceof Error ? err.message : String(err)
       } finally {
@@ -220,13 +221,11 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     },
 
     async startTraining(req: api.StartLoraTrainingRequest) {
-      const generation = this._backgroundGeneration
       this.trainingError = ''
       this.trainingStarting = true
       try {
         await api.startLoraTraining(req)
-        if (generation === this._backgroundGeneration) this._ensureTrainingPoll()
-        await this.refreshTrainingStatus()
+        if (this._backgroundWatching) this._ensureTrainingPoll()
       } catch (err) {
         this.trainingError = err instanceof Error ? err.message : String(err)
       } finally {
@@ -241,9 +240,10 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
       }
     },
     async refreshTrainingStatus(context?: PollContext) {
+      const generation = this._backgroundGeneration
       try {
         const training = await api.trainingStatus(context?.signal)
-        if (context && !context.isCurrent()) return
+        if (generation !== this._backgroundGeneration || (context && !context.isCurrent())) return
         this.training = training
         if (this.training.error) this.trainingError = this.training.error
         else if (typeof this.training.status === 'string' && this.training.status.startsWith('❌')) {
@@ -259,6 +259,9 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         await this.refreshTrainingStatus(context)
         return this.training?.is_training ?? false
       }, TRAINING_POLL_MS)
+      // A status sent before an accepted submission cannot stop observation
+      // of the new job when its stale idle response finally arrives.
+      loops.training.stop()
       loops.training.start()
     },
 
@@ -278,8 +281,17 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
       }
     },
 
+    startBackgroundTasks() {
+      if (this._backgroundWatching) return
+      this._backgroundWatching = true
+      if (this.autoLabelRunning && this.autoLabelTaskId) this._pollAutoLabel()
+      if (this.preprocessRunning && this.preprocessTaskId) this._pollPreprocess(this.preprocessTaskOutputDir)
+      // The initial owned poll also discovers a native training job after reload.
+      this._ensureTrainingPoll()
+    },
     stopBackgroundTasks() {
       this._backgroundGeneration++
+      this._backgroundWatching = false
       const loops = loopsFor(this)
       loops.autoLabel?.stop()
       loops.preprocess?.stop()

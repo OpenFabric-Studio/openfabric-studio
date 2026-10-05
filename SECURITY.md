@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-This maintained fork is in active development. Security fixes target the latest fork `master`; **0.3.0-dev.0** is an unreleased development snapshot. Inherited upstream tags and installers do not contain the fork's changes and are not maintained releases of this fork.
+This maintained fork is in active development. Security fixes target the latest fork `main`; **0.3.0-dev.0** is an unreleased development snapshot. Inherited upstream tags and installers do not contain the fork's changes and are not maintained releases of this fork.
 
 ## Reporting a vulnerability
 

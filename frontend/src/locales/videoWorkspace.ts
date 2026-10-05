@@ -55,7 +55,7 @@ export const videoErrorsEn = {
   storage_failed: 'The project could not be saved. Check free disk space and retry.', frame_alignment: 'Start times must match the 24 fps timeline.',
   invalid_media: 'The rendered clip did not pass media validation.', invalid_audio: 'The source audio could not be decoded.', analysis_failed: 'Audio analysis failed. Check the source file and retry.',
   analysis_unavailable: 'Audio analysis tools are unavailable. Install the updated backend dependencies.', analysis_dependency_missing: 'Audio analysis requires NumPy in the backend environment. Install the declared backend dependencies and restart the backend.', analysis_timeout: 'Audio analysis took too long. Try a shorter source.', audio_too_long: 'This audio exceeds the six-hour analysis limit.',
-  video_work_busy: 'Video generation is using the accelerator. Wait or cancel it before starting other model work.', worker_identity_unverified: 'An interrupted worker could not be identified safely. Inspect the backend log before retrying.',
+  video_work_busy: 'Local generation or training is using the accelerator. Wait or cancel it before starting other model work.', worker_identity_unverified: 'An interrupted worker could not be identified safely. Inspect the backend log before retrying.',
   overlay_text_too_large: 'This text does not fit the export frame. Shorten it or reduce the text size.', nothing_to_resume: 'There is no failed or cancelled work to resume.',
   visual_quality_unverified: 'Visual quality and GPU memory use require testing with your material.', lyrics_require_explicit_timing: 'Titles and lyrics use the start and end times you enter.',
 }

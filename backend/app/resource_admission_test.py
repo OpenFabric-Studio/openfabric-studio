@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app import resource_admission as admission
 
@@ -35,6 +37,31 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(admission.ResourceBusyError):
             await admission.reserve_native(lambda: True)
         self.assertFalse(admission.native_work_inflight())
+
+    async def test_native_lease_blocks_optional_and_character_submission(self) -> None:
+        from app import optional_engines, video_character_training
+        from app.video_projects import VideoProjectError
+        with tempfile.TemporaryDirectory() as directory, \
+             patch('app.config.DATA_DIR', Path(directory)), \
+             patch.object(optional_engines, '_STOPPING', False), \
+             patch.object(video_character_training, '_STOPPING', False), \
+             patch.object(optional_engines, 'work_busy', return_value=False), \
+             patch.object(video_character_training, 'work_busy', return_value=False):
+            lease = await admission.reserve_native(lambda: False, model_id='ace_step')
+            try:
+                output = optional_engines._output('kokoro', '.wav')
+                with patch.object(optional_engines, '_execute', new=AsyncMock()) as execute:
+                    with self.assertRaises(optional_engines.OptionalEngineError) as error:
+                        await optional_engines._run('kokoro', [], cwd=Path(directory), output=output, timeout=1, runtime='fixture')
+                    self.assertEqual(error.exception.code, 'engine_busy')
+                    execute.assert_not_awaited()
+                with patch.object(video_character_training, '_create_job', new=AsyncMock()) as create:
+                    with self.assertRaises(VideoProjectError) as error:
+                        await video_character_training.create_job(name='Fixture', consent_confirmed=True, uploads=[])
+                    self.assertEqual(error.exception.code, 'busy')
+                    create.assert_not_awaited()
+            finally:
+                await lease.release()
 
     async def test_setup_rejects_native_after_waiting_for_admission(self) -> None:
         with patch('app.module_jobs.work_busy', return_value=False) as setup:

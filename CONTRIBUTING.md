@@ -23,8 +23,8 @@ Use the documented setup for engines/models; unit tests must not download weight
 
 ## Before you open a pull request
 
-- Branch from the fork's `master` using a small `fix/…`, `feat/…` or `docs/…` topic.
-  Preserve unrelated uncommitted work. Open the PR against this fork's `master`.
+- Branch from the fork's `main` using a small `fix/…`, `feat/…` or `docs/…` topic.
+  Preserve unrelated uncommitted work. Open the PR against this fork's `main`.
 - Keep one problem per PR. Explain its concrete trigger, resulting behavior,
   compatibility/data effects and remaining uncertainty.
 - Add meaningful regression tests for behavioral changes, including relevant
@@ -34,8 +34,8 @@ Use the documented setup for engines/models; unit tests must not download weight
   scoped strict-mypy check in CI. Run desktop tests when startup, packaging or
   file layout changes. [Fork maintenance](docs/fork-maintenance.md#required-checks)
   gives isolated test commands; [CI](.github/workflows/ci.yml) is the checked scope.
-- Add user-facing strings in English and Russian, using the existing locale
-  modules and design components. Include relevant UI screenshots and accessibility
+- Add user-facing strings to the current English locale module, using the existing
+  design components. Include relevant UI screenshots and accessibility
   verification for UI changes.
 - Use descriptive commits with `feat:`, `fix:`, `docs:` or `chore:` prefixes. Keep
   model weights, recordings, `.env`, logs and machine-specific artifacts out of Git.
@@ -43,7 +43,7 @@ Use the documented setup for engines/models; unit tests must not download weight
   engine/platform checks. Passing tests do not establish perceptual model quality.
 
 Maintainers integrate upstream through `sync/upstream-…` branches. Do not rebase or
-force-push shared `master`. Submit selected, self-contained fixes upstream; the
+force-push shared `main`. Submit selected, self-contained fixes upstream; the
 fork's accumulated baseline is not one giant upstream PR. See the
 [maintenance workflow](docs/fork-maintenance.md#branches-and-upstream-integration).
 

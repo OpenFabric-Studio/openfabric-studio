@@ -601,3 +601,24 @@ class PictureProjectTests(VideoProjectTests):
         self.assertEqual(still_id, applied.references[0].id)
         self.assertEqual(strength, self.p.CHARACTER_LOCK_STRENGTH)
         self.p.ensure_character_lock(applied)
+
+        from app.video_contracts import VideoVariant
+        def approve(document: self.p.StoredVideoProject) -> None:
+            document.project.shots[0].variants.append(VideoVariant(id="c" * 32, seed=0, status="ready", created_at=self.p.now()))
+            document.project.shots[0].approved_variant_id = "c" * 32
+        approved = self.p.mutate(project.id, approve)
+        reapplied = self.p.apply_character(project.id, ApplyVideoCharacterRequest(revision=approved.revision, character_id=character.id))
+        self.assertIsNone(reapplied.shots[0].approved_variant_id)
+        self.assertEqual(len(reapplied.shots[0].variants), 1)
+
+    def test_character_still_refuses_escaping_symlinks(self) -> None:
+        from app import video_characters
+        self.enterContext(patch.object(video_characters, "DATA_DIR", self.root))
+        identifier = "a" * 32
+        directory = video_characters.character_dir(identifier)
+        directory.mkdir(parents=True)
+        outside = self.root / "outside.png"
+        outside.write_bytes(b"private")
+        (directory / "still.png").symlink_to(outside)
+        with self.assertRaises(self.p.VideoProjectError):
+            video_characters.still_file(identifier)

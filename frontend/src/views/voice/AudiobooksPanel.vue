@@ -52,6 +52,7 @@ const regeneratingIndex = ref<number | null>(null)
 const titleInput = ref<HTMLInputElement | null>(null)
 const newBookButton = ref<HTMLButtonElement | null>(null)
 const audioPlayers = ref<HTMLAudioElement[]>([])
+const previewPlayer = ref<HTMLAudioElement | null>(null)
 const profileId = ref('')
 let chapterSequence = 0
 function newChapter(number: number): ChapterDraft {
@@ -65,6 +66,7 @@ let jobsController: AbortController | undefined
 let createController: AbortController | undefined
 let retryController: AbortController | undefined
 let profilesController: AbortController | undefined
+const bookActionControllers = new Set<AbortController>()
 
 const selectedBook = computed(() => books.value.find(book => book.id === selectedBookId.value))
 const narrators = computed(() => profiles.value.filter(profile => profile.consent_confirmed))
@@ -90,7 +92,10 @@ const activity = computed(() => {
   return ''
 })
 watch(activity, message => { if (mounted) emit('activity', message) }, { immediate: true })
-function pauseAudio() { for (const player of audioPlayers.value) player.pause() }
+function pauseAudio() {
+  previewPlayer.value?.pause()
+  for (const player of audioPlayers.value) player.pause()
+}
 watch([() => props.active, creating, selectedBookId], pauseAudio)
 watch(() => props.active, active => { if (active && creating.value) void refreshNarrators() })
 
@@ -175,7 +180,7 @@ const polling = createPollingLoop(async ({ signal, isCurrent }) => {
 }, 2000)
 
 function updatePolling() {
-  if (!mounted || loading.value || loadingJobs.value || saving.value || retrying.value || controlling.value || (!activeBooks.value.length && !finishingSection.value)) polling.stop()
+  if (!mounted || loading.value || loadingJobs.value || saving.value || retrying.value || controlling.value || bookActionControllers.size > 0 || (!activeBooks.value.length && !finishingSection.value)) polling.stop()
   else polling.start(false)
 }
 
@@ -328,6 +333,21 @@ function upsertBook(book: AudiobookBook) {
   else books.value.splice(existing, 1, book)
 }
 
+/** Accepted edits update the library, while editor feedback belongs to one selection. */
+function bookAction(bookId: string) {
+  const generation = selectionGeneration
+  const controller = new AbortController()
+  bookActionControllers.add(controller)
+  polling.stop()
+  const isMounted = () => mounted && !controller.signal.aborted
+  return {
+    signal: controller.signal,
+    isMounted,
+    isCurrent: () => isMounted() && generation === selectionGeneration && selectedBookId.value === bookId && !creating.value,
+    finish: () => { bookActionControllers.delete(controller); updatePolling() },
+  }
+}
+
 async function onCreate() {
   if (!mounted || loading.value || saving.value || retrying.value || loadingProfiles.value || draftSaving.value || deletingImport.value || previewing.value) return
   error.value = ''
@@ -390,70 +410,79 @@ async function onSaveCast() {
   const book = selectedBook.value
   const cast = castMembers(bookCast.value)
   if (!book || !cast || savingCast.value || book.status === 'queued' || book.status === 'running') return
+  const context = bookAction(book.id)
   savingCast.value = true; error.value = ''; notice.value = ''
   try {
-    const updated = await audiobooksApi.setAudiobookCast(book.id, cast)
-    if (!mounted) return
+    const updated = await audiobooksApi.setAudiobookCast(book.id, cast, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
+    if (!context.isCurrent()) return
     bookCast.value = (updated.cast ?? []).map(item => ({ name: item.name, profile_id: item.profile_id }))
     notice.value = t('audiobookWorkspace.castSaved')
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.invalid_cast_name') }
-  finally { if (mounted) savingCast.value = false }
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.invalid_cast_name') }
+  finally { context.finish(); if (mounted) savingCast.value = false }
 }
 async function onSaveLines(job: AudiobookJob) {
   const book = selectedBook.value
   const textValue = (chapterTexts.value[job.id] ?? '').trim()
   if (!book || !textValue || savingLineId.value || book.status === 'queued' || book.status === 'running') return
+  const context = bookAction(book.id)
   savingLineId.value = job.id; error.value = ''; notice.value = ''
   try {
-    const updated = await audiobooksApi.setAudiobookChapterText(book.id, job.chapter_index, textValue)
-    if (!mounted) return
+    const updated = await audiobooksApi.setAudiobookChapterText(book.id, job.chapter_index, textValue, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
+    if (!context.isCurrent()) return
     chapterTexts.value = { ...chapterTexts.value, [job.id]: textValue }
     notice.value = t('audiobookWorkspace.linesSaved')
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.emptyChapter') }
-  finally { if (mounted) savingLineId.value = '' }
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.emptyChapter') }
+  finally { context.finish(); if (mounted) savingLineId.value = '' }
 }
 async function onSaveSpeech() {
   const book = selectedBook.value
   const speech = speechRows(bookSpeech.value)
   if (!book || !speech || savingSpeech.value || retrying.value || regeneratingIndex.value !== null) return
   if (book.status === 'queued' || book.status === 'running') return
+  const context = bookAction(book.id)
   savingSpeech.value = true; error.value = ''; notice.value = ''
   try {
-    const updated = await audiobooksApi.setAudiobookPronunciations(book.id, speech)
-    if (!mounted) return
+    const updated = await audiobooksApi.setAudiobookPronunciations(book.id, speech, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
-    notice.value = t('audiobookWorkspace.pronunciationsSaved')
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.pronunciation') }
-  finally { if (mounted) savingSpeech.value = false }
+    if (context.isCurrent()) notice.value = t('audiobookWorkspace.pronunciationsSaved')
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.pronunciation') }
+  finally { context.finish(); if (mounted) savingSpeech.value = false }
 }
 async function onRegenerate(index: number) {
   const book = selectedBook.value
   if (!book || regeneratingIndex.value !== null || retrying.value || saving.value) return
   if (book.status !== 'done' && book.status !== 'failed') return
-  const controller = new AbortController(); regeneratingIndex.value = index; error.value = ''; notice.value = ''; polling.stop()
+  const context = bookAction(book.id)
+  regeneratingIndex.value = index; error.value = ''; notice.value = ''; polling.stop()
   try {
-    const updated = await audiobooksApi.regenerateAudiobookChapter(book.id, index, controller.signal)
-    if (!mounted) return
+    const updated = await audiobooksApi.regenerateAudiobookChapter(book.id, index, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
+    if (!context.isCurrent()) return
     notice.value = t('audiobookWorkspace.regenerated')
     void loadJobs(book.id)
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.control') }
-  finally { if (mounted) { regeneratingIndex.value = null; updatePolling() } }
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.control') }
+  finally { context.finish(); if (mounted) { regeneratingIndex.value = null; updatePolling() } }
 }
 async function onCover(event: Event) {
   const book = selectedBook.value
   if (!book || !(event.target instanceof HTMLInputElement)) return
   const file = event.target.files?.[0]; event.target.value = ''
   if (!file) return
+  const context = bookAction(book.id)
   error.value = ''; notice.value = ''
   try {
-    const updated = await audiobooksApi.uploadAudiobookCover(book.id, file)
-    if (!mounted) return
+    const updated = await audiobooksApi.uploadAudiobookCover(book.id, file, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
-    notice.value = t('audiobookWorkspace.coverSaved')
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.unsupported_cover') }
+    if (context.isCurrent()) notice.value = t('audiobookWorkspace.coverSaved')
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.unsupported_cover') }
+  finally { context.finish() }
 }
 function castMembers(rows: CastRow[]): CastRow[] | null {
   const cleaned = rows.map(row => ({ name: row.name.trim(), profile_id: row.profile_id })).filter(row => row.name || row.profile_id)
@@ -493,18 +522,20 @@ watch(jobs, rows => {
 async function onSaveLanguages() {
   const book = selectedBook.value
   if (!book || savingLanguages.value || book.status === 'queued' || book.status === 'running') return
+  const context = bookAction(book.id)
   savingLanguages.value = true; error.value = ''; notice.value = ''
   try {
     const chapters = jobs.value.map(job => ({ chapter_index: job.chapter_index, language: (chapterLanguages.value[job.id] ?? '').trim() }))
-    const updated = await audiobooksApi.setAudiobookLanguages(book.id, bookLanguage.value.trim(), chapters)
-    if (!mounted) return
+    const updated = await audiobooksApi.setAudiobookLanguages(book.id, bookLanguage.value.trim(), chapters, context.signal)
+    if (!context.isMounted()) return
     upsertBook(updated)
+    if (!context.isCurrent()) return
     bookLanguage.value = updated.language ?? ''
     chapterLanguages.value = {}
     notice.value = t('audiobookWorkspace.languagesSaved')
     void loadJobs(book.id)
-  } catch (err) { if (mounted) error.value = safeError(err, 'audiobookWorkspace.errors.control') }
-  finally { if (mounted) savingLanguages.value = false }
+  } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.control') }
+  finally { context.finish(); if (mounted) savingLanguages.value = false }
 }
 async function onRetry() {
   const book = selectedBook.value
@@ -539,6 +570,8 @@ onBeforeUnmount(() => {
   polling.stop()
   loadController?.abort(); jobsController?.abort(); createController?.abort(); retryController?.abort()
   profilesController?.abort()
+  for (const controller of bookActionControllers) controller.abort()
+  bookActionControllers.clear()
   draftGeneration++; previewGeneration++; draftController?.abort(); previewController?.abort(); controlController?.abort()
   pauseAudio()
   emit('activity', '')
@@ -621,7 +654,7 @@ onBeforeUnmount(() => {
           </div>
           <div class="flex flex-wrap items-center gap-3"><button type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="previewing || !draftNarratorAvailable || !includedChapters[0]?.text.trim()" @click="onPreview">{{ previewing ? t('audiobookWorkspace.previewing') : t('audiobookWorkspace.preview') }}</button><span v-if="preview?.status === 'mock_completed'" class="text-xs text-status-queued">{{ t('audiobookWorkspace.mockPreview') }}</span></div>
           <p v-if="previewError" role="alert" class="text-sm text-status-failed">{{ previewError }}</p>
-          <audio v-if="previewUrl" ref="audioPlayers" :src="previewUrl" controls preload="none" :aria-label="t('audiobookWorkspace.previewReady')" class="h-10 w-full" />
+          <audio v-if="previewUrl" ref="previewPlayer" :src="previewUrl" controls preload="none" :aria-label="t('audiobookWorkspace.previewReady')" class="h-10 w-full" />
           <div class="space-y-2 rounded-lg border border-border bg-panel-2 p-3">
             <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.pronunciations') }}</p>
             <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pronunciationHint') }}</p>

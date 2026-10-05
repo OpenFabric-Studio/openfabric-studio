@@ -21,14 +21,16 @@ fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 
 // Top-level backend entries that are local state, not source.
-const LOCAL_ONLY = new Set(['.venv', '.env', '.env.setup', 'data', 'logs', 'run.bat', 'run.sh']);
+const LOCAL_ONLY = new Set(['.venv', 'data', 'logs', 'run.bat', 'run.sh']);
 const backendSrc = path.join(root, 'backend');
 fs.cpSync(backendSrc, path.join(out, 'backend'), {
   recursive: true,
   filter: (src) => {
     const rel = path.relative(backendSrc, src);
     if (!rel) return true;
-    if (LOCAL_ONLY.has(rel.split(path.sep)[0]) || rel.split(path.sep)[0].startsWith('.env.setup.')) return false;
+    const parts = rel.split(path.sep);
+    if (LOCAL_ONLY.has(parts[0]) || parts.some(name => name.startsWith('.env') && name !== '.env.example')) return false;
+    if (fs.lstatSync(src).isSymbolicLink()) throw new Error(`refusing to package a source symlink: ${rel}`);
     return !rel.split(path.sep).includes('__pycache__') && !rel.endsWith('.pyc');
   },
 });
@@ -57,8 +59,9 @@ const forbidden = [];
 (function scan(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name);
-    if (e.isDirectory()) { if (['.venv', '__pycache__'].includes(e.name)) forbidden.push(p); else scan(p); }
-    else if (e.name === '.env' || /\.(db|sqlite3?)$/i.test(e.name)) forbidden.push(p);
+    if (e.isSymbolicLink() || (e.name.startsWith('.env') && e.name !== '.env.example')) forbidden.push(p);
+    else if (e.isDirectory()) { if (['.venv', '__pycache__'].includes(e.name)) forbidden.push(p); else scan(p); }
+    else if (/\.(db|sqlite3?)$/i.test(e.name)) forbidden.push(p);
   }
 })(out);
 if (forbidden.length) throw new Error(`refusing to package local files:\n${forbidden.join('\n')}`);

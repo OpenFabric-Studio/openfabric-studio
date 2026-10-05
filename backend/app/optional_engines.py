@@ -9,15 +9,43 @@ GPT-SoVITS, Seed-VC, and LTX stay in place. Song videos are not retargeted.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
+import wave
 import json
 import os
 import subprocess
 import sys
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from .module_contracts import ModuleId
+from .contracts import Contract
+from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
+from .video_process import WorkerIdentity, spawn_owned, terminate_verified
+from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
+from .gpu_lease import gpu_lease
+from .stems import gpu_lock
+from .video_projects import atomic_text
+from .video_media import VideoMediaError, probe_media, tool
+from typing import Literal
+from pydantic import Field
+
+_LOG = logging.getLogger(__name__)
+_TASKS: dict[str, asyncio.Task[LocalRun]] = {}
+_UNVERIFIED: set[str] = set()
+_STOPPING = False
+
+
+class StoredRun(Contract):
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    engine: Literal['kokoro', 'chatterbox', 'wan22', 'rvc']
+    status: Literal['queued', 'running', 'completed', 'failed', 'cancelled', 'interrupted']
+    output_path: str
+    worker: WorkerIdentity | None = None
+
 
 OPTIONAL_ENGINE_IDS: tuple[ModuleId, ...] = ('kokoro', 'chatterbox', 'wan22', 'rvc')
 
@@ -149,11 +177,32 @@ def _missing(identifier: ModuleId, names: list[str]) -> None:
         )
 
 
-def _output(identifier: str, suffix: str) -> Path:
+def local_root(identifier: str) -> Path:
     from .config import DATA_DIR
-    path = DATA_DIR / 'outputs' / 'local-engines' / identifier / f'{uuid.uuid4().hex}{suffix}'
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
+    if identifier not in {'kokoro', 'chatterbox', 'wan22', 'rvc', 'inputs', '_runs'}:
+        raise OptionalEngineError('unknown_engine', 'That optional engine is not registered.')
+    data = DATA_DIR.resolve()
+    path = DATA_DIR
+    for component in ('outputs', 'local-engines', identifier):
+        path = path / component
+        if path.is_symlink() or not path.resolve().is_relative_to(data):
+            raise OptionalEngineError('storage_unavailable', 'Local engine storage is unavailable.')
+    return path.resolve()
+
+
+def contained_output(path: Path) -> Path:
+    root = local_root(path.parent.name)
+    resolved = path.resolve()
+    if path.is_symlink() or resolved.parent != root:
+        raise OptionalEngineError('storage_unavailable', 'Local engine storage is unavailable.')
+    return resolved
+
+
+def _output(identifier: str, suffix: str) -> Path:
+    root = local_root(identifier)
+    root.mkdir(parents=True, exist_ok=True)
+    name = f'{uuid.uuid4().hex}{suffix}' if identifier == 'inputs' else f'{uuid.uuid4().hex}.partial{suffix}'
+    return contained_output(root / name)
 
 
 def stage_input_path(suffix: str) -> Path:
@@ -179,33 +228,226 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-def launch(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float) -> subprocess.CompletedProcess[str]:
-    """One engine process. Tests replace this. It does not download weights."""
-    return subprocess.run(
-        argv, cwd=str(cwd), env=env, timeout=timeout, check=False,
-        capture_output=True, text=True,
-    )
-
-
-def _run(identifier: ModuleId, argv: list[str], *, cwd: Path, output: Path, timeout: float, runtime: str) -> LocalRun:
+async def launch(argv: list[str], *, cwd: Path, env: dict[str, str], timeout: float,
+                 receipt_path: Path | None = None, on_identity: Callable[[WorkerIdentity], None] | None = None) -> subprocess.CompletedProcess[str]:
+    """Supervise one worker, retaining backend diagnostics and draining its tree."""
+    root = local_root('_runs')
+    root.mkdir(parents=True, exist_ok=True)
+    receipt = contained_output(receipt_path or root / f'{uuid.uuid4().hex}.worker.json')
+    log_path = contained_output(receipt.with_suffix('.log'))
+    proc: asyncio.subprocess.Process | None = None
     try:
-        completed = launch(argv, cwd=cwd, env=_child_env(), timeout=timeout)
-    except subprocess.TimeoutExpired as exc:
-        raise OptionalEngineError('engine_failed', f'{identifier} timed out before writing output.') from exc
+        with log_path.open('wb') as log:
+            proc = await spawn_owned(argv, receipt_path=receipt, cwd=cwd, env=env,
+                                     stdout=log.fileno(), on_identity=on_identity)
+            async with asyncio.timeout(timeout):
+                code = await proc.wait()
+        with log_path.open('rb') as reader:
+            reader.seek(0, 2)
+            reader.seek(max(0, reader.tell() - 8000))
+            tail = reader.read(8000).decode('utf-8', errors='replace')
+        return subprocess.CompletedProcess(argv, code, '', tail)
+    finally:
+        if proc is not None:
+            await await_cleanup(kill_process_tree(proc))
+            if proc.stdin is not None:
+                proc.stdin.close()
+
+
+def _record_path(identifier: str) -> Path:
+    if len(identifier) != 32 or any(char not in '0123456789abcdef' for char in identifier):
+        raise OptionalEngineError('storage_unavailable', 'Local engine storage is unavailable.')
+    return contained_output(local_root('_runs') / f'{identifier}.json')
+
+
+def _save_run(record: StoredRun) -> None:
+    try:
+        atomic_text(_record_path(record.id), record.model_dump_json())
     except OSError as exc:
-        raise OptionalEngineError('engine_failed', f'Could not start {identifier}: {exc.strerror or exc}') from exc
-    if completed.returncode != 0 or not output.is_file() or output.stat().st_size < 16:
-        tail = (completed.stderr or completed.stdout or '').strip().splitlines()
-        short = tail[-1][:240] if tail else 'no output'
-        raise OptionalEngineError('engine_failed', f'{identifier} failed: {short}')
-    return LocalRun('completed', f'{identifier} wrote {output.name}.', output, runtime)
+        raise OptionalEngineError('storage_unavailable', 'Local engine storage is unavailable.') from exc
+
+
+async def _validate_output(path: Path) -> None:
+    if path.suffix == '.wav':
+        with wave.open(str(path), 'rb') as source:
+            if source.getnframes() <= 0 or source.getnchannels() < 1 or source.getframerate() < 1:
+                raise OptionalEngineError('engine_failed', 'The engine did not write valid audio.')
+            expected = source.getnframes() * source.getnchannels() * source.getsampwidth()
+            actual = 0
+            while chunk := source.readframes(65536):
+                actual += len(chunk)
+            if actual != expected:
+                raise OptionalEngineError('engine_failed', 'The engine did not write valid audio.')
+    else:
+        info = await probe_media(path)
+        if info.width < 1 or info.height < 1 or info.video_duration <= 0:
+            raise OptionalEngineError('engine_failed', 'The engine did not write valid video.')
+        from .job_lifecycle import spawn_process, communicate_process
+        proc = await spawn_process(tool('ffmpeg'), '-v', 'error', '-xerror', '-i', str(path), '-map', '0:v:0', '-f', 'null', '-',
+                                   stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        await communicate_process(proc, 120)
+        if proc.returncode != 0:
+            raise OptionalEngineError('engine_failed', 'The engine did not write valid video.')
+
+
+async def _execute(record: StoredRun, argv: list[str], cwd: Path, output: Path, timeout: float, runtime: str) -> LocalRun:
+    request = output.with_suffix('.json')
+    completed_worker = False
+    try:
+        record.status = 'running'
+        _save_run(record)
+        def own(identity: WorkerIdentity) -> None:
+            record.worker = identity
+            _save_run(record)
+        async with gpu_lease(gpu_lock, 'video_generation' if record.engine == 'wan22' else 'voice_conversion', record.engine):
+            completed = await launch(argv, cwd=cwd, env=_child_env(), timeout=timeout,
+                                     receipt_path=local_root('_runs') / f'{record.id}.worker.json', on_identity=own)
+        completed_worker = True
+        record.worker = None
+        if completed.returncode != 0:
+            _LOG.warning('Optional engine %s failed: %s', record.engine, completed.stderr or completed.stdout)
+            raise OptionalEngineError('engine_failed', 'The local engine failed. See the backend log for diagnostics.')
+        await _validate_output(contained_output(output))
+        final = contained_output(Path(record.output_path))
+        output.replace(final)
+        record.status = 'completed'
+        _save_run(record)
+        return LocalRun('completed', f'{record.engine} wrote {final.name}.', final, runtime)
+    except asyncio.CancelledError:
+        record.status = 'cancelled'
+        raise
+    except (TimeoutError, subprocess.TimeoutExpired, OSError, EOFError, wave.Error, VideoMediaError) as exc:
+        _LOG.exception('Optional engine %s failed', record.engine)
+        record.status = 'failed'
+        raise OptionalEngineError('engine_failed', 'The local engine failed. See the backend log for diagnostics.') from exc
+    except OptionalEngineError:
+        record.status = 'failed'
+        raise
+    except Exception as exc:
+        _LOG.exception('Optional engine %s failed unexpectedly', record.engine)
+        record.status = 'failed'
+        raise OptionalEngineError('engine_failed', 'The local engine failed. See the backend log for diagnostics.') from exc
+    finally:
+        await await_cleanup(_cleanup_run(record, output, request, completed_worker))
+
+
+async def _cleanup_run(record: StoredRun, output: Path, request: Path, completed_worker: bool) -> None:
+    # A failed drain retains the identity and gates admission until startup
+    # can prove that exact supervised worker no longer exists.
+    if record.worker is not None and not completed_worker:
+        try:
+            if await terminate_verified(record.worker):
+                record.worker = None
+            else:
+                _UNVERIFIED.add(record.id)
+        except Exception:
+            _UNVERIFIED.add(record.id)
+            _LOG.exception('Optional worker ownership could not be reconciled')
+    try:
+        if record.status != 'completed' and record.worker is None:
+            output.unlink(missing_ok=True)
+        if record.worker is None:
+            request.unlink(missing_ok=True)
+        _save_run(record)
+    finally:
+        _TASKS.pop(record.id, None)
+
+async def _run(identifier: ModuleId, argv: list[str], *, cwd: Path, output: Path, timeout: float, runtime: str) -> LocalRun:
+    if identifier not in ('kokoro', 'chatterbox', 'wan22', 'rvc'):
+        raise OptionalEngineError('unknown_engine', 'That optional engine is not registered.')
+    output = contained_output(output)
+    final = output.with_name(output.name.replace('.partial', ''))
+    record = StoredRun(id=output.name[:32], engine=identifier, status='queued', output_path=str(final))
+    try:
+        async with admission_lock:
+            require_setup_idle()
+            from .video_jobs import work_busy as video_busy
+            from .work_busy import other_work_busy
+            if _STOPPING or work_busy() or native_work_inflight() or video_busy() or await other_work_busy():
+                raise OptionalEngineError('engine_busy', 'Another local job is using the engine resources.')
+            _save_run(record)
+            task = asyncio.create_task(_execute(record, argv, cwd, output, timeout, runtime))
+            _TASKS[record.id] = task
+    except BaseException:
+        output.with_suffix('.json').unlink(missing_ok=True)
+        output.unlink(missing_ok=True)
+        raise
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+        await await_cleanup(asyncio.gather(task, return_exceptions=True))
+        if record.status == 'queued':
+            record.status = 'cancelled'
+            _save_run(record)
+            output.with_suffix('.json').unlink(missing_ok=True)
+        raise
+    finally:
+        if task.done():
+            _TASKS.pop(record.id, None)
+
+
+def work_busy() -> bool:
+    return bool(_UNVERIFIED) or any(not task.done() for task in _TASKS.values())
+
+
+async def recover() -> None:
+    global _STOPPING
+    _STOPPING = True
+    root = local_root('_runs')
+    if root.is_dir():
+        for path in root.glob('*.json'):
+            if len(path.stem) != 32:
+                continue
+            record = StoredRun.model_validate_json(contained_output(path).read_bytes())
+            if record.id != path.stem or record.id in _TASKS:
+                continue
+            if record.worker is not None:
+                expected = root / f'{record.id}.worker.json'
+                if expected.is_symlink() or Path(record.worker.receipt) != expected or not await terminate_verified(record.worker):
+                    _UNVERIFIED.add(record.id)
+                    continue
+                record.worker = None
+                _UNVERIFIED.discard(record.id)
+            if record.status in {'queued', 'running'}:
+                record.status = 'interrupted'
+                final = contained_output(Path(record.output_path))
+                if final.is_file():
+                    try:
+                        await _validate_output(final)
+                        record.status = 'completed'
+                    except (OSError, EOFError, wave.Error, VideoMediaError, OptionalEngineError):
+                        _LOG.warning('Interrupted optional output is invalid', exc_info=True)
+                candidate = contained_output(Path(record.output_path).with_name(Path(record.output_path).stem + '.partial' + Path(record.output_path).suffix))
+                candidate.unlink(missing_ok=True)
+                candidate.with_suffix('.json').unlink(missing_ok=True)
+            _save_run(record)
+    _STOPPING = False
+
+
+async def shutdown() -> None:
+    global _STOPPING
+    _STOPPING = True
+    tasks = tuple(_TASKS.values())
+    for task in tasks:
+        if not task.done():
+            task.cancel()
+    await await_cleanup(asyncio.gather(*tasks, return_exceptions=True))
+    for identifier, task in tuple(_TASKS.items()):
+        if task.done():
+            record = StoredRun.model_validate_json(_record_path(identifier).read_bytes())
+            if record.status == 'queued':
+                record.status = 'cancelled'
+                _save_run(record)
+            _TASKS.pop(identifier, None)
 
 
 def _worker() -> Path:
     return Path(__file__).resolve().parents[1] / 'scripts' / 'optional_engine_worker.py'
 
 
-def narrate_kokoro(text: str, *, voice: str = 'af_heart', lang: str = 'a') -> LocalRun:
+async def narrate_kokoro(text: str, *, voice: str = 'af_heart', lang: str = 'a') -> LocalRun:
     """Preset Kokoro voice. A reference clip is not accepted."""
     cleaned = text.strip()
     if not cleaned:
@@ -230,11 +472,11 @@ def narrate_kokoro(text: str, *, voice: str = 'af_heart', lang: str = 'a') -> Lo
         'output_path': str(output),
     }), encoding='utf-8')
     python = _engine_python('kokoro')
-    return _run('kokoro', [str(python), str(_worker()), str(request)], cwd=require_installed('kokoro'),
+    return await _run('kokoro', [str(python), str(_worker()), str(request)], cwd=require_installed('kokoro'),
                 output=output, timeout=180, runtime=KOKORO_RUNTIME)
 
 
-def speak_chatterbox(
+async def speak_chatterbox(
     text: str, *, model: str = 'original', audio_prompt_path: str | None = None, language_id: str = 'en',
 ) -> LocalRun:
     if model == 'turbo':
@@ -253,6 +495,7 @@ def speak_chatterbox(
         if not prompt.is_file() or prompt.suffix.lower() not in ('.wav', '.flac', '.mp3'):
             raise OptionalEngineError('audio_missing', 'The Chatterbox reference clip must be an existing wav, flac, or mp3 file.')
     root = _weights_root('OPENFABRIC_CHATTERBOX_WEIGHTS', 'chatterbox') / model
+    names: tuple[str, ...]
     if model == 'original':
         names = ('ve.safetensors', 't3_cfg.safetensors', 's3gen.safetensors', 'tokenizer.json')
         t3_name = ''
@@ -273,12 +516,12 @@ def speak_chatterbox(
         'audio_prompt_path': str(prompt) if prompt is not None else '',
         'output_path': str(output),
     }), encoding='utf-8')
-    return _run('chatterbox', [str(_engine_python('chatterbox')), str(_worker()), str(request)],
+    return await _run('chatterbox', [str(_engine_python('chatterbox')), str(_worker()), str(request)],
                 cwd=require_installed('chatterbox'), output=output, timeout=300,
                 runtime='PyTorch Chatterbox ' + model + ' via from_local. Device is cuda, mps, or cpu. Turbo is not called. This does not replace GPT-SoVITS.')
 
 
-def render_wan(
+async def render_wan(
     prompt: str, *, variant: str = 'ti2v-5b', image_path: str | None = None,
     width: int = 832, height: int = 480, num_frames: int = 17,
 ) -> LocalRun:
@@ -312,10 +555,10 @@ def render_wan(
     ]
     if image is not None:
         argv.extend(['--image', str(image)])
-    return _run('wan22', argv, cwd=require_installed('wan22'), output=output, timeout=3600, runtime=WAN_RUNTIME)
+    return await _run('wan22', argv, cwd=require_installed('wan22'), output=output, timeout=3600, runtime=WAN_RUNTIME)
 
 
-def convert_rvc(model_path: str, input_path: str) -> LocalRun:
+async def convert_rvc(model_path: str, input_path: str) -> LocalRun:
     require_installed('rvc')
     voice = Path(model_path)
     source = Path(input_path)
@@ -336,7 +579,7 @@ def convert_rvc(model_path: str, input_path: str) -> LocalRun:
         '--model', str(voice), '--input', str(source), '--output', str(output),
         '--f0-method', 'rmvpe', '--overwrite', '--format', 'wav',
     ]
-    return _run('rvc', argv, cwd=root, output=output, timeout=600, runtime=RVC_RUNTIME)
+    return await _run('rvc', argv, cwd=root, output=output, timeout=600, runtime=RVC_RUNTIME)
 
 
 def prepare_chatterbox(model: str) -> None:

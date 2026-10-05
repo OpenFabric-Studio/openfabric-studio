@@ -6,6 +6,9 @@ import tempfile
 import unittest
 import wave
 import zipfile
+import concurrent.futures
+import threading
+import sqlite3
 from pathlib import Path
 from pydantic import ValidationError
 from unittest.mock import patch
@@ -114,3 +117,100 @@ class AudiobookResearchTests(unittest.TestCase):
         self.assertEqual(audiobooks.list_jobs(book_id=second)[0].language, "de")
         with self.assertRaises(ValidationError):
             SetAudiobookLanguagesRequest(language="not a language")
+
+    def test_concurrent_collection_downloads_keep_independent_candidates(self) -> None:
+        identifier = self._create()
+        original_replace = Path.replace
+        waiting, release = threading.Event(), threading.Event()
+        guard = threading.Lock()
+        first = True
+
+        def replace(path: Path, target: str | Path) -> Path:
+            nonlocal first
+            if "collection" in path.name:
+                with guard:
+                    is_first = first
+                    first = False
+                if is_first:
+                    waiting.set()
+                    release.wait(3)
+                else:
+                    result = original_replace(path, target)
+                    release.set()
+                    return result
+            return original_replace(path, target)
+
+        with patch.object(Path, "replace", replace), concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            one = pool.submit(audiobook_collection.write_collection, identifier)
+            self.assertTrue(waiting.wait(3))
+            two = pool.submit(audiobook_collection.write_collection, identifier)
+            try:
+                outputs = [two.result(timeout=5), one.result(timeout=5)]
+            finally:
+                release.set()
+        for output in outputs:
+            with zipfile.ZipFile(output) as archive:
+                self.assertIsNone(archive.testzip())
+                self.assertIn("export.wav", archive.namelist())
+
+    def test_collection_download_path_is_immutable_across_regeneration(self) -> None:
+        identifier = self._create()
+        first = audiobook_collection.write_collection(identifier)
+        original = first.read_bytes()
+        audiobooks.set_chapter_text(identifier, 0, "Different narration.")
+        audiobooks.regenerate_chapter(identifier, 0)
+        second = audiobook_collection.write_collection(identifier)
+        self.assertNotEqual(first, second)
+        self.assertEqual(first.read_bytes(), original)
+
+    def test_failed_cover_replacement_keeps_original(self) -> None:
+        identifier = self._create()
+        with patch.object(audiobooks, "_republish"):
+            audiobooks.save_cover(identifier, b"\x89PNG\r\n\x1a\noriginal")
+            original = audiobooks.cover_path_for(identifier)
+            self.assertIsNotNone(original)
+            with patch.object(Path, "write_bytes", side_effect=OSError("disk full")):
+                with self.assertRaises((OSError, audiobooks.AudiobookError)):
+                    audiobooks.save_cover(identifier, b"\xff\xd8\xffreplacement")
+        self.assertEqual(audiobooks.cover_path_for(identifier), original)
+        self.assertIsNotNone(original)
+        if original is not None:
+            self.assertEqual(original.read_bytes(), b"\x89PNG\r\n\x1a\noriginal")
+
+    def test_cover_metadata_failure_preserves_previous_file_and_pointer(self) -> None:
+        identifier = self._create()
+        with patch.object(audiobooks, "_republish"):
+            audiobooks.save_cover(identifier, b"\x89PNG\r\n\x1a\noriginal")
+            original = audiobooks.cover_path_for(identifier)
+            connect = audiobooks._connect
+
+            def reject_cover(action: int, table: str | None, column: str | None, database: str | None, trigger: str | None) -> int:
+                if action == sqlite3.SQLITE_UPDATE and table == "audiobook_books" and column == "cover_path":
+                    return sqlite3.SQLITE_DENY
+                return sqlite3.SQLITE_OK
+
+            def failed_connect() -> sqlite3.Connection:
+                connection = connect()
+                connection.set_authorizer(reject_cover)
+                return connection
+
+            with patch.object(audiobooks, "_connect", side_effect=failed_connect):
+                with self.assertRaises(audiobooks.AudiobookError):
+                    audiobooks.save_cover(identifier, b"\xff\xd8\xffreplacement")
+        self.assertEqual(audiobooks.cover_path_for(identifier), original)
+        self.assertEqual(len(list(audiobooks.book_dir(identifier).glob("cover-*"))), 1)
+
+    def test_old_cover_cleanup_failure_does_not_hide_committed_replacement(self) -> None:
+        identifier = self._create()
+        with patch.object(audiobooks, "_republish"):
+            audiobooks.save_cover(identifier, b"\x89PNG\r\n\x1a\noriginal")
+            original = audiobooks.cover_path_for(identifier)
+            unlink = Path.unlink
+            def refuse_old(path: Path, missing_ok: bool = False) -> None:
+                if path == original:
+                    raise OSError("old file is busy")
+                unlink(path, missing_ok=missing_ok)
+            with patch.object(Path, "unlink", refuse_old), self.assertLogs("app.audiobooks", level="WARNING"):
+                updated = audiobooks.save_cover(identifier, b"\xff\xd8\xffreplacement")
+        self.assertTrue(updated.has_cover)
+        self.assertNotEqual(audiobooks.cover_path_for(identifier), original)
