@@ -7,6 +7,7 @@ import HomeView from '../HomeView.vue'
 import AppSidebar from '../../components/shared/AppSidebar.vue'
 import appRouter from '../../router'
 import * as audioApi from '../../api/audioSettings'
+import { createPinia } from 'pinia'
 import { i18n, setLocale } from '../../i18n'
 import { audioSettingsResponse } from './settingsTestFixtures'
 import type { CompleteAudioSettingsResponse } from '../../api/audioSettings'
@@ -44,7 +45,7 @@ async function mount(component: Component = SettingsPage, path = '/') {
   app?.unmount()
   const router = createRouter({ history: createMemoryHistory(), routes: ['/', '/settings', '/editor', '/voice-clone', '/video', '/ace-step', '/yue2', '/ace-step/lora'].map((route) => ({ path: route, name: route, component: { render: () => null } })) })
   await router.push(path)
-  app = createApp(component).use(i18n).use(router)
+  app = createApp(component).use(i18n).use(createPinia()).use(router)
   const container = document.body.appendChild(document.createElement('div')); app.mount(container); await settle(); return container
 }
 function button(container: HTMLElement, label: string) {
@@ -169,7 +170,7 @@ it('moves the existing library migration workflow from Home into Settings', asyn
   const settings = await mount()
   expect(settings.textContent).toContain(i18n.global.t('dataFolder.title'))
   await settle()
-  const folder = settings.querySelector('input[spellcheck=false]')
+  const folder = settings.querySelector('#settings-panel-library input[spellcheck=false]')
   if (!(folder instanceof HTMLInputElement)) throw new Error('Missing library folder field')
   expect(folder.value).toBe('/test/library'); expect(folder.getAttribute('spellcheck')).toBe('false')
 })

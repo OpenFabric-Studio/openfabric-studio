@@ -55,6 +55,25 @@ class DataRootTests(unittest.TestCase):
                 workflow = json.loads(connection.execute('SELECT payload FROM audiobook_workflows').fetchone()[0])
                 self.assertEqual(workflow['snapshot'], restored)
 
+    def test_cloud_snapshots_and_empty_presets_survive_path_rewriting(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src,dest=Path(tmp).resolve()/'old',Path(tmp).resolve()/'new';dest.mkdir()
+            database=dest/'profiles.db'
+            cloud={'renderer':'openrouter','reference_audio_path':str(src/'audiobooks'/'_cloud_speech'/'references'/'sample.wav'),
+                'cloud':{'model':'fish-audio/s2.1-pro','voice':None,'clone_reference':True},'cloud_authorization_id':'a'*32}
+            with sqlite3.connect(database) as connection:
+                connection.execute('CREATE TABLE voice_profiles(reference_audio_path TEXT)')
+                connection.execute('INSERT INTO voice_profiles VALUES(?)',('',))
+                connection.execute('CREATE TABLE audiobook_sections(output_path TEXT,snapshot_json TEXT)')
+                connection.execute('INSERT INTO audiobook_sections VALUES(?,?)',(str(src/'audiobooks'/'passage.wav'),json.dumps(cloud)))
+            rewrite_library_paths(database,src,dest)
+            with sqlite3.connect(database) as connection:
+                self.assertEqual(connection.execute('SELECT reference_audio_path FROM voice_profiles').fetchone()[0],'')
+                _,payload=connection.execute('SELECT * FROM audiobook_sections').fetchone()
+                restored=json.loads(payload)
+                self.assertEqual(restored['reference_audio_path'],str(dest/'audiobooks'/'_cloud_speech'/'references'/'sample.wav'))
+                self.assertEqual(restored['cloud'],cloud['cloud']);self.assertEqual(restored['cloud_authorization_id'],cloud['cloud_authorization_id'])
+
     def _speech_library(self, src: Path) -> None:
         for folder in ('audiobooks', 'voice-profiles', 'speech-clone-trials'):
             (src / folder).mkdir(parents=True, exist_ok=True)

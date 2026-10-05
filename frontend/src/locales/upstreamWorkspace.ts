@@ -9,7 +9,7 @@ export const upstreamWorkspaceEn = {
   helpSettings: 'Settings contains artist metadata, MP3/WAV/FLAC encoding profiles and the library folder. Higher resolution cannot restore detail missing from the source.',
   notices: 'Licenses and attribution', noticesTitle: 'Licenses, models and attribution',
   attribution: 'OpenFabric Studio — independent MIT project derived from Remiqora by Nikolay Cherkashin.',
-  local: 'Generation runs locally', noticesText: 'Application code uses the MIT license. The inspected Seed-VC compatibility excerpts retain GPL version 3 notices. Engine code, model weights, FFmpeg builds and source media have separate terms: check the exact artifacts you installed.',
+  local: 'Local engines and optional cloud providers', noticesText: 'Application code uses the MIT license. The inspected Seed-VC compatibility excerpts retain GPL version 3 notices. Engine code, model weights, FFmpeg builds and source media have separate terms: check the exact artifacts you installed.',
   appLicense: 'Application license', vendorNotice: 'Seed-VC excerpt notices', projectNotices: 'Project and dependency notices', upstream: 'Original Remiqora (inikolax)', sourceFork: 'Source fork (mchosc)',
   artistTitle: 'Artist metadata', artistLabel: 'Artist name', albumLabel: 'Album', artistHint: 'Artist and optional album are written into tagged downloads. The artist name is saved once and reused. Leave the artist blank to omit that tag. Stored audio is unchanged.',
   albumHint: 'Optional. Used when a download does not set its own album.',

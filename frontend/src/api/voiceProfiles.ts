@@ -15,6 +15,7 @@ import type {
   SpeechCloneEngineStatus,
   PatchSpeechVoiceProfileRequest,
   StarterSpeechVoice,
+  CloudSpeechApproval,
 } from './contracts'
 
 export type { SpeechVoiceProfile, SpeechCloneTrialResponse, SpeechCloneEngineStatus, StarterSpeechVoice }
@@ -83,13 +84,14 @@ export async function startSpeechCloneTrial(
   text: string,
   signal?: AbortSignal,
   textLanguage?: string,
+  cloudApproval?: CloudSpeechApproval | null,
 ): Promise<SpeechCloneTrialResponse> {
   // Missing engine returns HTTP 501 with a structured body; mock/ready return 200.
   const resp = await fetch('/api/speech-clone/trials', {
     method: 'POST',
     signal,
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(parseSpeechCloneTrialRequest({ profile_id: profileId, text, engine: 'gpt-sovits', ...(textLanguage ? { text_language: textLanguage } : {}) })),
+    body: JSON.stringify(parseSpeechCloneTrialRequest({ profile_id: profileId, text, engine: 'gpt-sovits', ...(textLanguage ? { text_language: textLanguage } : {}), ...(cloudApproval ? { cloud_approval: cloudApproval } : {}) })),
   })
   const raw: unknown = await resp.json().catch(() => undefined)
   if (resp.status === 501) return parseSpeechCloneTrialResponse(raw)

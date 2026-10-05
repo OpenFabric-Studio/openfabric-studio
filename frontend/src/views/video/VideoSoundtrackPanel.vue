@@ -21,7 +21,7 @@ onMounted(async () => {
   try {
     const response = await listSpeechVoiceProfiles(lifetime.signal)
     if (!alive) return
-    voices.value = response.filter((voice) => voice.consent_confirmed)
+    voices.value = response.filter((voice) => voice.consent_confirmed && voice.renderer !== 'openrouter')
     const bound = props.project.speech_clip?.voice_profile_id
     voiceId.value = bound && voices.value.some((voice) => voice.id === bound) ? bound : (voices.value[0]?.id ?? '')
   } catch {
@@ -51,6 +51,7 @@ function speak() {
         <option v-for="voice in voices" :key="voice.id" :value="voice.id">{{ voice.name }}</option>
       </select>
     </label>
+    <p class="text-xs text-text-dim">{{t('videoCloud.cloudSpeechHint')}}</p>
     <p v-if="voiceError" class="text-sm text-text-dim">{{ t('videoExperience.noVoices') }}</p>
     <label>{{ t('videoExperience.speakLine') }}<textarea v-model="line" data-speech-line rows="2" maxlength="500" :disabled="readOnly"></textarea></label>
     <button type="button" data-speak-line :disabled="readOnly || !voiceId || !line.trim()" @click="speak">{{ t('videoExperience.speak') }}</button>

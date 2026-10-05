@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts import Contract, JsonValue
 
@@ -19,11 +19,74 @@ SpeechCloneStatus = Literal[
 ]
 
 
+class CloudSpeechConfiguration(Contract):
+    model_config = ConfigDict(frozen=True, allow_inf_nan=False)
+    """A preset sends text only; cloning is a separately permitted reference transfer."""
+    model: str = Field(min_length=3, max_length=200, pattern=r"^[A-Za-z0-9._:-]+/[A-Za-z0-9._:-]+$")
+    voice: str | None = Field(default=None, min_length=1, max_length=200)
+    clone_reference: bool = False
+    reference_transfer_confirmed: bool = False
+    speed: Literal[1] = 1
+
+    @model_validator(mode="after")
+    def voice_mode(self) -> CloudSpeechConfiguration:
+        if self.clone_reference == (self.voice is not None):
+            raise ValueError("cloud_speech_voice_mode_required")
+        return self
+
+
+class CreateCloudSpeechVoiceProfileRequest(Contract):
+    name: str = Field(min_length=1, max_length=120)
+    model: str = Field(min_length=3, max_length=200, pattern=r"^[A-Za-z0-9._:-]+/[A-Za-z0-9._:-]+$")
+    voice: str = Field(min_length=1, max_length=200)
+    notes: str = Field(default="", max_length=2000)
+
+
+class CloudSpeechApproval(Contract):
+    quote_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    transfers_confirmed: bool
+
+
+class CloudSpeechQuote(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    estimated_usd: float = Field(ge=0, le=1000000)
+    request_count: int = Field(ge=0, le=20000)
+    models: list[str] = Field(default_factory=list, max_length=17)
+    transfers: list[Literal["text", "reference_audio", "reference_transcript"]] = Field(default_factory=list, max_length=3)
+    expires_at: float = Field(ge=0)
+    ceiling_is_estimate: Literal[True] = True
+
+
+class CloudSpeechProvenance(Contract):
+    receipt_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    model: str = Field(min_length=3,max_length=200)
+    model_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    voice: str | None = Field(default=None,max_length=200)
+    reference_transferred: bool = False
+    generation_id: str | None = Field(default=None,max_length=160)
+    actual_cost_usd: float | None = Field(default=None,ge=0,le=1000000)
+
+
+class CloudSpeechTrial(Contract):
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    created_at: str = Field(min_length=1,max_length=64)
+    audio_url: str = Field(pattern=r"^/api/speech-clone/trials/[0-9a-f]{32}/audio$")
+    provenance: CloudSpeechProvenance
+
+
+class CloudSpeechTrialsResponse(Contract):
+    trials: list[CloudSpeechTrial] = Field(default_factory=list,max_length=20)
+
+
 class SpeechVoiceProfile(Contract):
     id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     name: str = Field(min_length=1, max_length=120)
     consent_confirmed: bool
-    reference_audio_path: str = Field(min_length=1, max_length=1024)
+    reference_audio_path: str = Field(default="", max_length=1024)
+    renderer: Literal["local", "openrouter"] = "local"
+    cloud: CloudSpeechConfiguration | None = None
     notes: str = Field(default="", max_length=2000)
     reference_transcript: str = Field(default="", max_length=2000)
     reference_language: str = Field(default="en", min_length=2, max_length=16, pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$")
@@ -57,6 +120,8 @@ class SpeechVoiceProfilesResponse(Contract):
 
 
 class PatchSpeechVoiceProfileRequest(Contract):
+    renderer: Literal["local", "openrouter"] | None = None
+    cloud: CloudSpeechConfiguration | None = None
     name: str | None = Field(default=None, min_length=1, max_length=120)
     notes: str | None = Field(default=None, max_length=2000)
     consent_confirmed: bool | None = None
@@ -65,6 +130,7 @@ class PatchSpeechVoiceProfileRequest(Contract):
 
 
 class SpeechCloneTrialRequest(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     text: str = Field(min_length=1, max_length=8000)
     engine: Literal["speech", "gpt-sovits"] = "gpt-sovits"
@@ -77,11 +143,12 @@ class SpeechCloneTrialRequest(Contract):
 class SpeechCloneTrialResponse(Contract):
     status: SpeechCloneStatus
     detail: str
-    engine: Literal["speech", "gpt-sovits"]
+    engine: Literal["speech", "gpt-sovits", "openrouter"]
     profile_id: str
     install_hints: list[str] = Field(default_factory=list)
     trial_id: str | None = None
     output_path: str | None = None
+    cloud_receipt_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
 
 class SpeechCloneEngineStatus(Contract):
@@ -94,6 +161,13 @@ class SpeechCloneEngineStatus(Contract):
 
 
 VOICE_PROFILE_CLIENT_MODELS: list[type[BaseModel]] = [
+    CloudSpeechConfiguration,
+    CreateCloudSpeechVoiceProfileRequest,
+    CloudSpeechApproval,
+    CloudSpeechQuote,
+    CloudSpeechProvenance,
+    CloudSpeechTrial,
+    CloudSpeechTrialsResponse,
     SpeechVoiceProfile,
     SpeechVoiceProfilesResponse,
     PatchSpeechVoiceProfileRequest,

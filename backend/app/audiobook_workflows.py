@@ -24,6 +24,7 @@ from .audiobook_contracts import (AcceptAudiobookRepairRequest, AudiobookAuditio
     AudiobookAuditionClip, AudiobookAuditionOptions, AudiobookPassage, AudiobookPassagesResponse,
     AudiobookRepair, CreateAudiobookAuditionRequest, CreateAudiobookRepairRequest)
 from .job_lifecycle import await_cleanup
+from .voice_profile_contracts import CloudSpeechQuote, CloudSpeechProvenance
 from .speech_references import SpeechRenderSnapshot, capture, file_digest, normalize_language
 
 _LOG = logging.getLogger(__name__)
@@ -95,6 +96,10 @@ def _cleanup_stages(state: _RepairState) -> None:
         if str(path) not in selected and not path.is_symlink():
             audiobook_narration._contained(path, root)
             path.unlink(missing_ok=True)
+            if path.suffix==".wav":
+                provenance = path.with_suffix(".cloud.json")
+                if not provenance.is_symlink():
+                    provenance.unlink(missing_ok=True)
     state.pending_accept_token = None
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         # Cancellation may have updated the public state while encoding ran.
@@ -141,10 +146,11 @@ def _load(identifier: str, kind: Literal["audition", "repair"]) -> str:
 
 
 def get_audition(identifier: str) -> AudiobookAudition:
-    public = _AuditionState.model_validate_json(_load(identifier, "audition")).public
+    state = _AuditionState.model_validate_json(_load(identifier, "audition"))
+    public = state.public
     all_allowed = True
-    for clip in public.clips:
-        if not _preview_allowed(clip.profile_id):
+    for clip, snapshot in zip(public.clips,state.snapshots,strict=True):
+        if not _preview_allowed(clip.profile_id,snapshot):
             clip.audio_url = None
             all_allowed = False
     if not all_allowed:
@@ -154,14 +160,15 @@ def get_audition(identifier: str) -> AudiobookAudition:
 
 def get_repair(identifier: str) -> AudiobookRepair:
     state = _RepairState.model_validate_json(_load(identifier, "repair"))
-    if not _preview_allowed(state.snapshot.profile_id):
+    if not _preview_allowed(state.snapshot.profile_id,state.snapshot):
         state.public.audio_url, state.public.detail = None, "consent_required"
     return state.public
 
 
-def _preview_allowed(profile_id: str) -> bool:
+def _preview_allowed(profile_id: str, snapshot: SpeechRenderSnapshot | None = None) -> bool:
     try:
-        return voice_profiles.get_profile(profile_id).consent_confirmed
+        profile = voice_profiles.get_profile(profile_id)
+        return profile.consent_confirmed and (snapshot is None or snapshot.cloud is None or not snapshot.cloud.clone_reference or profile.cloud is not None and profile.cloud.reference_transfer_confirmed)
     except voice_profiles.VoiceProfileError:
         return False
 
@@ -182,6 +189,8 @@ def get_passages(book_id: str, chapter_index: int) -> AudiobookPassagesResponse:
                 text=str(row["section_text"]), profile_id=str(row["profile_id"] or audiobooks.get_book(book_id).profile_id),
                 speaker=str(row["speaker_name"] or "Narrator"), start_ms=int(row["start_ms"]), end_ms=int(row["end_ms"]),
                 status=row["status"], audio_url=f"/api/audiobooks/{book_id}/passages/{row['passage_id']}/audio?revision={revision}" if complete else None,
+                renderer="openrouter" if snapshot and snapshot.cloud else "local",
+                cloud_provenance=_provenance(Path(str(row["output_path"]))) if complete else None,
                 render_identity=str(row["render_identity"]) if row["render_identity"] else None, language=snapshot.text_language if snapshot else str(job["render_language"] or "")))
         return AudiobookPassagesResponse(book_id=book_id, chapter_index=chapter_index, revision=revision, passages=passages)
 
@@ -215,18 +224,11 @@ def start_audition(body: CreateAudiobookAuditionRequest, *, book_id: str | None 
         return _start_audition(body, book_id=book_id, revision=revision)
 
 
-def _start_audition(body: CreateAudiobookAuditionRequest, *, book_id: str | None = None, revision: int | None = None, chapter_languages: list[str] | None = None) -> AudiobookAudition:
-    from .audiobook_cast import require_cast
-    if _STOPPING:
-        raise audiobooks.AudiobookError("audiobook_backend_stopping", 503)
-    require_cast(body.cast)
-    if body.chapter_index >= len(body.chapters):
-        raise audiobooks.AudiobookError("chapter_not_found", 404)
-    identifier, stamp = uuid.uuid4().hex, audiobooks._now()
+def audition_inputs(body: CreateAudiobookAuditionRequest, chapter_languages: list[str] | None = None) -> list[tuple[str, str, str, str]]:
     planned: list[tuple[str, str, str, str]] = []
     chapters = list(enumerate(body.chapters)) if body.mode == "cast" else [(body.chapter_index, body.chapters[body.chapter_index])]
     for index, chapter in chapters:
-        language = normalize_language(chapter_languages[index] if chapter_languages else body.language)
+        language = (chapter_languages[index] if chapter_languages else body.language) or "en"
         planned.extend((text, profile, speaker, language) for text, profile, speaker in audiobook_narration.plan_text(chapter.text, body.profile_id, body.cast, body.pronunciations))
     chosen: list[tuple[str, str, str, str]] = []
     seen: set[tuple[str, str]] = set()
@@ -244,14 +246,35 @@ def _start_audition(body: CreateAudiobookAuditionRequest, *, book_id: str | None
                 remaining -= len(spoken)
     if not chosen:
         raise audiobooks.AudiobookError("chapter_text_required")
+    return chosen
+
+
+def quote_audition(body: CreateAudiobookAuditionRequest) -> CloudSpeechQuote:
+    from .cloud_speech import quote_inputs
+    return quote_inputs([(text, profile, language) for text, profile, _, language in audition_inputs(body)])
+
+
+def _start_audition(body: CreateAudiobookAuditionRequest, *, book_id: str | None = None, revision: int | None = None, chapter_languages: list[str] | None = None) -> AudiobookAudition:
+    from .audiobook_cast import require_cast
+    if _STOPPING:
+        raise audiobooks.AudiobookError("audiobook_backend_stopping", 503)
+    require_cast(body.cast)
+    if body.chapter_index >= len(body.chapters):
+        raise audiobooks.AudiobookError("chapter_not_found", 404)
+    identifier, stamp = uuid.uuid4().hex, audiobooks._now()
+    chosen = audition_inputs(body, chapter_languages)
     snapshots_by_profile = {(profile, language): capture(profile, language, _workspace(identifier), speech_clone.known_engine_identity()) for _, profile, _, language in chosen}
-    clips = [AudiobookAuditionClip(index=index, speaker=speaker, profile_id=profile, text=text, language=language)
+    clips = [AudiobookAuditionClip(index=index, speaker=speaker, profile_id=profile, text=text, language=language,renderer="openrouter" if snapshots_by_profile[(profile,language)].cloud else "local")
              for index, (text, profile, speaker, language) in enumerate(chosen)]
     public = AudiobookAudition(id=identifier, mode=body.mode, status="queued", clips=clips,
         created_at=stamp, updated_at=stamp, book_id=book_id, chapter_index=body.chapter_index, revision=revision)
     if body.mode == "cast":
-        public.skipped_speakers = [member.name for member in body.cast if (member.profile_id, member.name) not in seen]
-    _save(identifier, "audition", _AuditionState(public=public, snapshots=[snapshots_by_profile[(clip.profile_id, clip.language)] for clip in clips]))
+        used = {(profile, speaker) for _, profile, speaker, _ in chosen}
+        public.skipped_speakers = [member.name for member in body.cast if (member.profile_id, member.name) not in used]
+    from .cloud_speech import approve_snapshots
+    prepared = [snapshots_by_profile[(clip.profile_id, clip.language)] for clip in clips]
+    authorization = approve_snapshots([(clip.text, snapshot) for clip, snapshot in zip(clips, prepared, strict=True)], body.cloud_approval)
+    _save(identifier, "audition", _AuditionState(public=public, snapshots=[snapshot.model_copy(update={"cloud_authorization_id": authorization}) for snapshot in prepared]))
     _schedule(identifier, "audition")
     return get_audition(identifier)
 
@@ -274,7 +297,7 @@ def _synthesize(snapshot: SpeechRenderSnapshot, text: str, target: Path) -> bool
         prompt_text=snapshot.prompt_text, prompt_language=snapshot.prompt_language,
         text_language=snapshot.text_language, snapshot=snapshot, require_consent=True)
     if outcome.status not in {"completed", "mock_completed"} or outcome.output_path is None:
-        code = outcome.status if outcome.status in {"engine_not_installed", "api_unavailable"} else "setup_busy" if outcome.detail == "setup_busy" else "chapter_synthesis_failed"
+        code = outcome.status if outcome.status in {"engine_not_installed", "api_unavailable"} else outcome.detail if outcome.detail.startswith("cloud_") or outcome.detail.startswith("openrouter_") or outcome.detail == "setup_busy" else "chapter_synthesis_failed"
         raise audiobooks.AudiobookError(code)
     _validate_audio(target)
     return outcome.status == "mock_completed"
@@ -304,7 +327,13 @@ def _consent(profiles: list[str]) -> None:
             raise audiobooks.AudiobookError("consent_required", 403)
 
 
-def _join(paths: list[Path], target: Path) -> None:
+def _join(paths: list[Path], target: Path, *, cloud_workflow: bool = False) -> None:
+    from .cloud_speech import compatible_pcm
+    with compatible_pcm(paths,target.parent,cloud_workflow=cloud_workflow) as prepared:
+        _join_pcm(prepared,target)
+
+
+def _join_pcm(paths: list[Path], target: Path) -> None:
     parameters: tuple[int, int, int] | None = None
     with wave.open(str(target), "wb") as destination:
         for path in paths:
@@ -336,6 +365,7 @@ def _run_audition(identifier: str, cancelled: threading.Event) -> None:
             _save(identifier, "audition", state)
             target = _workspace(identifier) / f"clip-{clip.index}.wav"
             clip.mock = _synthesize(snapshot, clip.text, target)
+            clip.cloud_provenance = _provenance(target)
             with audiobooks._LOCK, voice_profiles._LOCK:
                 _consent([clip.profile_id])
                 clip.audio_url = f"/api/audiobooks/auditions/{identifier}/clips/{clip.index}/audio"
@@ -346,7 +376,7 @@ def _run_audition(identifier: str, cancelled: threading.Event) -> None:
             public.status = "cancelled"
         elif public.status != "cancelled":
             if public.mode == "scene":
-                _join(paths, _workspace(identifier) / "scene.wav")
+                _join(paths, _workspace(identifier) / "scene.wav",cloud_workflow=any(snapshot.cloud is not None for snapshot in state.snapshots))
             with audiobooks._LOCK, voice_profiles._LOCK:
                 _consent([clip.profile_id for clip in public.clips])
                 if public.mode == "scene":
@@ -391,8 +421,11 @@ def _start_repair(book_id: str, chapter_index: int, passage_id: str, body: Creat
         text = (body.text if body.text is not None else passage.text).strip()
         if not text:
             raise audiobooks.AudiobookError("chapter_text_required")
+        from .cloud_speech import approve_snapshots
+        authorization = approve_snapshots([(text,snapshot)], body.cloud_approval)
+        snapshot = snapshot.model_copy(update={"cloud_authorization_id":authorization})
         public = AudiobookRepair(id=identifier, book_id=book_id, chapter_index=chapter_index, passage_id=passage_id,
-            revision=version.revision, status="queued", text=text, created_at=stamp, updated_at=stamp)
+            revision=version.revision, status="queued", text=text, created_at=stamp, updated_at=stamp,renderer="openrouter" if snapshot.cloud else "local")
         _save(identifier, "repair", _RepairState(public=public, snapshot=snapshot, source_identity=passage.render_identity,
             source_text=passage.text, section_index=passage.section_index))
     _schedule(identifier, "repair")
@@ -410,6 +443,7 @@ def _run_repair(identifier: str, cancelled: threading.Event) -> None:
             public.status = "cancelled"
         else:
             public.mock = _synthesize(state.snapshot, public.text, _workspace(identifier) / "candidate.wav")
+            public.cloud_provenance = _provenance(_workspace(identifier) / "candidate.wav")
             with audiobooks._LOCK, voice_profiles._LOCK:
                 _consent([state.snapshot.profile_id])
                 public.status = "cancelled" if cancelled.is_set() else "ready"
@@ -476,6 +510,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
             from shutil import copyfile
             audiobook_narration._contained(accepted_pcm, sections_root)
             copyfile(candidate, accepted_pcm)
+            if candidate.with_suffix(".cloud.json").is_file():
+                copyfile(candidate.with_suffix(".cloud.json"),accepted_pcm.with_suffix(".cloud.json"))
             paths = [accepted_pcm if item.id == public.passage_id else path for item, path in zip(version.passages, paths, strict=True)]
             audiobook_narration.concat_wavs(book_id, paths, chapter_target, controlled=False)
             jobs = audiobooks.list_jobs(book_id=book_id)
@@ -585,7 +621,11 @@ def cancel(identifier: str, kind: Literal["audition", "repair"]) -> AudiobookAud
 
 
 def audition_audio_path(identifier: str, index: int | None = None) -> Path:
-    public = _AuditionState.model_validate_json(_load(identifier, "audition")).public
+    state = _AuditionState.model_validate_json(_load(identifier, "audition"))
+    public = state.public
+    selected = state.snapshots if index is None else [state.snapshots[index]] if 0 <= index < len(state.snapshots) else []
+    if any(not _preview_allowed(snapshot.profile_id,snapshot) for snapshot in selected):
+        raise audiobooks.AudiobookError("consent_required",403)
     if index is None:
         if public.scene_audio_url is None:
             raise audiobooks.AudiobookError("audio_missing", 404)
@@ -607,6 +647,8 @@ def audition_audio_path(identifier: str, index: int | None = None) -> Path:
 def repair_audio_path(identifier: str) -> Path:
     state = _RepairState.model_validate_json(_load(identifier, "repair"))
     _consent([state.snapshot.profile_id])
+    if not _preview_allowed(state.snapshot.profile_id,state.snapshot):
+        raise audiobooks.AudiobookError("consent_required",403)
     if state.public.audio_url is None:
         raise audiobooks.AudiobookError("audio_missing", 404)
     path = _workspace(identifier, create=False) / "candidate.wav"
@@ -680,3 +722,34 @@ async def wait_for(identifier: str) -> None:
     task = _TASKS.get(identifier)
     if task is not None:
         await await_cleanup(asyncio.shield(task))
+
+
+def quote_repair(book_id: str, chapter_index: int, passage_id: str, body: CreateAudiobookRepairRequest) -> CloudSpeechQuote:
+    from .cloud_speech import quote_snapshots
+    with audiobooks.publication_lock(book_id), audiobooks._LOCK:
+        version = get_passages(book_id, chapter_index)
+        if version.revision != body.revision:
+            raise audiobooks.AudiobookError("passage_changed",409)
+        passage = next((item for item in version.passages if item.id == passage_id and item.status == "done"),None)
+        if passage is None:
+            raise audiobooks.AudiobookError("passage_not_ready",409)
+        with closing(audiobooks._connect()) as connection:
+            row = connection.execute("SELECT snapshot_json FROM audiobook_sections WHERE passage_id=?",(passage_id,)).fetchone()
+        snapshot = SpeechRenderSnapshot.model_validate_json(str(row[0])) if row is not None and row[0] else capture(passage.profile_id,passage.language or "en",_workspace(uuid.uuid4().hex),speech_clone.known_engine_identity())
+        return quote_snapshots([(body.text if body.text is not None else passage.text,snapshot)])
+
+
+def quote_book_audition(book_id: str, options: AudiobookAuditionOptions) -> CloudSpeechQuote:
+    from .audiobook_contracts import AudiobookChapterInput
+    from .cloud_speech import quote_inputs
+    with audiobooks.publication_lock(book_id), audiobooks._LOCK:
+        book,jobs = audiobooks.get_book(book_id),audiobooks.list_jobs(book_id=book_id)
+        if options.chapter_index >= len(jobs):
+            raise audiobooks.AudiobookError("chapter_not_found",404)
+        body = CreateAudiobookAuditionRequest(title=book.title,profile_id=book.profile_id,chapters=[AudiobookChapterInput(title=job.chapter_title,text=job.chapter_text) for job in jobs],cast=book.cast,pronunciations=book.pronunciations,**options.model_dump())
+        return quote_inputs([(text,profile,language) for text,profile,_,language in audition_inputs(body,[job.language for job in jobs])])
+
+
+def _provenance(path: Path) -> CloudSpeechProvenance | None:
+    from .cloud_speech import read_provenance
+    return read_provenance(path)

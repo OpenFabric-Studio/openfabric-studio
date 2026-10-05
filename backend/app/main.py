@@ -37,12 +37,15 @@ from .api.routes_audiobook_review import router as audiobook_review_router
 from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
+from .api.routes_openrouter import router as openrouter_router
+from .api.routes_cloud_music import router as cloud_music_router
 from .desktop_runtime import router as desktop_runtime_router
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
+from . import cloud_music, openrouter_client
 
 
 @asynccontextmanager
@@ -53,6 +56,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         legacy_logs = _LEGACY_LOG_DIR if LOG_DIR.resolve() == (DATA_DIR / "logs").resolve() else None
         ensure_layout(DATA_DIR, legacy_logs)
         place_seed_models(DATA_DIR, SEED_VC_DIR)
+        openrouter_client.start()
+        await cloud_music.recover()
         yue_upload.start()
         await audio_versions.recover()
         await audio_exports.recover_exports()
@@ -84,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 try:
                     outcomes = await asyncio.gather(
-                        voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
+                        cloud_music.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
                         stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
                         audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
                         optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
@@ -115,6 +120,8 @@ async def invalid_request(_request: Request, exc: RequestValidationError) -> JSO
 
 app.include_router(orchestrator_router)
 app.include_router(desktop_runtime_router)
+app.include_router(openrouter_router)
+app.include_router(cloud_music_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)
 app.include_router(stem_exports_router)

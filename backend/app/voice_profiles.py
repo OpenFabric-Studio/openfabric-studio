@@ -18,7 +18,7 @@ from typing import Iterator
 from pydantic import TypeAdapter, ValidationError
 
 from .config import DATA_DIR
-from .voice_profile_contracts import EngineHintMap, PatchSpeechVoiceProfileRequest, SpeechVoiceProfile
+from .voice_profile_contracts import CloudSpeechConfiguration, CreateCloudSpeechVoiceProfileRequest, EngineHintMap, PatchSpeechVoiceProfileRequest, SpeechVoiceProfile
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _ALLOWED_EXT = frozenset({"wav", "flac"})
@@ -63,18 +63,18 @@ def _connect() -> sqlite3.Connection:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 2:
+    if version == 3:
         return
-    if version not in (0, 1):
+    if version not in (0, 1, 2):
         raise VoiceProfileError("profile_storage_unavailable", 503)
     # SQLite protects the entire schema upgrade, including concurrent processes.
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 2:
+        if version == 3:
             connection.commit()
             return
-        if version not in (0, 1):
+        if version not in (0, 1, 2):
             raise VoiceProfileError("profile_storage_unavailable", 503)
         connection.execute(
             """
@@ -106,7 +106,11 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             connection.execute("UPDATE voice_profiles SET reference_transcript = notes")
         if "reference_language" not in columns:
             connection.execute("ALTER TABLE voice_profiles ADD COLUMN reference_language TEXT NOT NULL DEFAULT 'en'")
-        connection.execute("PRAGMA user_version = 2")
+        if "renderer" not in columns:
+            connection.execute("ALTER TABLE voice_profiles ADD COLUMN renderer TEXT NOT NULL DEFAULT 'local' CHECK(renderer IN ('local','openrouter'))")
+        if "cloud_json" not in columns:
+            connection.execute("ALTER TABLE voice_profiles ADD COLUMN cloud_json TEXT")
+        connection.execute("PRAGMA user_version = 3")
         connection.commit()
     except Exception:
         connection.rollback()
@@ -138,6 +142,8 @@ def _row_to_profile(row: sqlite3.Row) -> SpeechVoiceProfile:
         name=str(row["name"]),
         consent_confirmed=bool(row["consent_confirmed"]),
         reference_audio_path=str(row["reference_audio_path"]),
+        renderer=row["renderer"],
+        cloud=CloudSpeechConfiguration.model_validate_json(str(row["cloud_json"])) if row["cloud_json"] else None,
         notes=str(row["notes"] or ""),
         reference_transcript=str(row["reference_transcript"] or ""),
         reference_language=str(row["reference_language"] or "en"),
@@ -255,10 +261,41 @@ def create_profile(
         raise
 
 
+def create_cloud_profile(body: CreateCloudSpeechVoiceProfileRequest) -> SpeechVoiceProfile:
+    """Create a provider preset without storing or pretending to own a recording."""
+    from .cloud_speech import validate_configuration
+    cloud = CloudSpeechConfiguration(model=body.model, voice=body.voice)
+    validate_configuration(cloud)
+    name = body.name.strip()
+    if not name:
+        raise VoiceProfileError("name_required")
+    directory: Path | None = None
+    committed = False
+    try:
+        with _profile_store() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            identifier, stamp = uuid.uuid4().hex, _now()
+            directory = profiles_root() / identifier
+            directory.mkdir(exist_ok=False)
+            connection.execute("""INSERT INTO voice_profiles
+                (id,name,consent_confirmed,reference_audio_path,notes,created_at,updated_at,renderer,cloud_json)
+                VALUES(?,?,1,'',?,?,?,'openrouter',?)""",
+                (identifier, name, body.notes, stamp, stamp, cloud.model_dump_json()))
+            row = connection.execute("SELECT * FROM voice_profiles WHERE id=?", (identifier,)).fetchone()
+            assert row is not None
+            profile = _row_to_profile(row)
+            connection.commit()
+            committed = True
+            return profile
+    finally:
+        if not committed and directory is not None:
+            directory.rmdir()
+
+
 def patch_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest) -> SpeechVoiceProfile:
     if not _ID.fullmatch(profile_id):
         raise VoiceProfileError("invalid_profile_id", 404)
-    if all(value is None for value in (body.name, body.notes, body.consent_confirmed, body.reference_transcript, body.reference_language)):
+    if all(value is None for value in (body.name, body.notes, body.consent_confirmed, body.reference_transcript, body.reference_language, body.renderer, body.cloud)):
         raise VoiceProfileError("nothing_to_patch")
     with _profile_store() as connection:
         connection.execute("BEGIN IMMEDIATE")
@@ -276,16 +313,31 @@ def patch_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest) -> Spee
             if body.consent_confirmed is not None
             else int(row["consent_confirmed"])
         )
+        renderer = body.renderer or str(row["renderer"])
+        cloud = body.cloud or (CloudSpeechConfiguration.model_validate_json(str(row["cloud_json"])) if row["cloud_json"] else None)
+        if renderer == "openrouter":
+            if cloud is None:
+                raise VoiceProfileError("cloud_speech_configuration_required")
+            revoking = row["renderer"] == "openrouter" and cloud.clone_reference and not cloud.reference_transfer_confirmed and body.cloud is not None
+            if cloud.clone_reference and not cloud.reference_transfer_confirmed and not revoking:
+                raise VoiceProfileError("cloud_reference_permission_required", 403)
+            if cloud.clone_reference and not str(row["reference_audio_path"]):
+                raise VoiceProfileError("audio_required")
+            from .cloud_speech import validate_configuration
+            if not revoking:
+                validate_configuration(cloud)
+        elif not str(row["reference_audio_path"]):
+            raise VoiceProfileError("audio_required")
         stamp = _now()
         transcript = body.reference_transcript if body.reference_transcript is not None else str(row["reference_transcript"] or "")
         language = body.reference_language if body.reference_language is not None else str(row["reference_language"] or "en")
         connection.execute(
             """
             UPDATE voice_profiles
-            SET name = ?, notes = ?, consent_confirmed = ?, updated_at = ?, reference_transcript = ?, reference_language = ?
+            SET name = ?, notes = ?, consent_confirmed = ?, updated_at = ?, reference_transcript = ?, reference_language = ?, renderer = ?, cloud_json = ?
             WHERE id = ?
             """,
-            (name[:120], notes[:2000], consent, stamp, transcript.strip(), language, profile_id),
+            (name[:120], notes[:2000], consent, stamp, transcript.strip(), language, renderer, cloud.model_dump_json() if cloud else None, profile_id),
         )
         connection.commit()
         updated = connection.execute(

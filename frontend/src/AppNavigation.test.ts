@@ -12,6 +12,8 @@ import * as modulesApi from './api/modules'
 import { useModulesStore } from './stores/modules'
 import type { ModuleInventory, ModuleInfo } from './api/generated'
 
+vi.mock('./api/openrouter', async original => ({ ...await original<typeof import('./api/openrouter')>(), getProviderStatus: vi.fn().mockResolvedValue({ enabled: false, estimate_limit_usd: 1, credential_configured: false, credential_source: 'none', secure_storage_available: false }) }))
+
 vi.mock('./api/orchestrator', () => ({ getStatus: vi.fn(), switchModel: vi.fn(), stopActive: vi.fn() }))
 vi.mock('./api/modules', () => ({ getModules: vi.fn(), listModuleJobs: vi.fn() }))
 function moduleSnapshot(state: ModuleInfo['state'] = 'installed'): ModuleInventory {
@@ -192,7 +194,8 @@ it.each<ModuleInfo['state']>(['ready', 'installed', 'partial', 'missing', 'unsup
   const labels = { ready: 'Ready', installed: 'Installed', partial: 'Setup incomplete', missing: 'Not installed', unsupported: 'Unavailable on this computer' }
   expect(headerLink('ACE-Step').getAttribute('aria-label')).toContain(labels[state])
   for (const name of ['ACE-Step', 'YuE', 'Speech', 'Singing', 'Video', 'Tools']) expect(headerLink(name)).toBeDefined()
-  expect(document.querySelectorAll('header a')).toHaveLength(6)
+  expect(document.querySelectorAll('header a[href*="module-"]')).toHaveLength(6)
+  expect(document.querySelector('header a[href="/settings#providers"]')?.getAttribute('aria-label')).toContain('OpenRouter disabled')
 })
 
 it('shows status tooltips for keyboard focus and dismisses them with Escape', async () => {

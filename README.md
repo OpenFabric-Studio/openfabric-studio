@@ -46,7 +46,8 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
 | **Speech profiles** | Reference clips for speech and audiobooks, with four licensed English starter voices |
-| **Video Studio** | Shot lists / LTX-oriented video workflow (experimental) |
+| **Video Studio** | Local LTX pictures and optional quoted OpenRouter shots with approvals/export |
+| **OpenRouter media** | Bring your own key for cloud speech, video and experimental Lyria music |
 | **Demucs / DAW** | Stems and multitrack timeline |
 
 UI language: English. Brand palette: near-black + indigo (`#4F46E5` / `#6366F1`).
@@ -88,7 +89,7 @@ Open **http://127.0.0.1:9000** when the launcher reports that the backend is run
 
 Optional singing and speech CLI wrappers are `setup_voice.bat` / `./setup_voice.sh` and `setup_speech.bat` / `./setup_speech.sh`. They use the same reviewed catalog as Settings; model downloads require explicit `--download-models`. Preview a CLI plan without installing with the backend environment’s Python and `backend/scripts/setup_modules.py --feature singing`. Kokoro, Chatterbox, Wan 2.2 TI2V-5B, and RVC use `./setup_kokoro.sh`, `./setup_chatterbox.sh`, `./setup_wan22.sh`, and `./setup_rvc.sh` (and the matching `.bat` files). Those wrappers clone and install only. They do not download weights. After the weights are on disk, call POST /api/local-engines/kokoro, /chatterbox, /wan (body engine wan22), or /rvc. Song videos stay on LTX.
 
-Generated video currently requires **Apple Silicon macOS**. CPU-only Seed-VC singing **training** is unsupported; conversion and training have different hardware requirements. Linux/Intel Mac desktop first-run installation is unavailable; use the source route. Clean Windows/Linux installations and GPU workflows still require real platform verification. See [platform setup and troubleshooting](docs/platform-setup.md).
+The local LTX video engine currently requires **Apple Silicon macOS**. Optional OpenRouter picture generation uses a cloud provider and local FFmpeg conformance/export; it does not require a local GPU. CPU-only Seed-VC singing **training** is unsupported; conversion and training have different hardware requirements. Linux/Intel Mac desktop first-run installation is unavailable; use the source route. Clean Windows/Linux installations and GPU workflows still require real platform verification. See [platform setup and troubleshooting](docs/platform-setup.md).
 
 Desktop packaging is experimental. The first-run desktop bootstrap installs uv and the backend; optional engines and weights are selected inside the app. CI packaging runs on tags or manual dispatch. macOS installers are ad-hoc signed (no Developer ID): after download, allow the app once via System Settings → Privacy & Security → Open Anyway. See [desktop/README.md](desktop/README.md).
 
@@ -100,9 +101,24 @@ Desktop packaging is experimental. The first-run desktop bootstrap installs uv a
 
 Singing voice cloning uses **Seed-VC** today.
 
-Speech and audiobook synthesis uses an optional local **[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)** API (MIT). OpenFabric stores speech **voice profiles** (`/api/voice-profiles`) and offers four bundled English [starter reference voices](docs/speech-starter-voices.md), including previews, transcripts and attribution. These VCTK recordings are licensed separately under CC BY 4.0. Speech trials require an installed, running engine; missing engines are reported explicitly. Model weights are not downloaded by this repo.
+Speech and audiobook synthesis uses an optional local **[GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)** API (MIT). OpenFabric stores speech **voice profiles** (`/api/voice-profiles`) and offers four bundled English [starter reference voices](docs/speech-starter-voices.md), including previews, transcripts and attribution. These VCTK recordings are licensed separately under CC BY 4.0. Local speech trials require an installed, running engine; missing engines are reported explicitly. Model weights are not downloaded by this repo.
 
 Audiobook creation accepts unencrypted **MOBI** through Calibre, with editable saved chapters, inclusion choices, narrator previews and pause/resume controls. Original sources and completed audio stay in the library. See [ebook import and module setup](docs/ebook-and-module-setup.md) for usage and verification limits.
+
+## Optional cloud media
+
+Open **Settings → Cloud providers** to configure your own OpenRouter key, check
+its connection, set an estimate ceiling and refresh supported models. Music has
+an experimental cloud tab; speech profiles support provider voices or separately
+approved reference cloning; Video quotes one cloud shot at a time. Every paid
+action needs an input-bound estimate and transfer approval. Local engines remain
+independent. Completed results and request receipts live in the library.
+
+Keys stay behind the backend, with native credential storage when available and
+session/environment fallback. The estimate ceiling is not a billing cap: set a
+spending limit on the provider key. Unknown submission outcomes never trigger an
+automatic paid retry. Live billed quality and native stores on all three operating
+systems remain unverified. See [OpenRouter setup, privacy and recovery](docs/openrouter-media.md).
 
 ## License and liability
 

@@ -6,16 +6,17 @@ import LibraryFolder from '../../components/shared/LibraryFolder.vue'
 import ArtistSettings from './ArtistSettings.vue'
 import GenerationSettings from './GenerationSettings.vue'
 import ModuleSetupPanel from './ModuleSetupPanel.vue'
+import ProvidersPanel from './ProvidersPanel.vue'
 import { getAudioSettings, saveAudioSettings, type CompleteAudioEncodingSettings } from '../../api/audioSettings'
 import { parseAudioEncodingSettings } from '../../api/contracts'
 
 const { t } = useI18n()
-type SettingsTab = 'setup' | 'audio' | 'library' | 'preferences'
+type SettingsTab = 'setup' | 'providers' | 'audio' | 'library' | 'preferences'
 const tab = ref<SettingsTab>('setup')
-const tabs: SettingsTab[] = ['setup', 'library', 'audio', 'preferences']
+const tabs: SettingsTab[] = ['setup', 'providers', 'library', 'audio', 'preferences']
 const route = inject(routeLocationKey, undefined)
-watch(() => route?.hash, hash => { if (hash?.startsWith('#module-')) tab.value = 'setup' }, { immediate: true })
-function tabLabel(value: SettingsTab) { return value === 'setup' ? t('moduleWorkspace.title') : t(`settingsWorkspace.tabs.${value}`) }
+watch(() => route?.hash, hash => { if (hash?.startsWith('#module-')) tab.value = 'setup'; else if (hash === '#providers') tab.value = 'providers' }, { immediate: true })
+function tabLabel(value: SettingsTab) { return value === 'setup' ? t('moduleWorkspace.title') : value === 'providers' ? t('cloudProviders.title') : t(`settingsWorkspace.tabs.${value}`) }
 function moveTab(event: KeyboardEvent, index: number) {
   let next: number
   if (event.key === 'ArrowRight') next = (index + 1) % tabs.length
@@ -111,6 +112,7 @@ onBeforeUnmount(() => { active = false; operation++; controller?.abort(); contro
     </div>
     <div role="tablist" :aria-label="t('settingsWorkspace.title')" class="flex flex-wrap gap-1 border-b border-border pb-2"><button v-for="(value, index) in tabs" :id="`settings-tab-${value}`" :key="value" type="button" role="tab" :aria-selected="tab === value" :aria-controls="`settings-panel-${value}`" :tabindex="tab === value ? 0 : -1" class="settings-button border-transparent" :class="tab === value ? 'bg-accent1/15 text-accent2' : 'text-text-dim'" @click="tab = value" @keydown="moveTab($event, index)">{{ tabLabel(value) }}</button></div>
     <div v-show="tab === 'setup'" id="settings-panel-setup" role="tabpanel" aria-labelledby="settings-tab-setup"><ModuleSetupPanel /></div>
+    <div v-show="tab === 'providers'" id="settings-panel-providers" role="tabpanel" aria-labelledby="settings-tab-providers"><ProvidersPanel v-if="tab === 'providers'" :active="true" /></div>
     <section v-show="tab === 'audio'" id="settings-panel-audio" role="tabpanel" aria-labelledby="settings-tab-audio" class="space-y-4 rounded-xl border border-border bg-panel p-5" :aria-busy="loading || saving">
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div>

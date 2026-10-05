@@ -778,6 +778,7 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_cancel_route_drains_references_despite_repeated_caller_cancellation(self) -> None:
         from app.api.routes_videos import cancel_project
+        from starlette.requests import Request
         from app.video_media import MediaInfo
 
         started = asyncio.Event()
@@ -799,7 +800,8 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
             cancelling: asyncio.Task[VideoProject] | None = None
             try:
                 await wait_for_test_signal(started, pending, description="cancel-route reference probe readiness")
-                cancelling = asyncio.create_task(cancel_project(self.project.id))
+                request = Request({"type": "http", "scheme": "http", "path": f"/api/videos/projects/{self.project.id}/cancel", "root_path": "", "query_string": b"", "headers": [(b"host", b"127.0.0.1:8000")]})
+                cancelling = asyncio.create_task(cancel_project(self.project.id, request))
                 await wait_for_test_signal(cleaning, pending, cancelling, description="cancel-route reference cleanup entering")
                 cancelling.cancel()
                 await asyncio.sleep(0)

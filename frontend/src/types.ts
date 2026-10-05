@@ -1,5 +1,5 @@
 export type ModelId = 'ace_step' | 'yue2'
-export type TrackOrigin = ModelId | 'editor' | 'upload'
+export type TrackOrigin = import('./api/generated').SavedTrack['model']
 
 export type ModelRuntimeStatus = 'stopped' | 'starting' | 'running' | 'stopping' | 'error'
 

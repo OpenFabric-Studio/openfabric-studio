@@ -5,11 +5,16 @@ import * as api from '../../api/audiobookWorkflow'
 import type { AudiobookAudition, CreateAudiobookRequest } from '../../api/contracts'
 import { createPollingLoop } from '../../composables/polling'
 import { ApiError } from '../../api/http'
-const props = withDefaults(defineProps<{ draft?: CreateAudiobookRequest | null; bookId?: string; chapterIndex?: number; active?: boolean; disabled?: boolean; revision?: number }>(), { chapterIndex: 0, active: true, disabled: false })
+import CloudSpeechCost from './CloudSpeechCost.vue'
+import * as cloudApi from '../../api/cloudSpeech'
+import type { CloudSpeechApproval } from '../../api/contracts'
+const props = withDefaults(defineProps<{ draft?: CreateAudiobookRequest | null; bookId?: string; chapterIndex?: number; active?: boolean; disabled?: boolean; revision?: number; cloud?: boolean }>(), { chapterIndex: 0, active: true, disabled: false,cloud:false })
 const emit = defineEmits<{ busy: [value: boolean] }>()
 const { t } = useI18n()
 const audition = ref<AudiobookAudition | null>(null), submitting = ref(false), error = ref('')
 const restored = ref(false)
+const cloudApproval=ref<CloudSpeechApproval|null>(null),quoteMode=ref<'cast'|'scene'>('cast'),costNonce=ref(0)
+function quotePreview(signal:AbortSignal){const options={chapter_index:props.chapterIndex,mode:quoteMode.value,max_chars:600};return props.bookId?cloudApi.quoteSavedAudition(props.bookId,options,signal):cloudApi.quoteAudition({...props.draft, title:props.draft?.title??'',profile_id:props.draft?.profile_id??'',chapters:props.draft?.chapters??[],...options},signal)}
 const mediaRoot = ref<HTMLElement | null>(null)
 const running = computed(() => audition.value?.status === 'queued' || audition.value?.status === 'running')
 watch([submitting, running], ([pending, generating]) => emit('busy', pending || generating))
@@ -19,7 +24,7 @@ let alive = true, generation = 0
 let controller: AbortController | undefined
 function pause() { for (const player of mediaRoot.value?.querySelectorAll('audio') ?? []) player.pause() }
 function failure(code = '') {
-  return t(code === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : code === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'audiobookReview.auditionFailed')
+  return t(code==='cloud_speech_submission_unknown'?'cloudSpeech.unknown':code.startsWith('cloud_')?'cloudSpeech.changed':code === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : code === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'audiobookReview.auditionFailed')
 }
 const polling = createPollingLoop(async ({ signal, isCurrent }) => {
   const target = audition.value, token = generation
@@ -28,6 +33,7 @@ const polling = createPollingLoop(async ({ signal, isCurrent }) => {
     const result = await api.getAudition(target.id, signal)
     if (!alive || token !== generation || !isCurrent() || result.id !== target.id) return false
     audition.value = result
+    cloudApproval.value=null
     if (result.status === 'failed') error.value = failure(result.detail)
     return result.status === 'queued' || result.status === 'running'
   } catch { if (alive && token === generation && isCurrent()) error.value = t('audiobookReview.auditionFailed'); return false }
@@ -49,11 +55,14 @@ watch(() => props.active, active => { if (!active) { pause(); polling.stop() } e
 watch(() => props.disabled, disabled => { if (!disabled && !audition.value) void restore() })
 async function start(mode: 'cast' | 'scene') {
   if (submitting.value || running.value || !enabled.value || !props.active) return
+  if(props.cloud&&(!cloudApproval.value||mode!==quoteMode.value)){error.value=t('cloudSpeech.approvalRequired');return}
+  const approval=cloudApproval.value
+  if(props.cloud)costNonce.value++
   const token = ++generation, request = new AbortController(); controller?.abort(); controller = request; submitting.value = true; error.value = ''; restored.value = false; pause(); audition.value = null
   try {
     const result = props.bookId
-      ? await api.auditionBook(props.bookId, { chapter_index: props.chapterIndex, mode, max_chars: 600 }, request.signal)
-      : props.draft ? await api.auditionDraft({ ...props.draft, chapter_index: props.chapterIndex, mode, max_chars: 600 }, request.signal) : null
+      ? await api.auditionBook(props.bookId, { chapter_index: props.chapterIndex, mode, max_chars: 600,...(approval?{cloud_approval:approval}:{}) }, request.signal)
+      : props.draft ? await api.auditionDraft({ ...props.draft, chapter_index: props.chapterIndex, mode, max_chars: 600,...(approval?{cloud_approval:approval}:{}) }, request.signal) : null
     if (!alive || token !== generation || request.signal.aborted || !result) return
     audition.value = result
     if (result.status === 'failed') error.value = failure(result.detail)
@@ -76,9 +85,11 @@ onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); pollin
 <template>
   <section ref="mediaRoot" class="space-y-3 rounded-lg border border-accent1/30 bg-accent1/5 p-4" :aria-label="t('audiobookReview.audition')">
     <p class="text-xs text-text-dim">{{ t('audiobookReview.auditionIntro') }}</p>
+    <label v-if="cloud" class="block space-y-1"><span class="text-xs text-text-dim">{{t('cloudSpeech.control')}}</span><select v-model="quoteMode" :disabled="running||submitting" :aria-label="t('cloudSpeech.control')" class="min-h-11 rounded-lg border border-border bg-panel p-2 text-sm text-text"><option value="cast">{{t('audiobookReview.audition')}}</option><option value="scene">{{t('audiobookReview.scene')}}</option></select></label>
+    <CloudSpeechCost :enabled="cloud" :input-key="inputKey+quoteMode+costNonce" :load="quotePreview" :active="active" :disabled="!enabled||running||submitting" @approval="value=>cloudApproval=value" />
     <div class="flex flex-wrap items-center gap-3">
-      <button type="button" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text disabled:opacity-50" :disabled="!enabled || submitting || running || !active" @click="start('cast')">{{ t('audiobookReview.audition') }}</button>
-      <button type="button" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text disabled:opacity-50" :disabled="!enabled || submitting || running || !active" @click="start('scene')">{{ t('audiobookReview.scene') }}</button>
+      <button type="button" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text disabled:opacity-50" :disabled="!enabled || submitting || running || !active || cloud&&(!cloudApproval||quoteMode!=='cast')" @click="start('cast')">{{ t('audiobookReview.audition') }}</button>
+      <button type="button" class="min-h-11 rounded-lg border border-border bg-panel px-3 text-sm text-text disabled:opacity-50" :disabled="!enabled || submitting || running || !active || cloud&&(!cloudApproval||quoteMode!=='scene')" @click="start('scene')">{{ t('audiobookReview.scene') }}</button>
       <button v-if="running" type="button" class="min-h-11 px-3 text-xs text-text-dim" :disabled="submitting" @click="cancel">{{ t('audiobookReview.cancel') }}</button>
       <span v-if="submitting || running" role="status" class="text-xs text-text-dim">{{ t('audiobookReview.auditionBusy') }}</span>
     </div>

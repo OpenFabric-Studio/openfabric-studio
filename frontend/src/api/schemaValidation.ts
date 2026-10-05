@@ -3,6 +3,8 @@ interface Schema {
   readonly $ref?: string
   readonly type?: string
   readonly anyOf?: readonly Schema[]
+  readonly oneOf?: readonly Schema[]
+  readonly discriminator?: { readonly propertyName: string; readonly mapping?: Readonly<Record<string, string>> }
   readonly enum?: readonly unknown[]
   readonly const?: unknown
   readonly properties?: Readonly<Record<string, Schema>>
@@ -30,6 +32,12 @@ export function decodeSchema(schema: Schema, value: unknown, definitions: Readon
     return referenced !== undefined && decodeSchema(referenced, value, definitions)
   }
   if (schema.anyOf) return schema.anyOf.some((branch) => decodeSchema(branch, value, definitions))
+  if (schema.discriminator) {
+    if (!isObject(value) || !Object.hasOwn(value, schema.discriminator.propertyName)) return false
+    const tag = value[schema.discriminator.propertyName]
+    if (typeof tag !== 'string' || (schema.discriminator.mapping && !Object.hasOwn(schema.discriminator.mapping, tag))) return false
+  }
+  if (schema.oneOf) return schema.oneOf.filter((branch) => decodeSchema(branch, value, definitions)).length === 1
   if (schema.enum) return schema.enum.includes(value)
   if ('const' in schema) return schema.const === value
   switch (schema.type) {

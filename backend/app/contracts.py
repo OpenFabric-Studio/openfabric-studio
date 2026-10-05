@@ -23,7 +23,7 @@ JsonValue: TypeAlias = Annotated[PydanticJsonValue, AfterValidator(finite_json)]
 
 JsonObject = dict[str, JsonValue]
 JobStatus = Literal['queued', 'running', 'done', 'failed', 'cancelled']
-TrackOrigin = Literal['ace_step', 'yue2', 'editor', 'upload']
+TrackOrigin = Literal['ace_step', 'yue2', 'editor', 'upload', 'openrouter']
 
 
 class Contract(BaseModel):

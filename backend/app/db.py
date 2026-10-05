@@ -183,6 +183,8 @@ def get_db() -> sqlite3.Connection:
             migrate_generation_library(_db)
             from .yue_jobs import migrate as migrate_yue_jobs
             migrate_yue_jobs(_db)
+            from .cloud_music import migrate as migrate_cloud_music
+            migrate_cloud_music(_db)
         except BaseException:
             # Do not retain a partly initialized connection after a migration
             # interruption. Additive migrations are safe to retry on next open.
@@ -225,6 +227,7 @@ def insert_track(
     ace_candidate: tuple[str, int] | None = None,
     audio_version_id: str | None = None,
     yue_job_id: str | None = None,
+    cloud_music_job_id: str | None = None,
 ) -> int:
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
@@ -259,6 +262,10 @@ def insert_track(
                                       (cur.lastrowid, yue_job_id))
             if attached_yue.rowcount != 1:
                 raise ValueError('invalid_yue_job_attachment')
+        if cloud_music_job_id is not None:
+            attached_cloud = db.execute('UPDATE cloud_music_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, cloud_music_job_id))
+            if attached_cloud.rowcount != 1:
+                raise ValueError('invalid_cloud_music_attachment')
         if audio_version_id is not None:
             attached = db.execute("UPDATE audio_versions SET worker_track_id=? WHERE id=? AND kind='voice' AND worker_track_id IS NULL",
                                   (cur.lastrowid, audio_version_id))

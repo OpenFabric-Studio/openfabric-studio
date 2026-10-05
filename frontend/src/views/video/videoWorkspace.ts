@@ -24,14 +24,14 @@ export function toShotDraft(shot: VideoProjectShot): VideoShotDraft {
     locked: shot.locked ?? false }
 }
 
-export function shotProblem(shots: readonly VideoShotDraft[], id: string, duration: number): ShotProblem {
+export function shotProblem(shots: readonly VideoShotDraft[], id: string, duration: number, cloud = false): ShotProblem {
   const shot = shots.find((item) => item.id === id)
   if (!shot) return ''
   if (!shot.prompt.trim() || shot.prompt.length > 2000) return 'bad_prompt'
   if (!Number.isFinite(shot.start_sec) || shot.start_sec < 0) return 'bad_start'
   if (Math.abs(shot.start_sec * 24 - Math.round(shot.start_sec * 24)) > 1e-5) return 'frame_alignment'
   const length = shot.seconds ?? 4
-  if (!isClipLength(length)) return 'bad_length'
+  if (cloud ? !Number.isInteger(length) || length < 1 || length > 60 : !isClipLength(length)) return 'bad_length'
   if (shot.start_sec >= duration || shot.start_sec + length > duration + 1 / 24) return 'past_end'
   if (shots.some((other) => other.id !== id && other.start_sec < shot.start_sec + length - 1e-6
     && other.start_sec + (other.seconds ?? 4) > shot.start_sec + 1e-6)) return 'overlap'
@@ -51,7 +51,7 @@ export function splitShot(shots: readonly VideoShotDraft[], id: string, newId: s
   const index = shots.findIndex((shot) => shot.id === id)
   const selected = shots[index]
   const length = selected?.seconds ?? 4
-  if (!selected || length === 2) return [...shots]
+  if (!selected || !isClipLength(length) || length === 2) return [...shots]
   const splits: Record<Exclude<VideoClipLength, 2>, readonly [VideoClipLength, VideoClipLength]> = {
     4: [2, 2], 6: [2, 4], 8: [4, 4], 10: [4, 6], 12: [6, 6],
   }

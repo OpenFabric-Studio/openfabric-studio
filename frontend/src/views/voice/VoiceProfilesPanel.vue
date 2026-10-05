@@ -9,6 +9,11 @@ import SpeechAudioPreview from './SpeechAudioPreview.vue'
 import LocalEnginePanel from './LocalEnginePanel.vue'
 import { ApiError } from '../../api/http'
 import SpeechReferenceDetails from './SpeechReferenceDetails.vue'
+import CloudSpeechProfile from './CloudSpeechProfile.vue'
+import CloudSpeechCost from './CloudSpeechCost.vue'
+import CloudSpeechTrials from './CloudSpeechTrials.vue'
+import { quoteTrial } from '../../api/cloudSpeech'
+import type { CloudSpeechApproval } from '../../api/contracts'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const emit = defineEmits<{ activity: [message: string] }>()
@@ -44,6 +49,10 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const nameInput = ref<HTMLInputElement | null>(null)
 const trialText = ref('')
 const trialLanguage = ref('en')
+const cloudApproval = ref<CloudSpeechApproval|null>(null),trialCostNonce=ref(0)
+const trialKey = computed(()=>JSON.stringify([selectedProfile.value,trialText.value,trialLanguage.value,trialCostNonce.value]))
+function quoteCurrentTrial(signal:AbortSignal){return quoteTrial({profile_id:selectedId.value,text:trialText.value.trim(),text_language:trialLanguage.value},signal)}
+function saveCloudProfile(updated:SpeechVoiceProfile){profiles.value=[...profiles.value.filter(profile=>profile.id!==updated.id),updated];selectProfile(updated.id);cloudApproval.value=null;trialResult.value=null}
 const trialTextInput = ref<HTMLTextAreaElement | null>(null)
 const trialResult = ref<SpeechCloneTrialResponse | null>(null)
 const trialAudioUrl = computed(() => {
@@ -252,8 +261,12 @@ async function onTrial() {
   cloning.value = true
   const current = () => alive && !controller.signal.aborted && generation === trialGeneration && selectedId.value === profile.id
   try {
-    const result = await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal, trialLanguage.value)
+    if(profile.renderer==='openrouter'&&!cloudApproval.value){error.value=t('cloudSpeech.approvalRequired');return}
+    const approval=cloudApproval.value
+    if(profile.renderer==='openrouter')trialCostNonce.value++
+    const result = profile.renderer==='openrouter'?await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal, trialLanguage.value, approval):await profilesApi.startSpeechCloneTrial(profile.id, text, controller.signal, trialLanguage.value)
     if (!current()) return
+    cloudApproval.value=null
     if (result.profile_id !== profile.id) { error.value = t('voiceProfiles.err.trial'); return }
     trialResult.value = result
     switch (result.status) {
@@ -265,7 +278,7 @@ async function onTrial() {
       case 'failed': error.value = t(result.detail === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : result.detail === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'voiceProfiles.err.trial'); break
     }
   } catch (err) {
-    if (current()) error.value = t(err instanceof ApiError && err.message === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : err instanceof ApiError && err.message === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'voiceProfiles.err.trial')
+    if (current()) error.value = t(err instanceof ApiError && err.message==='cloud_speech_submission_unknown'?'cloudSpeech.unknown':err instanceof ApiError && err.message.startsWith('cloud_')?'cloudSpeech.changed':err instanceof ApiError && err.message === 'reference_transcript_required' ? 'audiobookReview.referenceRequired' : err instanceof ApiError && err.message === 'speech_language_unsupported' ? 'audiobookReview.languageUnsupported' : 'voiceProfiles.err.trial')
   } finally {
     if (current()) { cloning.value = false; trialController = null }
   }
@@ -309,6 +322,8 @@ onBeforeUnmount(() => {
       <p v-if="notice" role="status" class="rounded-lg border border-status-done/30 bg-status-done/5 px-4 py-3 text-sm text-status-done">{{ notice }}</p>
       <StarterSpeechVoices v-model:expanded="starterCatalogExpanded" :profiles="profiles" :active="active" :disabled="loading || saving || deleting" :importing-id="importingId" @import="importStarter" @select="selectStarterProfile" />
 
+      <CloudSpeechProfile :active="active" :disabled="saving||cloning||deleting" @saved="saveCloudProfile" />
+
       <form v-if="createVisited" v-show="createOpen" :aria-label="t('speechWorkspace.createTitle')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onCreate">
         <div class="flex items-start justify-between gap-3">
           <div><h2 class="text-lg font-semibold text-text">{{ t('speechWorkspace.createTitle') }}</h2><p class="mt-1 text-sm text-text-dim">{{ t('speechWorkspace.createIntro') }}</p></div>
@@ -324,6 +339,8 @@ onBeforeUnmount(() => {
         <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="saving || !!importingId || !consent">{{ saving ? t('speechWorkspace.createPending') : t('voiceProfiles.create') }}</button>
       </form>
 
+      <CloudSpeechProfile v-if="selectedProfile&&!createOpen" :key="selectedProfile.id+'renderer'" :profile="selectedProfile" :active="active" :disabled="cloning||deleting" @saved="saveCloudProfile" />
+      <CloudSpeechTrials v-if="selectedProfile&&!createOpen&&(selectedProfile.renderer==='openrouter'||selectedProfile.cloud)" :key="selectedProfile.id+'trials'" :profile-id="selectedProfile.id" :active="active" :disabled="cloning||deleting" :refresh-key="trialResult?.cloud_receipt_id??''" />
       <form v-show="!createOpen" :aria-label="t('speechWorkspace.synthesis')" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="onTrial">
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div><h2 class="text-lg font-semibold text-text">{{ selectedProfile?.name ?? t('speechWorkspace.synthesis') }}</h2><p class="mt-1 text-sm text-text-dim">{{ t('speechWorkspace.synthesisIntro') }}</p></div>
@@ -332,14 +349,16 @@ onBeforeUnmount(() => {
         <template v-if="selectedProfile">
           <p class="text-xs" :class="selectedProfile.consent_confirmed ? 'text-text-dim' : 'text-status-failed'">{{ !selectedProfile.consent_confirmed ? t('voiceProfiles.consentMissing') : selectedProfile.starter_voice_id ? t('speechWorkspace.licensedReference') : t('voiceProfiles.consentOk') }}</p>
           <p v-if="selectedProfile.notes" class="whitespace-pre-wrap break-words text-sm text-text-dim">{{ selectedProfile.notes }}</p>
-          <SpeechReferenceDetails :key="selectedProfile.id" :profile="selectedProfile" :disabled="cloning || deleting" @saved="updated => { profiles = profiles.map(profile => profile.id === updated.id ? updated : profile) }" />
+          <SpeechReferenceDetails v-if="selectedProfile.reference_audio_path" :key="selectedProfile.id" :profile="selectedProfile" :disabled="cloning || deleting" @saved="updated => { profiles = profiles.map(profile => profile.id === updated.id ? updated : profile) }" />
           <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea ref="trialTextInput" v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
-          <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><select v-model="trialLanguage" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option></select></label>
+          <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><input v-if="selectedProfile.renderer==='openrouter'" v-model="trialLanguage" maxlength="16" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><select v-else v-model="trialLanguage" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option></select></label>
+          <p v-if="selectedProfile.renderer==='openrouter'" class="text-xs text-text-dim">{{t('cloudSpeech.languageHelp')}}</p>
+          <CloudSpeechCost :enabled="selectedProfile.renderer==='openrouter'" :input-key="trialKey" :load="quoteCurrentTrial" :active="active&&!createOpen" :disabled="cloning||!trialText.trim()" @approval="value=>cloudApproval=value" />
           <p v-if="!selectedProfile.consent_confirmed" class="text-xs text-status-failed">{{ t('speechWorkspace.consentRequired') }}</p>
           <p v-else-if="cloning" role="status" class="text-xs text-text-dim">{{ t('speechWorkspace.trialPendingHelp') }}</p>
           <p v-else-if="deleting && deleteTarget?.id === selectedId" class="text-xs text-text-dim">{{ t('speechWorkspace.deletePending') }}</p>
           <p v-else-if="!trialText.trim()" class="text-xs text-text-dim">{{ t('voiceProfiles.err.trialText') }}</p>
-          <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="cloning || !selectedProfile.consent_confirmed || !trialText.trim() || deleting && deleteTarget?.id === selectedId">{{ cloning ? t('speechWorkspace.trialPending') : t('voiceProfiles.trialRun') }}</button>
+          <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="cloning || !selectedProfile.consent_confirmed || !trialText.trim() || selectedProfile.renderer==='openrouter'&&!cloudApproval || deleting && deleteTarget?.id === selectedId">{{ cloning ? t('speechWorkspace.trialPending') : t('voiceProfiles.trialRun') }}</button>
           <div v-if="trialAudioUrl" data-speech-trial class="space-y-3 rounded-lg border border-border bg-panel-2 p-3">
             <p class="text-sm text-text-dim">{{ t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.trialMock' : 'speechWorkspace.trialCompleted') }}</p>
             <SpeechAudioPreview :src="trialAudioUrl" :label="t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.mockTrialAudio' : 'speechWorkspace.trialAudio')" :active="active && !createOpen" />

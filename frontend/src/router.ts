@@ -9,6 +9,7 @@ export const appRoutes: RouteRecordRaw[] = [
       children: [
         { path: '', name: 'music', redirect: () => ({ name: useOrchestratorStore().activeModel === 'yue2' ? 'yue2' : 'ace-step' }) },
         { path: 'ace-step', name: 'ace-step', component: () => import('./views/ace-step/AceStepPage.vue') },
+        { path: 'openrouter', name: 'openrouter-music', component: () => import('./views/music/CloudMusicPanel.vue') },
         { path: 'yue2', name: 'yue2', component: () => import('./views/yue2/Yue2Page.vue') },
       ],
     },

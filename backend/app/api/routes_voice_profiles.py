@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse
 
 from .. import speech_starter_voices, voice_profiles
@@ -12,7 +12,10 @@ from ..voice_profile_contracts import (
     SpeechVoiceProfile,
     SpeechVoiceProfilesResponse,
     StarterSpeechVoicesResponse,
+    CreateCloudSpeechVoiceProfileRequest,
 )
+
+from ..module_security import require_local_origin
 
 router = APIRouter(prefix="/api/voice-profiles", tags=["voice profiles"])
 
@@ -64,6 +67,16 @@ def list_starter_voice_catalog() -> StarterSpeechVoicesResponse:
         raise  # pragma: no cover
 
 
+@router.post("/cloud", response_model=SpeechVoiceProfile)
+def create_cloud_voice_profile(body: CreateCloudSpeechVoiceProfileRequest, request: Request) -> SpeechVoiceProfile:
+    require_local_origin(request)
+    try:
+        return voice_profiles.create_cloud_profile(body)
+    except voice_profiles.VoiceProfileError as exc:
+        _raise(exc)
+        raise  # pragma: no cover
+
+
 @router.get("/starter-voices/{starter_id}/audio")
 def preview_starter_voice(starter_id: str) -> FileResponse:
     try:
@@ -95,8 +108,10 @@ def get_voice_profile(profile_id: str) -> SpeechVoiceProfile:
 
 
 @router.patch("/{profile_id}", response_model=SpeechVoiceProfile)
-def patch_voice_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest) -> SpeechVoiceProfile:
+def patch_voice_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest, request: Request) -> SpeechVoiceProfile:
     try:
+        if body.renderer is not None or body.cloud is not None:
+            require_local_origin(request)
         return voice_profiles.patch_profile(profile_id, body)
     except voice_profiles.VoiceProfileError as exc:
         _raise(exc)

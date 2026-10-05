@@ -10,9 +10,10 @@ from fastapi.routing import APIRoute
 from starlette.responses import Response
 from starlette.types import Message
 
-from .. import audiobook_workflows, audiobooks, ebook_import, voice_profiles
+from .. import audiobook_workflows, audiobooks, ebook_import, voice_profiles, audiobook_cloud
 from ..audiobook_contracts import (
     AcceptAudiobookRepairRequest,
+    AudiobookCloudControlRequest,
     AudiobookAudition,
     AudiobookAuditionOptions,
     AudiobookAuditionsResponse,
@@ -33,6 +34,7 @@ from ..audiobook_contracts import (
     SetChapterTextRequest,
     SetPronunciationsRequest,
 )
+from ..voice_profile_contracts import CloudSpeechQuote
 from ..job_lifecycle import await_cleanup
 from ..module_security import require_local_origin
 
@@ -84,12 +86,24 @@ def list_audiobooks() -> AudiobookBooksResponse:
 @router.post("", response_model=AudiobookCreateResponse)
 async def create_audiobook(body: CreateAudiobookRequest) -> AudiobookCreateResponse:
     try:
-        if audiobooks._sync_worker():
-            return await await_cleanup(asyncio.to_thread(audiobooks.create_book, body))
-        return audiobooks.create_book(body)
+        from ..resource_admission import admission_lock
+        async with admission_lock:
+            with audiobook_workflows._prepare_admission():
+                if audiobooks._sync_worker():
+                    return await await_cleanup(asyncio.to_thread(audiobooks.create_book, body))
+                return audiobooks.create_book(body)
     except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise  # pragma: no cover
+
+
+@router.post("/quote",response_model=CloudSpeechQuote)
+def quote_audiobook(body: CreateAudiobookRequest) -> CloudSpeechQuote:
+    try:
+        return audiobook_cloud.quote_creation(body)
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
 
 
 @router.get("/jobs", response_model=AudiobookJobsResponse)
@@ -211,9 +225,9 @@ def pause_audiobook(book_id: str) -> AudiobookBook:
 
 
 @router.post("/{book_id}/resume", response_model=AudiobookBook)
-async def resume_audiobook(book_id: str) -> AudiobookBook:
+async def resume_audiobook(book_id: str, body: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     try:
-        return await audiobooks.resume_book(book_id)
+        return await audiobooks.resume_book(book_id,body)
     except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise
@@ -274,12 +288,12 @@ def set_audiobook_pronunciations(book_id: str, body: SetPronunciationsRequest) -
 
 
 @router.post("/{book_id}/chapters/{chapter_index}/regenerate", response_model=AudiobookBook)
-async def regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
+async def regenerate_chapter(book_id: str, chapter_index: int, body: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     try:
         await audiobooks.wait_for_book(book_id)
         if audiobooks._sync_worker():
-            return await await_cleanup(asyncio.to_thread(audiobooks.regenerate_chapter, book_id, chapter_index))
-        return audiobooks.regenerate_chapter(book_id, chapter_index)
+            return await await_cleanup(asyncio.to_thread(audiobooks.regenerate_chapter, book_id, chapter_index, body))
+        return audiobooks.regenerate_chapter(book_id, chapter_index, body)
     except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise
@@ -347,12 +361,12 @@ def download_audiobook_format(book_id: str, fmt: str) -> FileResponse:
 
 
 @router.post("/{book_id}/retry", response_model=AudiobookBook)
-async def retry_audiobook(book_id: str) -> AudiobookBook:
+async def retry_audiobook(book_id: str, body: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     try:
         await audiobooks.wait_for_book(book_id)
         if audiobooks._sync_worker():
-            return await await_cleanup(asyncio.to_thread(audiobooks.retry_failed, book_id))
-        return audiobooks.retry_failed(book_id)
+            return await await_cleanup(asyncio.to_thread(audiobooks.retry_failed, book_id, body))
+        return audiobooks.retry_failed(book_id,body)
     except audiobooks.AudiobookError as exc:
         _raise(exc)
         raise  # pragma: no cover
@@ -525,5 +539,41 @@ async def accept_passage_repair(identifier: str, body: AcceptAudiobookRepairRequ
     try:
         return await await_cleanup(asyncio.to_thread(audiobook_workflows.accept_repair, identifier, body))
     except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/auditions/quote",response_model=CloudSpeechQuote)
+def quote_draft_audition(body: CreateAudiobookAuditionRequest) -> CloudSpeechQuote:
+    try:
+        return audiobook_workflows.quote_audition(body)
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/auditions/quote",response_model=CloudSpeechQuote)
+def quote_saved_audition(book_id: str, body: AudiobookAuditionOptions) -> CloudSpeechQuote:
+    try:
+        return audiobook_workflows.quote_book_audition(book_id,body)
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/cloud-quote",response_model=CloudSpeechQuote)
+def quote_cloud_control(book_id: str,body: AudiobookCloudControlRequest) -> CloudSpeechQuote:
+    try:
+        return audiobook_cloud.quote_control(book_id,body)
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/chapters/{chapter_index}/passages/{passage_id}/repairs/quote",response_model=CloudSpeechQuote)
+def quote_passage_repair(book_id: str,chapter_index: int,passage_id: str,body: CreateAudiobookRepairRequest) -> CloudSpeechQuote:
+    try:
+        return audiobook_workflows.quote_repair(book_id,chapter_index,passage_id,body)
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise
