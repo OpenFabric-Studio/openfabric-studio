@@ -15,6 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from . import voice_profiles
+from .voice_profile_contracts import CloudSpeechConfiguration
 
 
 def normalize_language(value: str) -> str:
@@ -40,20 +41,26 @@ class SpeechRenderSettings(BaseModel, frozen=True):
     speed: float = Field(default=1.0, ge=0.25, le=4)
 
 
+class CloudSpeechSnapshot(CloudSpeechConfiguration):
+    model_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class SpeechRenderSnapshot(BaseModel, frozen=True):
     profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
-    reference_audio_path: str = Field(min_length=1, max_length=4096)
-    reference_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    prompt_text: str = Field(min_length=1, max_length=2000)
+    reference_audio_path: str = Field(default="", max_length=4096)
+    reference_sha256: str = Field(default="", pattern=r"^(?:[0-9a-f]{64})?$")
+    prompt_text: str = Field(default="", max_length=2000)
     prompt_language: str = Field(min_length=2, max_length=35)
     text_language: str = Field(min_length=2, max_length=35)
     engine: str = "gpt-sovits"
     engine_identity: str | None = Field(default=None, max_length=200)
     settings: SpeechRenderSettings = Field(default_factory=SpeechRenderSettings)
+    cloud: CloudSpeechSnapshot | None = None
+    cloud_authorization_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
 
     @property
     def identity(self) -> str:
-        inputs = self.model_dump(exclude={"reference_audio_path"})
+        inputs = self.model_dump(exclude={"reference_audio_path", "cloud_authorization_id"})
         return hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -71,6 +78,17 @@ def capture(profile_id: str, text_language: str, directory: Path, engine_identit
         profile = voice_profiles.get_profile(profile_id)
         if not profile.consent_confirmed:
             raise voice_profiles.VoiceProfileError("consent_required", 403)
+        cloud: CloudSpeechSnapshot | None = None
+        if profile.renderer == "openrouter":
+            from .cloud_speech import validate_configuration, model_fingerprint, normalize_cloud_language
+            if profile.cloud is None:
+                raise voice_profiles.VoiceProfileError("cloud_speech_configuration_required")
+            validate_configuration(profile.cloud)
+            language = normalize_cloud_language(profile.cloud, text_language)
+            cloud = CloudSpeechSnapshot(**profile.cloud.model_dump(), model_fingerprint=model_fingerprint(profile.cloud.model))
+            if not cloud.clone_reference:
+                return SpeechRenderSnapshot(profile_id=profile_id, prompt_language=profile.reference_language,
+                    text_language=language, engine="openrouter", cloud=cloud)
         if not profile.reference_transcript.strip():
             raise voice_profiles.VoiceProfileError("reference_transcript_required")
         source = Path(profile.reference_audio_path)
@@ -96,6 +114,16 @@ def capture(profile_id: str, text_language: str, directory: Path, engine_identit
             temporary.replace(target)
             return SpeechRenderSnapshot(profile_id=profile_id, reference_audio_path=str(target),
                 reference_sha256=fingerprint, prompt_text=profile.reference_transcript.strip(),
-                prompt_language=normalize_language(profile.reference_language), text_language=normalize_language(text_language), engine_identity=engine_identity)
+                prompt_language=profile.reference_language if cloud else normalize_language(profile.reference_language),
+                text_language=language if cloud else normalize_language(text_language), engine_identity=None if cloud else engine_identity,
+                engine="openrouter" if cloud else "gpt-sovits", cloud=cloud)
         finally:
             temporary.unlink(missing_ok=True)
+
+
+def normalize_for_profile(profile_id: str, language: str) -> str:
+    profile = voice_profiles.get_profile(profile_id)
+    if profile.renderer == "openrouter" and profile.cloud is not None:
+        from .cloud_speech import normalize_cloud_language
+        return normalize_cloud_language(profile.cloud, language)
+    return normalize_language(language)

@@ -263,6 +263,9 @@ def _synthesize_unlocked(
     cleaned = text.strip()
     if not cleaned:
         raise voice_profiles.VoiceProfileError("text_required")
+    if (snapshot is not None and snapshot.cloud is not None) or (snapshot is None and profile.renderer == "openrouter"):
+        from .cloud_speech import synthesize
+        return synthesize(profile_id=profile_id, text=cleaned, output_path=output_path, snapshot=snapshot)
     resolved_prompt = snapshot.prompt_text if snapshot is not None else _resolve_prompt_text(prompt_text, profile.reference_transcript)
     target_language = normalize_language(text_language or "en")
     reference_language = normalize_language(prompt_language or profile.reference_language)
@@ -393,6 +396,13 @@ def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
 
     trial_id = uuid.uuid4().hex
     out = trials_root() / f"{trial_id}.wav"
+    snapshot: SpeechRenderSnapshot | None = None
+    if profile.renderer == "openrouter":
+        from .speech_references import capture
+        from .cloud_speech import approve_snapshots
+        snapshot = capture(profile.id,body.text_language or "en",trials_root()/"references",None)
+        authorization = approve_snapshots([(text,snapshot)],body.cloud_approval)
+        snapshot = snapshot.model_copy(update={"cloud_authorization_id":authorization})
     outcome = synthesize_to_path(
         profile_id=body.profile_id,
         text=text,
@@ -401,15 +411,19 @@ def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
         prompt_language=body.prompt_language,
         text_language=body.text_language,
         require_consent=True,
+        **({"snapshot": snapshot} if snapshot is not None else {}),
     )
+    from .cloud_speech import read_provenance
+    provenance = read_provenance(out) if outcome.output_path else None
     return SpeechCloneTrialResponse(
         status=outcome.status,
         detail=outcome.detail,
-        engine=body.engine,
+        engine="openrouter" if profile.renderer == "openrouter" else body.engine,
         profile_id=body.profile_id,
         install_hints=list(outcome.install_hints),
         trial_id=trial_id if outcome.output_path is not None else None,
         output_path=str(outcome.output_path) if outcome.output_path is not None else None,
+        cloud_receipt_id=provenance.receipt_id if provenance else None,
     )
 
 

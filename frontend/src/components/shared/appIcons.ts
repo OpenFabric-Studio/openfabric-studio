@@ -1,4 +1,5 @@
 export const APP_ICON_PATHS = {
+  cloud: 'M6 18a5 5 0 0 1-1-10 7 7 0 0 1 13-1 5 5 0 0 1 0 11H6',
   home: 'm3 10 9-7 9 7 M5 9v12h14V9 M9 21v-7h6v7',
   editor: 'M3 5h18v14H3z M8 5v14 M8 10h13 M12 14h5 M12 17h3',
   ace_step: 'm12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z',

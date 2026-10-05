@@ -55,6 +55,7 @@ from .video_engine import (
 logger = logging.getLogger(__name__)
 _tasks: dict[str, asyncio.Task[None]] = {}
 _gpu_projects: set[str] = set()
+_cloud_projects: set[str] = set()
 _unverified: set[str] = set()
 _analysis_tasks: dict[str, asyncio.Task[VideoSongAnalysis]] = {}
 _cancelling: dict[str, int] = {}
@@ -72,7 +73,8 @@ class VariantReceipt(VideoContract):
 
 
 def work_busy() -> bool:
-    return bool(_gpu_projects or _unverified)
+    from .video_dialogue import work_busy as dialogue_busy
+    return bool(_gpu_projects or _cloud_projects or _unverified or dialogue_busy())
 
 
 def _elapsed(start: str) -> float:
@@ -274,6 +276,8 @@ def readiness() -> VideoReadinessResponse:
 
 
 async def _engine_fingerprint(project: VideoProject, *, verify: bool = False) -> str:
+    if project.provider_config.provider == "openrouter":
+        return hashlib.sha256((project.provider_config.model_dump_json()+"cloud-silent-v1").encode()).hexdigest()
     if project.mode != "generated":
         return hashlib.sha256(
             (store.file_hash(Path(__file__)) + "cpu-cover").encode()
@@ -368,6 +372,8 @@ def fingerprint(
         "seed": seed,
         "reference_sha256": reference_hash,
     }
+    if project.provider_config.provider == "openrouter":
+        value["provider_config"] = project.provider_config.model_dump()
     cue = next((item for item in project.dialogue_cues if item.shot_id == shot.id), None)
     if cue is not None:
         value["dialogue_identity"] = cue.model_dump(exclude={"waveform_peaks"})
@@ -409,6 +415,22 @@ async def _valid_variant(
     path = variant_path(document.project.id, shot.id, variant.id)
     if variant.fingerprint != expected:
         return False
+    if document.project.provider_config.provider == "openrouter":
+        cloud = variant.cloud
+        if (
+            cloud is None
+            or variant.provider_config != document.project.provider_config
+            or cloud.receipt.state != "completed"
+            or cloud.receipt.remote_id is None
+            or cloud.receipt.owner_id != f"video-{document.project.id}-{shot.id}-{variant.id}"
+            or cloud.receipt.model_id != document.project.provider_config.model_id
+            or cloud.source_duration_sec is None
+            or cloud.received_sha256 is None
+            or cloud.slot_duration_sec != shot.seconds
+            or cloud.remote_duration_sec < cloud.slot_duration_sec
+            or cloud.remote_duration_sec != cloud.slot_duration_sec and not cloud.trim_confirmed
+        ):
+            return False
     try:
         receipt = VariantReceipt.model_validate_json(_receipt_path(path).read_bytes())
         if (
@@ -421,7 +443,7 @@ async def _valid_variant(
         await validate_media(
             path,
             shot.seconds,
-            (document.project.settings.width, document.project.settings.height),
+            document.project.frame_size,
         )
         return True
     except (ValidationError, OSError, VideoMediaError):
@@ -802,7 +824,7 @@ async def _assemble(
         / 24
     )
     width, height = aspect_size(
-        settings, project.settings.width, project.settings.height
+        settings, *project.frame_size
     )
     run = store.artifact(project.id, f"runs/{job.id}")
     run.mkdir(parents=True, exist_ok=True)
@@ -1221,7 +1243,9 @@ async def start(
             raise store.VideoProjectError("worker_identity_unverified")
         if body.revision != project.revision:
             raise store.VideoProjectError("revision_conflict")
-        needs_gpu = project.mode == "generated" and operation != "export"
+        if project.provider_config.provider == "openrouter" and operation != "export":
+            raise store.VideoProjectError("cloud_quote_required")
+        needs_gpu = project.mode == "generated" and project.provider_config.provider == "local" and operation != "export"
         slot_busy = video_busy() if needs_gpu else any(
             active_id not in _gpu_projects for active_id in _tasks
         )
@@ -1261,10 +1285,10 @@ async def start(
                 from .video_text import validate_text
             except ImportError as exc:
                 raise store.VideoProjectError("image_tools_unavailable") from exc
-            width, height = aspect_size(effective_export, project.settings.width, project.settings.height)
+            width, height = aspect_size(effective_export, *project.frame_size)
             for overlay in project.overlays:
                 validate_text(overlay, width, height)
-        if project.mode == "generated":
+        if project.mode == "generated" and project.provider_config.provider == "local":
             from .ace_jobs import work_busy as ace_busy
 
             if needs_gpu and (native_work_inflight() or ace_busy() or await other_work_busy()):
@@ -1281,7 +1305,7 @@ async def start(
                 raise store.VideoProjectError("engine_incompatible")
             if not ready.ready:
                 raise store.VideoProjectError("model_not_installed")
-        elif not project.references:
+        elif project.mode != "generated" and not project.references:
             raise store.VideoProjectError("reference_required")
         if operation == "export" and any(
             shot.approved_variant_id is None for shot in project.shots
@@ -1299,6 +1323,7 @@ async def start(
             saved.render_request = body
             saved.requested_export_settings = export_settings
             saved.pending_export = None
+            saved.cloud_variant_id = None
 
         result = store.mutate(project_id, reserve, revision=body.revision)
         if needs_gpu:
@@ -1374,13 +1399,25 @@ async def approve(
     return store.mutate(project_id, change, revision=body.revision)
 
 
-async def cancel(project_id: str) -> VideoProject:
+async def cancel(project_id: str, *, stop_cloud_tracking: bool = True) -> VideoProject:
+    tracking_failed = False
     async with admission_lock:
         task = _tasks.get(project_id)
         measurement = _analysis_tasks.get(project_id)
         job = store.get(project_id).job
         _cancelling[project_id] = _cancelling.get(project_id, 0) + 1
         references = store.request_reference_cancel(project_id)
+        from .video_dialogue import request_cancel as cancel_dialogue
+        dialogue_tasks = cancel_dialogue(project_id)
+        if stop_cloud_tracking:
+            from .video_cloud import stop_tracking
+            from .openrouter_errors import OpenRouterError
+            try:
+                stop_tracking(project_id)
+            except (OpenRouterError, store.VideoProjectError):
+                # A failed ledger write cannot prevent owned network/process draining.
+                tracking_failed = True
+                logger.warning("Cloud tracking ledger could not be updated", exc_info=True)
         request_cancel(task)
         if (
             measurement is not None
@@ -1389,7 +1426,7 @@ async def cancel(project_id: str) -> VideoProject:
         ):
             measurement.cancel()
     try:
-        pending: list[asyncio.Task[None] | asyncio.Task[VideoSongAnalysis]] = []
+        pending: list[asyncio.Task[None] | asyncio.Task[VideoSongAnalysis] | asyncio.Task[VideoProject]] = list(dialogue_tasks)
         pending.append(asyncio.create_task(store.drain_reference_uploads(project_id, references)))
         if task is not None:
             pending.append(task)
@@ -1402,6 +1439,9 @@ async def cancel(project_id: str) -> VideoProject:
             ):
                 logger.error("Video cleanup failed", exc_info=result)
                 raise store.VideoProjectError("cleanup_failed")
+        if tracking_failed:
+            _finish(project_id, "cancelled", "cloud_tracking_storage_failed")
+            raise store.VideoProjectError("cloud_tracking_storage_failed")
     finally:
         if _tasks.get(project_id) is task:
             _tasks.pop(project_id, None)
@@ -1413,6 +1453,7 @@ async def cancel(project_id: str) -> VideoProject:
         else:
             _cancelling.pop(project_id)
             _gpu_projects.discard(project_id)
+            _cloud_projects.discard(project_id)
         project = store.get(project_id)
         if (
             job is not None
@@ -1439,6 +1480,8 @@ async def delete(project_id: str) -> None:
 
 
 def request_shutdown() -> None:
+    from .video_dialogue import request_shutdown as stop_dialogue
+    stop_dialogue()
     store.request_reference_shutdown()
     for task in _tasks.values():
         request_cancel(task)
@@ -1448,10 +1491,12 @@ def request_shutdown() -> None:
 
 
 async def shutdown() -> None:
+    from .video_dialogue import shutdown as shutdown_dialogue
     request_shutdown()
     results = await await_cleanup(
         asyncio.gather(
-            *(cancel(project_id) for project_id in set(_tasks) | set(_analysis_tasks) | store.reference_project_ids()),
+            shutdown_dialogue(),
+            *(cancel(project_id, stop_cloud_tracking=False) for project_id in set(_tasks) | set(_analysis_tasks) | store.reference_project_ids()),
             return_exceptions=True,
         )
     )
@@ -1494,11 +1539,17 @@ def variant_file(
 
 
 async def recover() -> None:
+    from .video_dialogue import recover as recover_dialogue
+    await recover_dialogue()
     for project in store.list_projects():
         if project.id in _tasks:
             continue
         document = store.load(project.id)
         job = document.project.job
+        if document.worker is None:
+            from .video_cloud import recover as recover_cloud
+            if await recover_cloud(project.id):
+                continue
         if document.worker is None and (
             job is None or job.status not in _ACTIVE and document.pending_export is None
         ):
@@ -1514,6 +1565,10 @@ async def recover() -> None:
                 _finish(project.id, "failed", "worker_identity_unverified")
                 continue
             _unverified.discard(project.id)
+            _worker(project.id, None)
+            from .video_cloud import recover as recover_cloud
+            if await recover_cloud(project.id):
+                continue
         if job is None:
             _worker(project.id, None)
             continue

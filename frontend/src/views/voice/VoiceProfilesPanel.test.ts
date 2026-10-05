@@ -11,6 +11,7 @@ import en from '../../locales/en'
 import { speechWorkspaceEn } from '../../locales/speechWorkspace'
 import { hasOpenDialog } from '../../composables/useDialogA11y'
 
+vi.mock('../../api/openrouter', async original => ({ ...await original<typeof import('../../api/openrouter')>(), getProviderCatalog: vi.fn().mockResolvedValue({ models: [], fingerprint: 'a'.repeat(64), fetched_at: '', expires_at: 0 }) }))
 vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
   listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
 }))

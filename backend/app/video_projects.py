@@ -81,12 +81,14 @@ class VideoHistorySnapshot(VideoContract):
 
 class StoredVideoProject(VideoContract):
     project: VideoProject
+    preparing: bool = False
     source: SourceIdentity | None = None
     reference_paths: dict[str, str] = Field(default_factory=dict)
     speech_path: str = ""
     worker: WorkerIdentity | None = None
     published_file: str = ""
     pending_export: PendingExport | None = None
+    cloud_variant_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     render_request: VideoRenderRequest | None = None
     requested_export_settings: VideoExportSettings | None = None
     undo_history: list[VideoHistorySnapshot] = Field(default_factory=list, max_length=50)
@@ -159,7 +161,8 @@ def ensure_open(project_id: str) -> None:
 def begin_delete(project_id: str) -> None:
     with _lock:
         ensure_open(project_id)
-        load(project_id)
+        if load(project_id).preparing:
+            raise VideoProjectError("not_found")
         _deleting.add(project_id)
 
 
@@ -307,7 +310,10 @@ def view(document: StoredVideoProject) -> VideoProject:
 
 def get(project_id: str) -> VideoProject:
     with _lock:
-        return view(load(project_id))
+        document = load(project_id)
+        if document.preparing:
+            raise VideoProjectError("not_found")
+        return view(document)
 
 
 def list_projects() -> list[VideoProject]:
@@ -349,12 +355,13 @@ def _enforce_reel(project: VideoProject) -> None:
         raise VideoProjectError("reel_has_song")
     if project.mode != "generated":
         raise VideoProjectError("reel_mode")
-    if (project.settings.width, project.settings.height) != (704, 1280):
+    width,height = project.frame_size
+    if project.provider_config.provider == "local" and (width,height) != (704, 1280) or project.provider_config.provider == "openrouter" and width * 16 != height * 9:
         raise VideoProjectError("reel_size")
     shots = sorted(project.shots, key=lambda shot: shot.start_sec)
     if not (1 if project.dialogue_cues else 2) <= len(shots) <= 4:
         raise VideoProjectError("reel_shots")
-    if any(shot.seconds not in (2, 4, 6) for shot in shots):
+    if project.provider_config.provider == "local" and any(shot.seconds not in (2, 4, 6) for shot in shots):
         raise VideoProjectError("reel_length")
     end = shots[-1].start_sec + shots[-1].seconds
     if end < (2 if project.dialogue_cues else 8) - 1e-6 or end > 15 + 1 / 24:
@@ -510,6 +517,8 @@ def mutate(
         if not busy_ok:
             ensure_open(project_id)
         document = load(project_id)
+        if document.preparing and not busy_ok:
+            raise VideoProjectError("not_found")
         if revision is not None and revision != document.project.revision:
             raise VideoProjectError("revision_conflict")
         if (
@@ -616,6 +625,13 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
             project.character_lock = body.character_lock
         if body.seed is not None:
             project.seed = body.seed
+        if body.provider_config is not None:
+            project.provider_config = body.provider_config
+        if project.provider_config.provider == "openrouter":
+            if project.character_adapter_id:
+                raise VideoProjectError("cloud_lora_unsupported")
+            if project.mode != "generated":
+                raise VideoProjectError("cloud_mode_unsupported")
         if body.settings is not None:
             if project.character_adapter_id:
                 from .video_character_training import ready_adapter_file
@@ -658,6 +674,8 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
                 current = by_id.get(cue.shot_id)
                 if previous is None or current is None or (previous.start_sec, previous.seconds) != (current.start_sec, current.seconds):
                     raise VideoProjectError("dialogue_timing_locked")
+        if project.provider_config.provider == "local" and any(shot.seconds not in (2, 4, 6, 8, 10, 12) for shot in project.shots):
+            raise VideoProjectError("bad_length")
         _enforce_reel(project)
         if any(
             overlay.end_sec > project.duration_sec + 1 / 24
@@ -671,7 +689,8 @@ def update(project_id: str, body: UpdateVideoProjectRequest) -> VideoProject:
             project.mode,
             project.direction,
             project.character_lock,
-        ) != (before.settings, before.mode, before.direction, before.character_lock)
+            project.provider_config,
+        ) != (before.settings, before.mode, before.direction, before.character_lock, before.provider_config)
         if global_changed:
             for shot in project.shots:
                 shot.approved_variant_id = None
@@ -699,6 +718,8 @@ def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
     with _lock:
         ensure_open(project_id)
         document = load(project_id)
+        if document.preparing:
+            raise VideoProjectError("not_found")
         if document.project.revision != body.revision:
             raise VideoProjectError("revision_conflict")
         copied = document.model_copy(deep=True)
@@ -717,6 +738,7 @@ def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
         copied.worker = None
         copied.published_file = ""
         copied.pending_export = None
+        copied.cloud_variant_id = None
         for shot in copied.project.shots:
             shot.variants = []
             shot.approved_variant_id = None
@@ -1135,6 +1157,8 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
     if not text:
         raise VideoProjectError("text_required")
     profile = video_characters.require_voice(body.profile_id)
+    if profile.renderer == "openrouter":
+        raise VideoProjectError("cloud_speech_quote_required")
     with _lock:
         ensure_open(project_id)
         document = load(project_id)
@@ -1283,8 +1307,21 @@ def apply_character(project_id: str, body: ApplyVideoCharacterRequest) -> VideoP
             output.unlink(missing_ok=True)
 
 
+def clear_character_adapter(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    """Detach the project binding; retained training files and references stay owned."""
+    def change(document: StoredVideoProject) -> None:
+        document.project.character_adapter_id = None
+        document.project.file_url = ""
+        document.project.poster_url = ""
+        for shot in document.project.shots:
+            shot.approved_variant_id = None
+    return mutate(project_id, change, revision=body.revision)
+
+
 def apply_character_adapter(project_id: str, body: ApplyVideoCharacterAdapterRequest) -> VideoProject:
     """Use a trained adapter when one exists. Otherwise keep the still lock, and say so."""
+    if get(project_id).provider_config.provider == "openrouter":
+        raise VideoProjectError("cloud_lora_unsupported")
     from . import video_character_training as training
 
     job = training.get_job(body.training_id)
@@ -1308,6 +1345,8 @@ def apply_character_adapter(project_id: str, body: ApplyVideoCharacterAdapterReq
             raise VideoProjectError("reference_too_large")
 
         def change(document: StoredVideoProject) -> None:
+            if document.project.provider_config.provider == "openrouter":
+                raise VideoProjectError("cloud_lora_unsupported")
             if document.project.track_id is not None:
                 raise VideoProjectError("character_adapter_picture_only")
             if len(document.project.references) >= 6:

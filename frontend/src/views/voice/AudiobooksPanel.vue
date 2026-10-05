@@ -10,6 +10,9 @@ import { createPollingLoop } from '../../composables/polling'
 import EbookImportPanel from './EbookImportPanel.vue'
 import CastAuditionPanel from './CastAuditionPanel.vue'
 import AudiobookPassages from './AudiobookPassages.vue'
+import CloudSpeechCost from './CloudSpeechCost.vue'
+import * as cloudApi from '../../api/cloudSpeech'
+import type { CloudSpeechApproval, AudiobookCloudControlRequest } from '../../api/contracts'
 import type { EbookDraft, EbookChapterDraft } from '../../api/contracts'
 
 const emit = defineEmits<{ activity: [message: string] }>()
@@ -87,6 +90,19 @@ const auditionDraft = computed<CreateAudiobookRequest | null>(() => {
   if (!draftNarratorAvailable.value || !includedChapters.value.length || !cast || !speech || includedChapters.value.some(chapter => !chapter.text.trim())) return null
   return { title: title.value.trim() || t('audiobookReview.audition'), profile_id: profileId.value, language: draftLanguage.value.trim(), cast, pronunciations: speech, chapters: includedChapters.value.map(chapter => ({ title: chapter.title, text: chapter.text })) }
 })
+const draftCloudApproval=ref<CloudSpeechApproval|null>(null),controlCloudApproval=ref<CloudSpeechApproval|null>(null),draftCostNonce=ref(0),controlCostNonce=ref(0)
+const cloudAction=ref<'resume'|'retry'|'regenerate'>('resume'),cloudChapter=ref(0)
+const draftHasCloud=computed(()=>{const request=auditionDraft.value;return !!request&&[request.profile_id,...(request.cast??[]).map(member=>member.profile_id)].some(id=>profiles.value.find(profile=>profile.id===id)?.renderer==='openrouter')})
+const selectedHasCloud=computed(()=>!!selectedBook.value?.cloud_models?.length||[selectedBook.value?.profile_id,...(selectedBook.value?.cast??[]).map(member=>member.profile_id)].some(id=>profiles.value.find(profile=>profile.id===id)?.renderer==='openrouter'))
+const creationQuoteKey=computed(()=>JSON.stringify([auditionDraft.value,profiles.value,draftCostNonce.value]))
+const controlQuoteKey=computed(()=>JSON.stringify([selectedBook.value,jobs.value,profiles.value,cloudAction.value,cloudChapter.value,controlCostNonce.value]))
+function quoteCreation(signal:AbortSignal){const draft=auditionDraft.value;if(!draft)throw new Error('Missing audiobook draft');return cloudApi.quoteBook({...draft,chapters:draft.chapters.map(chapter=>({...chapter,text:chapter.text.trim()}))},signal)}
+function quoteContinuation(signal:AbortSignal){return cloudApi.quoteControl(selectedBookId.value,{action:cloudAction.value,...(cloudAction.value==='regenerate'?{chapter_index:cloudChapter.value}:{})},signal)}
+function cloudControl(action:'resume'|'retry'|'regenerate',chapter?:number):AudiobookCloudControlRequest|undefined{
+  if(!selectedHasCloud.value)return undefined
+  if(!controlCloudApproval.value||cloudAction.value!==action||action==='regenerate'&&chapter!==cloudChapter.value){error.value=t('cloudSpeech.approvalRequired');return undefined}
+  return {action,...(chapter!==undefined?{chapter_index:chapter}:{}),cloud_approval:controlCloudApproval.value}
+}
 watch([castDraft, chapters], () => { castReviewed.value = false }, { deep: true })
 const activity = computed(() => {
   if (saving.value) return t('audiobookWorkspace.creating')
@@ -110,6 +126,10 @@ watch(() => props.active, active => { if (active && creating.value) void refresh
 function safeError(err: unknown, fallback: string): string {
   if (err instanceof ApiError) {
     switch (err.message) {
+      case 'cloud_speech_submission_unknown': return t('cloudSpeech.unknown')
+      case 'cloud_speech_approval_required': return t('cloudSpeech.approvalRequired')
+      case 'cloud_speech_quote_changed': return t('cloudSpeech.changed')
+      case 'cloud_voice_language_mismatch': return t('cloudSpeech.language')
       case 'consent_required': return t('audiobookWorkspace.errors.consent')
       case 'profile_not_found':
       case 'invalid_profile_id': return t('audiobookWorkspace.errors.profileMissing')
@@ -293,7 +313,11 @@ async function onControl(action: 'pause' | 'resume' | 'cancel') {
   if (!book || controlling.value || saving.value || loading.value || retrying.value) return
   const generation = selectionGeneration, controller = new AbortController(); controlController = controller; controlling.value = true; polling.stop(); error.value = ''
   try {
-    const updated = await audiobooksApi.controlAudiobook(book.id, action, controller.signal)
+    const control=action==='resume'?cloudControl('resume'):undefined
+    if(action==='resume'&&selectedHasCloud.value&&!control)return
+    if(control)controlCostNonce.value++
+    const updated = control?await audiobooksApi.controlAudiobook(book.id, action, controller.signal,control):await audiobooksApi.controlAudiobook(book.id, action, controller.signal)
+    controlCloudApproval.value=null
     if (!mounted || controller.signal.aborted) return
     upsertBook(updated)
     if (generation === selectionGeneration && selectedBookId.value === book.id) void loadJobs(book.id)
@@ -375,6 +399,8 @@ async function onCreate() {
   if (cast.length) body.cast = cast
   if (draftLanguage.value.trim()) body.language = draftLanguage.value.trim()
   if (importedDraft.value?.cast_review_required && !castReviewed.value) { error.value = t('audiobookWorkspace.importErrors.subtitle_cast_review_required'); return }
+  if(draftHasCloud.value&&!draftCloudApproval.value){error.value=t('cloudSpeech.approvalRequired');return}
+  if(draftCloudApproval.value){body.cloud_approval=draftCloudApproval.value;draftCostNonce.value++}
   const controller = new AbortController()
   createController = controller
   const generation = selectionGeneration
@@ -384,9 +410,10 @@ async function onCreate() {
   try {
     const reviewedDraft = await saveReviewedDraft(controller.signal)
     if (!isCurrent()) return
-    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal, cast.length ? cast : undefined, { ...(body.language ? { language: body.language } : {}), ...(reviewedDraft.cast_review_required ? { cast_reviewed: castReviewed.value } : {}) }) : await audiobooksApi.createAudiobook(body, controller.signal)
+    const created = reviewedDraft ? await audiobooksApi.createAudiobookFromDraft(reviewedDraft, body.profile_id, controller.signal, cast.length ? cast : undefined, { ...(body.language ? { language: body.language } : {}), ...(body.cloud_approval?{cloud_approval:body.cloud_approval}:{}), ...(reviewedDraft.cast_review_required ? { cast_reviewed: castReviewed.value } : {}) }) : await audiobooksApi.createAudiobook(body, controller.signal)
     if (!isCurrent()) return
     upsertBook(created.book)
+    draftCloudApproval.value=null
     title.value = ''
     author.value = ''
     pronunciations.value = []
@@ -469,7 +496,11 @@ async function onRegenerate(index: number) {
   const context = bookAction(book.id)
   regeneratingIndex.value = index; error.value = ''; notice.value = ''; polling.stop()
   try {
-    const updated = await audiobooksApi.regenerateAudiobookChapter(book.id, index, context.signal)
+    const control=cloudControl('regenerate',index)
+    if(selectedHasCloud.value&&!control)return
+    if(control)controlCostNonce.value++
+    const updated = control?await audiobooksApi.regenerateAudiobookChapter(book.id, index, context.signal,control):await audiobooksApi.regenerateAudiobookChapter(book.id, index, context.signal)
+    controlCloudApproval.value=null
     if (!context.isMounted()) return
     upsertBook(updated)
     if (!context.isCurrent()) return
@@ -558,7 +589,11 @@ async function onRetry() {
   notice.value = ''
   polling.stop()
   try {
-    const updated = await audiobooksApi.retryAudiobook(book.id, controller.signal)
+    const control=cloudControl('retry')
+    if(selectedHasCloud.value&&!control)return
+    if(control)controlCostNonce.value++
+    const updated = control?await audiobooksApi.retryAudiobook(book.id, controller.signal,control):await audiobooksApi.retryAudiobook(book.id, controller.signal)
+    controlCloudApproval.value=null
     if (!isCurrent()) return
     upsertBook(updated)
     if (selectionGeneration === generation && selectedBookId.value === book.id) {
@@ -663,7 +698,7 @@ onBeforeUnmount(() => {
           </div>
           <label v-if="importedDraft?.cast_review_required" class="flex items-start gap-2 rounded-lg border border-status-queued/40 p-3 text-sm text-text"><input v-model="castReviewed" type="checkbox" :aria-label="t('audiobookWorkspace.subtitleCastReview')" class="mt-1"><span>{{ t('audiobookWorkspace.subtitleCastReview') }}</span></label>
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><input v-model="draftLanguage" maxlength="35" :aria-label="t('audiobookReview.outputLanguage')" placeholder="en" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><span class="block text-xs text-text-dim">{{ t('audiobookReview.outputLanguageHint') }}</span></label>
-          <CastAuditionPanel :draft="auditionDraft" :active="active && creating" :disabled="saving || draftSaving || !!importedDraft?.cast_review_required && !castReviewed" @busy="value => previewing = value" />
+          <CastAuditionPanel :draft="auditionDraft" :cloud="draftHasCloud" :active="active && creating" :disabled="saving || draftSaving || !!importedDraft?.cast_review_required && !castReviewed" @busy="value => previewing = value" />
           <div class="space-y-2 rounded-lg border border-border bg-panel-2 p-3">
             <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.pronunciations') }}</p>
             <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pronunciationHint') }}</p>
@@ -702,7 +737,8 @@ onBeforeUnmount(() => {
         <p class="text-xs text-text-dim">{{ t(importedDraft ? 'audiobookWorkspace.importedDraftHint' : 'audiobookWorkspace.draftHint') }}</p>
         <button v-if="importedDraft" type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="draftSaving || deletingImport || saving || !title.trim() || chapters.some(chapter => !chapter.text.trim())" @click="onSaveDraft">{{ t('audiobookWorkspace.saveDraft') }}</button>
         <p v-if="retrying" role="status" class="text-xs text-text-dim">{{ t('audiobookWorkspace.retrying') }}</p>
-        <button type="submit" class="min-h-11 rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="loading || saving || retrying || loadingProfiles || draftSaving || deletingImport || previewing || !draftNarratorAvailable || !includedChapters.length">{{ saving ? t('audiobookWorkspace.creating') : t('audiobooks.create') }}</button>
+        <CloudSpeechCost :enabled="draftHasCloud" :input-key="creationQuoteKey" :load="quoteCreation" :active="active&&creating" :disabled="saving||draftSaving||!auditionDraft" @approval="value=>draftCloudApproval=value" />
+        <button type="submit" class="min-h-11 rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="loading || saving || retrying || loadingProfiles || draftSaving || deletingImport || previewing || !draftNarratorAvailable || !includedChapters.length || draftHasCloud&&!draftCloudApproval">{{ saving ? t('audiobookWorkspace.creating') : t('audiobooks.create') }}</button>
       </form>
 
       <div v-else-if="selectedBook" data-book-editor class="space-y-4">
@@ -714,9 +750,9 @@ onBeforeUnmount(() => {
           </div>
           <div class="flex flex-wrap gap-3">
             <button v-if="selectedBook.status === 'queued' || selectedBook.status === 'running'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="controlling || loading || retrying" @click="onControl('pause')">{{ t('audiobookWorkspace.pause') }}</button>
-            <button v-if="selectedBook.status === 'paused' || selectedBook.status === 'cancelled'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="controlling || loading || retrying" @click="onControl('resume')">{{ t('audiobookWorkspace.resume') }}</button>
+            <button v-if="selectedBook.status === 'paused' || selectedBook.status === 'cancelled'" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="controlling || loading || retrying || selectedHasCloud&&(!controlCloudApproval||cloudAction!=='resume')" @click="onControl('resume')">{{ t('audiobookWorkspace.resume') }}</button>
             <button v-if="['queued', 'running', 'paused'].includes(selectedBook.status)" type="button" class="min-h-11 rounded-lg border border-border px-3 text-xs text-text disabled:opacity-50" :disabled="controlling || loading || retrying" @click="onControl('cancel')">{{ t('audiobookWorkspace.cancel') }}</button>
-            <button v-if="selectedBook.status === 'failed'" type="button" class="min-h-11 rounded-lg border border-accent1/50 px-3 py-2 text-xs font-medium text-accent1 focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="loading || retrying || saving" :aria-label="t('audiobooks.retry')" @click="onRetry">{{ retrying ? t('audiobookWorkspace.retrying') : t('audiobooks.retry') }}</button>
+            <button v-if="selectedBook.status === 'failed'" type="button" class="min-h-11 rounded-lg border border-accent1/50 px-3 py-2 text-xs font-medium text-accent1 focus-visible:outline-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="loading || retrying || saving || selectedHasCloud&&(!controlCloudApproval||cloudAction!=='retry')" :aria-label="t('audiobooks.retry')" @click="onRetry">{{ retrying ? t('audiobookWorkspace.retrying') : t('audiobooks.retry') }}</button>
             <a v-if="selectedBook.status === 'done'" data-export-book class="rounded-lg bg-accent1 px-3 py-2 text-xs font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :href="audiobooksApi.audiobookExportUrl(selectedBook.id)" download>{{ t('audiobooks.downloadExport') }}</a>
             <a v-if="selectedBook.mp3_ready" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookExportFormatUrl(selectedBook.id, 'mp3')" download>{{ t('audiobookWorkspace.downloadMp3') }}</a>
             <a v-if="selectedBook.m4b_ready" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookExportFormatUrl(selectedBook.id, 'm4b')" download>{{ t('audiobookWorkspace.downloadM4b') }}</a>
@@ -724,12 +760,19 @@ onBeforeUnmount(() => {
             <a v-if="selectedBook.status === 'done'" class="rounded-lg border border-border px-3 py-2 text-xs font-medium text-text" :href="audiobooksApi.audiobookCollectionUrl(selectedBook.id)" download>{{ t('audiobookWorkspace.downloadCollection') }}</a>
           </div>
         </div>
+        <div v-if="selectedHasCloud" class="space-y-3">
+          <p class="text-xs text-status-queued">{{t('cloudSpeech.cloudBook')}}</p>
+          <p class="text-xs text-text-dim">{{t('cloudSpeech.models',{models:(selectedBook.cloud_models??[]).join(', ')})}}</p>
+          <label class="block space-y-1"><span class="text-xs text-text-dim">{{t('cloudSpeech.control')}}</span><select v-model="cloudAction" :aria-label="t('cloudSpeech.control')" :disabled="controlling||retrying||regeneratingIndex!==null" class="min-h-11 rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option value="resume">{{t('cloudSpeech.resume')}}</option><option value="retry">{{t('cloudSpeech.retry')}}</option><option value="regenerate">{{t('cloudSpeech.regenerate')}}</option></select></label>
+          <label v-if="cloudAction==='regenerate'" class="block space-y-1"><span class="text-xs text-text-dim">{{t('cloudSpeech.chapter')}}</span><select v-model.number="cloudChapter" :aria-label="t('cloudSpeech.chapter')" class="min-h-11 rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option v-for="job in jobs" :key="job.id" :value="job.chapter_index">{{job.chapter_title||job.chapter_index+1}}</option></select></label>
+          <CloudSpeechCost :enabled="true" :input-key="controlQuoteKey" :load="quoteContinuation" :active="active&&!creating" :disabled="controlling||retrying||regeneratingIndex!==null" @approval="value=>controlCloudApproval=value" />
+        </div>
         <p v-if="selectedBook.status !== 'done'" class="text-xs text-text-dim">{{ t('audiobookWorkspace.boundaryHint') }}</p>
         <p v-if="selectedBook.status !== 'done'" class="text-xs text-text-dim">{{ t('audiobookWorkspace.exportHint') }}</p>
         <p v-if="exportNote(selectedBook.export_note)" class="text-xs text-status-queued">{{ exportNote(selectedBook.export_note) }}</p>
         <label v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" class="flex min-h-11 flex-wrap items-center gap-3 text-sm text-text"><span>{{ t('audiobookWorkspace.cover') }}</span><input type="file" accept="image/png,image/jpeg" :aria-label="t('audiobookWorkspace.cover')" class="text-xs" @change="onCover"></label>
         <p class="text-xs text-text-dim">{{ t('audiobookReview.savedAuditionHint') }}</p>
-        <CastAuditionPanel :book-id="selectedBook.id" :active="active && !creating" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :revision="Math.max(1, ...jobs.map(job => job.revision ?? 1))" />
+        <CastAuditionPanel :book-id="selectedBook.id" :cloud="selectedHasCloud" :active="active && !creating" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :revision="Math.max(1, ...jobs.map(job => job.revision ?? 1))" />
         <details class="rounded-lg border border-border p-3">
           <summary class="cursor-pointer text-sm font-medium text-text focus-visible:outline-2 focus-visible:outline-accent1">{{ t('audiobookReview.bookInputs') }}</summary>
           <div class="mt-3 space-y-3">
@@ -795,7 +838,7 @@ onBeforeUnmount(() => {
               </details>
               <p v-if="chapterHint(job)" class="mt-2 text-xs text-text-dim">{{ chapterHint(job) }}</p>
               <p v-if="job.total_sections" class="mt-2 text-xs text-text-dim">{{ t('audiobookWorkspace.sections', { done: job.completed_sections ?? 0, total: job.total_sections }) }}</p>
-              <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>
+              <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying || selectedHasCloud&&(!controlCloudApproval||cloudAction!=='regenerate'||cloudChapter!==job.chapter_index)" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>
               <audio v-if="job.status === 'done'" ref="audioPlayers" class="mt-3 h-9 w-full" controls preload="none" :aria-label="t('audiobookWorkspace.playChapter', { title: job.chapter_title || t('audiobookWorkspace.chapterName', { number: job.chapter_index + 1 }) })" :src="audiobooksApi.audiobookChapterAudioUrl(selectedBook.id, job.chapter_index) + '?revision=' + (job.revision ?? 1)" @timeupdate="updateChapterTime(job.id, $event)" />
               <AudiobookPassages v-if="job.status === 'done'" :key="selectedBook.id + job.id" :book-id="selectedBook.id" :chapter-index="job.chapter_index" :chapter-revision="job.revision" :active="active && !creating" :playback-seconds="chapterPlayback[job.id] ?? 0" @updated="loadJobs(selectedBook.id)" />
             </li>

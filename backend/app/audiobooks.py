@@ -27,11 +27,14 @@ from .audiobook_contracts import (
     CastMember,
     CreateAudiobookRequest,
     PronunciationEntry,
+    AudiobookCloudControlRequest,
     EbookDraft,
 )
 from .config import DATA_DIR
 from .atomic_files import document_lock
 from .contracts import JobStatus
+
+_MODEL_IDS: TypeAdapter[list[str]] = TypeAdapter(list[str])
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _LOCK = threading.RLock()
@@ -116,17 +119,17 @@ def _book_columns(connection: sqlite3.Connection) -> set[str]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 7:
+    if version == 8:
         return
-    if version not in (0, 1, 2, 3, 4, 5, 6):
+    if version not in (0, 1, 2, 3, 4, 5, 6, 7):
         raise AudiobookError("audiobook_storage_unavailable", 503)
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 7:
+        if version == 8:
             connection.commit()
             return
-        if version not in (0, 1, 2, 3, 4, 5, 6):
+        if version not in (0, 1, 2, 3, 4, 5, 6, 7):
             raise AudiobookError("audiobook_storage_unavailable", 503)
         if version == 0:
             connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_books (
@@ -210,7 +213,9 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             job_id TEXT NOT NULL,section_index INTEGER NOT NULL,source_sha256 TEXT NOT NULL,
             profile_id TEXT NOT NULL,speaker_name TEXT NOT NULL,text TEXT NOT NULL,
             PRIMARY KEY(job_id,section_index), FOREIGN KEY(job_id) REFERENCES audiobook_jobs(id) ON DELETE CASCADE)""")
-        connection.execute("PRAGMA user_version = 7")
+        if "cloud_models_json" not in _book_columns(connection):
+            connection.execute("ALTER TABLE audiobook_books ADD COLUMN cloud_models_json TEXT NOT NULL DEFAULT '[]'")
+        connection.execute("PRAGMA user_version = 8")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -254,6 +259,7 @@ def _row_to_book(row: sqlite3.Row) -> AudiobookBook:
         export_note=str(row["export_note"] or ""),
         language=str(row["language"] or ""),
         cast=_cast_members(row["cast_json"]),
+        cloud_models=_MODEL_IDS.validate_json(str(row["cloud_models_json"])),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -266,11 +272,7 @@ def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
     override = str(row["language"] or "")
     language = override or (str(book["language"] or "") if book is not None else "")
     status = _JOB_STATUS.validate_python(row["status"])
-    from .speech_references import normalize_language
-    try:
-        language_ready = bool(language) and str(row["render_language"]) == normalize_language(language)
-    except voice_profiles.VoiceProfileError:
-        language_ready = False
+    language_ready = bool(language) and str(row["render_language"]) == language.lower().split("-",1)[0]
     return AudiobookJob(
         id=str(row["id"]),
         book_id=str(row["book_id"]),
@@ -341,8 +343,6 @@ def _update_job(
 
 def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = None,
                 source_import_revision: int | None = None) -> AudiobookCreateResponse:
-    from .speech_references import normalize_language
-    normalize_language(body.language)
     title = body.title.strip()
     if not title:
         raise AudiobookError("title_required")
@@ -352,6 +352,18 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
         raise AudiobookError("too_many_chapters")
 
     profile = voice_profiles.get_profile(body.profile_id)
+    if source_import_id is not None:
+        with _LOCK,closing(_connect()) as source_connection:
+            _ensure_schema(source_connection)
+            source = source_connection.execute("SELECT payload FROM ebook_drafts WHERE id=?",(source_import_id,)).fetchone()
+            if source is None or source_import_revision is None or EbookDraft.model_validate_json(str(source[0])).revision != source_import_revision:
+                raise AudiobookError("ebook_draft_conflict",409)
+    from .speech_references import normalize_language
+    if profile.renderer == "openrouter" and profile.cloud is not None:
+        from .cloud_speech import normalize_cloud_language
+        normalize_cloud_language(profile.cloud,body.language)
+    else:
+        normalize_language(body.language)
     if not profile.consent_confirmed:
         raise AudiobookError("consent_required", 403)
     from .audiobook_pronounce import PronunciationError, ensure_unique
@@ -365,10 +377,12 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
     spoken_map = json.dumps([entry.model_dump() for entry in body.pronunciations], ensure_ascii=False)
     cast_map = json.dumps([member.model_dump() for member in body.cast], ensure_ascii=False)
 
+    from .audiobook_cloud import prepare_creation, seed_sections
+    cloud_prepared = prepare_creation(body)
     book_id = uuid.uuid4().hex
     stamp = _now()
     jobs: list[AudiobookJob] = []
-    detail = "Queued for serial GPT-SoVITS chapter synthesis."
+    detail = "Queued for serial speech synthesis (local and/or OpenRouter)." if cloud_prepared else "Queued for serial GPT-SoVITS chapter synthesis."
 
     with _LOCK, closing(_connect()) as connection:
         _ensure_schema(connection)
@@ -389,6 +403,8 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
             """,
             (book_id, title[:200], body.profile_id, len(body.chapters), stamp, stamp, source_import_id, author, spoken_map, cast_map),
         )
+        if cloud_prepared:
+            connection.execute("UPDATE audiobook_books SET cloud_models_json=? WHERE id=?", (json.dumps(sorted({snapshot.cloud.model for _, planned in cloud_prepared for _, snapshot, _ in planned if snapshot.cloud is not None})), book_id))
         if source_import_id is not None:
             connection.execute("UPDATE audiobook_books SET source_snapshot_json=? WHERE id=?", (source_draft.model_dump_json(), book_id))
         for index, chapter in enumerate(body.chapters):
@@ -410,6 +426,8 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
                 """,
                 (job_id, book_id, index, chapter_title, text[:MAX_CHAPTER_CHARS], detail, stamp, stamp),
             )
+            if cloud_prepared:
+                seed_sections(connection, job_id, cloud_prepared[index][1])
             jobs.append(
                 AudiobookJob(
                     id=job_id,
@@ -531,8 +549,10 @@ def chapter_audio_path(book_id: str, chapter_index: int) -> Path:
     return resolved
 
 
-def retry_failed(book_id: str) -> AudiobookBook:
+def retry_failed(book_id: str, cloud_control: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     """Retry failed chapters or an export, retaining completed section audio."""
+    from .audiobook_cloud import approve_control
+    approve_control(book_id,cloud_control or AudiobookCloudControlRequest(action="retry"))
     if not _ID.fullmatch(book_id):
         raise AudiobookError("invalid_book_id", 404)
     with _LOCK, closing(_connect()) as connection:
@@ -741,15 +761,20 @@ def set_pronunciations(book_id: str, entries: list[PronunciationEntry]) -> Audio
     return get_book(book_id)
 
 
-def regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
+def regenerate_chapter(book_id: str, chapter_index: int, cloud_control: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     with publication_lock(book_id):
-        return _regenerate_chapter(book_id, chapter_index)
+        return _regenerate_chapter(book_id, chapter_index, cloud_control)
 
 
-def _regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
+def _regenerate_chapter(book_id: str, chapter_index: int, cloud_control: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     """Re-queue one chapter, including a chapter that already succeeded."""
     if not _ID.fullmatch(book_id) or chapter_index < 0:
         raise AudiobookError("chapter_not_found", 404)
+    from .audiobook_cloud import control_snapshots, seed_sections, record_models
+    from .cloud_speech import approve_snapshots
+    control = cloud_control or AudiobookCloudControlRequest(action="regenerate",chapter_index=chapter_index)
+    captured = control_snapshots(book_id,control)
+    authorization = approve_snapshots(captured,control.cloud_approval)
     with _LOCK, closing(_connect()) as connection:
         _ensure_schema(connection)
         connection.execute("BEGIN IMMEDIATE")
@@ -771,6 +796,12 @@ def _regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
             raise AudiobookError("chapter_not_found", 404)
         stamp = _now()
         connection.execute("DELETE FROM audiobook_sections WHERE job_id = ?", (job["id"],))
+        if authorization is not None:
+            from .audiobook_narration import _planned
+            planned = _planned(book_id,next(item.chapter_text for item in list_jobs(book_id=book_id) if item.chapter_index==chapter_index),str(job["id"]))
+            sections = [(text,snapshot.model_copy(update={"cloud_authorization_id":authorization}),speaker) for (text,snapshot),(_,_,speaker) in zip(captured,planned,strict=True)]
+            seed_sections(connection,str(job["id"]),sections)
+            record_models(connection,book_id,captured)
         connection.execute(
             """
             UPDATE audiobook_jobs
@@ -1020,8 +1051,11 @@ def cancel_book(book_id: str) -> AudiobookBook:
     return audiobook_narration.cancel_book(book_id)
 
 
-async def resume_book(book_id: str) -> AudiobookBook:
+async def resume_book(book_id: str, cloud_control: AudiobookCloudControlRequest | None = None) -> AudiobookBook:
     from . import audiobook_narration
+    await wait_for_book(book_id)
+    from .audiobook_cloud import approve_control
+    approve_control(book_id,cloud_control or AudiobookCloudControlRequest(action="resume"))
     return await audiobook_narration.resume_book(book_id)
 
 

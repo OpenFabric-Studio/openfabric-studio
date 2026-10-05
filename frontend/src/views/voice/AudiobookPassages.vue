@@ -8,6 +8,9 @@ import type { AudiobookPassagesResponse, AudiobookRepair, AudiobookPassage } fro
 import { createPollingLoop } from '../../composables/polling'
 import PassageAsrReview from './PassageAsrReview.vue'
 import PauseAnalysisSettings from './PauseAnalysisSettings.vue'
+import CloudSpeechCost from './CloudSpeechCost.vue'
+import {quoteRepair} from '../../api/cloudSpeech'
+import type { CloudSpeechApproval } from '../../api/contracts'
 const props = withDefaults(defineProps<{ bookId: string; chapterIndex: number; active?: boolean; playbackSeconds?: number; chapterRevision?: number }>(), { active: true, playbackSeconds: 0 })
 const emit = defineEmits<{ updated: [] }>()
 const { t } = useI18n()
@@ -17,6 +20,8 @@ const seconds = ref(0), text = ref(''), loading = ref(false), busy = ref(false),
 const repair = ref<AudiobookRepair | null>(null), mediaRoot = ref<HTMLElement | null>(null)
 type ReelClip = { passage_id: string; start: number; end: number; prompt: string; caption: string }
 const reelClips = ref<ReelClip[]>([]), reelName = ref(''), reelId = ref(''), reelBusy = ref(false)
+const cloudApproval=ref<CloudSpeechApproval|null>(null),costNonce=ref(0)
+function quoteTake(signal:AbortSignal){return quoteRepair(props.bookId,props.chapterIndex,selectedId.value,{revision:data.value?.revision??0,text:text.value.trim()},signal)}
 const selected = computed(() => data.value?.passages.find(passage => passage.id === selectedId.value))
 const running = computed(() => repair.value?.status === 'queued' || repair.value?.status === 'running')
 let alive = true, generation = 0
@@ -33,6 +38,7 @@ const polling = createPollingLoop(async ({ signal, isCurrent }) => {
   try {
     const result = await api.getRepair(candidate.id, signal)
     if (!alive || token !== generation || !isCurrent() || result.id !== candidate.id) return false
+    cloudApproval.value=null
     repair.value = result
     if (result.status === 'failed') error.value = t('audiobookReview.repairFailed')
     return result.status === 'queued' || result.status === 'running'
@@ -84,12 +90,15 @@ async function freshTake() {
   if (!passage || !revision || passage.status !== 'done' || busy.value || accepting.value || running.value || restoring.value || !text.value.trim()) return
   const action = context(); busy.value = true; error.value = ''; notice.value = ''; repair.value = null; pause()
   try {
-    const result = await api.createRepair(props.bookId, props.chapterIndex, passage.id, { revision, text: text.value.trim() }, action.signal)
+    if(passage.renderer==='openrouter'&&!cloudApproval.value){error.value=t('cloudSpeech.approvalRequired');return}
+    const approval=cloudApproval.value
+    if(passage.renderer==='openrouter')costNonce.value++
+    const result = await api.createRepair(props.bookId, props.chapterIndex, passage.id, { revision, text: text.value.trim(),...(approval?{cloud_approval:approval}:{}) }, action.signal)
     if (!action.current() || result.book_id !== props.bookId || result.passage_id !== passage.id || result.revision !== revision) return
     repair.value = result
     if (result.status === 'failed') error.value = t('audiobookReview.repairFailed')
     if (running.value && props.active && expanded.value) polling.start(false)
-  } catch (err) { if (action.current()) error.value = t(err instanceof ApiError && err.status === 409 ? 'audiobookReview.stale' : 'audiobookReview.repairFailed') }
+  } catch (err) { if (action.current()) error.value = t(err instanceof ApiError && err.message==='cloud_speech_submission_unknown'?'cloudSpeech.unknown':err instanceof ApiError && err.message.startsWith('cloud_')?'cloudSpeech.changed':err instanceof ApiError && err.status === 409 ? 'audiobookReview.stale' : 'audiobookReview.repairFailed') }
   finally { action.finish(); if (action.current()) busy.value = false }
 }
 async function accept() {
@@ -162,7 +171,9 @@ onBeforeUnmount(() => { alive = false; generation++; for (const request of contr
           <p class="text-xs text-text-dim">{{ t('audiobookReview.kept') }}</p>
           <div><p class="text-xs text-text-dim">{{ t('audiobookReview.original') }}</p><audio v-if="api.workflowAudioUrl(selected.audio_url, data?.revision)" controls preload="none" :aria-label="t('audiobookReview.original')" :src="api.workflowAudioUrl(selected.audio_url, data?.revision)" class="mt-2 h-10 w-full" /></div>
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.text') }}</span><textarea v-model="text" maxlength="1200" rows="4" :disabled="busy || running || accepting" :aria-label="t('audiobookReview.text')" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
-          <button type="button" class="min-h-11 rounded-lg border border-accent1/50 px-3 text-sm text-accent1 disabled:opacity-50" :disabled="busy || running || accepting || restoring || !text.trim()" @click="freshTake">{{ busy || running ? t('audiobookReview.working') : t('audiobookReview.repair') }}</button>
+          <CloudSpeechCost :enabled="selected.renderer==='openrouter'" :input-key="JSON.stringify([bookId,chapterIndex,data?.revision,selectedId,text,costNonce])" :load="quoteTake" :active="active&&expanded" :disabled="busy||running||accepting||!text.trim()" @approval="value=>cloudApproval=value" />
+          <p v-if="selected.cloud_provenance" class="text-xs text-text-dim">{{t('cloudSpeech.provenance',{model:selected.cloud_provenance.model,receipt:selected.cloud_provenance.receipt_id})}}</p>
+          <button type="button" class="min-h-11 rounded-lg border border-accent1/50 px-3 text-sm text-accent1 disabled:opacity-50" :disabled="busy || running || accepting || restoring || !text.trim() || selected.renderer==='openrouter'&&!cloudApproval" @click="freshTake">{{ busy || running ? t('audiobookReview.working') : t('audiobookReview.repair') }}</button>
           <div v-if="repair" class="space-y-2 rounded-lg border border-accent1/30 bg-accent1/5 p-3">
             <p class="text-sm font-medium text-text">{{ t('audiobookReview.candidate') }}</p><p class="text-sm text-text-dim">{{ repair.text }}</p>
             <p v-if="repair.mock" class="text-xs text-status-queued">{{ t('audiobookReview.auditionMock') }}</p>

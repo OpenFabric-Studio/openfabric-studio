@@ -112,6 +112,15 @@ def _contained(path: Path, root: Path) -> Path:
 
 
 def concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled: bool = True) -> Path:
+    from .cloud_speech import compatible_pcm
+    root = audiobooks.book_dir(identifier)
+    for path in paths:
+        _contained(path,root)
+    with compatible_pcm(paths,target.parent,cloud_workflow=bool(audiobooks.get_book(identifier).cloud_models)) as prepared:
+        return _concat_wavs(identifier,prepared,target,controlled=controlled)
+
+
+def _concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled: bool = True) -> Path:
     """Stream matching PCM sections without an unmanaged ffmpeg subprocess."""
     if not paths:
         raise audiobooks.AudiobookError("audio_missing")
@@ -204,7 +213,7 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
             if pending:
                 book_id = str(connection.execute("SELECT book_id FROM audiobook_jobs WHERE id=?", (chapter.id,)).fetchone()[0])
                 from .speech_references import normalize_language
-                language = normalize_language(chapter.language or audiobooks.get_book(book_id).language or "en")
+                language = (chapter.language or audiobooks.get_book(book_id).language or "en").lower().split("-", 1)[0]
                 reference_root = _contained(audiobooks.book_dir(book_id) / "references", audiobooks.book_dir(book_id))
                 snapshots = {voice: capture(voice, language, reference_root, speech_clone.known_engine_identity())
                     for voice in dict.fromkeys(section.profile_id or narrator_id for section in pending)}
@@ -218,7 +227,7 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
             return sections
         book_id = str(connection.execute("SELECT book_id FROM audiobook_jobs WHERE id = ?", (chapter.id,)).fetchone()[0])
         from .speech_references import normalize_language
-        language = normalize_language(chapter.language or audiobooks.get_book(book_id).language or "en")
+        language = (chapter.language or audiobooks.get_book(book_id).language or "en").lower().split("-", 1)[0]
         reference_root = _contained(audiobooks.book_dir(book_id) / "references", audiobooks.book_dir(book_id))
         snapshots = {voice_id: capture(voice_id, language, reference_root, speech_clone.known_engine_identity()) for voice_id in dict.fromkeys(voice for _, voice, _ in planned)}
         for index, (text, profile_id, speaker) in enumerate(planned):
@@ -273,7 +282,7 @@ def _synthesize(identifier: str, profile_id: str, text: str, target: Path, snaps
             text_language=snapshot.text_language if snapshot else "en", snapshot=snapshot)
         if outcome.status not in {"completed", "mock_completed"} or outcome.output_path is None:
             _LOG.warning("Audiobook section failed: %s", outcome.status)
-            code = outcome.status if outcome.status in {"engine_not_installed", "api_unavailable"} else "setup_busy" if outcome.detail == "setup_busy" else "chapter_synthesis_failed"
+            code = outcome.status if outcome.status in {"engine_not_installed", "api_unavailable"} else outcome.detail if outcome.detail.startswith("cloud_") or outcome.detail.startswith("openrouter_") or outcome.detail == "setup_busy" else "chapter_synthesis_failed"
             raise audiobooks.AudiobookError(code)
 
 
@@ -339,6 +348,9 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
                     if handle.getnframes() <= 0:
                         raise audiobooks.AudiobookError("invalid_speech_audio")
                 temporary.replace(target)
+                cloud_note = temporary.with_suffix(".cloud.json")
+                if cloud_note.is_file() and not cloud_note.is_symlink():
+                    cloud_note.replace(target.with_suffix(".cloud.json"))
                 store(voice_id, section.section_text, target, render_identity=identity)
             finally:
                 temporary.unlink(missing_ok=True)

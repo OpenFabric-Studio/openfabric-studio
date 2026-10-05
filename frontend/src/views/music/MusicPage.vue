@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { useOrchestratorStore } from '../../stores/orchestrator'
 import { MODEL_LABELS, MODEL_ROUTES, useModelSwitch } from '../../composables/useModelSwitch'
 import { ENGINE_STATUS_CLASSES, ENGINE_STATUS_KEYS, type DisplayEngineStatus } from '../../components/shared/enginePresentation'
@@ -40,6 +40,7 @@ async function select(id: ModelId) {
             <AppIcon :name="id" />
             <span><span class="block text-sm font-medium">{{ MODEL_LABELS[id] }}</span><span class="mt-1 flex items-center gap-1.5 text-xs text-text-dim"><span aria-hidden="true" class="h-1.5 w-1.5 rounded-full" :class="ENGINE_STATUS_CLASSES[statusOf(id)]" />{{ t(ENGINE_STATUS_KEYS[statusOf(id)]) }}</span></span>
           </button>
+          <RouterLink to="/music/openrouter" data-model="openrouter" :aria-pressed="route.name === 'openrouter-music'" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent2" :class="route.name === 'openrouter-music' ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim'"><AppIcon name="yue2" /><span>{{ t('cloudMusic.title') }}<span class="mt-1 block text-xs text-text-dim">OpenRouter · {{ t('cloudMusic.experimental') }}</span></span></RouterLink>
         </div>
       </div>
       <p id="music-switch-hint" class="text-xs leading-relaxed text-text-dim">{{ t('musicWorkspace.switchHint') }}</p>

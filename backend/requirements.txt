@@ -6,3 +6,5 @@ python-multipart>=0.0.32
 python-dotenv>=1.2.3
 numpy>=2.0,<3
 Pillow==12.3.0
+
+keyring==25.7.0

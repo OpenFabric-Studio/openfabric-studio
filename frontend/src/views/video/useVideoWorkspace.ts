@@ -14,6 +14,7 @@ export interface VideoDraft {
   character_lock: boolean
   seed: number
   settings: VideoProjectSettings
+  provider_config?: VideoProject['provider_config']
   export_settings: VideoExportSettings
   shots: VideoShotDraft[]
   markers: VideoMarker[]
@@ -22,12 +23,13 @@ export interface VideoDraft {
 
 function fromProject(project: VideoProject): VideoDraft {
   return { name: project.name, mode: project.mode ?? 'generated', direction: project.direction ?? '', character_lock: project.character_lock ?? false, seed: project.seed ?? 42,
+    provider_config: project.provider_config ?? { provider: 'local' },
     settings: { engine_pack: 'ltx23', width: 704, height: 448, stage1_steps: 30, stage2_steps: 3, cfg_scale: 3, ...project.settings },
     export_settings: { aspect: 'landscape', quality: 'standard', include_overlays: true, attach_speech: false, ...project.export_settings },
     shots: (project.shots ?? []).map(toShotDraft), markers: (project.markers ?? []).map((item) => ({ ...item })), overlays: (project.overlays ?? []).map((item) => ({ ...item })) }
 }
 function snapshot(draft: VideoDraft, revision: number): UpdateVideoProjectRequest {
-  return { revision, name: draft.name, mode: draft.mode, direction: draft.direction, character_lock: draft.character_lock, seed: draft.seed, settings: { ...draft.settings }, export_settings: { ...draft.export_settings },
+  return { revision, name: draft.name, mode: draft.mode, direction: draft.direction, character_lock: draft.character_lock, seed: draft.seed, provider_config: draft.provider_config, settings: { ...draft.settings }, export_settings: { ...draft.export_settings },
     shots: draft.shots.map((shot) => ({ ...shot })), markers: draft.markers.map((marker) => ({ ...marker })), overlays: draft.overlays.map((overlay) => ({ ...overlay })) }
 }
 const draftKey = (id: string) => `openfabric:video-draft:${id}`
@@ -41,6 +43,7 @@ function restoreDraft(project: VideoProject): VideoDraft | null {
     const saved = fromProject(project)
     return { name: body.name ?? saved.name, mode: body.mode ?? saved.mode,
       direction: body.direction ?? saved.direction, character_lock: body.character_lock ?? saved.character_lock, seed: body.seed ?? saved.seed,
+      provider_config: body.provider_config ?? saved.provider_config,
       settings: { ...saved.settings, ...body.settings }, export_settings: { ...saved.export_settings, ...body.export_settings },
       shots: body.shots ?? saved.shots, markers: body.markers ?? saved.markers, overlays: body.overlays ?? saved.overlays }
   } catch { return null }
@@ -72,7 +75,7 @@ export function useVideoWorkspace() {
   const savedShot = computed(() => project.value?.shots?.find((item) => item.id === selectedShotId.value))
   const active = computed(() => api.isVideoActive(project.value?.job?.status))
   const readOnly = computed(() => acting.value || active.value)
-  const problem = computed(() => draft.value?.shots.map((shot) => shotProblem(draft.value?.shots ?? [], shot.id, project.value?.preset === 'reel' ? 15 : (project.value?.duration_sec ?? 0))).find(Boolean) ?? '')
+  const problem = computed(() => draft.value?.shots.map((shot) => shotProblem(draft.value?.shots ?? [], shot.id, project.value?.preset === 'reel' ? 15 : (project.value?.duration_sec ?? 0), draft.value?.provider_config?.provider === 'openrouter')).find(Boolean) ?? '')
   const coverageEnd = computed(() => Math.max(0, ...(draft.value?.shots ?? []).map((shot) => shot.start_sec + (shot.seconds ?? 4))))
   const approvalCount = computed(() => project.value?.shots?.filter((shot) => shot.approved_variant_id).length ?? 0)
   let alive = true
@@ -292,6 +295,12 @@ export function useVideoWorkspace() {
   function preview(ids = [selectedShotId.value]) {
     return action((row, signal) => api.previewVideoProject(row.id, { revision: row.revision, shot_ids: ids.filter(Boolean), variants_per_shot: variantsPerShot.value, reuse_completed: false }, signal), 'preview')
   }
+  function cloudSubmit(projectId: string, body: api.VideoCloudSubmitRequest) {
+    if (dirty.value || project.value?.id !== projectId || project.value.revision !== body.revision || selectedShotId.value !== body.shot_id) { error.value = 'quote_mismatch'; return }
+    return action((row, signal) => api.submitCloudVideo(row.id, body, signal), 'preview', false)
+  }
+  function detachAdapter() { return action((row, signal) => api.clearCharacterAdapter(row.id, { revision: row.revision }, signal)) }
+  function cloudResume(variantId: string) { return action((row, signal) => api.resumeCloudVideo(row.id, { revision: row.revision, variant_id: variantId }, signal), 'preview', false) }
   function render() { return action((row, signal) => api.renderVideoProject(row.id, { revision: row.revision, reuse_completed: true }, signal), 'export') }
   function analyze() { return action((row, signal) => api.analyzeVideoProject(row.id, { revision: row.revision }, signal), 'storyboard') }
   function approve(shotId: string, variantId: string) { return action((row, signal) => api.approveVideoVariant(row.id, shotId, { revision: row.revision, variant_id: variantId }, signal)) }
@@ -387,5 +396,5 @@ export function useVideoWorkspace() {
   onUnmounted(() => { alive = false; generation++; lifetime.abort(); actionController?.abort(); loop.stop(); if (clock !== undefined) clearInterval(clock); if (saveTimer !== undefined) clearTimeout(saveTimer) })
   return { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
     selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-    save, selectProject, reloadProject, removeProject, createProject, action, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot }
+    save, selectProject, reloadProject, removeProject, createProject, action, cloudSubmit, cloudResume, detachAdapter, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot }
 }

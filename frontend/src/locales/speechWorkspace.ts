@@ -7,7 +7,7 @@ export const speechWorkspaceEn = {
   createIntro: 'Save a reference recording with permission from its speaker.',
   notesHelp: 'Optional recording notes. Enter the spoken words separately in Reference transcript.',
   synthesis: 'Speech synthesis',
-  synthesisIntro: 'Generate a short speech trial using this profile’s reference recording.',
+  synthesisIntro: 'Generate a short speech trial with this voice profile.',
   selectOrCreate: 'Select a speech profile or create one to begin.',
   consentRequired: 'Consent is required before this profile can generate speech.',
   createPending: 'Saving speech profile…',

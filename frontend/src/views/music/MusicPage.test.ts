@@ -12,6 +12,7 @@ import type { ModelId, OrchestratorStatus } from '../../types'
 vi.mock('../../api/orchestrator', () => ({ getStatus: vi.fn(), switchModel: vi.fn(), stopActive: vi.fn() }))
 vi.mock('../ace-step/AceStepPage.vue', () => ({ default: defineComponent({ render: () => h('h2', 'ACE generator') }) }))
 vi.mock('../yue2/Yue2Page.vue', () => ({ default: defineComponent({ render: () => h('h2', 'YuE generator') }) }))
+vi.mock('./CloudMusicPanel.vue', () => ({ default: defineComponent({ render: () => h('h2', 'Cloud generator') }) }))
 vi.mock('../settings/SettingsPage.vue', () => ({ default: defineComponent({ render: () => h('h1', 'Settings') }) }))
 
 let app: App | undefined
@@ -140,4 +141,14 @@ it.each([['/ace-step', 'ace-step'], ['/yue2', 'yue2']])('preserves a legacy %s b
   expect(router.currentRoute.value.query.reference).toBe('retained')
   expect(router.currentRoute.value.hash).toBe('#mix')
   expect(api.switchModel).not.toHaveBeenCalled()
+})
+
+it('opens cloud music without switching or stopping a running local model', async () => {
+  const {node,router}=await mount('/music/ace-step','ace_step')
+  const cloud=node.querySelector('a[data-model="openrouter"]')
+  if (!(cloud instanceof HTMLAnchorElement)) throw new Error('Missing cloud selector')
+  cloud.click(); await settle()
+  expect(router.currentRoute.value.name).toBe('openrouter-music')
+  expect(node.textContent).toContain('Cloud generator')
+  expect(api.switchModel).not.toHaveBeenCalled(); expect(api.stopActive).not.toHaveBeenCalled()
 })

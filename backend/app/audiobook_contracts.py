@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from .contracts import Contract, JobStatus
+from .voice_profile_contracts import CloudSpeechApproval, CloudSpeechProvenance
 
 AudiobookBookStatus = Literal["draft", "queued", "running", "done", "failed", "paused", "cancelled"]
 
@@ -57,6 +58,7 @@ def _language_code(value: str) -> str:
 
 
 class CreateAudiobookRequest(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
     title: str = Field(min_length=1, max_length=200)
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     chapters: list[AudiobookChapterInput] = Field(min_length=1, max_length=100)
@@ -91,6 +93,7 @@ class AudiobookJob(Contract):
 
 
 class AudiobookBook(Contract):
+    cloud_models: list[str] = Field(default_factory=list, max_length=17)
     id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
     title: str = Field(min_length=1, max_length=200)
     profile_id: str = Field(min_length=32, max_length=32, pattern=r"^[0-9a-f]{32}$")
@@ -231,6 +234,7 @@ class SetChapterTextRequest(Contract):
 
 
 class CreateAudiobookFromDraftRequest(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
     profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     revision: int = Field(ge=1)
     cast: list[CastMember] = Field(default_factory=list, max_length=16)
@@ -244,6 +248,8 @@ class CreateAudiobookFromDraftRequest(Contract):
 
 
 class AudiobookPassage(Contract):
+    renderer: Literal["local","openrouter"] = "local"
+    cloud_provenance: CloudSpeechProvenance | None = None
     id: str = Field(pattern=r"^[0-9a-f]{32}$")
     section_index: int = Field(ge=0)
     text: str = Field(min_length=1, max_length=1200)
@@ -265,6 +271,7 @@ class AudiobookPassagesResponse(Contract):
 
 
 class AudiobookAuditionOptions(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
     chapter_index: int = Field(default=0, ge=0, le=99)
     mode: Literal["cast", "scene"] = "cast"
     max_chars: int = Field(default=600, ge=40, le=1200)
@@ -277,6 +284,8 @@ class CreateAudiobookAuditionRequest(CreateAudiobookRequest):
 
 
 class AudiobookAuditionClip(Contract):
+    renderer: Literal["local","openrouter"] = "local"
+    cloud_provenance: CloudSpeechProvenance | None = None
     index: int = Field(ge=0)
     speaker: str = Field(min_length=1, max_length=40)
     profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
@@ -303,6 +312,7 @@ class AudiobookAudition(Contract):
 
 
 class CreateAudiobookRepairRequest(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
     revision: int = Field(ge=1)
     text: str | None = Field(default=None, min_length=1, max_length=1200)
 
@@ -312,6 +322,8 @@ class AcceptAudiobookRepairRequest(Contract):
 
 
 class AudiobookRepair(Contract):
+    renderer: Literal["local","openrouter"] = "local"
+    cloud_provenance: CloudSpeechProvenance | None = None
     id: str = Field(pattern=r"^[0-9a-f]{32}$")
     book_id: str = Field(pattern=r"^[0-9a-f]{32}$")
     chapter_index: int = Field(ge=0)
@@ -370,3 +382,11 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     AudiobookAuditionsResponse,
     AudiobookRepairsResponse,
 ]
+
+
+class AudiobookCloudControlRequest(Contract):
+    cloud_approval: CloudSpeechApproval | None = None
+    action: Literal["resume", "retry", "regenerate"] = "resume"
+    chapter_index: int | None = Field(default=None, ge=0, le=99)
+
+AUDIOBOOK_CLIENT_MODELS.append(AudiobookCloudControlRequest)

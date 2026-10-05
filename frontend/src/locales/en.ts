@@ -1,3 +1,7 @@
+import { videoCloudEn, videoCloudErrorsEn } from './videoCloud'
+import { cloudSpeechEn } from './cloudSpeech'
+import { cloudMusicEn } from './cloudMusic'
+import { cloudProvidersEn } from './cloudProviders'
 import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
@@ -20,6 +24,10 @@ import { trackFavoritesEn } from './trackFavorites'
 import { upstreamLibraryEn } from './upstreamLibrary'
 import { upstreamWorkspaceEn } from './upstreamWorkspace'
 export default {
+  videoCloud: videoCloudEn,
+  cloudSpeech: cloudSpeechEn,
+  cloudMusic: cloudMusicEn,
+  cloudProviders: cloudProvidersEn,
   appNavigation: appNavigationEn,
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,
@@ -420,6 +428,7 @@ voiceProfiles: {
     delete: 'Delete',
     confirmDelete: 'Delete this video?',
     err: {
+      ...videoCloudErrorsEn,
       ...videoErrorsEn,
       ...videoDialogueErrorsEn,
       busy: 'A video is already being created.',

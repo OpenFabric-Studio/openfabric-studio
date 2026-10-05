@@ -22,11 +22,13 @@ from app.reference_contracts import REFERENCE_CLIENT_MODELS
 from app.module_contracts import MODULE_CLIENT_MODELS
 from app.optional_engine_contracts import OPTIONAL_ENGINE_CLIENT_MODELS
 from app.audiobook_review_contracts import AUDIOBOOK_REVIEW_CLIENT_MODELS
+from app.openrouter_contracts import OPENROUTER_CLIENT_MODELS
+from app.cloud_music_contracts import CLOUD_MUSIC_CLIENT_MODELS
 
-ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS]
+ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS]
 
 DEST = Path(__file__).resolve().parents[2] / 'frontend/src/api/generated.ts'
-SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}
+SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'oneOf', 'discriminator', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}
 
 
 def object_of(value: JsonValue) -> JsonObject:
@@ -51,10 +53,30 @@ def type_of(schema: JsonObject) -> str:
     unsupported = schema.keys() - SUPPORTED
     if unsupported:
         raise ValueError(f'Unsupported schema: {unsupported}')
+    if 'discriminator' in schema:
+        if 'oneOf' not in schema:
+            raise ValueError('Discriminator requires oneOf')
+        discriminator = object_of(schema['discriminator'])
+        if discriminator.keys() - {'propertyName', 'mapping'}:
+            raise ValueError('Unsupported discriminator metadata')
+        string_of(discriminator['propertyName'])
+        for reference in object_of(discriminator.get('mapping', {})).values():
+            string_of(reference)
     if '$ref' in schema:
         return string_of(schema['$ref']).rsplit('/', 1)[1]
     if 'anyOf' in schema:
         return '(' + ' | '.join(type_of(object_of(s)) for s in list_of(schema['anyOf'])) + ')'
+    if 'oneOf' in schema:
+        union = '(' + ' | '.join(type_of(object_of(s)) for s in list_of(schema['oneOf'])) + ')'
+        if 'discriminator' in schema:
+            discriminator = object_of(schema['discriminator'])
+            # Tagged-union parsing requires a tag even when a member model
+            # defaults it. Preserve that parent-level constraint in TS too.
+            name = json.dumps(string_of(discriminator['propertyName']))
+            mapping = object_of(discriminator.get('mapping', {}))
+            tags = ' | '.join(json.dumps(tag) for tag in mapping) if mapping else 'string'
+            return f'({union} & {{ {name}: {tags} }})'
+        return union
     if 'enum' in schema:
         return ' | '.join(json.dumps(v) for v in list_of(schema['enum']))
     if 'const' in schema:

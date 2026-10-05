@@ -222,6 +222,8 @@ export type AudiobookAudition = {
 }
 
 export type AudiobookAuditionClip = {
+  "renderer"?: "local" | "openrouter"
+  "cloud_provenance"?: (CloudSpeechProvenance | null)
   "index": number
   "speaker": string
   "profile_id": string
@@ -233,6 +235,7 @@ export type AudiobookAuditionClip = {
 }
 
 export type AudiobookAuditionOptions = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "chapter_index"?: number
   "mode"?: "cast" | "scene"
   "max_chars"?: number
@@ -243,6 +246,7 @@ export type AudiobookAuditionsResponse = {
 }
 
 export type AudiobookBook = {
+  "cloud_models"?: Array<string>
   "id": string
   "title": string
   "profile_id": string
@@ -269,6 +273,12 @@ export type AudiobookBooksResponse = {
 export type AudiobookChapterInput = {
   "title"?: string
   "text": string
+}
+
+export type AudiobookCloudControlRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
+  "action"?: "resume" | "retry" | "regenerate"
+  "chapter_index"?: (number | null)
 }
 
 export type AudiobookCreateResponse = {
@@ -300,6 +310,8 @@ export type AudiobookJobsResponse = {
 }
 
 export type AudiobookPassage = {
+  "renderer"?: "local" | "openrouter"
+  "cloud_provenance"?: (CloudSpeechProvenance | null)
   "id": string
   "section_index": number
   "text": string
@@ -321,6 +333,8 @@ export type AudiobookPassagesResponse = {
 }
 
 export type AudiobookRepair = {
+  "renderer"?: "local" | "openrouter"
+  "cloud_provenance"?: (CloudSpeechProvenance | null)
   "id": string
   "book_id": string
   "chapter_index": number
@@ -403,6 +417,80 @@ export type ChatterboxRequest = {
   "language_id"?: string
 }
 
+export type CloudMusicJob = {
+  "id": string
+  "status": "queued" | "running" | "done" | "failed" | "submission_unknown" | "canceled_tracking" | "interrupted"
+  "created_at": string
+  "title": string
+  "request": OpenRouterMusicRequest
+  "receipt_id": string
+  "receipt"?: (OpenRouterReceipt | null)
+  "track"?: (SavedTrack | null)
+  "output_sha256"?: (string | null)
+  "can_retry_save"?: boolean
+  "error_code"?: string
+}
+
+export type CloudMusicJobs = {
+  "history_incomplete"?: boolean
+  "jobs": Array<CloudMusicJob>
+}
+
+export type CloudMusicSubmitRequest = {
+  "model": string
+  "prompt": string
+  "seed"?: (number | null)
+  "title"?: string
+  "quote_id": string
+  "transfers_confirmed": boolean
+}
+
+export type CloudSpeechApproval = {
+  "quote_id": string
+  "transfers_confirmed": boolean
+}
+
+export type CloudSpeechConfiguration = {
+  "model": string
+  "voice"?: (string | null)
+  "clone_reference"?: boolean
+  "reference_transfer_confirmed"?: boolean
+  "speed"?: 1
+}
+
+export type CloudSpeechProvenance = {
+  "receipt_id": string
+  "profile_id": string
+  "model": string
+  "model_fingerprint": string
+  "voice"?: (string | null)
+  "reference_transferred"?: boolean
+  "generation_id"?: (string | null)
+  "actual_cost_usd"?: (number | null)
+}
+
+export type CloudSpeechQuote = {
+  "id": string
+  "estimated_usd": number
+  "request_count": number
+  "models"?: Array<string>
+  "transfers"?: Array<"text" | "reference_audio" | "reference_transcript">
+  "expires_at": number
+  "ceiling_is_estimate"?: true
+}
+
+export type CloudSpeechTrial = {
+  "id": string
+  "profile_id": string
+  "created_at": string
+  "audio_url": string
+  "provenance": CloudSpeechProvenance
+}
+
+export type CloudSpeechTrialsResponse = {
+  "trials"?: Array<CloudSpeechTrial>
+}
+
 export type CreateAudioExportRequest = {
   "format": "mp3" | "wav" | "flac"
   "settings"?: (AudioEncodingSettings | null)
@@ -413,6 +501,7 @@ export type CreateAudioVersionRequest = {
 }
 
 export type CreateAudiobookAuditionRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "title": string
   "profile_id": string
   "chapters": Array<AudiobookChapterInput>
@@ -426,6 +515,7 @@ export type CreateAudiobookAuditionRequest = {
 }
 
 export type CreateAudiobookFromDraftRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "profile_id": string
   "revision": number
   "cast"?: Array<CastMember>
@@ -434,11 +524,13 @@ export type CreateAudiobookFromDraftRequest = {
 }
 
 export type CreateAudiobookRepairRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "revision": number
   "text"?: (string | null)
 }
 
 export type CreateAudiobookRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "title": string
   "profile_id": string
   "chapters": Array<AudiobookChapterInput>
@@ -446,6 +538,13 @@ export type CreateAudiobookRequest = {
   "pronunciations"?: Array<PronunciationEntry>
   "language"?: string
   "cast"?: Array<CastMember>
+}
+
+export type CreateCloudSpeechVoiceProfileRequest = {
+  "name": string
+  "model": string
+  "voice": string
+  "notes"?: string
 }
 
 export type CreateDialogueReelRequest = {
@@ -702,6 +801,10 @@ export type LocalInputResponse = {
   "path": string
 }
 
+export type LocalVideoProviderConfig = {
+  "provider"?: "local"
+}
+
 export type MidiSourceState = {
   "status": "idle" | "queued" | "running" | "done" | "failed" | "cancelled"
   "error": (string | null)
@@ -844,6 +947,131 @@ export type Mp3EncodingSettings = {
   "channels"?: 1 | 2
 }
 
+export type OpenRouterCatalog = {
+  "models"?: Array<OpenRouterModel>
+  "fingerprint": string
+  "fetched_at": string
+  "expires_at": number
+}
+
+export type OpenRouterConnection = {
+  "connected": boolean
+  "limit_usd"?: (number | null)
+  "limit_remaining_usd"?: (number | null)
+  "usage_usd"?: number
+  "is_free_tier"?: boolean
+  "checked_at": string
+}
+
+export type OpenRouterKeyRequest = {
+  "api_key": string
+  "persist"?: boolean
+}
+
+export type OpenRouterModel = {
+  "id": string
+  "name": string
+  "kind": "video" | "speech" | "music"
+  "fingerprint": string
+  "prices": Array<OpenRouterPrice>
+  "supported_durations"?: Array<number>
+  "supported_resolutions"?: Array<string>
+  "supported_aspect_ratios"?: Array<string>
+  "supported_sizes"?: Array<string>
+  "supported_frame_images"?: Array<"first_frame" | "last_frame">
+  "supports_generate_audio"?: boolean
+  "supports_seed"?: boolean
+  "supports_voice_cloning"?: boolean
+  "supported_voices"?: Array<string>
+  "input_character_limit"?: number
+  "warnings"?: Array<string>
+}
+
+export type OpenRouterMusicRequest = {
+  "model": string
+  "prompt": string
+  "seed"?: (number | null)
+}
+
+export type OpenRouterPrice = {
+  "unit": "second" | "character" | "utf8_byte" | "request"
+  "rate_usd": number
+  "source": "live_catalog" | "published_model_page"
+  "resolution"?: (string | null)
+  "generate_audio"?: (boolean | null)
+}
+
+export type OpenRouterQuote = {
+  "id": string
+  "kind": "video" | "speech" | "music"
+  "model_id": string
+  "model_fingerprint": string
+  "request_fingerprint": string
+  "estimated_usd": number
+  "expires_at": number
+  "ceiling_is_estimate"?: true
+  "transfers": Array<"prompt" | "text" | "reference_image" | "reference_audio">
+  "warnings"?: Array<string>
+}
+
+export type OpenRouterQuoteRequest = {
+  "kind": "video" | "speech" | "music"
+  "model_id": string
+  "text"?: string
+  "duration_seconds"?: (number | null)
+  "size"?: (string | null)
+  "resolution"?: (string | null)
+  "aspect_ratio"?: (string | null)
+  "generate_audio"?: boolean
+  "voice"?: (string | null)
+  "seed"?: (number | null)
+  "reference_bytes"?: number
+  "reference_sha256"?: (string | null)
+  "reference_transcript"?: (string | null)
+}
+
+export type OpenRouterReceipt = {
+  "id": string
+  "owner_id": string
+  "kind": "video" | "speech" | "music"
+  "model_id": string
+  "model_fingerprint": string
+  "request_fingerprint": string
+  "quote_id": string
+  "estimated_usd": number
+  "state": "intent" | "submitting" | "submission_unknown" | "submitted" | "completed" | "failed" | "canceled_tracking"
+  "remote_id"?: (string | null)
+  "actual_cost_usd"?: (number | null)
+  "error_code"?: (string | null)
+  "created_at": string
+  "updated_at": string
+}
+
+export type OpenRouterReceipts = {
+  "history_incomplete"?: boolean
+  "requests": Array<OpenRouterReceipt>
+}
+
+export type OpenRouterSettingsRequest = {
+  "enabled"?: boolean
+  "estimate_limit_usd"?: (number | null)
+}
+
+export type OpenRouterStatus = {
+  "enabled"?: boolean
+  "estimate_limit_usd"?: (number | null)
+  "credential_configured"?: boolean
+  "credential_source"?: "none" | "session" | "environment" | "secure_store"
+  "secure_storage_available"?: boolean
+}
+
+export type OpenRouterVideoProviderConfig = {
+  "provider"?: "openrouter"
+  "model_id": string
+  "size": string
+  "generate_audio"?: false
+}
+
 export type OrchestratorConfigResponse = {
   "yue2_specs": Yue2ModelSpecs
 }
@@ -862,6 +1090,8 @@ export type PatchEbookDraftRequest = {
 }
 
 export type PatchSpeechVoiceProfileRequest = {
+  "renderer"?: ("local" | "openrouter" | null)
+  "cloud"?: (CloudSpeechConfiguration | null)
   "name"?: (string | null)
   "notes"?: (string | null)
   "consent_confirmed"?: (boolean | null)
@@ -1064,7 +1294,7 @@ export type SavedTrack = {
   "id": number
   "short_id": (number | null)
   "is_favorite"?: boolean
-  "model": "ace_step" | "yue2" | "editor" | "upload"
+  "model": "ace_step" | "yue2" | "editor" | "upload" | "openrouter"
   "created_at": string
   "title": string
   "lyrics": string
@@ -1128,6 +1358,7 @@ export type SpeechCloneEngineStatus = {
 }
 
 export type SpeechCloneTrialRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
   "profile_id": string
   "text": string
   "engine"?: "speech" | "gpt-sovits"
@@ -1139,18 +1370,21 @@ export type SpeechCloneTrialRequest = {
 export type SpeechCloneTrialResponse = {
   "status": "engine_not_installed" | "engine_ready" | "api_unavailable" | "mock_completed" | "completed" | "failed"
   "detail": string
-  "engine": "speech" | "gpt-sovits"
+  "engine": "speech" | "gpt-sovits" | "openrouter"
   "profile_id": string
   "install_hints"?: Array<string>
   "trial_id"?: (string | null)
   "output_path"?: (string | null)
+  "cloud_receipt_id"?: (string | null)
 }
 
 export type SpeechVoiceProfile = {
   "id": string
   "name": string
   "consent_confirmed": boolean
-  "reference_audio_path": string
+  "reference_audio_path"?: string
+  "renderer"?: "local" | "openrouter"
+  "cloud"?: (CloudSpeechConfiguration | null)
   "notes"?: string
   "reference_transcript"?: string
   "reference_language"?: string
@@ -1258,6 +1492,7 @@ export type UpdateVideoProjectRequest = {
   "character_lock"?: (boolean | null)
   "seed"?: (number | null)
   "settings"?: (VideoProjectSettings | null)
+  "provider_config"?: (((LocalVideoProviderConfig | OpenRouterVideoProviderConfig) & { "provider": "local" | "openrouter" }) | null)
   "export_settings"?: (VideoExportSettings | null)
   "shots"?: (Array<VideoShotDraft> | null)
   "overlays"?: (Array<VideoOverlay> | null)
@@ -1341,6 +1576,46 @@ export type VideoCharacterTrainingResponse = {
 
 export type VideoCharactersResponse = {
   "characters": Array<VideoCharacter>
+}
+
+export type VideoCloudProvenance = {
+  "receipt": OpenRouterReceipt
+  "remote_duration_sec": number
+  "slot_duration_sec": number
+  "trim_confirmed"?: boolean
+  "source_duration_sec"?: (number | null)
+  "received_sha256"?: (string | null)
+  "requested_seed"?: (number | null)
+}
+
+export type VideoCloudQuoteRequest = {
+  "revision": number
+  "shot_id": string
+  "remote_duration_sec": number
+}
+
+export type VideoCloudQuoteResponse = {
+  "project_id": string
+  "revision": number
+  "shot_id": string
+  "remote_duration_sec": number
+  "slot_duration_sec": number
+  "trim_required": boolean
+  "quote": OpenRouterQuote
+}
+
+export type VideoCloudResumeRequest = {
+  "revision": number
+  "variant_id": string
+}
+
+export type VideoCloudSubmitRequest = {
+  "revision": number
+  "shot_id": string
+  "remote_duration_sec": number
+  "quote_id": string
+  "transfers_confirmed"?: boolean
+  "trim_confirmed"?: boolean
 }
 
 export type VideoDialogueCue = {
@@ -1472,6 +1747,7 @@ export type VideoProject = {
   "created_at": string
   "updated_at": string
   "settings"?: VideoProjectSettings
+  "provider_config"?: ((LocalVideoProviderConfig | OpenRouterVideoProviderConfig) & { "provider": "local" | "openrouter" })
   "export_settings"?: VideoExportSettings
   "shots"?: Array<VideoProjectShot>
   "references"?: Array<VideoReference>
@@ -1516,7 +1792,7 @@ export type VideoProjectSettings = {
 export type VideoProjectShot = {
   "id": string
   "start_sec": number
-  "seconds"?: 2 | 4 | 6 | 8 | 10 | 12
+  "seconds"?: number
   "prompt": string
   "seed"?: number
   "reference_id"?: (string | null)
@@ -1569,7 +1845,7 @@ export type VideoShot = {
 export type VideoShotDraft = {
   "id": string
   "start_sec": number
-  "seconds"?: 2 | 4 | 6 | 8 | 10 | 12
+  "seconds"?: number
   "prompt": string
   "seed"?: number
   "reference_id"?: (string | null)
@@ -1617,6 +1893,7 @@ export type VideoVariant = {
   "created_at": string
   "prompt"?: string
   "settings"?: VideoProjectSettings
+  "provider_config"?: ((LocalVideoProviderConfig | OpenRouterVideoProviderConfig) & { "provider": "local" | "openrouter" })
   "mode"?: "generated" | "cover" | "visualizer"
   "reference_id"?: (string | null)
   "reference_strength"?: number
@@ -1629,6 +1906,7 @@ export type VideoVariant = {
   "finished_at"?: string
   "timings"?: Array<VideoPhaseTiming>
   "duration_sec"?: number
+  "cloud"?: (VideoCloudProvenance | null)
 }
 
 export type VideosResponse = {
@@ -2078,7 +2356,8 @@ const schemas = {
           "ace_step",
           "yue2",
           "editor",
-          "upload"
+          "upload",
+          "openrouter"
         ],
         "title": "Model",
         "type": "string"
@@ -3247,6 +3526,257 @@ const schemas = {
     "title": "CreateStemExportRequest",
     "type": "object"
   },
+  "LocalVideoProviderConfig": {
+    "additionalProperties": false,
+    "properties": {
+      "provider": {
+        "const": "local",
+        "default": "local",
+        "title": "Provider",
+        "type": "string"
+      }
+    },
+    "title": "LocalVideoProviderConfig",
+    "type": "object"
+  },
+  "OpenRouterReceipt": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "owner_id": {
+        "pattern": "^[A-Za-z0-9_.:-]{1,160}$",
+        "title": "Owner Id",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "video",
+          "speech",
+          "music"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "model_id": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Model Id",
+        "type": "string"
+      },
+      "model_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Model Fingerprint",
+        "type": "string"
+      },
+      "request_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Request Fingerprint",
+        "type": "string"
+      },
+      "quote_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Quote Id",
+        "type": "string"
+      },
+      "estimated_usd": {
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Estimated Usd",
+        "type": "number"
+      },
+      "state": {
+        "enum": [
+          "intent",
+          "submitting",
+          "submission_unknown",
+          "submitted",
+          "completed",
+          "failed",
+          "canceled_tracking"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "remote_id": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Remote Id"
+      },
+      "actual_cost_usd": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actual Cost Usd"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "pattern": "^[a-z_]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error Code"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "owner_id",
+      "kind",
+      "model_id",
+      "model_fingerprint",
+      "request_fingerprint",
+      "quote_id",
+      "estimated_usd",
+      "state",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "OpenRouterReceipt",
+    "type": "object"
+  },
+  "OpenRouterVideoProviderConfig": {
+    "additionalProperties": false,
+    "properties": {
+      "provider": {
+        "const": "openrouter",
+        "default": "openrouter",
+        "title": "Provider",
+        "type": "string"
+      },
+      "model_id": {
+        "maxLength": 160,
+        "minLength": 3,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "title": "Model Id",
+        "type": "string"
+      },
+      "size": {
+        "maxLength": 15,
+        "minLength": 7,
+        "pattern": "^[0-9]{2,4}x[0-9]{2,4}$",
+        "title": "Size",
+        "type": "string"
+      },
+      "generate_audio": {
+        "const": false,
+        "default": false,
+        "title": "Generate Audio",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "model_id",
+      "size"
+    ],
+    "title": "OpenRouterVideoProviderConfig",
+    "type": "object"
+  },
+  "VideoCloudProvenance": {
+    "additionalProperties": false,
+    "properties": {
+      "receipt": {
+        "$ref": "#/$defs/OpenRouterReceipt"
+      },
+      "remote_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Remote Duration Sec",
+        "type": "integer"
+      },
+      "slot_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Slot Duration Sec",
+        "type": "integer"
+      },
+      "trim_confirmed": {
+        "default": false,
+        "title": "Trim Confirmed",
+        "type": "boolean"
+      },
+      "source_duration_sec": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 61,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Duration Sec"
+      },
+      "received_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Received Sha256"
+      },
+      "requested_seed": {
+        "anyOf": [
+          {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Requested Seed"
+      }
+    },
+    "required": [
+      "receipt",
+      "remote_duration_sec",
+      "slot_duration_sec"
+    ],
+    "title": "VideoCloudProvenance",
+    "type": "object"
+  },
   "VideoDialogueCue": {
     "additionalProperties": false,
     "description": "Copied, completed cast audio; model generation stays silent.",
@@ -3759,14 +4289,8 @@ const schemas = {
       },
       "seconds": {
         "default": 4,
-        "enum": [
-          2,
-          4,
-          6,
-          8,
-          10,
-          12
-        ],
+        "maximum": 60,
+        "minimum": 1,
         "title": "Seconds",
         "type": "integer"
       },
@@ -4095,6 +4619,24 @@ const schemas = {
       "settings": {
         "$ref": "#/$defs/VideoProjectSettings"
       },
+      "provider_config": {
+        "discriminator": {
+          "mapping": {
+            "local": "#/$defs/LocalVideoProviderConfig",
+            "openrouter": "#/$defs/OpenRouterVideoProviderConfig"
+          },
+          "propertyName": "provider"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/LocalVideoProviderConfig"
+          },
+          {
+            "$ref": "#/$defs/OpenRouterVideoProviderConfig"
+          }
+        ],
+        "title": "Provider Config"
+      },
       "mode": {
         "default": "generated",
         "enum": [
@@ -4174,6 +4716,17 @@ const schemas = {
         "minimum": 0,
         "title": "Duration Sec",
         "type": "number"
+      },
+      "cloud": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VideoCloudProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       }
     },
     "required": [
@@ -4318,6 +4871,24 @@ const schemas = {
       },
       "settings": {
         "$ref": "#/$defs/VideoProjectSettings"
+      },
+      "provider_config": {
+        "discriminator": {
+          "mapping": {
+            "local": "#/$defs/LocalVideoProviderConfig",
+            "openrouter": "#/$defs/OpenRouterVideoProviderConfig"
+          },
+          "propertyName": "provider"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/LocalVideoProviderConfig"
+          },
+          {
+            "$ref": "#/$defs/OpenRouterVideoProviderConfig"
+          }
+        ],
+        "title": "Provider Config"
       },
       "export_settings": {
         "$ref": "#/$defs/VideoExportSettings"
@@ -4659,14 +5230,8 @@ const schemas = {
       },
       "seconds": {
         "default": 4,
-        "enum": [
-          2,
-          4,
-          6,
-          8,
-          10,
-          12
-        ],
+        "maximum": 60,
+        "minimum": 1,
         "title": "Seconds",
         "type": "integer"
       },
@@ -4806,6 +5371,32 @@ const schemas = {
         ],
         "default": null
       },
+      "provider_config": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "local": "#/$defs/LocalVideoProviderConfig",
+                "openrouter": "#/$defs/OpenRouterVideoProviderConfig"
+              },
+              "propertyName": "provider"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/LocalVideoProviderConfig"
+              },
+              {
+                "$ref": "#/$defs/OpenRouterVideoProviderConfig"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Config"
+      },
       "export_settings": {
         "anyOf": [
           {
@@ -4921,6 +5512,234 @@ const schemas = {
       "revision"
     ],
     "title": "VideoRenderRequest",
+    "type": "object"
+  },
+  "VideoCloudQuoteRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "shot_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Shot Id",
+        "type": "string"
+      },
+      "remote_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Remote Duration Sec",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revision",
+      "shot_id",
+      "remote_duration_sec"
+    ],
+    "title": "VideoCloudQuoteRequest",
+    "type": "object"
+  },
+  "OpenRouterQuote": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "video",
+          "speech",
+          "music"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "model_id": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Model Id",
+        "type": "string"
+      },
+      "model_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Model Fingerprint",
+        "type": "string"
+      },
+      "request_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Request Fingerprint",
+        "type": "string"
+      },
+      "estimated_usd": {
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Estimated Usd",
+        "type": "number"
+      },
+      "expires_at": {
+        "minimum": 0,
+        "title": "Expires At",
+        "type": "number"
+      },
+      "ceiling_is_estimate": {
+        "const": true,
+        "default": true,
+        "title": "Ceiling Is Estimate",
+        "type": "boolean"
+      },
+      "transfers": {
+        "items": {
+          "enum": [
+            "prompt",
+            "text",
+            "reference_image",
+            "reference_audio"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "title": "Transfers",
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "title": "Warnings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "model_id",
+      "model_fingerprint",
+      "request_fingerprint",
+      "estimated_usd",
+      "expires_at",
+      "transfers"
+    ],
+    "title": "OpenRouterQuote",
+    "type": "object"
+  },
+  "VideoCloudQuoteResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "project_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Project Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "shot_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Shot Id",
+        "type": "string"
+      },
+      "remote_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Remote Duration Sec",
+        "type": "integer"
+      },
+      "slot_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Slot Duration Sec",
+        "type": "integer"
+      },
+      "trim_required": {
+        "title": "Trim Required",
+        "type": "boolean"
+      },
+      "quote": {
+        "$ref": "#/$defs/OpenRouterQuote"
+      }
+    },
+    "required": [
+      "project_id",
+      "revision",
+      "shot_id",
+      "remote_duration_sec",
+      "slot_duration_sec",
+      "trim_required",
+      "quote"
+    ],
+    "title": "VideoCloudQuoteResponse",
+    "type": "object"
+  },
+  "VideoCloudSubmitRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "shot_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Shot Id",
+        "type": "string"
+      },
+      "remote_duration_sec": {
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Remote Duration Sec",
+        "type": "integer"
+      },
+      "quote_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Quote Id",
+        "type": "string"
+      },
+      "transfers_confirmed": {
+        "default": false,
+        "title": "Transfers Confirmed",
+        "type": "boolean"
+      },
+      "trim_confirmed": {
+        "default": false,
+        "title": "Trim Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision",
+      "shot_id",
+      "remote_duration_sec",
+      "quote_id"
+    ],
+    "title": "VideoCloudSubmitRequest",
+    "type": "object"
+  },
+  "VideoCloudResumeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "variant_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Variant Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "variant_id"
+    ],
+    "title": "VideoCloudResumeRequest",
     "type": "object"
   },
   "ApproveVideoVariantRequest": {
@@ -8426,6 +9245,297 @@ const schemas = {
     "title": "LibraryPickResponse",
     "type": "object"
   },
+  "CloudSpeechConfiguration": {
+    "properties": {
+      "model": {
+        "maxLength": 200,
+        "minLength": 3,
+        "pattern": "^[A-Za-z0-9._:-]+/[A-Za-z0-9._:-]+$",
+        "title": "Model",
+        "type": "string"
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Voice"
+      },
+      "clone_reference": {
+        "default": false,
+        "title": "Clone Reference",
+        "type": "boolean"
+      },
+      "reference_transfer_confirmed": {
+        "default": false,
+        "title": "Reference Transfer Confirmed",
+        "type": "boolean"
+      },
+      "speed": {
+        "const": 1,
+        "default": 1,
+        "title": "Speed",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "model"
+    ],
+    "title": "CloudSpeechConfiguration",
+    "type": "object"
+  },
+  "CreateCloudSpeechVoiceProfileRequest": {
+    "properties": {
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "model": {
+        "maxLength": 200,
+        "minLength": 3,
+        "pattern": "^[A-Za-z0-9._:-]+/[A-Za-z0-9._:-]+$",
+        "title": "Model",
+        "type": "string"
+      },
+      "voice": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Voice",
+        "type": "string"
+      },
+      "notes": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Notes",
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "model",
+      "voice"
+    ],
+    "title": "CreateCloudSpeechVoiceProfileRequest",
+    "type": "object"
+  },
+  "CloudSpeechApproval": {
+    "properties": {
+      "quote_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Quote Id",
+        "type": "string"
+      },
+      "transfers_confirmed": {
+        "title": "Transfers Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "quote_id",
+      "transfers_confirmed"
+    ],
+    "title": "CloudSpeechApproval",
+    "type": "object"
+  },
+  "CloudSpeechQuote": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "estimated_usd": {
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Estimated Usd",
+        "type": "number"
+      },
+      "request_count": {
+        "maximum": 20000,
+        "minimum": 0,
+        "title": "Request Count",
+        "type": "integer"
+      },
+      "models": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 17,
+        "title": "Models",
+        "type": "array"
+      },
+      "transfers": {
+        "items": {
+          "enum": [
+            "text",
+            "reference_audio",
+            "reference_transcript"
+          ],
+          "type": "string"
+        },
+        "maxItems": 3,
+        "title": "Transfers",
+        "type": "array"
+      },
+      "expires_at": {
+        "minimum": 0,
+        "title": "Expires At",
+        "type": "number"
+      },
+      "ceiling_is_estimate": {
+        "const": true,
+        "default": true,
+        "title": "Ceiling Is Estimate",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "estimated_usd",
+      "request_count",
+      "expires_at"
+    ],
+    "title": "CloudSpeechQuote",
+    "type": "object"
+  },
+  "CloudSpeechProvenance": {
+    "properties": {
+      "receipt_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Receipt Id",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "model": {
+        "maxLength": 200,
+        "minLength": 3,
+        "title": "Model",
+        "type": "string"
+      },
+      "model_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Model Fingerprint",
+        "type": "string"
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Voice"
+      },
+      "reference_transferred": {
+        "default": false,
+        "title": "Reference Transferred",
+        "type": "boolean"
+      },
+      "generation_id": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Generation Id"
+      },
+      "actual_cost_usd": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actual Cost Usd"
+      }
+    },
+    "required": [
+      "receipt_id",
+      "profile_id",
+      "model",
+      "model_fingerprint"
+    ],
+    "title": "CloudSpeechProvenance",
+    "type": "object"
+  },
+  "CloudSpeechTrial": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "audio_url": {
+        "pattern": "^/api/speech-clone/trials/[0-9a-f]{32}/audio$",
+        "title": "Audio Url",
+        "type": "string"
+      },
+      "provenance": {
+        "$ref": "#/$defs/CloudSpeechProvenance"
+      }
+    },
+    "required": [
+      "id",
+      "profile_id",
+      "created_at",
+      "audio_url",
+      "provenance"
+    ],
+    "title": "CloudSpeechTrial",
+    "type": "object"
+  },
+  "CloudSpeechTrialsResponse": {
+    "properties": {
+      "trials": {
+        "items": {
+          "$ref": "#/$defs/CloudSpeechTrial"
+        },
+        "maxItems": 20,
+        "title": "Trials",
+        "type": "array"
+      }
+    },
+    "title": "CloudSpeechTrialsResponse",
+    "type": "object"
+  },
   "SpeechVoiceProfile": {
     "properties": {
       "id": {
@@ -8446,10 +9556,30 @@ const schemas = {
         "type": "boolean"
       },
       "reference_audio_path": {
+        "default": "",
         "maxLength": 1024,
-        "minLength": 1,
         "title": "Reference Audio Path",
         "type": "string"
+      },
+      "renderer": {
+        "default": "local",
+        "enum": [
+          "local",
+          "openrouter"
+        ],
+        "title": "Renderer",
+        "type": "string"
+      },
+      "cloud": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechConfiguration"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       },
       "notes": {
         "default": "",
@@ -8516,7 +9646,6 @@ const schemas = {
       "id",
       "name",
       "consent_confirmed",
-      "reference_audio_path",
       "created_at",
       "updated_at"
     ],
@@ -8541,6 +9670,33 @@ const schemas = {
   },
   "PatchSpeechVoiceProfileRequest": {
     "properties": {
+      "renderer": {
+        "anyOf": [
+          {
+            "enum": [
+              "local",
+              "openrouter"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Renderer"
+      },
+      "cloud": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechConfiguration"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "name": {
         "anyOf": [
           {
@@ -8614,6 +9770,17 @@ const schemas = {
   },
   "SpeechCloneTrialRequest": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "profile_id": {
         "maxLength": 32,
         "minLength": 32,
@@ -8706,7 +9873,8 @@ const schemas = {
       "engine": {
         "enum": [
           "speech",
-          "gpt-sovits"
+          "gpt-sovits",
+          "openrouter"
         ],
         "title": "Engine",
         "type": "string"
@@ -8745,6 +9913,19 @@ const schemas = {
         ],
         "default": null,
         "title": "Output Path"
+      },
+      "cloud_receipt_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Cloud Receipt Id"
       }
     },
     "required": [
@@ -8982,6 +10163,17 @@ const schemas = {
   },
   "CreateAudiobookRequest": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "title": {
         "maxLength": 200,
         "minLength": 1,
@@ -9164,6 +10356,14 @@ const schemas = {
   },
   "AudiobookBook": {
     "properties": {
+      "cloud_models": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 17,
+        "title": "Cloud Models",
+        "type": "array"
+      },
       "id": {
         "maxLength": 32,
         "minLength": 32,
@@ -9734,6 +10934,17 @@ const schemas = {
   },
   "CreateAudiobookFromDraftRequest": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "profile_id": {
         "pattern": "^[0-9a-f]{32}$",
         "title": "Profile Id",
@@ -9843,6 +11054,26 @@ const schemas = {
   },
   "AudiobookPassage": {
     "properties": {
+      "renderer": {
+        "default": "local",
+        "enum": [
+          "local",
+          "openrouter"
+        ],
+        "title": "Renderer",
+        "type": "string"
+      },
+      "cloud_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "id": {
         "pattern": "^[0-9a-f]{32}$",
         "title": "Id",
@@ -9971,6 +11202,17 @@ const schemas = {
   },
   "AudiobookAuditionOptions": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "chapter_index": {
         "default": 0,
         "maximum": 99,
@@ -10000,6 +11242,17 @@ const schemas = {
   },
   "CreateAudiobookAuditionRequest": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "title": {
         "maxLength": 200,
         "minLength": 1,
@@ -10084,6 +11337,26 @@ const schemas = {
   },
   "AudiobookAuditionClip": {
     "properties": {
+      "renderer": {
+        "default": "local",
+        "enum": [
+          "local",
+          "openrouter"
+        ],
+        "title": "Renderer",
+        "type": "string"
+      },
+      "cloud_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "index": {
         "minimum": 0,
         "title": "Index",
@@ -10270,6 +11543,17 @@ const schemas = {
   },
   "CreateAudiobookRepairRequest": {
     "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "revision": {
         "minimum": 1,
         "title": "Revision",
@@ -10312,6 +11596,26 @@ const schemas = {
   },
   "AudiobookRepair": {
     "properties": {
+      "renderer": {
+        "default": "local",
+        "enum": [
+          "local",
+          "openrouter"
+        ],
+        "title": "Renderer",
+        "type": "string"
+      },
+      "cloud_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "id": {
         "pattern": "^[0-9a-f]{32}$",
         "title": "Id",
@@ -10436,6 +11740,47 @@ const schemas = {
       "repairs"
     ],
     "title": "AudiobookRepairsResponse",
+    "type": "object"
+  },
+  "AudiobookCloudControlRequest": {
+    "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "action": {
+        "default": "resume",
+        "enum": [
+          "resume",
+          "retry",
+          "regenerate"
+        ],
+        "title": "Action",
+        "type": "string"
+      },
+      "chapter_index": {
+        "anyOf": [
+          {
+            "maximum": 99,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Chapter Index"
+      }
+    },
+    "title": "AudiobookCloudControlRequest",
     "type": "object"
   },
   "ArtistSettings": {
@@ -14458,6 +15803,766 @@ const schemas = {
     ],
     "title": "AsrReviewsResponse",
     "type": "object"
+  },
+  "OpenRouterStatus": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "estimate_limit_usd": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": 1.0,
+        "title": "Estimate Limit Usd"
+      },
+      "credential_configured": {
+        "default": false,
+        "title": "Credential Configured",
+        "type": "boolean"
+      },
+      "credential_source": {
+        "default": "none",
+        "enum": [
+          "none",
+          "session",
+          "environment",
+          "secure_store"
+        ],
+        "title": "Credential Source",
+        "type": "string"
+      },
+      "secure_storage_available": {
+        "default": false,
+        "title": "Secure Storage Available",
+        "type": "boolean"
+      }
+    },
+    "title": "OpenRouterStatus",
+    "type": "object"
+  },
+  "OpenRouterSettingsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "estimate_limit_usd": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 1000,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": 1.0,
+        "title": "Estimate Limit Usd"
+      }
+    },
+    "title": "OpenRouterSettingsRequest",
+    "type": "object"
+  },
+  "OpenRouterKeyRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "api_key": {
+        "maxLength": 512,
+        "minLength": 16,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "title": "Api Key",
+        "type": "string"
+      },
+      "persist": {
+        "default": true,
+        "title": "Persist",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "api_key"
+    ],
+    "title": "OpenRouterKeyRequest",
+    "type": "object"
+  },
+  "OpenRouterConnection": {
+    "additionalProperties": false,
+    "properties": {
+      "connected": {
+        "title": "Connected",
+        "type": "boolean"
+      },
+      "limit_usd": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Limit Usd"
+      },
+      "limit_remaining_usd": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Limit Remaining Usd"
+      },
+      "usage_usd": {
+        "default": 0,
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Usage Usd",
+        "type": "number"
+      },
+      "is_free_tier": {
+        "default": false,
+        "title": "Is Free Tier",
+        "type": "boolean"
+      },
+      "checked_at": {
+        "title": "Checked At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "connected",
+      "checked_at"
+    ],
+    "title": "OpenRouterConnection",
+    "type": "object"
+  },
+  "OpenRouterModel": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 160,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "video",
+          "speech",
+          "music"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Fingerprint",
+        "type": "string"
+      },
+      "prices": {
+        "items": {
+          "$ref": "#/$defs/OpenRouterPrice"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "title": "Prices",
+        "type": "array"
+      },
+      "supported_durations": {
+        "items": {
+          "type": "integer"
+        },
+        "maxItems": 60,
+        "title": "Supported Durations",
+        "type": "array"
+      },
+      "supported_resolutions": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 20,
+        "title": "Supported Resolutions",
+        "type": "array"
+      },
+      "supported_aspect_ratios": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 20,
+        "title": "Supported Aspect Ratios",
+        "type": "array"
+      },
+      "supported_sizes": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 40,
+        "title": "Supported Sizes",
+        "type": "array"
+      },
+      "supported_frame_images": {
+        "items": {
+          "enum": [
+            "first_frame",
+            "last_frame"
+          ],
+          "type": "string"
+        },
+        "maxItems": 2,
+        "title": "Supported Frame Images",
+        "type": "array"
+      },
+      "supports_generate_audio": {
+        "default": false,
+        "title": "Supports Generate Audio",
+        "type": "boolean"
+      },
+      "supports_seed": {
+        "default": false,
+        "title": "Supports Seed",
+        "type": "boolean"
+      },
+      "supports_voice_cloning": {
+        "default": false,
+        "title": "Supports Voice Cloning",
+        "type": "boolean"
+      },
+      "supported_voices": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 256,
+        "title": "Supported Voices",
+        "type": "array"
+      },
+      "input_character_limit": {
+        "default": 4096,
+        "maximum": 10000,
+        "minimum": 1,
+        "title": "Input Character Limit",
+        "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "title": "Warnings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "kind",
+      "fingerprint",
+      "prices"
+    ],
+    "title": "OpenRouterModel",
+    "type": "object"
+  },
+  "OpenRouterPrice": {
+    "additionalProperties": false,
+    "properties": {
+      "unit": {
+        "enum": [
+          "second",
+          "character",
+          "utf8_byte",
+          "request"
+        ],
+        "title": "Unit",
+        "type": "string"
+      },
+      "rate_usd": {
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Rate Usd",
+        "type": "number"
+      },
+      "source": {
+        "enum": [
+          "live_catalog",
+          "published_model_page"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "resolution": {
+        "anyOf": [
+          {
+            "maxLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution"
+      },
+      "generate_audio": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Generate Audio"
+      }
+    },
+    "required": [
+      "unit",
+      "rate_usd",
+      "source"
+    ],
+    "title": "OpenRouterPrice",
+    "type": "object"
+  },
+  "OpenRouterCatalog": {
+    "additionalProperties": false,
+    "properties": {
+      "models": {
+        "items": {
+          "$ref": "#/$defs/OpenRouterModel"
+        },
+        "maxItems": 20,
+        "title": "Models",
+        "type": "array"
+      },
+      "fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Fingerprint",
+        "type": "string"
+      },
+      "fetched_at": {
+        "title": "Fetched At",
+        "type": "string"
+      },
+      "expires_at": {
+        "minimum": 0,
+        "title": "Expires At",
+        "type": "number"
+      }
+    },
+    "required": [
+      "fingerprint",
+      "fetched_at",
+      "expires_at"
+    ],
+    "title": "OpenRouterCatalog",
+    "type": "object"
+  },
+  "OpenRouterQuoteRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "video",
+          "speech",
+          "music"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "model_id": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Model Id",
+        "type": "string"
+      },
+      "text": {
+        "default": "",
+        "maxLength": 10000,
+        "title": "Text",
+        "type": "string"
+      },
+      "duration_seconds": {
+        "anyOf": [
+          {
+            "maximum": 60,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration Seconds"
+      },
+      "size": {
+        "anyOf": [
+          {
+            "maxLength": 20,
+            "pattern": "^[1-9][0-9]{1,4}x[1-9][0-9]{1,4}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Size"
+      },
+      "resolution": {
+        "anyOf": [
+          {
+            "maxLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Resolution"
+      },
+      "aspect_ratio": {
+        "anyOf": [
+          {
+            "maxLength": 10,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Aspect Ratio"
+      },
+      "generate_audio": {
+        "default": false,
+        "title": "Generate Audio",
+        "type": "boolean"
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Voice"
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Seed"
+      },
+      "reference_bytes": {
+        "default": 0,
+        "maximum": 15728640,
+        "minimum": 0,
+        "title": "Reference Bytes",
+        "type": "integer"
+      },
+      "reference_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reference Sha256"
+      },
+      "reference_transcript": {
+        "anyOf": [
+          {
+            "maxLength": 10000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Reference Transcript"
+      }
+    },
+    "required": [
+      "kind",
+      "model_id"
+    ],
+    "title": "OpenRouterQuoteRequest",
+    "type": "object"
+  },
+  "OpenRouterReceipts": {
+    "additionalProperties": false,
+    "properties": {
+      "history_incomplete": {
+        "default": false,
+        "title": "History Incomplete",
+        "type": "boolean"
+      },
+      "requests": {
+        "items": {
+          "$ref": "#/$defs/OpenRouterReceipt"
+        },
+        "maxItems": 1000,
+        "title": "Requests",
+        "type": "array"
+      }
+    },
+    "required": [
+      "requests"
+    ],
+    "title": "OpenRouterReceipts",
+    "type": "object"
+  },
+  "OpenRouterMusicRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "model": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Model",
+        "type": "string"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Prompt",
+        "type": "string"
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Seed"
+      }
+    },
+    "required": [
+      "model",
+      "prompt"
+    ],
+    "title": "OpenRouterMusicRequest",
+    "type": "object"
+  },
+  "CloudMusicSubmitRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "model": {
+        "pattern": "^[a-z0-9][a-z0-9._-]{0,79}/[a-z0-9][a-z0-9._:-]{0,119}$",
+        "title": "Model",
+        "type": "string"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Prompt",
+        "type": "string"
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "maximum": 2147483647,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Seed"
+      },
+      "title": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Title",
+        "type": "string"
+      },
+      "quote_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Quote Id",
+        "type": "string"
+      },
+      "transfers_confirmed": {
+        "title": "Transfers Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "model",
+      "prompt",
+      "quote_id",
+      "transfers_confirmed"
+    ],
+    "title": "CloudMusicSubmitRequest",
+    "type": "object"
+  },
+  "CloudMusicJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "submission_unknown",
+          "canceled_tracking",
+          "interrupted"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 500,
+        "title": "Title",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/OpenRouterMusicRequest"
+      },
+      "receipt_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Receipt Id",
+        "type": "string"
+      },
+      "receipt": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OpenRouterReceipt"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "track": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SavedTrack"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "output_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Output Sha256"
+      },
+      "can_retry_save": {
+        "default": false,
+        "title": "Can Retry Save",
+        "type": "boolean"
+      },
+      "error_code": {
+        "default": "",
+        "maxLength": 80,
+        "title": "Error Code",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "status",
+      "created_at",
+      "title",
+      "request",
+      "receipt_id"
+    ],
+    "title": "CloudMusicJob",
+    "type": "object"
+  },
+  "CloudMusicJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "history_incomplete": {
+        "default": false,
+        "title": "History Incomplete",
+        "type": "boolean"
+      },
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/CloudMusicJob"
+        },
+        "maxItems": 1000,
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "title": "CloudMusicJobs",
+    "type": "object"
   }
 } as const
 
@@ -14702,6 +16807,38 @@ function isVideoRenderRequest(value: unknown): value is VideoRenderRequest {
 }
 export function parseVideoRenderRequest(value: unknown): VideoRenderRequest {
   if (!isVideoRenderRequest(value)) throw new TypeError("Invalid VideoRenderRequest response")
+  return value
+}
+
+function isVideoCloudQuoteRequest(value: unknown): value is VideoCloudQuoteRequest {
+  return decodeSchema(schemas.VideoCloudQuoteRequest, value, schemas)
+}
+export function parseVideoCloudQuoteRequest(value: unknown): VideoCloudQuoteRequest {
+  if (!isVideoCloudQuoteRequest(value)) throw new TypeError("Invalid VideoCloudQuoteRequest response")
+  return value
+}
+
+function isVideoCloudQuoteResponse(value: unknown): value is VideoCloudQuoteResponse {
+  return decodeSchema(schemas.VideoCloudQuoteResponse, value, schemas)
+}
+export function parseVideoCloudQuoteResponse(value: unknown): VideoCloudQuoteResponse {
+  if (!isVideoCloudQuoteResponse(value)) throw new TypeError("Invalid VideoCloudQuoteResponse response")
+  return value
+}
+
+function isVideoCloudSubmitRequest(value: unknown): value is VideoCloudSubmitRequest {
+  return decodeSchema(schemas.VideoCloudSubmitRequest, value, schemas)
+}
+export function parseVideoCloudSubmitRequest(value: unknown): VideoCloudSubmitRequest {
+  if (!isVideoCloudSubmitRequest(value)) throw new TypeError("Invalid VideoCloudSubmitRequest response")
+  return value
+}
+
+function isVideoCloudResumeRequest(value: unknown): value is VideoCloudResumeRequest {
+  return decodeSchema(schemas.VideoCloudResumeRequest, value, schemas)
+}
+export function parseVideoCloudResumeRequest(value: unknown): VideoCloudResumeRequest {
+  if (!isVideoCloudResumeRequest(value)) throw new TypeError("Invalid VideoCloudResumeRequest response")
   return value
 }
 
@@ -15201,6 +17338,62 @@ export function parseLibraryPickResponse(value: unknown): LibraryPickResponse {
   return value
 }
 
+function isCloudSpeechConfiguration(value: unknown): value is CloudSpeechConfiguration {
+  return decodeSchema(schemas.CloudSpeechConfiguration, value, schemas)
+}
+export function parseCloudSpeechConfiguration(value: unknown): CloudSpeechConfiguration {
+  if (!isCloudSpeechConfiguration(value)) throw new TypeError("Invalid CloudSpeechConfiguration response")
+  return value
+}
+
+function isCreateCloudSpeechVoiceProfileRequest(value: unknown): value is CreateCloudSpeechVoiceProfileRequest {
+  return decodeSchema(schemas.CreateCloudSpeechVoiceProfileRequest, value, schemas)
+}
+export function parseCreateCloudSpeechVoiceProfileRequest(value: unknown): CreateCloudSpeechVoiceProfileRequest {
+  if (!isCreateCloudSpeechVoiceProfileRequest(value)) throw new TypeError("Invalid CreateCloudSpeechVoiceProfileRequest response")
+  return value
+}
+
+function isCloudSpeechApproval(value: unknown): value is CloudSpeechApproval {
+  return decodeSchema(schemas.CloudSpeechApproval, value, schemas)
+}
+export function parseCloudSpeechApproval(value: unknown): CloudSpeechApproval {
+  if (!isCloudSpeechApproval(value)) throw new TypeError("Invalid CloudSpeechApproval response")
+  return value
+}
+
+function isCloudSpeechQuote(value: unknown): value is CloudSpeechQuote {
+  return decodeSchema(schemas.CloudSpeechQuote, value, schemas)
+}
+export function parseCloudSpeechQuote(value: unknown): CloudSpeechQuote {
+  if (!isCloudSpeechQuote(value)) throw new TypeError("Invalid CloudSpeechQuote response")
+  return value
+}
+
+function isCloudSpeechProvenance(value: unknown): value is CloudSpeechProvenance {
+  return decodeSchema(schemas.CloudSpeechProvenance, value, schemas)
+}
+export function parseCloudSpeechProvenance(value: unknown): CloudSpeechProvenance {
+  if (!isCloudSpeechProvenance(value)) throw new TypeError("Invalid CloudSpeechProvenance response")
+  return value
+}
+
+function isCloudSpeechTrial(value: unknown): value is CloudSpeechTrial {
+  return decodeSchema(schemas.CloudSpeechTrial, value, schemas)
+}
+export function parseCloudSpeechTrial(value: unknown): CloudSpeechTrial {
+  if (!isCloudSpeechTrial(value)) throw new TypeError("Invalid CloudSpeechTrial response")
+  return value
+}
+
+function isCloudSpeechTrialsResponse(value: unknown): value is CloudSpeechTrialsResponse {
+  return decodeSchema(schemas.CloudSpeechTrialsResponse, value, schemas)
+}
+export function parseCloudSpeechTrialsResponse(value: unknown): CloudSpeechTrialsResponse {
+  if (!isCloudSpeechTrialsResponse(value)) throw new TypeError("Invalid CloudSpeechTrialsResponse response")
+  return value
+}
+
 function isSpeechVoiceProfile(value: unknown): value is SpeechVoiceProfile {
   return decodeSchema(schemas.SpeechVoiceProfile, value, schemas)
 }
@@ -15534,6 +17727,14 @@ function isAudiobookRepairsResponse(value: unknown): value is AudiobookRepairsRe
 }
 export function parseAudiobookRepairsResponse(value: unknown): AudiobookRepairsResponse {
   if (!isAudiobookRepairsResponse(value)) throw new TypeError("Invalid AudiobookRepairsResponse response")
+  return value
+}
+
+function isAudiobookCloudControlRequest(value: unknown): value is AudiobookCloudControlRequest {
+  return decodeSchema(schemas.AudiobookCloudControlRequest, value, schemas)
+}
+export function parseAudiobookCloudControlRequest(value: unknown): AudiobookCloudControlRequest {
+  if (!isAudiobookCloudControlRequest(value)) throw new TypeError("Invalid AudiobookCloudControlRequest response")
   return value
 }
 
@@ -16062,5 +18263,109 @@ function isAsrReviewsResponse(value: unknown): value is AsrReviewsResponse {
 }
 export function parseAsrReviewsResponse(value: unknown): AsrReviewsResponse {
   if (!isAsrReviewsResponse(value)) throw new TypeError("Invalid AsrReviewsResponse response")
+  return value
+}
+
+function isOpenRouterStatus(value: unknown): value is OpenRouterStatus {
+  return decodeSchema(schemas.OpenRouterStatus, value, schemas)
+}
+export function parseOpenRouterStatus(value: unknown): OpenRouterStatus {
+  if (!isOpenRouterStatus(value)) throw new TypeError("Invalid OpenRouterStatus response")
+  return value
+}
+
+function isOpenRouterSettingsRequest(value: unknown): value is OpenRouterSettingsRequest {
+  return decodeSchema(schemas.OpenRouterSettingsRequest, value, schemas)
+}
+export function parseOpenRouterSettingsRequest(value: unknown): OpenRouterSettingsRequest {
+  if (!isOpenRouterSettingsRequest(value)) throw new TypeError("Invalid OpenRouterSettingsRequest response")
+  return value
+}
+
+function isOpenRouterKeyRequest(value: unknown): value is OpenRouterKeyRequest {
+  return decodeSchema(schemas.OpenRouterKeyRequest, value, schemas)
+}
+export function parseOpenRouterKeyRequest(value: unknown): OpenRouterKeyRequest {
+  if (!isOpenRouterKeyRequest(value)) throw new TypeError("Invalid OpenRouterKeyRequest response")
+  return value
+}
+
+function isOpenRouterConnection(value: unknown): value is OpenRouterConnection {
+  return decodeSchema(schemas.OpenRouterConnection, value, schemas)
+}
+export function parseOpenRouterConnection(value: unknown): OpenRouterConnection {
+  if (!isOpenRouterConnection(value)) throw new TypeError("Invalid OpenRouterConnection response")
+  return value
+}
+
+function isOpenRouterCatalog(value: unknown): value is OpenRouterCatalog {
+  return decodeSchema(schemas.OpenRouterCatalog, value, schemas)
+}
+export function parseOpenRouterCatalog(value: unknown): OpenRouterCatalog {
+  if (!isOpenRouterCatalog(value)) throw new TypeError("Invalid OpenRouterCatalog response")
+  return value
+}
+
+function isOpenRouterQuoteRequest(value: unknown): value is OpenRouterQuoteRequest {
+  return decodeSchema(schemas.OpenRouterQuoteRequest, value, schemas)
+}
+export function parseOpenRouterQuoteRequest(value: unknown): OpenRouterQuoteRequest {
+  if (!isOpenRouterQuoteRequest(value)) throw new TypeError("Invalid OpenRouterQuoteRequest response")
+  return value
+}
+
+function isOpenRouterQuote(value: unknown): value is OpenRouterQuote {
+  return decodeSchema(schemas.OpenRouterQuote, value, schemas)
+}
+export function parseOpenRouterQuote(value: unknown): OpenRouterQuote {
+  if (!isOpenRouterQuote(value)) throw new TypeError("Invalid OpenRouterQuote response")
+  return value
+}
+
+function isOpenRouterReceipt(value: unknown): value is OpenRouterReceipt {
+  return decodeSchema(schemas.OpenRouterReceipt, value, schemas)
+}
+export function parseOpenRouterReceipt(value: unknown): OpenRouterReceipt {
+  if (!isOpenRouterReceipt(value)) throw new TypeError("Invalid OpenRouterReceipt response")
+  return value
+}
+
+function isOpenRouterReceipts(value: unknown): value is OpenRouterReceipts {
+  return decodeSchema(schemas.OpenRouterReceipts, value, schemas)
+}
+export function parseOpenRouterReceipts(value: unknown): OpenRouterReceipts {
+  if (!isOpenRouterReceipts(value)) throw new TypeError("Invalid OpenRouterReceipts response")
+  return value
+}
+
+function isOpenRouterMusicRequest(value: unknown): value is OpenRouterMusicRequest {
+  return decodeSchema(schemas.OpenRouterMusicRequest, value, schemas)
+}
+export function parseOpenRouterMusicRequest(value: unknown): OpenRouterMusicRequest {
+  if (!isOpenRouterMusicRequest(value)) throw new TypeError("Invalid OpenRouterMusicRequest response")
+  return value
+}
+
+function isCloudMusicSubmitRequest(value: unknown): value is CloudMusicSubmitRequest {
+  return decodeSchema(schemas.CloudMusicSubmitRequest, value, schemas)
+}
+export function parseCloudMusicSubmitRequest(value: unknown): CloudMusicSubmitRequest {
+  if (!isCloudMusicSubmitRequest(value)) throw new TypeError("Invalid CloudMusicSubmitRequest response")
+  return value
+}
+
+function isCloudMusicJob(value: unknown): value is CloudMusicJob {
+  return decodeSchema(schemas.CloudMusicJob, value, schemas)
+}
+export function parseCloudMusicJob(value: unknown): CloudMusicJob {
+  if (!isCloudMusicJob(value)) throw new TypeError("Invalid CloudMusicJob response")
+  return value
+}
+
+function isCloudMusicJobs(value: unknown): value is CloudMusicJobs {
+  return decodeSchema(schemas.CloudMusicJobs, value, schemas)
+}
+export function parseCloudMusicJobs(value: unknown): CloudMusicJobs {
+  if (!isCloudMusicJobs(value)) throw new TypeError("Invalid CloudMusicJobs response")
   return value
 }

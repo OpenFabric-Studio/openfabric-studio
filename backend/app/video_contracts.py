@@ -5,6 +5,7 @@ import math
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .contracts import Contract
+from .openrouter_contracts import OpenRouterReceipt, OpenRouterQuote
 
 VideoId = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
 VideoSeconds = Literal[2, 4, 6, 8, 10, 12]
@@ -39,6 +40,30 @@ class VideoProjectSettings(VideoContract):
         return self
 
 
+class LocalVideoProviderConfig(VideoContract):
+    provider: Literal['local'] = 'local'
+
+
+class OpenRouterVideoProviderConfig(VideoContract):
+    provider: Literal['openrouter'] = 'openrouter'
+    model_id: str = Field(min_length=3, max_length=160, pattern=r'^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.:-]*$')
+    size: str = Field(min_length=7, max_length=15, pattern=r'^[0-9]{2,4}x[0-9]{2,4}$')
+    # The studio keeps its original song/cast soundtrack. Provider audio is
+    # disabled where supported and removed during checked local conformance.
+    generate_audio: Literal[False] = False
+
+    @field_validator('size')
+    @classmethod
+    def bounded_size(cls, value: str) -> str:
+        width, height = (int(part) for part in value.split('x'))
+        if not all(64 <= dimension <= 4096 and dimension % 2 == 0 for dimension in (width, height)):
+            raise ValueError('cloud_size_unsupported')
+        return value
+
+
+VideoProviderConfig = Annotated[LocalVideoProviderConfig | OpenRouterVideoProviderConfig, Field(discriminator='provider')]
+
+
 class VideoExportSettings(VideoContract):
     aspect: Literal["landscape", "portrait", "square"] = "landscape"
     quality: Literal["fast", "standard", "high"] = "standard"
@@ -50,7 +75,7 @@ class VideoExportSettings(VideoContract):
 class VideoShotDraft(VideoContract):
     id: VideoId
     start_sec: float = Field(ge=0, le=21600)
-    seconds: VideoSeconds = 4
+    seconds: int = Field(default=4, ge=1, le=60)
     prompt: str = Field(min_length=1, max_length=2000)
     seed: int = Field(default=0, ge=0, le=2147483647)
     reference_id: VideoId | None = None
@@ -115,6 +140,16 @@ class VideoPhaseTiming(VideoContract):
     duration_sec: float = Field(default=0, ge=0)
 
 
+class VideoCloudProvenance(VideoContract):
+    receipt: OpenRouterReceipt
+    remote_duration_sec: int = Field(ge=1,le=60)
+    slot_duration_sec: int = Field(ge=1,le=60)
+    trim_confirmed: bool = False
+    source_duration_sec: float | None = Field(default=None,gt=0,le=61)
+    received_sha256: str | None = Field(default=None,pattern=r'^[0-9a-f]{64}$')
+    requested_seed: int | None = Field(default=None,ge=0,le=2147483647)
+
+
 class VideoVariant(VideoContract):
     id: VideoId
     seed: int = Field(ge=0, le=2147483647)
@@ -127,6 +162,7 @@ class VideoVariant(VideoContract):
     created_at: str
     prompt: str = ""
     settings: VideoProjectSettings = Field(default_factory=VideoProjectSettings)
+    provider_config: VideoProviderConfig = Field(default_factory=LocalVideoProviderConfig)
     mode: VideoMode = "generated"
     reference_id: VideoId | None = None
     reference_strength: float = Field(default=0.7, ge=0, le=1)
@@ -139,6 +175,7 @@ class VideoVariant(VideoContract):
     finished_at: str = ""
     timings: list[VideoPhaseTiming] = Field(default_factory=list)
     duration_sec: float = Field(default=0, ge=0)
+    cloud: VideoCloudProvenance | None = None
 
 
 class VideoProjectShot(VideoShotDraft):
@@ -249,6 +286,7 @@ class VideoProject(VideoContract):
     created_at: str
     updated_at: str
     settings: VideoProjectSettings = Field(default_factory=VideoProjectSettings)
+    provider_config: VideoProviderConfig = Field(default_factory=LocalVideoProviderConfig)
     export_settings: VideoExportSettings = Field(default_factory=VideoExportSettings)
     shots: list[VideoProjectShot] = Field(default_factory=list, max_length=40)
     references: list[VideoReference] = Field(default_factory=list, max_length=6)
@@ -262,6 +300,14 @@ class VideoProject(VideoContract):
     poster_url: str = ""
     output_version: str = ""
     warnings: list[str] = Field(default_factory=list, max_length=30)
+
+
+    @property
+    def frame_size(self) -> tuple[int,int]:
+        if self.provider_config.provider == 'openrouter':
+            width,height = self.provider_config.size.split('x')
+            return int(width),int(height)
+        return self.settings.width,self.settings.height
 
 
 class VideoProjectsResponse(VideoContract):
@@ -289,6 +335,7 @@ class UpdateVideoProjectRequest(VideoRevisionRequest):
     character_lock: bool | None = None
     seed: int | None = Field(default=None, ge=0, le=2147483647)
     settings: VideoProjectSettings | None = None
+    provider_config: VideoProviderConfig | None = None
     export_settings: VideoExportSettings | None = None
     shots: list[VideoShotDraft] | None = Field(default=None, max_length=40)
     overlays: list[VideoOverlay] | None = Field(default=None, max_length=100)
@@ -322,6 +369,32 @@ class VideoRenderRequest(VideoRevisionRequest):
     shot_ids: list[VideoId] = Field(default_factory=list, max_length=40)
     variants_per_shot: int = Field(default=1, ge=1, le=3)
     reuse_completed: bool = True
+
+
+class VideoCloudQuoteRequest(VideoRevisionRequest):
+    shot_id: VideoId
+    remote_duration_sec: int = Field(ge=1,le=60)
+
+
+class VideoCloudQuoteResponse(VideoContract):
+    project_id: VideoId
+    revision: int = Field(ge=1)
+    shot_id: VideoId
+    remote_duration_sec: int = Field(ge=1,le=60)
+    slot_duration_sec: int = Field(ge=1,le=60)
+    trim_required: bool
+    quote: OpenRouterQuote
+
+
+class VideoCloudSubmitRequest(VideoCloudQuoteRequest):
+    quote_id: VideoId
+    transfers_confirmed: bool = False
+    trim_confirmed: bool = False
+
+
+class VideoCloudResumeRequest(VideoRevisionRequest):
+    variant_id: VideoId
+
 
 
 class ApproveVideoVariantRequest(VideoRevisionRequest):
@@ -514,6 +587,10 @@ VIDEO_CLIENT_MODELS: list[type[BaseModel]] = [
     UpdateVideoProjectRequest,
     VideoRevisionRequest,
     VideoRenderRequest,
+    VideoCloudQuoteRequest,
+    VideoCloudQuoteResponse,
+    VideoCloudSubmitRequest,
+    VideoCloudResumeRequest,
     ApproveVideoVariantRequest,
     VideoExportRequest,
     VideoSpeechLineRequest,

@@ -256,3 +256,21 @@ export function reviewCharacterComparison(id: string, body: ReviewCharacterAdapt
 export function dialoguePassages(bookId: string, chapterIndex: number, signal?: AbortSignal): Promise<AudiobookPassagesResponse> {
   return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/passages`, { signal }, parseAudiobookPassagesResponse)
 }
+
+import { parseVideoCloudQuoteRequest, parseVideoCloudQuoteResponse, parseVideoCloudSubmitRequest, parseVideoCloudResumeRequest } from './contracts'
+import type { VideoCloudQuoteRequest, VideoCloudQuoteResponse, VideoCloudSubmitRequest, VideoCloudResumeRequest } from './contracts'
+export function quoteCloudVideo(id: string, body: VideoCloudQuoteRequest, signal?: AbortSignal): Promise<VideoCloudQuoteResponse> {
+  return apiFetch(`${projectPath(id)}/cloud/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parseVideoCloudQuoteRequest(body)), signal }, parseVideoCloudQuoteResponse)
+}
+export function submitCloudVideo(id: string, body: VideoCloudSubmitRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'cloud/submit', parseVideoCloudSubmitRequest(body), signal)
+}
+export function resumeCloudVideo(id: string, body: VideoCloudResumeRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'cloud/resume', parseVideoCloudResumeRequest(body), signal)
+}
+
+export type { VideoCloudSubmitRequest } from './contracts'
+
+export function clearCharacterAdapter(id: string, body: VideoRevisionRequest, signal?: AbortSignal): Promise<VideoProject> {
+  return projectPost(id, 'character-adapter/clear', parseVideoRevisionRequest(body), signal)
+}

@@ -10,6 +10,7 @@ import {
 } from './contracts'
 import type {
   AudiobookBook,
+  AudiobookCloudControlRequest,
   AudiobookCreateResponse,
   AudiobookJob,
   CreateAudiobookRequest,
@@ -36,13 +37,13 @@ export function saveEbookDraft(id: string, body: PatchEbookDraftRequest, signal?
   const validated = parsePatchEbookDraftRequest(body)
   return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(id)}`, { method: 'PATCH', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(validated) }, parseEbookDraft)
 }
-export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal, cast?: CreateAudiobookRequest['cast'], options?: Pick<CreateAudiobookFromDraftRequest, 'language' | 'cast_reviewed'>): Promise<AudiobookCreateResponse> {
+export function createAudiobookFromDraft(draft: EbookDraft, profileId: string, signal?: AbortSignal, cast?: CreateAudiobookRequest['cast'], options?: Pick<CreateAudiobookFromDraftRequest, 'language' | 'cast_reviewed' | 'cloud_approval'>): Promise<AudiobookCreateResponse> {
   const body = parseCreateAudiobookFromDraftRequest({ profile_id: profileId, revision: draft.revision, ...(cast?.length ? { cast } : {}), ...options })
   return apiFetch(`/api/audiobooks/imports/${encodeURIComponent(draft.id)}/create`, { method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, parseAudiobookCreateResponse)
 }
 export function ebookSourceUrl(id: string): string { return `/api/audiobooks/imports/${encodeURIComponent(id)}/source` }
-export function controlAudiobook(id: string, action: 'pause' | 'resume' | 'cancel', signal?: AbortSignal): Promise<AudiobookBook> {
-  return apiFetch(`/api/audiobooks/${encodeURIComponent(id)}/${action}`, { method: 'POST', signal }, parseAudiobookBook)
+export function controlAudiobook(id: string, action: 'pause' | 'resume' | 'cancel', signal?: AbortSignal,cloudControl?:AudiobookCloudControlRequest): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(id)}/${action}`, { method: 'POST', signal,...(cloudControl?{headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudControl)}:{}) }, parseAudiobookBook)
 }
 
 export async function listAudiobooks(signal?: AbortSignal): Promise<AudiobookBook[]> {
@@ -75,10 +76,11 @@ export async function listAudiobookJobs(bookId: string, signal?: AbortSignal): P
   return json.jobs
 }
 
-export async function retryAudiobook(bookId: string, signal?: AbortSignal): Promise<AudiobookBook> {
+export async function retryAudiobook(bookId: string, signal?: AbortSignal,cloudControl?:AudiobookCloudControlRequest): Promise<AudiobookBook> {
   return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/retry`, {
     method: 'POST',
     signal,
+    ...(cloudControl?{headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudControl)}:{}),
   }, parseAudiobookBook)
 }
 
@@ -123,8 +125,8 @@ export function setAudiobookPronunciations(bookId: string, pronunciations: Array
   }, parseAudiobookBook)
 }
 
-export function regenerateAudiobookChapter(bookId: string, chapterIndex: number, signal?: AbortSignal): Promise<AudiobookBook> {
-  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/regenerate`, { method: 'POST', signal }, parseAudiobookBook)
+export function regenerateAudiobookChapter(bookId: string, chapterIndex: number, signal?: AbortSignal,cloudControl?:AudiobookCloudControlRequest): Promise<AudiobookBook> {
+  return apiFetch(`/api/audiobooks/${encodeURIComponent(bookId)}/chapters/${chapterIndex}/regenerate`, { method: 'POST', signal,...(cloudControl?{headers:{'Content-Type':'application/json'},body:JSON.stringify(cloudControl)}:{}) }, parseAudiobookBook)
 }
 
 export function uploadAudiobookCover(bookId: string, file: File, signal?: AbortSignal): Promise<AudiobookBook> {

@@ -6,6 +6,7 @@ import { useVideoWorkspace } from './useVideoWorkspace'
 import SpeechAudioPreview from '../voice/SpeechAudioPreview.vue'
 import VideoPreviewPlayer from './VideoPreviewPlayer.vue'
 import VideoProjectLibrary from './VideoProjectLibrary.vue'
+import VideoCloudPanel from './VideoCloudPanel.vue'
 import VideoDirectionPanel from './VideoDirectionPanel.vue'
 import VideoDialoguePanel from './VideoDialoguePanel.vue'
 import VideoSoundtrackPanel from './VideoSoundtrackPanel.vue'
@@ -23,7 +24,7 @@ const { t } = useI18n()
 const route = useRoute()
 const { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
   selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
-  save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot } = useVideoWorkspace()
+  cloudSubmit, cloudResume, detachAdapter, save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot } = useVideoWorkspace()
 watch([() => route.query.project, loading], ([id, busy]) => {
   if (!busy && typeof id === 'string' && /^[0-9a-f]{32}$/.test(id)) void selectProject(id)
 }, { immediate: true })
@@ -60,15 +61,16 @@ onMounted(() => window.addEventListener('resize', resizeLibrary))
 onBeforeUnmount(() => { alive = false; focusGeneration++; window.removeEventListener('resize', resizeLibrary) })
 const searchedTracks = computed(() => tracks.value.filter((track) => `${track.title} ${track.filename} ${track.short_id ?? ''}`.toLowerCase().includes(songSearch.value.toLowerCase())))
 const engineOption = computed(() => readiness.value?.options.find((option) => option.id === (draft.value?.settings.engine_pack ?? 'ltx23')))
+const cloudMode = computed(() => draft.value?.provider_config?.provider === 'openrouter')
 const generatedMode = computed(() => draft.value?.mode === 'generated')
 const repairDescriptionFor = ref('')
-watch([() => selectedShot.value?.id, generatedMode, () => selectedShot.value ? shotProblem(draft.value?.shots ?? [], selectedShot.value.id, timelineLimit.value) === 'bad_prompt' : false], ([id, generated, invalid]) => {
+watch([() => selectedShot.value?.id, generatedMode, () => selectedShot.value ? shotProblem(draft.value?.shots ?? [], selectedShot.value.id, timelineLimit.value, cloudMode.value) === 'bad_prompt' : false], ([id, generated, invalid]) => {
   if (generated || id !== repairDescriptionFor.value) repairDescriptionFor.value = ''
   // Keep the recovery editor mounted while typing; valid image descriptions
   // stay hidden until a stored value actually needs correction.
   if (id && !generated && invalid) repairDescriptionFor.value = id
 }, { immediate: true })
-const modeReady = computed(() => Boolean(readiness.value?.ffmpeg_ready) && (!generatedMode.value || Boolean(engineOption.value?.available)))
+const modeReady = computed(() => Boolean(readiness.value?.ffmpeg_ready) && (cloudMode.value || !generatedMode.value || Boolean(engineOption.value?.available)))
 const canAnalyze = computed(() => !readOnly.value && !serverBusy.value && Boolean(readiness.value?.analysis_ready && readiness.value.ffmpeg_ready) && !project.value?.source_changed && project.value?.track_id != null)
 const pictureProject = computed(() => project.value?.track_id == null)
 const reelProject = computed(() => project.value?.preset === 'reel')
@@ -90,7 +92,7 @@ const clockText = (seconds: number) => formatClock(seconds)
 const statusText = computed(() => project.value?.job?.status ?? 'draft')
 const validShots = computed(() => Boolean(draft.value?.shots.length) && !problem.value)
 const shotsReady = computed(() => validShots.value && modeReady.value && !readOnly.value && !project.value?.source_changed && (generatedMode.value || (project.value?.references?.length ?? 0) > 0))
-const canCompute = computed(() => shotsReady.value && (!generatedMode.value || !serverBusy.value))
+const canCompute = computed(() => !cloudMode.value && shotsReady.value && (!generatedMode.value || !serverBusy.value))
 const textReady = computed(() => !draft.value?.export_settings.include_overlays || !draft.value.overlays.length || Boolean(readiness.value?.overlay_ready))
 const canAssemble = computed(() => canCompute.value && textReady.value)
 const canExport = computed(() => shotsReady.value && textReady.value)
@@ -102,9 +104,9 @@ function videoBlocker(generation: boolean): string {
   if (!readiness.value.ffmpeg_ready) return t('video.err.ffmpeg_missing')
   if (!draft.value?.shots.length) return t('videoExperience.noShotsBlocker')
   if (problem.value) return videoErrorText(problem.value)
-  if (generatedMode.value && !engineOption.value?.available) return t('videoExperience.modelMissing')
+  if (!cloudMode.value && generatedMode.value && !engineOption.value?.available) return t('videoExperience.modelMissing')
   if (!generatedMode.value && !project.value?.references?.length) return t('videoExperience.referencesMissing')
-  if (generation && generatedMode.value && serverBusy.value) return t('video.othersBusy')
+  if (generation && !cloudMode.value && generatedMode.value && serverBusy.value) return t('video.othersBusy')
   return ''
 }
 const computeBlocker = computed(() => videoBlocker(true))
@@ -270,7 +272,7 @@ onBeforeUnmount(stopSource)
           <span v-if="active && phaseEta !== null"> · {{ t('videoWorkspace.phaseRemaining', { time: clockText(phaseEta) }) }}</span>
         </div>
         <div class="flex items-center gap-2"><span v-if="saving">{{ t('videoWorkspace.saving') }}</span><span v-else-if="dirty">{{ t('videoWorkspace.unsaved') }}</span><span v-else-if="project">{{ t('videoWorkspace.saved') }}</span>
-          <button v-if="dirty" :disabled="readOnly || saving" @click="save">{{ t('videoWorkspace.save') }}</button><button v-if="active" :disabled="acting" @click="cancel">{{ t('video.cancel') }}</button>
+          <button v-if="dirty" :disabled="readOnly || saving" @click="save">{{ t('videoWorkspace.save') }}</button><button v-if="active" :title="cloudMode ? t('videoCloud.stopHint') : undefined" :disabled="acting" @click="cancel">{{ t(cloudMode ? 'videoCloud.stop' : 'video.cancel') }}</button>
         </div>
       </div>
       <progress v-if="active && project?.job?.progress_total" class="w-full" :value="project.job.progress_current ?? 0" :max="project.job.progress_total" :aria-label="t('videoWorkspace.progress')"></progress>
@@ -316,14 +318,14 @@ onBeforeUnmount(stopSource)
           <label>{{ t('videoWorkspace.projectName') }}<input v-model="draft.name" maxlength="120" :disabled="readOnly"></label>
           <div class="video-actions"><button type="button" class="primary" @click="changeStep('direction', true)">{{ t('videoWorkspace.continue') }}</button><button type="button" :disabled="acting || saving" @click="startNewProject">{{ t('videoExperience.newProject') }}</button></div>
         </div>
-        <LocalEnginePanel v-if="(showNewProject && startKind !== 'song') || (!showNewProject && pictureProject)" kind="picture" />
+        <LocalEnginePanel v-if="(showNewProject && startKind !== 'song') || (!showNewProject && pictureProject && !cloudMode)" kind="picture" />
       </template>
       <template v-else-if="draft && project && step === 'direction'">
-        <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @duplicate="duplicate" />
+        <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @detach-adapter="detachAdapter" @duplicate="duplicate" />
         <VideoDialoguePanel v-if="project.dialogue_cues?.length" :project="project" :read-only="readOnly" @refresh="refreshCue" />
         <VideoSoundtrackPanel v-if="pictureProject && !project.dialogue_cues?.length" :project="project" :draft="draft" :read-only="readOnly" @upload="uploadSpeech" @clear="clearSpeech" @speak="speakLine" />
         <VideoCharacterPanel v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyCharacter" />
-        <VideoCharacterTrainer v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyTrainedCharacter" />
+        <VideoCharacterTrainer v-if="pictureProject && !cloudMode" :project="project" :read-only="readOnly" @apply="applyTrainedCharacter" />
       </template>
       <template v-else-if="draft && project && step === 'storyboard'">
 
@@ -349,30 +351,32 @@ onBeforeUnmount(stopSource)
           <p v-if="characterIssue === 'missing'" role="alert" class="text-sm text-status-failed">{{ t('videoDirection.characterMissing') }}</p>
           <p v-if="characterIssue === 'mismatch'" role="alert" class="text-sm text-status-failed">{{ t('videoDirection.characterMismatch') }}</p>
           <details class="video-secondary"><summary>{{ t('videoExperience.shotSettings') }}</summary><div class="mt-4 space-y-4">
-            <div class="grid gap-4 sm:grid-cols-2"><label>{{ t('videoWorkspace.seed') }}<input v-model.number="selectedShot.seed" type="number" min="0" max="2147483647"></label><label v-if="generatedMode && !draft.character_lock">{{ t('videoWorkspace.strength') }}<input v-model.number="selectedShot.reference_strength" type="range" min="0" max="1" step="0.05"><span>{{ selectedShot.reference_strength ?? 0.7 }}</span></label><p v-else-if="generatedMode && draft.character_lock" class="text-sm text-text-dim">{{ t('videoWorkspace.fixedStrength') }}</p></div>
+            <div class="grid gap-4 sm:grid-cols-2"><label v-if="!cloudMode">{{ t('videoWorkspace.seed') }}<input v-model.number="selectedShot.seed" type="number" min="0" max="2147483647"></label><label v-if="generatedMode && !cloudMode && !draft.character_lock">{{ t('videoWorkspace.strength') }}<input v-model.number="selectedShot.reference_strength" type="range" min="0" max="1" step="0.05"><span>{{ selectedShot.reference_strength ?? 0.7 }}</span></label><p v-else-if="generatedMode && !cloudMode && draft.character_lock" class="text-sm text-text-dim">{{ t('videoWorkspace.fixedStrength') }}</p></div>
             <label class="inline-check"><input v-model="selectedShot.locked" type="checkbox">{{ t('videoWorkspace.lock') }}</label>
             <div class="video-actions" v-if="!project.dialogue_cues?.length"><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, -1))">{{ t('videoWorkspace.moveEarlier') }}</button><button type="button" @click="editShots(moveShot(draft.shots, selectedShotId, 1))">{{ t('videoWorkspace.moveLater') }}</button><button type="button" :disabled="selectedShot.seconds === 2 || draft.shots.length >= shotCap" @click="editShots(splitShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.split') }}</button><button type="button" :disabled="draft.shots.length >= shotCap" @click="editShots(duplicateShot(draft.shots, selectedShotId, newVideoId()))">{{ t('videoWorkspace.duplicate') }}</button><button type="button" class="text-status-failed" @click="removeShot">{{ t('video.removeShot') }}</button></div>
           </div></details>
-          <p v-if="shotProblem(draft.shots, selectedShot.id, timelineLimit)" role="alert" class="text-status-failed">{{ videoErrorText(shotProblem(draft.shots, selectedShot.id, timelineLimit)) }}</p>
+          <p v-if="shotProblem(draft.shots, selectedShot.id, timelineLimit, cloudMode)" role="alert" class="text-status-failed">{{ videoErrorText(shotProblem(draft.shots, selectedShot.id, timelineLimit, cloudMode)) }}</p>
         </fieldset>
         <details v-if="!pictureProject" class="video-card video-secondary"><summary>{{ t('videoExperience.markers') }}</summary><div class="mt-4 space-y-2"><div class="flex flex-wrap items-center justify-between gap-2"><h3>{{ t('videoWorkspace.markers') }} <span v-if="project.analysis?.tempo_bpm" class="text-text-dim">~{{ Math.round(project.analysis.tempo_bpm) }} BPM</span></h3><button :disabled="readOnly" @click="addMarker">{{ t('videoWorkspace.addMarker') }}</button></div><p class="text-xs text-text-dim">{{ t('videoWorkspace.markerHint') }}</p><div class="max-h-48 overflow-y-auto space-y-1"><div v-for="marker in importantMarkers" :key="marker.id" class="flex flex-wrap items-center gap-2 text-sm"><button @click="seek(marker.time_sec)">{{ clockText(marker.time_sec) }} · {{ marker.label || marker.kind }}</button><span>{{ Math.round((marker.confidence ?? 0) * 100) }}%</span><button :disabled="readOnly || !selectedShot" @click="snapShot(marker)">{{ t('videoWorkspace.snap') }}</button><button v-if="marker.kind === 'manual'" :disabled="readOnly" @click="draft.markers = draft.markers.filter((item) => item.id !== marker.id)">{{ t('video.removeShot') }}</button></div></div></div></details>
-        <div class="flex flex-wrap gap-2"><button :disabled="!canCompute || !selectedShot" class="primary" @click="preview()">{{ t('videoWorkspace.previewShot') }}</button><button type="button" @click="changeStep('preview', true)">{{ t('videoWorkspace.reviewPreviews') }}</button></div>
-        <p v-if="computeBlocker" role="status" class="text-sm text-status-failed">{{ computeBlocker }}</p><p class="text-sm text-text-dim">{{ t('videoWorkspace.previewHint') }}</p>
+        <div class="flex flex-wrap gap-2"><button v-if="!cloudMode" :disabled="!canCompute || !selectedShot" class="primary" @click="preview()">{{ t('videoWorkspace.previewShot') }}</button><button type="button" @click="changeStep('preview', true)">{{ t('videoWorkspace.reviewPreviews') }}</button></div>
+        <p v-if="computeBlocker" role="status" class="text-sm text-status-failed">{{ computeBlocker }}</p><p class="text-sm text-text-dim">{{ t(cloudMode ? 'videoCloud.noLocal' : 'videoWorkspace.previewHint') }}</p>
       </template>
       <template v-else-if="draft && project && step === 'preview'">
+        <p v-if="cloudMode && active" class="text-sm text-text-dim">{{t('videoCloud.stopHint')}}</p>
 
-        <fieldset :disabled="readOnly" class="video-card space-y-3"><h3 class="font-semibold">{{ t('videoExperience.previewSettings') }}</h3><label>{{ t('videoWorkspace.variantCount') }}<select v-model.number="variantsPerShot"><option :value="1">1</option><option :value="2">2</option><option :value="3" :disabled="!generatedMode">3</option></select></label><p v-if="!generatedMode" class="text-sm text-text-dim">{{ t('videoWorkspace.imageMotionHint') }}</p><div class="flex flex-wrap gap-3"><label v-for="(shot, index) in draft.shots" :key="shot.id" class="inline-check"><input v-model="selectedPreviewIds" type="checkbox" :value="shot.id">{{ index + 1 }} · {{ clockText(shot.start_sec) }}</label></div><button :disabled="!canCompute || !selectedPreviewIds.length" class="primary" @click="preview(selectedPreviewIds)">{{ t('videoWorkspace.previewSelected') }}</button></fieldset>
+        <VideoCloudPanel v-if="cloudMode" :project="project" :shot-id="selectedShotId" :read-only="readOnly" :dirty="dirty" @submit="cloudSubmit" @save="save" />
+        <fieldset v-else :disabled="readOnly" class="video-card space-y-3"><h3 class="font-semibold">{{ t('videoExperience.previewSettings') }}</h3><label>{{ t('videoWorkspace.variantCount') }}<select v-model.number="variantsPerShot"><option :value="1">1</option><option :value="2">2</option><option :value="3" :disabled="!generatedMode">3</option></select></label><p v-if="!generatedMode" class="text-sm text-text-dim">{{ t('videoWorkspace.imageMotionHint') }}</p><div class="flex flex-wrap gap-3"><label v-for="(shot, index) in draft.shots" :key="shot.id" class="inline-check"><input v-model="selectedPreviewIds" type="checkbox" :value="shot.id">{{ index + 1 }} · {{ clockText(shot.start_sec) }}</label></div><button :disabled="!canCompute || !selectedPreviewIds.length" class="primary" @click="preview(selectedPreviewIds)">{{ t('videoWorkspace.previewSelected') }}</button></fieldset>
         <div class="flex gap-2 overflow-x-auto"><button v-for="(shot, index) in draft.shots" :key="shot.id" :aria-pressed="selectedShotId === shot.id" @click="selectedShotId = shot.id">{{ t('video.shotLabel', { current: index + 1 }) }} <span v-if="project.shots?.find((item) => item.id === shot.id)?.approved_variant_id">✓</span></button></div>
         <div v-if="!shotVariants.length" class="video-empty"><p class="font-semibold">{{ t('videoExperience.previewEmpty') }}</p><p class="mt-2 text-sm text-text-dim">{{ t('videoExperience.previewEmptyHint') }}</p></div>
         <div class="grid gap-4 md:grid-cols-2"><article v-for="variant in shotVariants" :key="variant.id" class="rounded-xl border bg-panel p-4 space-y-3" :class="savedShot?.approved_variant_id === variant.id ? 'border-accent1' : 'border-border'">
-          <div class="flex items-center justify-between gap-2"><strong>{{ t('videoWorkspace.seed') }} {{ variant.seed }}</strong><span>{{ t(`videoWorkspace.status.${variant.status ?? 'queued'}`) }}</span></div>
+          <div class="flex items-center justify-between gap-2"><strong v-if="variant.cloud">{{ variant.cloud.receipt.model_id }}</strong><strong v-else>{{ t('videoWorkspace.seed') }} {{ variant.seed }}</strong><span>{{ t(`videoWorkspace.status.${variant.status ?? 'queued'}`) }}</span></div>
           <VideoPreviewPlayer v-if="variant.status === 'ready' && variant.file_url" :src="variant.file_url" :poster="variant.poster_url" :label="t('videoWorkspace.variantVideo', { seed: variant.seed })" />
           <img v-if="variant.filmstrip_url" :src="variant.filmstrip_url" :alt="t('videoDialogue.filmstrip', { number: draft.shots.findIndex(shot => shot.id === selectedShotId) + 1 })" loading="lazy" class="w-full rounded bg-black" />
           <p v-if="variant.error_code" class="text-status-failed">{{ videoErrorText(variant.error_code) }}</p>
-          <details><summary>{{ t('videoWorkspace.details') }}</summary><p class="mt-2 whitespace-pre-wrap text-sm">{{ variant.prompt || selectedShot?.prompt }}</p><p class="text-xs text-text-dim">{{ variant.settings?.engine_pack }} · {{ variant.settings?.width }}×{{ variant.settings?.height }} · {{ variant.settings?.stage1_steps }} + {{ variant.settings?.stage2_steps }} · CFG {{ variant.settings?.cfg_scale }}</p><p v-for="timing in variant.timings" :key="timing.started_at" class="text-xs">{{ timing.phase }} · {{ clockText(timing.duration_sec ?? 0) }}</p></details>
+          <div v-if="variant.cloud" class="space-y-2 text-xs text-text-dim"><p>{{ t('videoCloud.duration', { native: variant.cloud.source_duration_sec ?? variant.cloud.remote_duration_sec, slot: variant.cloud.slot_duration_sec }) }}</p><p>{{ t('videoCloud.estimate', { cost: variant.cloud.receipt.estimated_usd.toFixed(3) }) }}</p><p>{{ variant.cloud.receipt.actual_cost_usd != null ? t('videoCloud.actual', { cost: variant.cloud.receipt.actual_cost_usd.toFixed(3) }) : t('videoCloud.unreported') }}</p><p v-if="variant.cloud.receipt.remote_id">{{ t('videoCloud.remote', { id: variant.cloud.receipt.remote_id }) }}</p><p v-if="variant.cloud.receipt.state === 'submission_unknown' || !variant.cloud.receipt.remote_id && variant.cloud.receipt.state === 'canceled_tracking'" role="alert">{{ t('videoCloud.unknown') }}</p><button v-if="['submitted','canceled_tracking','completed'].includes(variant.cloud.receipt.state) && variant.cloud.receipt.remote_id && variant.status !== 'ready'" type="button" :disabled="readOnly || dirty" @click="cloudResume(variant.id)">{{ t('videoCloud.resume') }}</button></div><details><summary>{{ t('videoWorkspace.details') }}</summary><p class="mt-2 whitespace-pre-wrap text-sm">{{ variant.prompt || selectedShot?.prompt }}</p><p v-if="!variant.cloud" class="text-xs text-text-dim">{{ variant.settings?.engine_pack }} · {{ variant.settings?.width }}×{{ variant.settings?.height }} · {{ variant.settings?.stage1_steps }} + {{ variant.settings?.stage2_steps }} · CFG {{ variant.settings?.cfg_scale }}</p><p v-for="timing in variant.timings" :key="timing.started_at" class="text-xs">{{ timing.phase }} · {{ clockText(timing.duration_sec ?? 0) }}</p></details>
           <button v-if="variant.status === 'ready'" :disabled="readOnly || savedShot?.approved_variant_id === variant.id" @click="approve(selectedShotId, variant.id)">{{ savedShot?.approved_variant_id === variant.id ? t('videoWorkspace.approved') : t('videoWorkspace.approve') }}</button>
         </article></div>
-        <p v-if="computeBlocker" role="status" class="text-sm text-status-failed">{{ computeBlocker }}</p><div class="video-actions"><button :disabled="!canCompute || !selectedShot" @click="preview()">{{ t('videoWorkspace.retryShot') }}</button><button type="button" @click="changeStep('storyboard', true)">{{ t('videoWorkspace.editStoryboard') }}</button><button type="button" class="primary" @click="changeStep('export', true)">{{ t('videoWorkspace.continueExport') }}</button></div>
+        <p v-if="computeBlocker" role="status" class="text-sm text-status-failed">{{ computeBlocker }}</p><div class="video-actions"><button v-if="!cloudMode" :disabled="!canCompute || !selectedShot" @click="preview()">{{ t('videoWorkspace.retryShot') }}</button><button type="button" @click="changeStep('storyboard', true)">{{ t('videoWorkspace.editStoryboard') }}</button><button type="button" class="primary" @click="changeStep('export', true)">{{ t('videoWorkspace.continueExport') }}</button></div>
       </template>
       <template v-else-if="draft && project && step === 'export'">
 <p class="text-sm font-medium text-text">{{ t('videoExperience.approvalProgress', { approved: approvalCount, total: draft.shots.length }) }}</p>
@@ -383,10 +387,10 @@ onBeforeUnmount(stopSource)
           </div></details>
         </fieldset>
         <div class="grid gap-4 md:grid-cols-2">
-          <article data-video-render-action class="video-card flex flex-col gap-3"><h3 class="font-semibold">{{ t('videoExperience.renderTitle') }}</h3><p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.renderDescription') }}</p><p v-if="assemblyBlocker" class="text-sm text-status-failed">{{ assemblyBlocker }}</p><button type="button" class="primary mt-auto" :disabled="!canAssemble" @click="render">{{ t('videoWorkspace.render') }}</button></article>
+          <p v-if="cloudMode" class="text-sm text-text-dim">{{t('videoCloud.noLocal')}}</p><article v-else data-video-render-action class="video-card flex flex-col gap-3"><h3 class="font-semibold">{{ t('videoExperience.renderTitle') }}</h3><p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.renderDescription') }}</p><p v-if="assemblyBlocker" class="text-sm text-status-failed">{{ assemblyBlocker }}</p><button type="button" class="primary mt-auto" :disabled="!canAssemble" @click="render">{{ t('videoWorkspace.render') }}</button></article>
           <article data-video-export-action class="video-card flex flex-col gap-3"><h3 class="font-semibold">{{ t('videoExperience.exportTitle') }}</h3><p class="text-sm leading-relaxed text-text-dim">{{ t('videoExperience.exportDescription') }}</p><p v-if="exportBlocker" class="text-sm text-status-failed">{{ exportBlocker }}</p><button type="button" class="mt-auto" :disabled="!canExport || approvalCount !== draft.shots.length" @click="exportVideo">{{ t('videoWorkspace.exportApproved') }}</button></article>
         </div>
-        <button v-if="project.job?.status === 'failed' || project.job?.status === 'cancelled'" :disabled="!canResume" @click="resume">{{ t('videoWorkspace.resume') }}</button>
+        <button v-if="!cloudMode && (project.job?.status === 'failed' || project.job?.status === 'cancelled')" :disabled="!canResume" @click="resume">{{ t('videoWorkspace.resume') }}</button>
         <div class="video-card space-y-4"><h3 class="font-semibold">{{ t('videoExperience.finished') }}</h3>
         <VideoPreviewPlayer v-if="project.file_url" :key="exportSource" :src="exportSource" :poster="exportPoster" :label="t('videoWorkspace.finishedVideo')" /><a v-if="project.file_url" :href="exportSource" download class="inline-block min-h-11 rounded-lg bg-accent1 px-4 py-3 text-white">{{ t('common.download') }}</a>
         <div v-if="!project.file_url" class="video-empty"><p class="font-medium">{{ t('videoExperience.noOutput') }}</p><p class="mt-2 text-sm text-text-dim">{{ t('videoExperience.noOutputHint') }}</p></div></div>

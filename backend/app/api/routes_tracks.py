@@ -31,7 +31,7 @@ from .tagged_download_response import download_options, tagged_download_response
 router = APIRouter(prefix="/api/tracks", tags=["tracks"])
 
 ALLOWED_AUDIO_EXT = {"wav", "mp3", "flac"}
-ALLOWED_TRACK_MODELS = set(MODELS.keys()) | {"editor", "upload"}
+ALLOWED_TRACK_MODELS = set(MODELS.keys()) | {"editor", "upload", "openrouter"}
 
 
 @router.get("/activity", response_model=TrackActivityResponse)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, Request
 from typing import Annotated, NoReturn
 from fastapi.responses import FileResponse
 from pydantic import ValidationError
@@ -32,7 +32,7 @@ from ..client_contracts import CreateVideoRequest, PlanRequest
 router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 
-def _raise(exc: VideoJobError) -> None:
+def _raise(exc: VideoJobError) -> NoReturn:
     if exc.code == "busy":
         status = 409
     elif exc.code == "not_found":
@@ -43,25 +43,25 @@ def _raise(exc: VideoJobError) -> None:
 
 
 @router.get("", response_model=VideosResponse)
-def get_videos():
-    return {"videos": list_videos()}
+def get_videos() -> VideosResponse:
+    return VideosResponse.model_validate({"videos": list_videos()})
 
 
 @router.get("/activity", response_model=VideoActivityResponse)
-async def video_activity():
-    return {"busy": await other_work_busy()}
+async def video_activity() -> VideoActivityResponse:
+    return VideoActivityResponse(busy=await other_work_busy())
 
 
 @router.post("/plan", response_model=VideoPlanResponse)
-async def plan_video(body: PlanRequest):
+async def plan_video(body: PlanRequest) -> VideoPlanResponse:
     try:
-        return await analyze_song(body.track_id)
+        return VideoPlanResponse.model_validate(await analyze_song(body.track_id))
     except VideoJobError as exc:
         _raise(exc)
 
 
 @router.post("", response_model=VideoJobResponse)
-async def create_video(body: CreateVideoRequest):
+async def create_video(body: CreateVideoRequest) -> VideoJobResponse:
     shots = None
     if body.shots:
         shots = [
@@ -73,7 +73,7 @@ async def create_video(body: CreateVideoRequest):
             for shot in body.shots
         ]
     try:
-        return await start_video(
+        return VideoJobResponse.model_validate(await start_video(
             body.track_id,
             body.prompt,
             body.seconds,
@@ -84,7 +84,7 @@ async def create_video(body: CreateVideoRequest):
             body.cfg_scale,
             body.width,
             body.height,
-        )
+        ))
     except VideoJobError as exc:
         _raise(exc)
 
@@ -153,10 +153,10 @@ def video_readiness() -> VideoReadinessResponse:
 
 
 @router.post("/dialogue-reels", response_model=VideoProject)
-def create_dialogue_reel(body: CreateDialogueReelRequest) -> VideoProject:
+async def create_dialogue_reel(body: CreateDialogueReelRequest) -> VideoProject:
     from .. import video_dialogue
     try:
-        return video_dialogue.create(body)
+        return await video_dialogue.create(body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 
@@ -389,10 +389,10 @@ def speech_file(project_id: str) -> FileResponse:
 
 
 @router.post("/projects/{project_id}/dialogue-cues/{shot_id}", response_model=VideoProject)
-def refresh_dialogue_cue(project_id: str, shot_id: str, body: RefreshDialogueCueRequest) -> VideoProject:
+async def refresh_dialogue_cue(project_id: str, shot_id: str, body: RefreshDialogueCueRequest) -> VideoProject:
     from .. import video_dialogue
     try:
-        return video_dialogue.refresh(project_id, shot_id, body)
+        return await video_dialogue.refresh(project_id, shot_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
 
@@ -446,8 +446,10 @@ async def resume_project(project_id: str, body: VideoRevisionRequest) -> VideoPr
 
 
 @router.post("/projects/{project_id}/cancel", response_model=VideoProject)
-async def cancel_project(project_id: str) -> VideoProject:
+async def cancel_project(project_id: str, request: Request) -> VideoProject:
     try:
+        if projects.get(project_id).provider_config.provider == "openrouter":
+            require_openrouter_origin(request)
         return await renders.cancel(project_id)
     except projects.VideoProjectError as exc:
         _project_error(exc)
@@ -526,7 +528,7 @@ def variant_poster(project_id: str, shot_id: str, variant_id: str) -> FileRespon
 
 
 @router.get("/{video_id}/file")
-def video_file(video_id: str):
+def video_file(video_id: str) -> FileResponse:
     try:
         path = output_file(video_id)
     except VideoJobError as exc:
@@ -535,25 +537,67 @@ def video_file(video_id: str):
 
 
 @router.post("/{video_id}/cancel", response_model=VideoJobResponse)
-async def cancel(video_id: str):
+async def cancel(video_id: str) -> VideoJobResponse:
     try:
-        return await cancel_video(video_id)
+        return VideoJobResponse.model_validate(await cancel_video(video_id))
     except VideoJobError as exc:
         _raise(exc)
 
 
 @router.get("/{video_id}", response_model=VideoJobResponse)
-def one_video(video_id: str):
+def one_video(video_id: str) -> VideoJobResponse:
     try:
-        return get_video(video_id)
+        return VideoJobResponse.model_validate(get_video(video_id))
     except VideoJobError as exc:
         _raise(exc)
 
 
 @router.delete("/{video_id}")
-async def remove_video(video_id: str):
+async def remove_video(video_id: str) -> dict[str, str]:
     try:
         await delete_video(video_id)
     except VideoJobError as exc:
         _raise(exc)
     return {"deleted": video_id}
+
+
+# Paid cloud operations are same-origin only; no browser receives credentials.
+from ..module_security import require_local_origin as require_openrouter_origin
+from .. import video_cloud
+from ..openrouter_errors import OpenRouterError
+from ..video_contracts import VideoCloudQuoteRequest, VideoCloudQuoteResponse, VideoCloudSubmitRequest, VideoCloudResumeRequest
+
+@router.post("/projects/{project_id}/cloud/quote", response_model=VideoCloudQuoteResponse, dependencies=[Depends(require_openrouter_origin)])
+def quote_cloud_video(project_id: str, body: VideoCloudQuoteRequest) -> VideoCloudQuoteResponse:
+    try:
+        return video_cloud.quote(project_id, body)
+    except OpenRouterError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+@router.post("/projects/{project_id}/cloud/submit", response_model=VideoProject, dependencies=[Depends(require_openrouter_origin)])
+async def submit_cloud_video(project_id: str, body: VideoCloudSubmitRequest) -> VideoProject:
+    try:
+        return await video_cloud.submit(project_id, body)
+    except OpenRouterError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+    except (projects.VideoProjectError, VideoMediaError) as exc:
+        _project_error(projects.VideoProjectError(exc.code))
+
+@router.post("/projects/{project_id}/cloud/resume", response_model=VideoProject, dependencies=[Depends(require_openrouter_origin)])
+async def resume_cloud_video(project_id: str, body: VideoCloudResumeRequest) -> VideoProject:
+    try:
+        return await video_cloud.resume(project_id, body)
+    except OpenRouterError as exc:
+        raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
+
+
+@router.post("/projects/{project_id}/character-adapter/clear", response_model=VideoProject)
+def clear_project_character_adapter(project_id: str, body: VideoRevisionRequest) -> VideoProject:
+    try:
+        return projects.clear_character_adapter(project_id, body)
+    except projects.VideoProjectError as exc:
+        _project_error(exc)

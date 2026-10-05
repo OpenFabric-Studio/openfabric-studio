@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import VideoCloudProvider from './VideoCloudProvider.vue'
 import AppIcon from '../../components/shared/AppIcon.vue'
 import type { AppIconName } from '../../components/shared/appIcons'
 import type { VideoProject, VideoReadinessResponse } from '../../api/contracts'
@@ -8,7 +9,7 @@ import type { VideoDraft } from './useVideoWorkspace'
 
 const draft = defineModel<VideoDraft>({ required: true })
 const props = defineProps<{ project: VideoProject; readiness: VideoReadinessResponse | null; readOnly: boolean; canAnalyze: boolean }>()
-const emit = defineEmits<{ analyze: []; continue: []; duplicate: []; upload: [file: File] }>()
+const emit = defineEmits<{ analyze: []; continue: []; duplicate: []; upload: [file: File]; detachAdapter: [] }>()
 const { t, te } = useI18n()
 const panelId = useId()
 const uploadError = ref('')
@@ -20,8 +21,9 @@ const approachChoices: { mode: VideoDraft['mode']; title: string; hint: string; 
 ]
 const picture = computed(() => props.project.track_id == null)
 const reel = computed(() => props.project.preset === 'reel')
-const approaches = computed(() => picture.value ? approachChoices.filter((item) => item.mode === 'generated') : approachChoices)
+const approaches = computed(() => picture.value || cloud.value ? approachChoices.filter((item) => item.mode === 'generated') : approachChoices)
 const generated = computed(() => draft.value.mode === 'generated')
+const cloud = computed(() => draft.value.provider_config?.provider === 'openrouter')
 const references = computed(() => props.project.references ?? [])
 const engineOption = computed(() => props.readiness?.options.find(option => option.id === (draft.value.settings.engine_pack ?? 'ltx23')))
 const comparisonOption = computed(() => props.readiness?.options.find(option => option.id === 'ltx25'))
@@ -81,24 +83,25 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
       </button>
     </div>
 
+    <VideoCloudProvider v-model="draft" :project="project" :read-only="readOnly" @detach-adapter="emit('detachAdapter')" />
     <fieldset :disabled="readOnly" class="min-w-0 space-y-5 rounded-xl border border-border bg-panel p-4 sm:p-5">
       <div v-if="generated" class="space-y-4">
         <label>{{ t('videoWorkspace.directionPrompt') }}
           <textarea v-model="draft.direction" data-video-direction-prompt rows="3" maxlength="2000" :placeholder="t('video.promptPlaceholder')" :aria-describedby="`${panelId}-direction-hint`" />
           <span :id="`${panelId}-direction-hint`" class="field-hint">{{ draft.character_lock && picture ? t('videoWorkspace.characterDirectionHint') : t('videoWorkspace.directionHint') }}</span>
         </label>
-        <label>{{ t('videoWorkspace.engine') }}
+        <label v-if="!cloud">{{ t('videoWorkspace.engine') }}
           <select v-model="draft.settings.engine_pack" data-video-model>
             <option value="ltx23">LTX-2.3</option>
             <option value="ltx25" :disabled="!comparisonOption?.available">LTX-2.5 · {{ t('videoWorkspace.experimental') }}</option>
           </select>
           <span class="field-hint">{{ t('videoWorkspace.engineHint') }}</span>
         </label>
-        <p v-if="!readiness" role="status" class="field-hint">{{ t('videoWorkspace.readinessFailed') }}</p>
-        <p v-else-if="!engineOption?.available" role="status" class="field-hint">{{ engineOption?.name || t('videoWorkspace.engine') }}: {{ publicSetupText(engineOption?.reason, 'reason') }}</p>
-        <p v-if="readiness && draft.settings.engine_pack !== 'ltx25' && !comparisonOption?.available" class="field-hint">LTX-2.5: {{ publicSetupText(comparisonOption?.reason, 'reason') }}</p>
+        <p v-if="!cloud && !readiness" role="status" class="field-hint">{{ t('videoWorkspace.readinessFailed') }}</p>
+        <p v-else-if="!cloud && !engineOption?.available" role="status" class="field-hint">{{ engineOption?.name || t('videoWorkspace.engine') }}: {{ publicSetupText(engineOption?.reason, 'reason') }}</p>
+        <p v-if="!cloud && readiness && draft.settings.engine_pack !== 'ltx25' && !comparisonOption?.available" class="field-hint">LTX-2.5: {{ publicSetupText(comparisonOption?.reason, 'reason') }}</p>
       </div>
-      <div class="grid min-w-0 gap-4 sm:grid-cols-2">
+      <div v-if="!cloud" class="grid min-w-0 gap-4 sm:grid-cols-2">
         <label>{{ t('video.size') }}
           <select :value="draft.settings.height === 1280 ? '704x1280' : String(draft.settings.width ?? 704)" :disabled="reel" data-video-size @change="setSize">
             <option value="704">704×448</option><option value="768">768×512</option><option value="1280">1280×704</option><option value="704x1280">704×1280</option>
@@ -137,7 +140,7 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
     <details class="disclosure" data-video-advanced>
       <summary>{{ t('videoDirection.advanced') }}</summary>
       <div class="mt-4 space-y-4">
-        <fieldset v-if="generated" :disabled="readOnly" class="grid min-w-0 gap-4 sm:grid-cols-2">
+        <fieldset v-if="generated && !cloud" :disabled="readOnly" class="grid min-w-0 gap-4 sm:grid-cols-2">
           <label>{{ t('video.denoiseSteps') }}<input v-model.number="draft.settings.stage1_steps" data-video-denoise type="number" min="10" max="50"></label>
           <label>{{ t('video.refineSteps') }}<input v-model.number="draft.settings.stage2_steps" data-video-refine type="number" min="1" max="3"><span class="field-hint">{{ t('videoWorkspace.refineHint') }}</span></label>
           <label>{{ t('video.guidance') }}<input v-model.number="draft.settings.cfg_scale" data-video-guidance type="number" min="1" max="8" step="0.1"></label>
@@ -152,7 +155,7 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
       <div class="mt-4 space-y-3 text-sm">
         <template v-if="readiness">
           <p>FFmpeg: {{ readiness.ffmpeg_ready ? t('videoDirection.toolsReady') : t('videoDirection.toolsMissing') }} · {{ t('videoWorkspace.text') }}: {{ readiness.overlay_ready ? t('videoDirection.toolsReady') : t('videoDirection.toolsMissing') }}</p>
-          <template v-if="generated && engineOption">
+          <template v-if="generated && !cloud && engineOption">
             <p>{{ engineOption.name }} · {{ engineOption.available ? t('videoWorkspace.installed') : publicSetupText(engineOption.reason, 'reason') }}</p>
             <p class="field-hint">{{ t('videoWorkspace.disk', { total: gib(engineOption.total_bytes), missing: gib(engineOption.uncached_bytes), free: gib(engineOption.free_bytes) }) }}</p>
             <p v-for="(warning, index) in engineOption.warnings" :key="index" class="field-hint">{{ publicSetupText(warning, 'warning') }}</p>
@@ -160,7 +163,7 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
           <p v-for="(warning, index) in readiness.warnings" :key="index" class="field-hint">{{ publicSetupText(warning, 'warning') }}</p>
         </template>
         <p v-else>{{ t('videoWorkspace.readinessFailed') }}</p>
-        <p v-if="generated && !engineOption?.available" class="field-hint">{{ t('videoWorkspace.setupHint') }}</p>
+        <p v-if="generated && !cloud && !engineOption?.available" class="field-hint">{{ t('videoWorkspace.setupHint') }}</p>
         <p v-if="!generated" class="field-hint">{{ t('videoWorkspace.cpuMode') }}</p>
       </div>
     </details>

@@ -43,7 +43,9 @@ def model_work_busy(stats: dict, training: dict) -> bool:
 def local_work_busy() -> bool:
     from .module_jobs import work_busy as setup_busy
     from .audiobook_narration import work_busy as audiobook_busy
-    return audiobook_busy() or audiobook_workflows.work_busy() or audiobook_review.work_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or video_character_comparison.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
+    from .cloud_music import work_busy as cloud_music_busy
+    from .openrouter_client import work_busy as cloud_provider_busy
+    return cloud_music_busy() or cloud_provider_busy() or audiobook_busy() or audiobook_workflows.work_busy() or audiobook_review.work_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or video_character_comparison.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> dict:
