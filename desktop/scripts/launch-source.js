@@ -16,7 +16,9 @@ function sourceLayout(root, platform = process.platform) {
 }
 
 function sourceEnvironment(env, development) {
-  return { ...env, ...(development ? { OPENFABRIC_SETUP_ALLOWED_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173' } : {}) };
+  const prepared = { ...env, ...(development ? { OPENFABRIC_SETUP_ALLOWED_ORIGINS: 'http://localhost:5173,http://127.0.0.1:5173' } : {}) };
+  delete prepared.UVICORN_RELOAD;
+  return prepared;
 }
 
 function npmCommand(args, env, platform = process.platform) {
@@ -91,7 +93,8 @@ async function launchSource({ root, development = false, env = process.env }) {
       children.push({ child, graceMs });
       return new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => code === 0 || controller.signal.aborted ? resolve() : reject(new Error(`${path.basename(command)} exited with code ${code}`))); });
     };
-    const backend = own(L.python, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], path.join(root, 'backend'), 150000);
+    // Catalog publication and worker ownership require one backend per library.
+    const backend = own(L.python, ['-m', 'uvicorn', 'app.main:app', '--workers', '1', '--host', '127.0.0.1', '--port', String(port)], path.join(root, 'backend'), 150000);
     const running = [backend];
     if (development) {
       const npm = npmCommand(['run', 'dev', '--', '--host', '127.0.0.1', '--port', '5173', '--strictPort'], childEnv);

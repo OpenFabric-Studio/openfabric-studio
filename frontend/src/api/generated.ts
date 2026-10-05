@@ -237,6 +237,13 @@ export type ChapterLanguageUpdate = {
   "language"?: string
 }
 
+export type ChatterboxRequest = {
+  "text": string
+  "model"?: "original" | "multilingual"
+  "audio_prompt_path"?: (string | null)
+  "language_id"?: string
+}
+
 export type CreateAudioExportRequest = {
   "format": "mp3" | "wav" | "flac"
   "settings"?: (AudioEncodingSettings | null)
@@ -441,6 +448,12 @@ export type ImportPastedTextRequest = {
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
+export type KokoroRequest = {
+  "text": string
+  "voice"?: string
+  "lang"?: "a" | "b"
+}
+
 export type LibraryFolderInfo = {
   "path": string
   "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database"
@@ -461,6 +474,34 @@ export type LibraryStatusResponse = {
   "error": string
   "can_pick"?: boolean
   "folders": Array<LibraryFolderInfo>
+}
+
+export type LocalEngineResponse = {
+  "status": string
+  "detail": string
+  "output_path"?: (string | null)
+  "media_url"?: (string | null)
+  "runtime"?: string
+}
+
+export type LocalEngineStatus = {
+  "id": "kokoro" | "chatterbox" | "wan22" | "rvc"
+  "installed": boolean
+  "setup_script": string
+  "runtime": string
+  "voices"?: Array<string>
+  "languages"?: Array<string>
+}
+
+export type LocalEnginesStatus = {
+  "video_engine"?: "ltx"
+  "video_preference": string
+  "note": string
+  "engines": Array<LocalEngineStatus>
+}
+
+export type LocalInputResponse = {
+  "path": string
 }
 
 export type MidiSourceState = {
@@ -795,6 +836,11 @@ export type ReferenceTrackPreparationRequest = {
   "subtitle_language"?: (string | null)
   "separation"?: "none" | "fast" | "high" | "roformer"
   "melody"?: boolean
+}
+
+export type RvcRequest = {
+  "model_path": string
+  "input_path": string
 }
 
 export type SavedTrack = {
@@ -1582,6 +1628,16 @@ export type VoiceUploadResponse = {
 
 export type VoicesResponse = {
   "voices": Array<VoiceProfileResponse>
+}
+
+export type WanRequest = {
+  "engine": "wan22"
+  "prompt": string
+  "variant"?: "ti2v-5b"
+  "image_path"?: (string | null)
+  "width"?: number
+  "height"?: number
+  "num_frames"?: number
 }
 
 export type WavEncodingSettings = {
@@ -12231,6 +12287,298 @@ const schemas = {
     ],
     "title": "ModuleJobsResponse",
     "type": "object"
+  },
+  "LocalEngineStatus": {
+    "properties": {
+      "id": {
+        "enum": [
+          "kokoro",
+          "chatterbox",
+          "wan22",
+          "rvc"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "installed": {
+        "title": "Installed",
+        "type": "boolean"
+      },
+      "setup_script": {
+        "title": "Setup Script",
+        "type": "string"
+      },
+      "runtime": {
+        "title": "Runtime",
+        "type": "string"
+      },
+      "voices": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Voices",
+        "type": "array"
+      },
+      "languages": {
+        "items": {
+          "type": "string"
+        },
+        "title": "Languages",
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "installed",
+      "setup_script",
+      "runtime"
+    ],
+    "title": "LocalEngineStatus",
+    "type": "object"
+  },
+  "LocalEnginesStatus": {
+    "properties": {
+      "video_engine": {
+        "const": "ltx",
+        "default": "ltx",
+        "title": "Video Engine",
+        "type": "string"
+      },
+      "video_preference": {
+        "title": "Video Preference",
+        "type": "string"
+      },
+      "note": {
+        "title": "Note",
+        "type": "string"
+      },
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/LocalEngineStatus"
+        },
+        "title": "Engines",
+        "type": "array"
+      }
+    },
+    "required": [
+      "video_preference",
+      "note",
+      "engines"
+    ],
+    "title": "LocalEnginesStatus",
+    "type": "object"
+  },
+  "LocalEngineResponse": {
+    "properties": {
+      "status": {
+        "title": "Status",
+        "type": "string"
+      },
+      "detail": {
+        "title": "Detail",
+        "type": "string"
+      },
+      "output_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Output Path"
+      },
+      "media_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Media Url"
+      },
+      "runtime": {
+        "default": "",
+        "title": "Runtime",
+        "type": "string"
+      }
+    },
+    "required": [
+      "status",
+      "detail"
+    ],
+    "title": "LocalEngineResponse",
+    "type": "object"
+  },
+  "LocalInputResponse": {
+    "properties": {
+      "path": {
+        "title": "Path",
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "title": "LocalInputResponse",
+    "type": "object"
+  },
+  "KokoroRequest": {
+    "properties": {
+      "text": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "voice": {
+        "default": "af_heart",
+        "title": "Voice",
+        "type": "string"
+      },
+      "lang": {
+        "default": "a",
+        "enum": [
+          "a",
+          "b"
+        ],
+        "title": "Lang",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "KokoroRequest",
+    "type": "object"
+  },
+  "ChatterboxRequest": {
+    "properties": {
+      "text": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      },
+      "model": {
+        "default": "original",
+        "enum": [
+          "original",
+          "multilingual"
+        ],
+        "title": "Model",
+        "type": "string"
+      },
+      "audio_prompt_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Audio Prompt Path"
+      },
+      "language_id": {
+        "default": "en",
+        "title": "Language Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "text"
+    ],
+    "title": "ChatterboxRequest",
+    "type": "object"
+  },
+  "WanRequest": {
+    "properties": {
+      "engine": {
+        "const": "wan22",
+        "title": "Engine",
+        "type": "string"
+      },
+      "prompt": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "title": "Prompt",
+        "type": "string"
+      },
+      "variant": {
+        "const": "ti2v-5b",
+        "default": "ti2v-5b",
+        "title": "Variant",
+        "type": "string"
+      },
+      "image_path": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Image Path"
+      },
+      "width": {
+        "default": 832,
+        "maximum": 1280,
+        "minimum": 256,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "default": 480,
+        "maximum": 1280,
+        "minimum": 256,
+        "title": "Height",
+        "type": "integer"
+      },
+      "num_frames": {
+        "default": 17,
+        "maximum": 81,
+        "minimum": 5,
+        "title": "Num Frames",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "engine",
+      "prompt"
+    ],
+    "title": "WanRequest",
+    "type": "object"
+  },
+  "RvcRequest": {
+    "properties": {
+      "model_path": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Model Path",
+        "type": "string"
+      },
+      "input_path": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "title": "Input Path",
+        "type": "string"
+      }
+    },
+    "required": [
+      "model_path",
+      "input_path"
+    ],
+    "title": "RvcRequest",
+    "type": "object"
   }
 } as const
 
@@ -13595,5 +13943,69 @@ function isModuleJobsResponse(value: unknown): value is ModuleJobsResponse {
 }
 export function parseModuleJobsResponse(value: unknown): ModuleJobsResponse {
   if (!isModuleJobsResponse(value)) throw new TypeError("Invalid ModuleJobsResponse response")
+  return value
+}
+
+function isLocalEngineStatus(value: unknown): value is LocalEngineStatus {
+  return decodeSchema(schemas.LocalEngineStatus, value, schemas)
+}
+export function parseLocalEngineStatus(value: unknown): LocalEngineStatus {
+  if (!isLocalEngineStatus(value)) throw new TypeError("Invalid LocalEngineStatus response")
+  return value
+}
+
+function isLocalEnginesStatus(value: unknown): value is LocalEnginesStatus {
+  return decodeSchema(schemas.LocalEnginesStatus, value, schemas)
+}
+export function parseLocalEnginesStatus(value: unknown): LocalEnginesStatus {
+  if (!isLocalEnginesStatus(value)) throw new TypeError("Invalid LocalEnginesStatus response")
+  return value
+}
+
+function isLocalEngineResponse(value: unknown): value is LocalEngineResponse {
+  return decodeSchema(schemas.LocalEngineResponse, value, schemas)
+}
+export function parseLocalEngineResponse(value: unknown): LocalEngineResponse {
+  if (!isLocalEngineResponse(value)) throw new TypeError("Invalid LocalEngineResponse response")
+  return value
+}
+
+function isLocalInputResponse(value: unknown): value is LocalInputResponse {
+  return decodeSchema(schemas.LocalInputResponse, value, schemas)
+}
+export function parseLocalInputResponse(value: unknown): LocalInputResponse {
+  if (!isLocalInputResponse(value)) throw new TypeError("Invalid LocalInputResponse response")
+  return value
+}
+
+function isKokoroRequest(value: unknown): value is KokoroRequest {
+  return decodeSchema(schemas.KokoroRequest, value, schemas)
+}
+export function parseKokoroRequest(value: unknown): KokoroRequest {
+  if (!isKokoroRequest(value)) throw new TypeError("Invalid KokoroRequest response")
+  return value
+}
+
+function isChatterboxRequest(value: unknown): value is ChatterboxRequest {
+  return decodeSchema(schemas.ChatterboxRequest, value, schemas)
+}
+export function parseChatterboxRequest(value: unknown): ChatterboxRequest {
+  if (!isChatterboxRequest(value)) throw new TypeError("Invalid ChatterboxRequest response")
+  return value
+}
+
+function isWanRequest(value: unknown): value is WanRequest {
+  return decodeSchema(schemas.WanRequest, value, schemas)
+}
+export function parseWanRequest(value: unknown): WanRequest {
+  if (!isWanRequest(value)) throw new TypeError("Invalid WanRequest response")
+  return value
+}
+
+function isRvcRequest(value: unknown): value is RvcRequest {
+  return decodeSchema(schemas.RvcRequest, value, schemas)
+}
+export function parseRvcRequest(value: unknown): RvcRequest {
+  if (!isRvcRequest(value)) throw new TypeError("Invalid RvcRequest response")
   return value
 }

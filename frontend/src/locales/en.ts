@@ -1025,6 +1025,8 @@ voiceProfiles: {
     },
   },
   editor: {
+    projectName: 'Project name',
+    exportFormat: 'Export format',
     playbackFailed: 'Could not start audio playback.',
     backToProjects: '← Back to projects',
     unsavedTitle: 'There are unsaved changes',

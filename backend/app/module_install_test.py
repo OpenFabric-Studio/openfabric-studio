@@ -6,6 +6,7 @@ import io
 from pathlib import Path
 import tarfile
 import tempfile
+import threading
 import unittest
 from unittest.mock import AsyncMock, patch
 import zipfile
@@ -25,6 +26,56 @@ class ModuleInstallTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temporary.name)
         self.environment = ModuleEnvironment.for_root(self.root, platform='darwin', architecture='arm64')
         self.context = InstallContext(ModuleJobService(self.environment), 'a' * 32)
+
+    async def test_cancel_waits_for_staging_deletion_before_releasing_setup(self) -> None:
+        await self._assert_staging_deletion_drained(shutdown=False)
+
+    async def test_shutdown_waits_for_staging_deletion_before_releasing_setup(self) -> None:
+        await self._assert_staging_deletion_drained(shutdown=True)
+
+    async def _assert_staging_deletion_drained(self, *, shutdown: bool) -> None:
+        from app import module_catalog as catalog, module_jobs as jobs
+        from app.module_contracts import ModuleInstallRequest, ModulePlanRequest
+        entered = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        actual = install.shutil.rmtree
+        def delete(path: Path) -> None:
+            entered.set()
+            release.wait(5)
+            actual(path)
+            finished.set()
+        async def installer(context: InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
+            staged = context.workspace / 'speech-source'
+            staged.mkdir(parents=True)
+            await install._clone(context, 'speech', install.SOURCE_PINS['speech'], context.environment.paths['speech'])
+            return jobs.InstallOutcome('verified', 'unused')
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(jobs, '_application_busy', return_value=False), patch.object(install.shutil, 'rmtree', delete):
+            service = ModuleJobService(self.environment, installer=installer)
+            reviewed = await catalog.plan(ModulePlanRequest(features=['media']), self.environment)
+            created = await service.create(ModuleInstallRequest(features=['media'], plan_token=reviewed.plan_token))
+            cancelled: asyncio.Task[jobs.ModuleInstallJob] | asyncio.Task[None] | None = None
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 2))
+                cancelled = asyncio.create_task(service.shutdown()) if shutdown else asyncio.create_task(service.cancel(created.id))
+                await asyncio.sleep(0.05)
+                self.assertFalse(cancelled.done(), 'cancel must wait for the deletion thread')
+                self.assertTrue(jobs.work_busy(), 'scratch cannot be reused until deletion drains')
+                with self.assertRaisesRegex(ModuleSetupError, 'setup_busy'):
+                    await ModuleJobService(self.environment).create(ModuleInstallRequest(features=['media'], plan_token=reviewed.plan_token))
+            finally:
+                release.set()
+                if cancelled is not None:
+                    await cancelled
+                await service.shutdown()
+                self.assertTrue(await asyncio.to_thread(finished.wait, 2))
+            self.assertEqual(service.get(created.id).state, 'interrupted' if shutdown else 'cancelled')
+            self.assertFalse(jobs.work_busy())
+            staged = service.environment.root / '.setup/staging' / created.id / 'speech-source'
+            staged.mkdir()
+            (staged / 'new-source').write_text('retained after cleanup')
+            await asyncio.sleep(0.01)
+            self.assertEqual((staged / 'new-source').read_text(), 'retained after cleanup')
 
     async def test_verified_download_resumes_known_artifact_only(self) -> None:
         content = b'verified-content'

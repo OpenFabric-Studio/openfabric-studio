@@ -3,11 +3,37 @@ const fs = require('node:fs');
 const fsp = require('node:fs/promises');
 const net = require('node:net');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { spawnTree, killTree, cleanEnv } = require('./proc');
 const { ffmpegExecutable } = require('./bootstrap/components');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Parse the app-owned readiness boundary without trusting HTTP success or an unbounded body. */
+async function verifyReadiness(response, nonce, pid) {
+  const limit = 1024;
+  if (response.status !== 200 || !response.body) { await response.body?.cancel(); return false; }
+  const reader = response.body.getReader();
+  try {
+    const declared = response.headers.get('content-length');
+    if (declared !== null && (!/^\d+$/.test(declared) || Number(declared) > limit)) return false;
+    const chunks = [];
+    let size = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) return false;
+      chunks.push(value);
+    }
+    const data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    return data !== null && typeof data === 'object' && !Array.isArray(data)
+      && data.service === 'openfabric-studio' && data.nonce === nonce && /^[0-9a-f]{64}$/.test(data.nonce)
+      && Number.isSafeInteger(data.pid) && data.pid > 0 && data.pid === pid;
+  } catch { return false; }
+  finally { await reader.cancel().catch(() => {}); }
+}
 
 function listenOnce(port) {
   return new Promise((resolve, reject) => {
@@ -36,7 +62,7 @@ function backendEnv({ L, manifest, platform }) {
   const sep = path.delimiter;
   const ffmpegBin = path.dirname(ffmpegExecutable(L, manifest, platform));
   const pathParts = [L.uvDir, ffmpegBin, L.yue2Bin, process.env.PATH || ''];
-  return cleanEnv({
+  const env = cleanEnv({
     PATH: pathParts.filter(Boolean).join(sep),
     UV_CACHE_DIR: L.uvCache,
     UV_PYTHON_INSTALL_DIR: L.pythonDir,
@@ -51,6 +77,10 @@ function backendEnv({ L, manifest, platform }) {
     OPENFABRIC_DATA_DIR: L.data,
     OPENFABRIC_LOG_DIR: L.logs,
   });
+  // Uvicorn's CLI inherits UVICORN_RELOAD even without --reload. Desktop
+  // readiness must identify this owned process rather than a reload monitor.
+  delete env.UVICORN_RELOAD;
+  return env;
 }
 
 /** Owns the FastAPI backend process: start, wait until it answers, stop cleanly. */
@@ -73,6 +103,7 @@ class BackendServer extends EventEmitter {
     let logStream = null;
     try {
       const { L, resources } = this.ctx;
+      const nonce = crypto.randomBytes(32).toString('hex');
       await fsp.mkdir(L.logs, { recursive: true });
       await fsp.mkdir(L.data, { recursive: true });
       const port = await freePort(preferredPort);
@@ -85,9 +116,10 @@ class BackendServer extends EventEmitter {
       });
       logStream.write(`\n--- start ${new Date().toISOString()} port ${port}\n`);
 
-      const child = spawnTree(L.backendPython, ['-m', 'uvicorn', 'app.main:app', '--host', '127.0.0.1', '--port', String(port)], {
+      // One owned backend process provides readiness identity and writes this library.
+      const child = spawnTree(L.backendPython, ['-m', 'uvicorn', 'app.main:app', '--workers', '1', '--host', '127.0.0.1', '--port', String(port)], {
         cwd: resources.backend,
-        env: backendEnv(this.ctx),
+        env: { ...backendEnv(this.ctx), OPENFABRIC_DESKTOP_STARTUP_NONCE: nonce },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       this.child = child;
@@ -105,8 +137,10 @@ class BackendServer extends EventEmitter {
         if (spawnError) throw new Error(`the backend could not start (see ${path.join(L.logs, 'backend-server.log')})`);
         if (exitCode !== null) throw new Error(`the backend exited with code ${exitCode} (see ${path.join(L.logs, 'backend-server.log')})`);
         try {
-          const res = await fetch(`${base}api/orchestrator/status`, { signal: AbortSignal.any([signal, AbortSignal.timeout(2000)]) });
-          if (res.ok) { this.url = base; return base; }
+          const res = await fetch(`${base}api/desktop/ready`, { redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(2000)]) });
+          const ready = await verifyReadiness(res, nonce, child.pid);
+          signal.throwIfAborted();
+          if (ready && this.child === child && child.exitCode === null && child.signalCode === null) { this.url = base; return base; }
         } catch { /* not up yet */ }
         await sleep(400);
       }
@@ -143,4 +177,4 @@ class BackendServer extends EventEmitter {
   }
 }
 
-module.exports = { BackendServer, backendEnv, freePort };
+module.exports = { BackendServer, backendEnv, freePort, verifyReadiness };

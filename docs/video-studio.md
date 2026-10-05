@@ -22,7 +22,7 @@ In one terminal:
 
 ```sh
 cd backend
-.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 9000
+.venv/bin/python -m uvicorn app.main:app --workers 1 --host 127.0.0.1 --port 9000
 ```
 
 In another:

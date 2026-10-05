@@ -7,7 +7,7 @@ dir) is what makes "one project, one place for everything it generated" true.
 from __future__ import annotations
 
 import json
-import shutil
+import logging
 import sqlite3
 import time
 from pathlib import Path
@@ -344,8 +344,9 @@ def delete_track_stems(track_id: int) -> bool:
     row = get_track(track_id)
     if not row or not row["stems_json"]:
         return False
-    shutil.rmtree(stems_dir(row["model"], track_id), ignore_errors=True)
     update_track_stems(track_id, None)
+    from .audio_versions import remove_unshared_track_directory
+    remove_unshared_track_directory(None, stems_dir(row["model"], track_id))
     return True
 
 
@@ -374,10 +375,11 @@ def delete_track_midi(track_id: int) -> bool:
     row = get_track(track_id)
     if not row or not row["midi_json"]:
         return False
-    shutil.rmtree(midi_dir(row["model"], track_id), ignore_errors=True)
     db = get_db()
     db.execute("UPDATE tracks SET midi_json = NULL WHERE id = ?", (track_id,))
     db.commit()
+    from .audio_versions import remove_unshared_track_directory
+    remove_unshared_track_directory(None, midi_dir(row["model"], track_id))
     return True
 
 
@@ -431,18 +433,21 @@ def delete_track(track_id: int) -> bool:
     row = get_track(track_id)
     if not row:
         return False
-    from .audio_versions import remove_track_files
+    from .audio_versions import remove_track_files, remove_unshared_track_file, remove_unshared_track_directory
     remove_track_files(track_id)
-    for p in (row["audio_path"], row["abc_path"]):
-        if p:
+    for field in ("audio_path", "abc_path"):
+        value: object = row[field]
+        if isinstance(value, str) and value:
             try:
-                Path(p).unlink(missing_ok=True)
+                remove_unshared_track_file(track_id, Path(value))
             except OSError:
-                pass
-    if row["stems_json"]:
-        shutil.rmtree(stems_dir(row["model"], track_id), ignore_errors=True)
-    if row["midi_json"]:
-        shutil.rmtree(midi_dir(row["model"], track_id), ignore_errors=True)
+                logging.getLogger(__name__).exception('Could not clean an artifact for track %s', track_id)
+    model: object = row["model"]
+    if isinstance(model, str):
+        for field, folder in (("stems_json", stems_dir(model, track_id)),
+                              ("midi_json", midi_dir(model, track_id))):
+            if row[field]:
+                remove_unshared_track_directory(track_id, folder)
     db.execute("DELETE FROM tracks WHERE id = ?", (track_id,))
     db.commit()
     return True

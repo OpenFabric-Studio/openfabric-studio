@@ -34,10 +34,6 @@ async function writeConfig(dir, config) {
   } finally { await fsp.rm(temporary, { force: true }); }
 }
 
-function saveConfig(dir, config) {
-  return serialize(dir, () => writeConfig(dir, config));
-}
-
 /** Merges `patch` into the saved settings (data root, remembered port, ...). */
 function updateConfig(dir, patch) {
   return serialize(dir, async () => {
@@ -56,4 +52,4 @@ async function ensureWritableDir(dir) {
   finally { await fsp.rm(probe, { force: true }); }
 }
 
-module.exports = { loadConfig, saveConfig, updateConfig, ensureWritableDir };
+module.exports = { loadConfig, updateConfig, ensureWritableDir };

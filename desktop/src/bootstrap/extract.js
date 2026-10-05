@@ -1,7 +1,6 @@
 'use strict';
 const fsp = require('node:fs/promises');
 const path = require('node:path');
-const crypto = require('node:crypto');
 const { IS_WINDOWS } = require('../paths');
 const { runCommand } = require('../proc');
 
@@ -42,36 +41,4 @@ async function extract(archive, destDir, { stripComponents = 0, signal } = {}) {
   await verify(destDir);
 }
 
-/**
- * Extracts into a sibling temp directory and renames it into place, so an interrupted
- * extraction never leaves a half-populated `destDir` that looks installed.
- */
-async function extractAtomic(archive, destDir, options) {
-  const tmp = `${destDir}.${crypto.randomUUID()}.tmp`;
-  try {
-    await extract(archive, tmp, options);
-    await promoteDirectory(tmp, destDir, options);
-  } finally { await fsp.rm(tmp, { recursive: true, force: true }); }
-}
-
-/** Retains the old directory until staged extraction/verification can be promoted. */
-async function promoteDirectory(tmp, destDir, options) {
-  const previous = `${destDir}.previous`;
-  const exists = file => fsp.lstat(file).then(() => true, () => false);
-  if (await exists(previous)) {
-    if (!(await exists(destDir))) await fsp.rename(previous, destDir);
-    else await fsp.rename(previous, `${destDir}.preserved-${crypto.randomUUID()}`);
-  }
-  options?.signal?.throwIfAborted();
-  if (await exists(destDir)) await fsp.rename(destDir, previous);
-  try {
-    options?.signal?.throwIfAborted();
-    await fsp.rename(tmp, destDir);
-  } catch (error) {
-    if (!(await exists(destDir)) && await exists(previous)) await fsp.rename(previous, destDir);
-    throw error;
-  }
-  await fsp.rm(previous, { recursive: true, force: true });
-}
-
-module.exports = { extract, extractAtomic, promoteDirectory, tarBinary };
+module.exports = { extract, tarBinary };

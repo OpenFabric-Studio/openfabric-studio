@@ -52,6 +52,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
             (main.midi, 'shutdown'), (main.tagging, 'shutdown'),
             (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
             (main.audiobooks, 'shutdown'), (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'), (main.speech_clone, 'shutdown'),
+            (main.yue_upload, 'shutdown'), (main.optional_engines, 'shutdown'), (main.video_character_training, 'shutdown'),
         ]]
         stop = self.enterContext(patch.object(main.manager, 'stop_all', new=AsyncMock()))
 

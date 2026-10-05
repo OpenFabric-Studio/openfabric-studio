@@ -52,3 +52,61 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   const builder = await fs.readFile(path.join(repo, 'desktop', 'electron-builder.yml'), 'utf8');
   assert.match(builder, /from: resources\/external\s+to: external/);
 });
+
+async function packagingFixture(t) {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openfabric-package-privacy-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const repo = path.resolve(__dirname, '../..');
+  const script = path.join(root, 'desktop/scripts/prepare-resources.js');
+  await fs.mkdir(path.dirname(script), { recursive: true });
+  await fs.copyFile(path.join(repo, 'desktop/scripts/prepare-resources.js'), script);
+  await fs.copyFile(path.join(repo, 'desktop/manifest.json'), path.join(root, 'desktop/manifest.json'));
+  await fs.mkdir(path.join(root, 'backend/nested'), { recursive: true });
+  await fs.mkdir(path.join(root, 'frontend/dist'), { recursive: true });
+  await fs.writeFile(path.join(root, 'frontend/dist/index.html'), '<html></html>');
+  await fs.mkdir(path.join(root, 'external/patches'), { recursive: true });
+  for (const name of ['ace-step.patch', 'yue-model-resume.patch', 'yue-workspace-release.patch', 'yue-progress.patch', 'README.md']) {
+    await fs.copyFile(path.join(repo, 'external/patches', name), path.join(root, 'external/patches', name));
+  }
+  return { root, run: () => execFileSync(process.execPath, [script, '--skip-frontend-build'], { stdio: 'pipe' }) };
+}
+
+test('private environment variants are excluded at every backend depth while examples remain', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  const privateFiles = ['.env.production', '.env.backup', '.env~', 'nested/.env.private', 'nested/.env'];
+  for (const name of privateFiles) await fs.writeFile(path.join(root, 'backend', name), 'PRIVATE_FIXTURE_TOKEN=do-not-package');
+  await fs.writeFile(path.join(root, 'backend/.env.example'), '# safe template');
+  run();
+  for (const name of privateFiles) await assert.rejects(fs.stat(path.join(root, 'desktop/resources/backend', name)), { code: 'ENOENT' });
+  assert.equal(await fs.readFile(path.join(root, 'desktop/resources/backend/.env.example'), 'utf8'), '# safe template');
+});
+
+test('the final packaging guard independently refuses a private frontend environment file', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  await fs.writeFile(path.join(root, 'frontend/dist/.env.production'), 'PRIVATE_FIXTURE_TOKEN=do-not-package');
+  assert.throws(run, /refusing to package local files/);
+});
+
+test('the final packaging guard refuses private environment directories', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  await fs.mkdir(path.join(root, 'frontend/dist/.env.production'));
+  await fs.writeFile(path.join(root, 'frontend/dist/.env.production/token.txt'), 'PRIVATE_FIXTURE_TOKEN=do-not-package');
+  assert.throws(run, /refusing to package local files/);
+});
+
+test('backend source symlinks cannot introduce private files into resources', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  const outside = path.join(root, 'private-source');
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, 'token.txt'), 'PRIVATE_FIXTURE_TOKEN=do-not-package');
+  await fs.symlink(outside, path.join(root, 'backend/linked-source'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(run, /symlink|symbolic link/i);
+});
+
+test('the final packaging guard refuses frontend resource symlinks', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  const outside = path.join(root, 'private-source');
+  await fs.mkdir(outside);
+  await fs.symlink(outside, path.join(root, 'frontend/dist/linked-source'), process.platform === 'win32' ? 'junction' : 'dir');
+  assert.throws(run, /refusing to package local files/);
+});

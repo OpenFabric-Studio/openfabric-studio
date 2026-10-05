@@ -10,5 +10,6 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 echo Starting OpenFabric backend on http://127.0.0.1:9000
-".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 9000
+set "UVICORN_RELOAD="
+".venv\Scripts\python.exe" -m uvicorn app.main:app --workers 1 --host 127.0.0.1 --port 9000
 endlocal

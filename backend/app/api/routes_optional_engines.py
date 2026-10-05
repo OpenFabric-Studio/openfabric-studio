@@ -6,49 +6,57 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Literal
+from collections.abc import Awaitable, Callable, Coroutine
 
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi.routing import APIRoute
+from starlette.responses import Response
+from starlette.types import Message
 from fastapi.responses import FileResponse
-from pydantic import Field
 
-from ..contracts import Contract
+
+from ..optional_engine_contracts import (LocalEngineStatus, LocalEnginesStatus, LocalEngineResponse, LocalInputResponse, KokoroRequest, ChatterboxRequest, WanRequest, RvcRequest)
 from ..module_security import require_local_origin
 from ..optional_engines import (
     CHATTERBOX_LANGUAGES, KOKORO_RUNTIME, KOKORO_VOICES, OptionalEngineError, RVC_RUNTIME,
-    WAN_RUNTIME, convert_rvc, installed, narrate_kokoro, render_wan, speak_chatterbox,
+    WAN_RUNTIME, LocalRun, local_root, contained_output, convert_rvc, installed, narrate_kokoro, render_wan, speak_chatterbox,
     video_engine_preference,
 )
 
-router = APIRouter(prefix='/api/local-engines', tags=['local engines'])
+class _BoundedRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[object, object, Response]]:
+        handler = super().get_route_handler()
+
+        async def bounded(request: Request) -> Response:
+            if request.method in {"GET", "HEAD", "OPTIONS"}:
+                return await handler(request)
+            require_local_origin(request)
+            limit = _MAX_INPUT_BYTES + 1024 * 1024 if request.url.path.endswith("/inputs") else 64 * 1024
+            declared = request.headers.get("content-length")
+            if declared is not None:
+                try:
+                    size = int(declared)
+                except ValueError as exc:
+                    raise HTTPException(400, detail={"code": "input_refused", "detail": "Invalid request size."}) from exc
+                if size < 0 or size > limit:
+                    raise HTTPException(413, detail={"code": "input_refused", "detail": "That upload is too large."})
+            count = 0
+
+            async def receive() -> Message:
+                nonlocal count
+                message = await request.receive()
+                body: object = message.get("body", b"")
+                if isinstance(body, bytes):
+                    count += len(body)
+                if count > limit:
+                    raise HTTPException(413, detail={"code": "input_refused", "detail": "That upload is too large."})
+                return message
+
+            return await handler(Request(request.scope, receive))
+        return bounded
 
 
-class LocalEngineStatus(Contract):
-    id: str
-    installed: bool
-    setup_script: str
-    runtime: str
-    voices: list[str] = Field(default_factory=list)
-    languages: list[str] = Field(default_factory=list)
-
-
-class LocalEnginesStatus(Contract):
-    video_engine: Literal['ltx'] = 'ltx'
-    video_preference: str
-    note: str
-    engines: list[LocalEngineStatus]
-
-
-class LocalEngineResponse(Contract):
-    status: str
-    detail: str
-    output_path: str | None = None
-    media_url: str | None = None
-    runtime: str = ''
-
-
-class LocalInputResponse(Contract):
-    path: str
+router = APIRouter(prefix='/api/local-engines', tags=['local engines'], route_class=_BoundedRoute)
 
 
 _MEDIA_ENGINES = {'kokoro', 'chatterbox', 'wan22', 'rvc'}
@@ -68,39 +76,11 @@ def _media_url(path: str | None) -> str | None:
     return f'/api/local-engines/{file.parent.name}/media/{file.stem}'
 
 
-class KokoroRequest(Contract):
-    text: str = Field(min_length=1, max_length=4000)
-    voice: str = 'af_heart'
-    lang: Literal['a', 'b'] = 'a'
-
-
-class ChatterboxRequest(Contract):
-    text: str = Field(min_length=1, max_length=4000)
-    model: Literal['original', 'multilingual'] = 'original'
-    audio_prompt_path: str | None = None
-    language_id: str = 'en'
-
-
-class WanRequest(Contract):
-    engine: Literal['wan22']
-    prompt: str = Field(min_length=1, max_length=2000)
-    variant: Literal['ti2v-5b'] = 'ti2v-5b'
-    image_path: str | None = None
-    width: int = Field(default=832, ge=256, le=1280)
-    height: int = Field(default=480, ge=256, le=1280)
-    num_frames: int = Field(default=17, ge=5, le=81)
-
-
-class RvcRequest(Contract):
-    model_path: str = Field(min_length=1, max_length=1000)
-    input_path: str = Field(min_length=1, max_length=1000)
-
-
-def _call(action):
+async def _call(action: Callable[[], Awaitable[LocalRun]]) -> LocalEngineResponse:
     try:
-        result = action()
+        result = await action()
     except OptionalEngineError as exc:
-        status = 400 if exc.code.endswith('_refused') or exc.code in ('text_required', 'audio_missing', 'image_missing', 'kokoro_voice_refused') else 409 if exc.code in ('engine_not_installed', 'weights_missing') else 500
+        status = 400 if exc.code.endswith('_refused') or exc.code in ('text_required', 'audio_missing', 'image_missing', 'kokoro_voice_refused') else 409 if exc.code in ('engine_not_installed', 'weights_missing') else 409 if exc.code in ('engine_busy', 'worker_identity_unverified') else 500
         raise HTTPException(status, detail={'code': exc.code, 'detail': exc.detail}) from exc
     output = str(result.output_path) if result.output_path else None
     return LocalEngineResponse(status=result.status, detail=result.detail,
@@ -127,31 +107,31 @@ def local_engine_status() -> LocalEnginesStatus:
 
 
 @router.post('/kokoro', response_model=LocalEngineResponse)
-def create_kokoro(body: KokoroRequest, request: Request) -> LocalEngineResponse:
+async def create_kokoro(body: KokoroRequest, request: Request) -> LocalEngineResponse:
     require_local_origin(request)
     if body.voice not in KOKORO_VOICES[body.lang]:
         raise HTTPException(400, detail={'code': 'kokoro_voice_refused', 'detail': 'Kokoro only speaks its preset voices. It does not clone a person.'})
-    return _call(lambda: narrate_kokoro(body.text, voice=body.voice, lang=body.lang))
+    return await _call(lambda: narrate_kokoro(body.text, voice=body.voice, lang=body.lang))
 
 
 @router.post('/chatterbox', response_model=LocalEngineResponse)
-def create_chatterbox(body: ChatterboxRequest, request: Request) -> LocalEngineResponse:
+async def create_chatterbox(body: ChatterboxRequest, request: Request) -> LocalEngineResponse:
     require_local_origin(request)
     if body.model == 'multilingual' and body.language_id not in CHATTERBOX_LANGUAGES:
         raise HTTPException(400, detail={'code': 'chatterbox_language_refused', 'detail': 'That language is not in the Chatterbox multilingual list.'})
-    return _call(lambda: speak_chatterbox(body.text, model=body.model, audio_prompt_path=body.audio_prompt_path, language_id=body.language_id))
+    return await _call(lambda: speak_chatterbox(body.text, model=body.model, audio_prompt_path=body.audio_prompt_path, language_id=body.language_id))
 
 
 @router.post('/wan', response_model=LocalEngineResponse)
-def create_wan(body: WanRequest, request: Request) -> LocalEngineResponse:
+async def create_wan(body: WanRequest, request: Request) -> LocalEngineResponse:
     require_local_origin(request)
-    return _call(lambda: render_wan(body.prompt, variant=body.variant, image_path=body.image_path, width=body.width, height=body.height, num_frames=body.num_frames))
+    return await _call(lambda: render_wan(body.prompt, variant=body.variant, image_path=body.image_path, width=body.width, height=body.height, num_frames=body.num_frames))
 
 
 @router.post('/rvc', response_model=LocalEngineResponse)
-def create_rvc(body: RvcRequest, request: Request) -> LocalEngineResponse:
+async def create_rvc(body: RvcRequest, request: Request) -> LocalEngineResponse:
     require_local_origin(request)
-    return _call(lambda: convert_rvc(body.model_path, body.input_path))
+    return await _call(lambda: convert_rvc(body.model_path, body.input_path))
 
 
 @router.post('/inputs', response_model=LocalInputResponse)
@@ -162,7 +142,10 @@ def upload_local_input(file: UploadFile, request: Request) -> LocalInputResponse
     if suffix not in _INPUT_SUFFIXES:
         raise HTTPException(400, detail={'code': 'input_refused', 'detail': 'Choose a wav, flac, mp3, png, jpg, webp, or pth file.'})
     from ..optional_engines import stage_input_path
-    dest = stage_input_path(suffix)
+    try:
+        dest = stage_input_path(suffix)
+    except OptionalEngineError as exc:
+        raise HTTPException(409, detail={"code": exc.code, "detail": exc.detail}) from exc
     total = 0
     try:
         with dest.open('wb') as handle:
@@ -187,11 +170,15 @@ def local_engine_media(engine: str, file_id: str) -> FileResponse:
     if engine not in _MEDIA_ENGINES or not re.fullmatch(r'[0-9a-f]{32}', file_id):
         raise HTTPException(404, detail='not_found')
     from ..config import DATA_DIR
-    root = (DATA_DIR / 'outputs' / 'local-engines' / engine).resolve()
+    try:
+        root = local_root(engine)
+    except OptionalEngineError as exc:
+        raise HTTPException(404, detail='not_found') from exc
     for suffix, media_type in _MEDIA_TYPES.items():
-        path = (root / f'{file_id}{suffix}').resolve()
-        if path.parent != root:
-            raise HTTPException(404, detail='not_found')
+        try:
+            path = contained_output(root / f'{file_id}{suffix}')
+        except OptionalEngineError as exc:
+            raise HTTPException(404, detail='not_found') from exc
         if path.is_file():
             return FileResponse(path, media_type=media_type, filename=path.name)
     raise HTTPException(404, detail='not_found')

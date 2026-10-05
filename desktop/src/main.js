@@ -8,7 +8,7 @@ const { describePlan, runSetup, isSetupComplete } = require('./bootstrap/run');
 const { BackendServer } = require('./server');
 const { loadConfig, updateConfig, ensureWritableDir } = require('./config');
 const { notificationHandlers } = require('./notifications');
-const { versionedDocumentUrl } = require('./navigation');
+const { versionedDocumentUrl, isAllowedNavigation, trustedSetupSender } = require('./navigation');
 const { drainApplication } = require('./lifecycle');
 
 // Only these links can be opened from the first-run screen.
@@ -63,7 +63,7 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (event, url) => {
-    const own = url.startsWith('file:') || (server && server.url && url.startsWith(server.url));
+    const own = isAllowedNavigation(url, { setupPage: SETUP_PAGE, backendUrl: server?.url });
     if (!own) {
       event.preventDefault();
       if (/^https?:\/\//.test(url)) shell.openExternal(url);
@@ -123,7 +123,11 @@ function registerIpc() {
   const notifications = notificationHandlers({ Notification, getWindow: () => win, getOrigin: () => server?.url });
   ipcMain.handle('notifications:capability', (event) => notifications.capability(event));
   ipcMain.handle('notifications:notify', (event, payload) => notifications.notify(event, payload));
-  ipcMain.handle('setup:context', async () => {
+  const handleSetup = (channel, handler) => ipcMain.handle(channel, (event, ...args) => {
+    if (!trustedSetupSender(event, win, SETUP_PAGE)) throw new Error('setup_ipc_forbidden');
+    return handler(event, ...args);
+  });
+  handleSetup('setup:context', async () => {
     const plan = await describePlan(ctx);
     return {
       version: app.getVersion(),
@@ -136,17 +140,17 @@ function registerIpc() {
       totalBytes: plan.filter((c) => !c.done && !c.skipped).reduce((sum, c) => sum + c.weight, 0),
     };
   });
-  ipcMain.handle('setup:checks', async (_e, dataRoot) => {
+  handleSetup('setup:checks', async (_e, dataRoot) => {
     const root = dataRoot || ctx.L.root;
     return runChecks({ platform: PLATFORM, dataRoot: root, manifest, plan: await describePlan(buildContext(root)) });
   });
-  ipcMain.handle('setup:choose-folder', async () => {
+  handleSetup('setup:choose-folder', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
     const picked = r.filePaths[0];
     return ['remiqora', 'openfabric', 'openfabricstudio', 'openfabric-studio'].includes(path.basename(picked).toLowerCase().replace(/[\s_]/g, '')) ? picked : path.join(picked, 'OpenFabricStudio');
   });
-  ipcMain.handle('setup:set-root', async (_e, dir) => {
+  handleSetup('setup:set-root', async (_e, dir) => {
     if (setupAbort || server?.child) return { ok: false, message: 'Stop setup and the backend before selecting another folder.' };
     try {
       await ensureWritableDir(dir);
@@ -157,17 +161,17 @@ function registerIpc() {
     await updateConfig(app.getPath('userData'), { dataRoot: dir });
     return { ok: true };
   });
-  ipcMain.handle('setup:start', async () => {
+  handleSetup('setup:start', async () => {
     // Remember the chosen folder right away: an interrupted setup resumes there on the next start.
     await ensureWritableDir(ctx.L.root);
     await updateConfig(app.getPath('userData'), { dataRoot: ctx.L.root });
     startSetup();
   });
-  ipcMain.handle('setup:pause', async () => { if (setupAbort) setupAbort.abort(new Error('paused')); if (setupTask) await setupTask; });
-  ipcMain.handle('setup:launch', () => launch());
-  ipcMain.handle('setup:open-external', (_e, key) => { if (EXTERNAL[key]) shell.openExternal(EXTERNAL[key]); });
-  ipcMain.handle('setup:open-logs', () => shell.openPath(ctx.L.logs));
-  ipcMain.handle('setup:show-data', () => shell.openPath(ctx.L.root));
+  handleSetup('setup:pause', async () => { if (setupAbort) setupAbort.abort(new Error('paused')); if (setupTask) await setupTask; });
+  handleSetup('setup:launch', () => launch());
+  handleSetup('setup:open-external', (_e, key) => { if (EXTERNAL[key]) shell.openExternal(EXTERNAL[key]); });
+  handleSetup('setup:open-logs', () => shell.openPath(ctx.L.logs));
+  handleSetup('setup:show-data', () => shell.openPath(ctx.L.root));
 }
 
 async function boot() {

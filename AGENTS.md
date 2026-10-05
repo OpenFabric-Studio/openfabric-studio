@@ -14,10 +14,10 @@ Act as a senior technical and business partner. Be direct, skeptical, and eviden
 
 - This is `OpenFabric-Studio/openfabric-studio`, a maintained fork of `inikolax/remiqora`. Preserve upstream history, MIT copyright and attribution; clearly label fork changes and experimental releases.
 - `origin` is the fork and `upstream` is the original repository. Check remotes before pushing; use the fork as the push default. Do not push to upstream as part of ordinary fork work.
-- Use focused topic branches from fork `master`. Integrate upstream on reviewed `sync/upstream-…` branches with merge commits; never force-push or rebase shared `master`.
+- Use focused topic branches from fork `main`. Integrate upstream on reviewed `sync/upstream-…` branches with merge commits; never force-push or rebase shared `main`.
 - Follow [ROADMAP.md](ROADMAP.md) and [fork maintenance](docs/fork-maintenance.md). Prioritize recoverable data, installation and measured quality before additional engines or infrastructure.
 - Before broad migrations or a baseline snapshot, preserve source/history and private configuration, take a consistent database backup, and copy user media/checkpoints/datasets. Keep backups and model caches outside Git. Do not move a library during active work.
-- Required checks protect `master`. Release tags must match desktop version metadata; packaging creates a draft prerelease. Publishing requires an explicit maintainer request covering the reviewed artifacts and platform evidence. Never overwrite a published release's assets.
+- Run the required checks before integrating into `main`. Release tags must match desktop version metadata; packaging creates a draft prerelease. Publishing requires an explicit maintainer request covering the reviewed artifacts and platform evidence. Never overwrite a published release's assets.
 
 ## Strict type safety
 

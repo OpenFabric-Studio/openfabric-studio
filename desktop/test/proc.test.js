@@ -58,3 +58,19 @@ test('a leader exiting drains its owned descendants before a later stop can targ
   assert.equal(fs.readFileSync(heartbeat, 'utf8'), stopped, 'leader exit did not abandon its group');
   await killTree(child);
 });
+
+test('a successful leader exit drains descendants holding inherited output pipes', { skip: process.platform === 'win32', timeout: 7000 }, async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'openfabric-pipes-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const heartbeat = path.join(root, 'heartbeat');
+  await runCommand(process.execPath, ['-e', `
+    require('node:child_process').spawn(process.execPath, ['-e',
+      'setInterval(()=>require("node:fs").appendFileSync(process.argv[1],"."),20)', process.argv[1]], { stdio: 'inherit' });
+    const timer = setInterval(() => {
+      if (require('node:fs').existsSync(process.argv[1])) { clearInterval(timer); process.exit(0); }
+    }, 10);
+  `, heartbeat], { timeoutMs: 3000 });
+  const stopped = fs.readFileSync(heartbeat, 'utf8');
+  await new Promise(resolve => setTimeout(resolve, 100));
+  assert.equal(fs.readFileSync(heartbeat, 'utf8'), stopped);
+});

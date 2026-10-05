@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 _ACTIVE = {'queued', 'running'}
 _EXTENSIONS = {'wav', 'mp3', 'flac', 'ogg', 'opus', 'm4a'}
 _deleting: set[int] = set()
+_artifact_paths: TypeAdapter[dict[str, str]] = TypeAdapter(dict[str, str])
 
 
 class _ApplyReceipt(Contract):
@@ -406,12 +407,9 @@ def remove_track_files(track_id: int) -> None:
         if record.worker_track_id is not None and record.worker_track_id != track_id:
             db.delete_track(record.worker_track_id)
         if record.path is not None:
-            try:
-                _contained(record.path, exists=False).unlink(missing_ok=True)
-            except HTTPException:
-                logger.warning('Refused escaped audio version file for track %s', track_id)
+            remove_unshared_track_file(track_id, record.path)
         if record.captured_source is not None:
-            _remove_unshared_capture(track_id, record.captured_source)
+            remove_unshared_track_file(track_id, record.captured_source)
     directory = db.FILES_DIR / '_versions' / str(track_id)
     try:
         _contained(directory, exists=False)
@@ -420,24 +418,64 @@ def remove_track_files(track_id: int) -> None:
         pass
 
 
-def _remove_unshared_capture(track_id: int, path: Path) -> None:
-    """Clean a proven prior file while retaining independent/shared track sources."""
+def remove_unshared_track_file(track_id: int | None, path: Path) -> None:
+    """Remove a contained artifact only when no other track/version references it."""
     try:
         source = _contained(path, exists=False)
-    except HTTPException:
+    except (HTTPException, OSError, RuntimeError):
         return
-    rows = db.get_db().execute('SELECT audio_path FROM tracks WHERE id!=?', (track_id,)).fetchall()
+    rows = db.get_db().execute('SELECT audio_path,abc_path,stems_json,midi_json FROM tracks WHERE id!=? OR ? IS NULL', (track_id, track_id)).fetchall()
     for row in rows:
-        value: object = row['audio_path']
-        if isinstance(value, str) and Path(value).resolve() == source:
+        try:
+            for field in ('audio_path', 'abc_path'):
+                value: object = row[field]
+                if isinstance(value, str) and Path(value).resolve() == source:
+                    return
+            for field in ('stems_json', 'midi_json'):
+                raw: object = row[field]
+                if raw is not None:
+                    if not isinstance(raw, str):
+                        return
+                    paths = _artifact_paths.validate_json(raw)
+                    if any(Path(value).resolve() == source for value in paths.values()):
+                        return
+        except (ValidationError, OSError, RuntimeError):
+            # Corrupt reference metadata cannot prove that a file is unshared.
+            logger.warning('Retaining artifact because a catalog reference is invalid')
             return
-    version_rows = db.get_db().execute('SELECT audio_path,captured_source_path FROM audio_versions WHERE track_id!=?', (track_id,)).fetchall()
-    for row in version_rows:
-        for name in ('audio_path', 'captured_source_path'):
-            value = row[name]
-            if isinstance(value, str) and Path(value).resolve() == source:
-                return
+    version_rows = db.get_db().execute('SELECT audio_path,captured_source_path FROM audio_versions WHERE track_id!=? OR ? IS NULL', (track_id, track_id)).fetchall()
+    try:
+        for row in version_rows:
+            for name in ('audio_path', 'captured_source_path'):
+                value = row[name]
+                if isinstance(value, str) and Path(value).resolve() == source:
+                    return
+    except (OSError, RuntimeError):
+        return
     source.unlink(missing_ok=True)
+
+
+def remove_unshared_track_directory(track_id: int | None, path: Path) -> None:
+    """Prune owned artifacts individually; shared files keep their directory."""
+    try:
+        _contained(path, exists=False)
+        if path.is_symlink():
+            return
+        entries = list(path.rglob('*'))
+        for entry in entries:
+            if entry.is_file() and not entry.is_symlink():
+                remove_unshared_track_file(track_id, entry)
+        for directory in sorted((entry for entry in entries if entry.is_dir() and not entry.is_symlink()), key=lambda entry: len(entry.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass  # A retained/shared artifact keeps this directory alive.
+        try:
+            path.rmdir()
+        except OSError:
+            pass
+    except (HTTPException, OSError, RuntimeError):
+        logger.warning('Could not prune artifacts for track %s', track_id, exc_info=True)
 
 
 async def recover() -> None:

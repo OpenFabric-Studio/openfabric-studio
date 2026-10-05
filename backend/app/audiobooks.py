@@ -6,6 +6,7 @@ GPT-SoVITS speech-clone worker, then concatenates chapter WAVs into one export.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -13,7 +14,7 @@ import threading
 import uuid
 
 from pydantic import TypeAdapter
-from contextlib import closing
+from contextlib import AbstractContextManager, closing
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,10 +29,12 @@ from .audiobook_contracts import (
     PronunciationEntry,
 )
 from .config import DATA_DIR
+from .atomic_files import document_lock
 from .contracts import JobStatus
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _LOCK = threading.RLock()
+_LOG = logging.getLogger(__name__)
 _BOOK_STATUS: TypeAdapter[AudiobookBookStatus] = TypeAdapter(AudiobookBookStatus)
 _JOB_STATUS: TypeAdapter[JobStatus] = TypeAdapter(JobStatus)
 
@@ -57,6 +60,13 @@ class AudiobookError(Exception):
         super().__init__(code)
         self.code = code
         self.status = status
+
+
+def publication_lock(book_id: str) -> AbstractContextManager[None]:
+    """Serialize audio replacement and snapshots belonging to one book."""
+    if not _ID.fullmatch(book_id):
+        raise AudiobookError("invalid_book_id", 404)
+    return document_lock(books_root() / book_id / ".publication")
 
 
 def books_root() -> Path:
@@ -683,6 +693,11 @@ def set_pronunciations(book_id: str, entries: list[PronunciationEntry]) -> Audio
 
 
 def regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
+    with publication_lock(book_id):
+        return _regenerate_chapter(book_id, chapter_index)
+
+
+def _regenerate_chapter(book_id: str, chapter_index: int) -> AudiobookBook:
     """Re-queue one chapter, including a chapter that already succeeded."""
     if not _ID.fullmatch(book_id) or chapter_index < 0:
         raise AudiobookError("chapter_not_found", 404)
@@ -754,26 +769,42 @@ def save_cover(book_id: str, data: bytes) -> AudiobookBook:
         suffix = "png"
     else:
         raise AudiobookError("unsupported_cover")
-    get_book(book_id)
-    directory = book_dir(book_id)
-    for stale in directory.glob("cover.*"):
-        if stale.is_file() and not stale.is_symlink():
-            stale.unlink()
-    target = directory / f"cover.{suffix}"
-    temporary = target.with_name(f".cover.{uuid.uuid4().hex}.part")
-    temporary.write_bytes(data)
-    temporary.replace(target)
-    with _LOCK, closing(_connect()) as connection:
-        _ensure_schema(connection)
-        connection.execute(
-            "UPDATE audiobook_books SET cover_path = ?, updated_at = ? WHERE id = ?",
-            (str(target), _now(), book_id),
-        )
-        connection.commit()
-        status = connection.execute("SELECT status FROM audiobook_books WHERE id = ?", (book_id,)).fetchone()
-    if status is not None and status["status"] == "done":
-        _republish(book_id)
-    return get_book(book_id)
+    with publication_lock(book_id):
+        get_book(book_id)
+        directory = book_dir(book_id)
+        # Unique final names preserve the old file even when metadata commit
+        # fails or the process is interrupted between file and DB publication.
+        target = directory / f"cover-{uuid.uuid4().hex}.{suffix}"
+        temporary = target.with_name(f".{target.name}.part")
+        committed = False
+        previous = cover_path_for(book_id)
+        try:
+            temporary.write_bytes(data)
+            with temporary.open("rb") as handle:
+                os.fsync(handle.fileno())
+            temporary.replace(target)
+            with _LOCK, closing(_connect()) as connection:
+                _ensure_schema(connection)
+                connection.execute(
+                    "UPDATE audiobook_books SET cover_path = ?, updated_at = ? WHERE id = ?",
+                    (str(target), _now(), book_id),
+                )
+                connection.commit()
+            committed = True
+        except (OSError, sqlite3.Error) as exc:
+            raise AudiobookError("audiobook_storage_unavailable", 503) from exc
+        finally:
+            temporary.unlink(missing_ok=True)
+            if not committed:
+                target.unlink(missing_ok=True)
+        if previous is not None:
+            try:
+                previous.unlink(missing_ok=True)
+            except OSError:
+                _LOG.warning("Previous audiobook cover could not be removed", exc_info=True)
+        if get_book(book_id).status == "done":
+            _republish(book_id)
+        return get_book(book_id)
 
 
 def _republish(book_id: str) -> None:

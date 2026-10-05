@@ -11,17 +11,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import UploadFile
 
 from .config import DATA_DIR, LTX_DIR
 from .gpu_lease import gpu_lease
-from .job_lifecycle import communicate_process, kill_process_tree, spawn_process
+from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, kill_process_tree, spawn_process
+from .video_process import WorkerIdentity, spawn_owned, terminate_verified
+from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
 from .stems import gpu_lock
 from .video_contracts import (
     VideoCharacterTrainerStatus,
@@ -32,6 +36,10 @@ from .video_projects import VideoProjectError, atomic_text
 
 _ID = re.compile(r"^[0-9a-f]{32}$")
 _TASKS: dict[str, asyncio.Task[None]] = {}
+_UPLOADS: set[asyncio.Task[VideoCharacterTrainingJob]] = set()
+_UNVERIFIED: set[str] = set()
+_STOPPING = False
+_LOG = logging.getLogger(__name__)
 _MIN_PHOTOS = 3
 _MAX_PHOTOS = 12
 _MAX_CLIPS = 6
@@ -47,7 +55,10 @@ def now() -> str:
 
 
 def jobs_root() -> Path:
-    return DATA_DIR / "video_character_training"
+    path = DATA_DIR / "video_character_training"
+    if path.is_symlink() or not path.resolve().is_relative_to(DATA_DIR.resolve()):
+        raise VideoProjectError("storage_failed")
+    return path
 
 
 def _settings_path() -> Path:
@@ -58,14 +69,23 @@ def job_dir(job_id: str) -> Path:
     if not _ID.fullmatch(job_id):
         raise VideoProjectError("not_found")
     root = jobs_root().resolve()
-    path = (root / job_id).resolve()
-    if not path.is_relative_to(root):
+    path = root / job_id
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise VideoProjectError("not_found")
     return path
 
 
 def _job_path(job_id: str) -> Path:
-    return job_dir(job_id) / "job.json"
+    return _artifact(job_id, "job.json")
+
+
+def _artifact(job_id: str, name: str) -> Path:
+    root = job_dir(job_id).resolve()
+    relative = Path(name)
+    path = root / relative
+    if relative.is_absolute() or ".." in relative.parts or path.is_symlink() or not path.resolve().is_relative_to(root):
+        raise VideoProjectError("storage_failed")
+    return path
 
 
 def _load(job_id: str) -> VideoCharacterTrainingJob:
@@ -83,26 +103,11 @@ def _save(job: VideoCharacterTrainingJob) -> None:
 
 
 def training_busy() -> bool:
-    return any(not task.done() for task in _TASKS.values())
+    return work_busy()
 
 
-def _reconcile(job: VideoCharacterTrainingJob) -> VideoCharacterTrainingJob:
-    task = _TASKS.get(job.id)
-    # A finished in-process task updates its own record. Only a restart, with
-    # no task left, means the job was interrupted.
-    if job.status in {"queued", "running"} and task is None:
-        job = job.model_copy(update={
-            "status": "failed",
-            "error_code": "interrupted",
-            "detail": "Training stopped before it finished.",
-            "adapter_ready": False,
-            "updated_at": now(),
-        })
-        try:
-            _save(job)
-        except OSError as exc:
-            raise VideoProjectError("storage_failed") from exc
-    return job
+def work_busy() -> bool:
+    return bool(_UNVERIFIED or _UPLOADS) or any(not task.done() for task in _TASKS.values())
 
 
 def list_jobs() -> list[VideoCharacterTrainingJob]:
@@ -114,7 +119,7 @@ def list_jobs() -> list[VideoCharacterTrainingJob]:
         if not path.is_dir() or not _ID.fullmatch(path.name):
             continue
         try:
-            rows.append(_reconcile(_load(path.name)))
+            rows.append(_load(path.name))
         except VideoProjectError:
             continue
     rows.sort(key=lambda item: item.updated_at, reverse=True)
@@ -122,14 +127,14 @@ def list_jobs() -> list[VideoCharacterTrainingJob]:
 
 
 def get_job(job_id: str) -> VideoCharacterTrainingJob:
-    return _reconcile(_load(job_id))
+    return _load(job_id)
 
 
 def _command_name(path: Path | None) -> str:
     return path.name if path is not None else ""
 
 
-def resolve_trainer() -> tuple[Path | None, str, bool]:
+def resolve_trainer() -> tuple[Path | None, Literal["env", "settings", "none"], bool]:
     """Return the command, where it came from, and whether a configured path is missing."""
     env = os.getenv("OPENFABRIC_VIDEO_CHARACTER_TRAINER", "").strip()
     if env:
@@ -154,7 +159,7 @@ def trainer_status() -> VideoCharacterTrainerStatus:
     path, source, missing = resolve_trainer()
     return VideoCharacterTrainerStatus(
         configured=path is not None,
-        source=source if source in {"env", "settings", "none"} else "none",
+        source=source,
         command_name=_command_name(path),
         missing=missing,
     )
@@ -231,11 +236,11 @@ def ready_adapter_file(job_id: str | None) -> Path | None:
         return None
     if job.mock or job.status != "completed" or not job.adapter_ready:
         return None
-    path = job_dir(job_id) / "adapter" / "adapter.safetensors"
     try:
+        path = _artifact(job_id, "adapter/adapter.safetensors")
         if path.is_file() and _MIN_ADAPTER <= path.stat().st_size <= _MAX_ADAPTER:
             return path
-    except OSError:
+    except (OSError, VideoProjectError):
         return None
     return None
 
@@ -255,7 +260,7 @@ def adapter_warning(character_adapter_id: str | None, picture: bool) -> str | No
 
 
 def still_file(job_id: str) -> Path:
-    path = job_dir(job_id) / "still.png"
+    path = _artifact(job_id, "still.png")
     if not path.is_file():
         raise VideoProjectError("not_found")
     return path
@@ -284,15 +289,18 @@ async def _store_upload(upload: UploadFile, dest: Path, limit: int) -> bytes:
             handle.write(chunk)
     if count < 1:
         raise VideoProjectError("invalid_reference")
-    header = dest.read_bytes()[:16]
+    with dest.open("rb") as reader:
+        header = reader.read(16)
     return header
 
 
 def _publish_adapter(output: Path) -> bool:
+    if output.is_symlink():
+        return False
     preferred = output / "adapter.safetensors"
     found: list[Path] = []
     if output.is_dir():
-        found.extend(path for path in output.rglob("*.safetensors") if path.is_file())
+        found.extend(path for path in output.rglob("*.safetensors") if path.is_file() and not path.is_symlink() and path.resolve().is_relative_to(output.resolve()))
     loras = [path for path in found if "lora" in path.name.lower() or path.name == "adapter.safetensors"]
     chosen = preferred if preferred in found else None
     if chosen is None and loras:
@@ -307,26 +315,41 @@ def _publish_adapter(output: Path) -> bool:
         return False
     if not _MIN_ADAPTER <= size <= _MAX_ADAPTER:
         return False
-    if chosen.resolve() != preferred.resolve():
-        preferred.write_bytes(chosen.read_bytes())
+    if preferred.is_symlink() or chosen.resolve() != preferred.resolve():
+        import shutil
+        temporary = preferred.with_name(f".adapter-{uuid.uuid4().hex}.safetensors")
+        try:
+            shutil.copyfile(chosen, temporary)
+            temporary.replace(preferred)
+        finally:
+            temporary.unlink(missing_ok=True)
     return preferred.is_file() and preferred.stat().st_size >= _MIN_ADAPTER
 
 
 async def _run(job_id: str, argv: list[str], output: Path) -> None:
     proc: asyncio.subprocess.Process | None = None
+    drained = False
     try:
         current = _load(job_id)
         current = current.model_copy(update={"status": "running", "updated_at": now()})
         _save(current)
         async with gpu_lease(gpu_lock, "video_generation", "Character training"):
-            proc = await spawn_process(
-                *argv,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env={**os.environ, "HF_HUB_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1"},
-            )
-            _out, err = await communicate_process(proc, _TRAIN_TIMEOUT)
-        detail = err.decode("utf-8", errors="replace").strip()[-400:]
+            try:
+                log_path = _artifact(job_id, "trainer.log")
+                with log_path.open("wb") as log:
+                    proc = await spawn_owned(argv, receipt_path=_artifact(job_id, "worker.json"),
+                        stdout=log.fileno(), on_identity=lambda identity: atomic_text(_artifact(job_id, "identity.json"), identity.model_dump_json()),
+                        env={**os.environ, "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_HUB_DISABLE_TELEMETRY": "1"})
+                    async with asyncio.timeout(_TRAIN_TIMEOUT):
+                        await proc.wait()
+            finally:
+                if proc is not None:
+                    await await_cleanup(kill_process_tree(proc))
+                    drained = True
+        with log_path.open("rb") as log_reader:
+            log_reader.seek(0, 2)
+            log_reader.seek(max(0, log_reader.tell() - 4000))
+            detail = log_reader.read(4000).decode("utf-8", errors="replace")
         ready = proc.returncode == 0 and _publish_adapter(output)
         if ready:
             updated = _load(job_id).model_copy(update={
@@ -338,12 +361,13 @@ async def _run(job_id: str, argv: list[str], output: Path) -> None:
                 "updated_at": now(),
             })
         else:
+            _LOG.warning("Character trainer failed: %s", detail)
             code = "model_not_installed" if "model_not_installed" in detail else "trainer_failed"
             updated = _load(job_id).model_copy(update={
                 "status": "failed",
                 "adapter_ready": False,
                 "error_code": code,
-                "detail": detail or "The local trainer did not write an adapter.",
+                "detail": "The local trainer did not write an adapter.",
                 "updated_at": now(),
             })
         _save(updated)
@@ -369,7 +393,8 @@ async def _run(job_id: str, argv: list[str], output: Path) -> None:
         except VideoProjectError:
             pass
         raise
-    except OSError:
+    except Exception:
+        _LOG.exception("Character training failed")
         try:
             failed = _load(job_id).model_copy(update={
                 "status": "failed",
@@ -382,9 +407,15 @@ async def _run(job_id: str, argv: list[str], output: Path) -> None:
         except VideoProjectError:
             pass
     finally:
-        if proc is not None:
-            await kill_process_tree(proc)
-        _TASKS.pop(job_id, None)
+        try:
+            if proc is not None and not drained:
+                await await_cleanup(kill_process_tree(proc))
+            _artifact(job_id, "identity.json").unlink(missing_ok=True)
+        except (OSError, VideoProjectError):
+            _UNVERIFIED.add(job_id)
+            _LOG.exception("Character worker cleanup failed")
+        finally:
+            _TASKS.pop(job_id, None)
 
 
 async def create_job(
@@ -393,6 +424,29 @@ async def create_job(
     consent_confirmed: bool,
     uploads: list[UploadFile],
 ) -> VideoCharacterTrainingJob:
+    async with admission_lock:
+        require_setup_idle()
+        if _STOPPING or work_busy() or native_work_inflight():
+            raise VideoProjectError("busy")
+        from .video_jobs import work_busy as video_busy
+        from .work_busy import other_work_busy
+        if video_busy() or await other_work_busy():
+            raise VideoProjectError("busy")
+        task = asyncio.create_task(_create_job(name=name, consent_confirmed=consent_confirmed, uploads=uploads))
+        _UPLOADS.add(task)
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        task.cancel()
+        await await_cleanup(asyncio.gather(task, return_exceptions=True))
+        raise
+    finally:
+        _UPLOADS.discard(task)
+        for upload in uploads:
+            await await_cleanup(upload.close())
+
+
+async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[UploadFile]) -> VideoCharacterTrainingJob:
     cleaned = " ".join(name.split())
     if not cleaned or len(cleaned) > 80:
         raise VideoProjectError("invalid_draft")
@@ -400,10 +454,6 @@ async def create_job(
         raise VideoProjectError("consent_required")
     if not uploads:
         raise VideoProjectError("too_few_photos")
-    from .video_jobs import work_busy
-
-    if work_busy() or training_busy():
-        raise VideoProjectError("busy")
     job_id = uuid.uuid4().hex
     root = job_dir(job_id)
     photos: list[Path] = []
@@ -526,27 +576,61 @@ async def create_job(
         _TASKS[job_id] = asyncio.create_task(_run(job_id, argv, output))
         published = True
         return job
-    except Exception:
+    except BaseException:
         if not published:
             import shutil
             shutil.rmtree(root, ignore_errors=True)
         raise
     finally:
         for upload in uploads:
-            await upload.close()
+            await await_cleanup(upload.close())
 
 
 async def cancel_job(job_id: str) -> VideoCharacterTrainingJob:
     _load(job_id)
+    if job_id in _UNVERIFIED:
+        raise VideoProjectError("worker_identity_unverified")
     task = _TASKS.get(job_id)
     if task is None or task.done():
         job = _load(job_id)
-        if job.status in {"queued", "running"}:
-            return _reconcile(job)
         return job
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    await cancel_and_wait(task)
+    if job_id in _UNVERIFIED:
+        raise VideoProjectError("cleanup_failed")
+    _TASKS.pop(job_id, None)
+    job = _load(job_id)
+    if job.status in {"queued", "running"}:
+        _save(job.model_copy(update={"status": "cancelled", "error_code": "cancelled", "detail": "", "adapter_ready": False, "updated_at": now()}))
     return get_job(job_id)
+
+
+async def recover() -> None:
+    global _STOPPING
+    _STOPPING = True
+    for job in list_jobs():
+        if job.id in _TASKS:
+            continue
+        identity_path = _artifact(job.id, "identity.json")
+        if identity_path.exists():
+            try:
+                identity = WorkerIdentity.model_validate_json(identity_path.read_bytes())
+                if Path(identity.receipt) != _artifact(job.id, "worker.json") or not await terminate_verified(identity):
+                    raise VideoProjectError("worker_identity_unverified")
+                identity_path.unlink()
+                _UNVERIFIED.discard(job.id)
+            except (OSError, ValueError, VideoProjectError):
+                _UNVERIFIED.add(job.id)
+                _save(job.model_copy(update={"status": "failed", "error_code": "worker_identity_unverified", "detail": "", "adapter_ready": False, "updated_at": now()}))
+                continue
+        if job.status in {"queued", "running"}:
+            _save(job.model_copy(update={"status": "failed", "error_code": "interrupted", "detail": "", "adapter_ready": False, "updated_at": now()}))
+    _STOPPING = False
+
+
+async def shutdown() -> None:
+    global _STOPPING
+    _STOPPING = True
+    for task in tuple(_UPLOADS):
+        task.cancel()
+    await await_cleanup(asyncio.gather(*tuple(_UPLOADS), return_exceptions=True))
+    await await_cleanup(asyncio.gather(*(cancel_job(identifier) for identifier in tuple(_TASKS)), return_exceptions=True))

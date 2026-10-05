@@ -9,6 +9,8 @@ import { i18n } from '../../i18n'
 import * as tracksApi from '../../api/tracks'
 import { decodeStem } from '../../audio/mixerEngine'
 import type { SavedTrack } from '../../api/contracts'
+import { detectBpm } from '../../audio/bpmDetector'
+import { TestAudioBuffer } from '../../audio/testWebAudio'
 
 const audioClock = vi.hoisted(() => ({ currentTime: 0 }))
 const engine = vi.hoisted(() => ({
@@ -19,8 +21,9 @@ const engine = vi.hoisted(() => ({
 }))
 vi.mock('../../composables/useTimelineEngine', () => ({ useTimelineEngine: () => engine }))
 vi.mock('../../composables/audioPlayback', () => ({ getSharedAudioCtx: () => audioClock }))
-vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), uploadTrack: vi.fn() }))
+vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), uploadTrack: vi.fn(), saveTrack: vi.fn() }))
 vi.mock('../../audio/mixerEngine', async (original) => ({ ...await original<typeof import('../../audio/mixerEngine')>(), decodeStem: vi.fn() }))
+vi.mock('../../audio/bpmDetector', () => ({ detectBpm: vi.fn(async () => 120) }))
 
 let app: App | undefined
 const frames = new Map<number, FrameRequestCallback>()
@@ -28,6 +31,8 @@ beforeEach(() => {
   frames.clear()
   audioClock.currentTime = 0
   engine.play.mockImplementation(async () => audioClock.currentTime + 0.05)
+  vi.stubGlobal('AudioBuffer', TestAudioBuffer)
+  vi.mocked(detectBpm).mockResolvedValue(120)
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -307,4 +312,69 @@ it('ignores a dropped-audio upload that finishes after leaving the editor', asyn
   expect(decodeStem).not.toHaveBeenCalled()
   expect(store.error).toBe('Current session warning')
   expect(store.project.lanes.every((track) => track.clips.length === 0)).toBe(true)
+})
+
+function deferred<T>() {
+  let resolve: (value: T) => void = () => { throw new Error('Not initialized') }
+  let reject: (reason: Error) => void = () => { throw new Error('Not initialized') }
+  const promise = new Promise<T>((release, fail) => { resolve = release; reject = fail })
+  return { promise, resolve, reject }
+}
+
+async function pickLibraryTrack(container: HTMLElement): Promise<void> {
+  vi.spyOn(tracksApi, 'listTracks').mockResolvedValue([{ id: 1, short_id: 1, title: 'Picked track', created_at: 'now', model: 'upload', lyrics: '', seed: null, duration_ms: null, wall_ms: null, params: {}, filename: 'song.wav', audio_url: '/api/tracks/1/audio', abc_url: null, stems: null, midi: null }])
+  const add = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.addTrack'))
+  if (!add) throw new Error('Missing add button')
+  add.click(); await settlePlayback(); await settlePlayback()
+  const pick = [...document.querySelectorAll('[role=dialog] button')].find(button => button.textContent?.trim() === i18n.global.t('library.fullMix'))
+  if (!(pick instanceof HTMLButtonElement)) throw new Error('Missing library track')
+  pick.click(); await settlePlayback()
+}
+
+it.each(['decode', 'bpm', 'decode-error'] as const)('ignores a library import after another project takes over during %s', async stage => {
+  const decode = deferred<AudioBuffer>(), bpm = deferred<number | null>()
+  const buffer = new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 })
+  vi.mocked(decodeStem).mockReturnValue(stage === 'bpm' ? Promise.resolve(buffer) : decode.promise)
+  vi.mocked(detectBpm).mockReturnValue(bpm.promise)
+  const { store, container } = await mountEditor()
+  await pickLibraryTrack(container)
+  store.newProject(); store.error = 'Current project warning'
+  if (stage === 'decode-error') decode.reject(new Error('Previous project failure'))
+  else { decode.resolve(buffer); bpm.resolve(120) }
+  await settlePlayback(); await settlePlayback()
+  expect(store.project.lanes).toHaveLength(2)
+  expect(store.project.lanes.every(lane => lane.clips.length === 0)).toBe(true)
+  expect(store.error).toBe('Current project warning')
+  expect(store.dirty).toBe(false)
+})
+
+it('ignores library decoding that resolves after leaving the editor', async () => {
+  const decode = deferred<AudioBuffer>(); vi.mocked(decodeStem).mockReturnValue(decode.promise)
+  const { store, router, container } = await mountEditor()
+  await pickLibraryTrack(container)
+  await router.push('/editor')
+  decode.resolve(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  await settlePlayback(); await settlePlayback()
+  expect(store.project.lanes).toHaveLength(2)
+  expect(detectBpm).not.toHaveBeenCalled()
+})
+
+it('retains the captured export project and format after navigation without downloading into the next session', async () => {
+  const render = deferred<AudioBuffer>(); engine.render.mockReturnValue(render.promise)
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:editor-export')
+  vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined)
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, router, container } = await mountEditor()
+  store.projectName = 'Project A'; store.projectId = 10
+  const exportButton = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(exportButton instanceof HTMLButtonElement)) throw new Error('Missing export button')
+  exportButton.click(); await settlePlayback()
+  const capturedProject = engine.render.mock.calls[0]?.[0]
+  store.project.bpm = 90
+  expect(capturedProject?.bpm).toBe(120)
+  await router.push('/editor'); store.newProject(); store.projectName = 'Project B'; store.projectId = 20
+  render.resolve(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  await settlePlayback(); await settlePlayback()
+  expect(tracksApi.saveTrack).toHaveBeenCalledWith(expect.objectContaining({ title: 'Project A', params: { project_export: true, project_id: 10 } }), expect.any(Blob), 'wav')
+  expect(download).not.toHaveBeenCalled()
 })

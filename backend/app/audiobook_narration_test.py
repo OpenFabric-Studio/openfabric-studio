@@ -240,3 +240,71 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(book.export_path, "export.wav")
         self.assertIsNone(book.source_import_id)
         self.assertEqual(audiobooks.list_jobs(book_id=book.id)[0].status, "done")
+
+    async def test_cached_repeated_section_stops_after_consent_revocation(self) -> None:
+        await audiobooks.start()
+        original = speech_clone.synthesize_to_path
+
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
+            outcome = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+            from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+            voice_profiles.patch_profile(profile_id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+            return outcome
+
+        with patch.object(speech_clone, "synthesize_to_path", side_effect=synthesize):
+            identifier = audiobooks.create_book(CreateAudiobookRequest(
+                title="Repeated", profile_id=self.profile.id,
+                chapters=[AudiobookChapterInput(text="x" * 2400)],
+            )).book.id
+            await audiobooks.wait_for_book(identifier)
+        self.assertEqual(audiobooks.get_book(identifier).status, "failed")
+        job = audiobooks.list_jobs(book_id=identifier)[0]
+        self.assertEqual(job.detail, "consent_required")
+        self.assertEqual(job.completed_sections, 1)
+
+    async def test_revocation_during_last_section_keeps_pcm_without_publishing_chapter(self) -> None:
+        await audiobooks.start()
+        original = speech_clone.synthesize_to_path
+        def synthesize(*, profile_id: str, text: str, output_path: Path, require_consent: bool = True) -> speech_clone.SynthesisOutcome:
+            result = original(profile_id=profile_id, text=text, output_path=output_path, require_consent=require_consent)
+            from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+            voice_profiles.patch_profile(profile_id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+            return result
+        with patch.object(speech_clone, "synthesize_to_path", side_effect=synthesize):
+            identifier = audiobooks.create_book(CreateAudiobookRequest(title="Last", profile_id=self.profile.id,
+                chapters=[AudiobookChapterInput(text="One final section.")])).book.id
+            await audiobooks.wait_for_book(identifier)
+        self.assertEqual(audiobooks.get_book(identifier).status, "failed")
+        job = audiobooks.list_jobs(book_id=identifier)[0]
+        self.assertEqual(job.completed_sections, 1)
+        self.assertEqual(job.detail, "consent_required")
+        with self.assertRaises(audiobooks.AudiobookError):
+            audiobooks.chapter_audio_path(identifier, 0)
+
+    async def test_revocation_after_last_chapter_prevents_book_publication(self) -> None:
+        await audiobooks.start()
+        original = audiobook_narration._process_chapter
+        def chapter(identifier: str, profile_id: str, item: audiobook_narration._Chapter) -> None:
+            original(identifier, profile_id, item)
+            from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+            voice_profiles.patch_profile(profile_id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+        with patch.object(audiobook_narration, "_process_chapter", side_effect=chapter):
+            identifier = audiobooks.create_book(CreateAudiobookRequest(title="Last", profile_id=self.profile.id,
+                chapters=[AudiobookChapterInput(text="One final section.")])).book.id
+            await audiobooks.wait_for_book(identifier)
+        self.assertEqual(audiobooks.get_book(identifier).status, "failed")
+        with self.assertRaises(audiobooks.AudiobookError):
+            audiobooks.export_path_for(identifier)
+
+    async def test_revocation_during_encoding_prevents_export_pointer_publication(self) -> None:
+        await audiobooks.start()
+        def publish(book_id: str, *, title: str, author: str, chapters: list[tuple[str, Path]], cover: Path | None) -> tuple[Path | None, Path | None, str]:
+            from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+            voice_profiles.patch_profile(self.profile.id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+            return None, None, ""
+        with patch("app.audiobook_publish.publish_formats", side_effect=publish):
+            identifier = audiobooks.create_book(CreateAudiobookRequest(title="Last", profile_id=self.profile.id,
+                chapters=[AudiobookChapterInput(text="One final section.")])).book.id
+            await audiobooks.wait_for_book(identifier)
+        self.assertEqual(audiobooks.get_book(identifier).status, "failed")
+        self.assertIsNone(audiobooks.get_book(identifier).export_path)

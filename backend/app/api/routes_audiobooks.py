@@ -318,15 +318,9 @@ def download_audiobook_cue(book_id: str) -> Response:
 
 
 @router.get("/{book_id}/exports/collection")
-def download_audiobook_collection(book_id: str) -> FileResponse:
-    from ..audiobook_collection import download_name, write_collection
-    try:
-        path = write_collection(book_id)
-        name = download_name(book_id, "zip")
-    except audiobooks.AudiobookError as exc:
-        _raise(exc)
-        raise
-    return FileResponse(path, media_type="application/zip", filename=name)
+def download_audiobook_collection(book_id: str) -> Response:
+    from ..audiobook_collection import CollectionResponse
+    return CollectionResponse(book_id)
 
 
 @router.get("/{book_id}/exports/{fmt}")

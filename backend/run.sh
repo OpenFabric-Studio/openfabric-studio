@@ -16,4 +16,5 @@ if [[ ! -x ".venv/bin/python3" ]]; then
 fi
 
 echo "Starting OpenFabric backend on http://127.0.0.1:9000"
-exec .venv/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 9000
+unset UVICORN_RELOAD
+exec .venv/bin/python3 -m uvicorn app.main:app --workers 1 --host 127.0.0.1 --port 9000

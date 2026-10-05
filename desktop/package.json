@@ -16,9 +16,6 @@
     "dist": "npm run prepare-resources && electron-builder",
     "dist:dir": "npm run prepare-resources && electron-builder --dir"
   },
-  "dependencies": {
-    "diff": "^9.0.0"
-  },
   "devDependencies": {
     "electron": "^44.4.3",
     "electron-builder": "^26.15.3"

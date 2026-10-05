@@ -1,4 +1,5 @@
 import { ref, watch } from 'vue'
+import { isObject } from '../api/schemaValidation'
 
 export interface LoraEntry {
   name: string
@@ -6,11 +7,21 @@ export interface LoraEntry {
 }
 
 const STORAGE_KEY = 'aicollector_ace_loras_v1'
+// LoRA names are retained as GenerationLabel in backend generation snapshots.
+const MAX_NAME_LENGTH = 500
 
 function load(): LoraEntry[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as LoraEntry[]) : []
+    const value: unknown = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(value)) return []
+    const entries: LoraEntry[] = []
+    for (const item of value) {
+      if (!isObject(item) || typeof item.name !== 'string' || !item.name.trim() || item.name.length > MAX_NAME_LENGTH
+        || typeof item.path !== 'string' || !item.path.trim()) return []
+      entries.push({ name: item.name, path: item.path })
+    }
+    return entries
   } catch {
     return []
   }
@@ -35,7 +46,7 @@ export function useLoraRegistry() {
   function add(name: string, path: string) {
     const cleanName = name.trim()
     const cleanPath = path.trim()
-    if (!cleanName || !cleanPath) return
+    if (!cleanName || cleanName.length > MAX_NAME_LENGTH || !cleanPath) return
     if (loras.value.some((l) => l.path === cleanPath)) return
     loras.value.push({ name: cleanName, path: cleanPath })
   }

@@ -8,6 +8,8 @@ The desktop first run installs pinned uv and a managed Python 3.12 backend envir
 
 Source `prod_run.sh` / `prod_run.bat` builds the frontend and starts the backend on loopback. `dev.sh` / `dev.bat` starts both backend and Vite, with fixed local development origins. All wrappers share `desktop/scripts/launch-source.js`; Windows uses `.venv/Scripts/python.exe`, POSIX uses `.venv/bin/python`. Requirements changes refresh the existing environment before startup, and frontend lockfile or Node major-version changes run `npm ci`. If a previous environment uses another Python version, preserve it and recreate `backend/.venv` with Python 3.12 rather than modifying it blindly.
 
+Maintained launchers explicitly start one backend worker and remove inherited `UVICORN_RELOAD`. `WEB_CONCURRENCY` cannot change that worker count. Catalog publication, response-owned collection caches and worker registries require one backend process per library; manually starting additional servers against the same library is unsupported. Frontend development still uses Vite's normal hot reload.
+
 The launchers prefer checked-in `backend/requirements.lock`, fingerprint its contents, and install with `--require-hashes --only-binary :all:`. `backend/requirements.txt` remains the input specification. Only source fixtures or older resource bundles without the lock fall back to the input file. Regenerate the universal Python 3.12 lock deliberately after reviewing dependency changes:
 
 ```bash
