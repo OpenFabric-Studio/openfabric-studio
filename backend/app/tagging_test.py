@@ -82,6 +82,29 @@ class TaggedDownloadTests(unittest.IsolatedAsyncioTestCase):
         result = subprocess.check_output(["ffprobe", "-v", "error", "-show_format", "-of", "json", str(path)])
         return {key.lower(): value for key, value in TaggedProbe.model_validate_json(result).format.tags.items()}
 
+    async def test_tagging_processed_recorded_export_retains_its_captured_classification(self) -> None:
+        db.get_db().execute("UPDATE tracks SET model='upload' WHERE id=?",(self.track_id,));db.get_db().commit()
+        job=await audio_exports.create_export(self.track_id,self.original_id,'flac',source_origin='recorded')
+        for _ in range(1200):
+            completed=audio_exports.get_export(self.track_id,self.original_id,job.id)
+            if completed.status not in {'queued','running'}:break
+            await asyncio.sleep(.01)
+        self.assertEqual(completed.status,'done',completed.error_code)
+        tagged=await tagging.prepare_download(self.track_id,self.original_id,job.id)
+        self.assertEqual(self.tags(tagged.path)['openfabric_content_origin'],'recorded')
+        tagged.cleanup()
+
+    async def test_cloud_and_imported_tags_keep_provider_marks_and_truthful_origin(self) -> None:
+        from app import export_provenance
+        for model,expected in [('openrouter','generated'),('upload','unknown'),('editor','unknown')]:
+            db.get_db().execute('UPDATE tracks SET model=? WHERE id=?',(model,self.track_id));db.get_db().commit()
+            track,version,source=tagging._selected(self.track_id,self.original_id,None)
+            tags=tagging.build_tags(track,version,'',tagging.TaggedDownloadOptions(),previous_comment='Provider watermark=retained')
+            self.assertIn('Provider watermark=retained',tags['comment'])
+            self.assertEqual(tags.get('OPENFABRIC_CONTENT_ORIGIN'),expected)
+            if expected=='unknown':self.assertNotIn('AI_GENERATED',tags)
+        self.assertEqual(export_provenance.track_component(self.track_id,self.original_id,'0'*64).content_origin,'unknown')
+
     async def test_original_voice_and_legacy_download_use_exact_selected_source(self) -> None:
         original_before, voice_before = self.source.read_bytes(), self.voice.read_bytes()
         db.update_track_audio(self.track_id, self.voice)

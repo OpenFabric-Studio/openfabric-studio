@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator, Mapping
 import hashlib
 import io
 from pathlib import Path
@@ -99,6 +100,154 @@ class ModuleInstallTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaisesRegex(ModuleSetupError, 'artifact_integrity'):
                 await install.download_artifact(artifact, target, self.context, client=client)
         self.assertEqual(target.read_bytes(), b'old-good-file')
+
+    async def test_transient_download_retries_are_bounded_and_keep_existing_artifact(self) -> None:
+        content = b'verified retry'
+        target = self.root / 'cache' / 'retry.bin'
+        target.parent.mkdir()
+        target.write_bytes(b'original')
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+        calls = 0
+        def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(503) if calls < 3 else httpx.Response(200, content=content)
+        with patch.object(install.asyncio, 'sleep', new=AsyncMock()):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                try:
+                    await install.download_artifact(artifact, target, self.context, client=client)
+                except httpx.HTTPError:
+                    self.fail('a transient asset response must retry within the reviewed attempt bound')
+        self.assertEqual(calls, 3)
+        self.assertEqual(target.read_bytes(), content)
+
+    async def test_short_download_resumes_received_bytes_without_starting_again(self) -> None:
+        content = b'verified partial transfer'
+        target = self.root / 'cache' / 'short.bin'
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+        calls = 0
+        def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return httpx.Response(200, content=content[:4])
+            self.assertEqual(request.headers.get('range'), 'bytes=4-')
+            return httpx.Response(206, headers={'content-range': f'bytes 4-{len(content)-1}/{len(content)}'}, content=content[4:])
+        with patch.object(install.asyncio, 'sleep', new=AsyncMock()):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+                try:
+                    await install.download_artifact(artifact, target, self.context, client=client)
+                except ModuleSetupError:
+                    self.fail('an incomplete transfer must retain and resume its received prefix')
+        self.assertEqual(calls, 2)
+        self.assertEqual(target.read_bytes(), content)
+
+    async def test_inconsistent_resume_range_is_rejected_before_publication(self) -> None:
+        content = b'verified range'
+        target = self.root / 'cache' / 'range.bin'
+        target.parent.mkdir()
+        target.with_name(target.name + '.part').write_bytes(content[:4])
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256=hashlib.sha256(content).hexdigest(), bytes=len(content))
+        response = httpx.Response(206, headers={'content-range': 'bytes 4-999/1000'}, content=content[4:])
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: response)) as client:
+            with self.assertRaisesRegex(ModuleSetupError, 'artifact_integrity'):
+                await install.download_artifact(artifact, target, self.context, client=client)
+        self.assertFalse(target.exists())
+
+    async def test_stalled_transfer_finishes_with_a_stable_error_and_no_publication(self) -> None:
+        class Stalled(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                await asyncio.Event().wait()
+                yield b'unreachable'
+        target = self.root / 'cache' / 'stall.bin'
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256='0' * 64, bytes=16)
+        with patch.object(install, 'DOWNLOAD_STALL_SECONDS', .01, create=True), patch.object(install.asyncio, 'sleep', new=AsyncMock()):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, stream=Stalled()))) as client:
+                try:
+                    await asyncio.wait_for(install.download_artifact(artifact, target, self.context, client=client), .3)
+                except ModuleSetupError as error:
+                    self.assertEqual(error.code, 'download_stalled')
+                except TimeoutError:
+                    self.fail('the downloader must bound a stalled stream itself')
+                else:
+                    self.fail('a stalled transfer cannot publish an artifact')
+        self.assertFalse(target.exists())
+
+    async def test_retry_exhaustion_and_integrity_failure_never_replace_prior_data(self) -> None:
+        target = self.root / 'cache' / 'prior.bin'
+        target.parent.mkdir()
+        target.write_bytes(b'original')
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256=hashlib.sha256(b'new').hexdigest(), bytes=3)
+        with patch.object(install.asyncio, 'sleep', AsyncMock()):
+            for status, content, code, attempts in ((503, b'', 'download_failed', 3), (403, b'', 'download_failed', 1), (200, b'bad', 'artifact_integrity', 1)):
+                calls = 0
+                def response(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(status, content=content)
+                async with httpx.AsyncClient(transport=httpx.MockTransport(response)) as client:
+                    with self.assertRaisesRegex(ModuleSetupError, code):
+                        await install.download_artifact(artifact, target, self.context, client=client)
+                self.assertEqual(calls, attempts)
+                self.assertEqual(target.read_bytes(), b'original')
+
+    async def test_cancel_during_backoff_retains_received_prefix_and_closes_stream(self) -> None:
+        target = self.root / 'cache' / 'cancel.bin'
+        artifact = install.DownloadArtifact(url='https://example.invalid/pinned', sha256=hashlib.sha256(b'complete').hexdigest(), bytes=8)
+        entered = asyncio.Event()
+        actual_sleep = asyncio.sleep
+        async def backoff(delay: float) -> None:
+            entered.set()
+            await asyncio.Event().wait()
+        async with httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=b'comp'))) as client:
+            with patch.object(install.asyncio, 'sleep', side_effect=backoff):
+                task = asyncio.create_task(install.download_artifact(artifact, target, self.context, client=client))
+                await asyncio.wait_for(entered.wait(), 1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            await actual_sleep(0)
+        self.assertFalse(target.exists())
+        self.assertEqual(target.with_name(target.name + '.part').read_bytes(), b'comp')
+
+    async def test_native_layers_apply_to_existing_resume_patch_and_remain_resumable(self) -> None:
+        import subprocess
+        target = self.environment.paths['yue2']
+        (target / 'tools').mkdir(parents=True)
+        repository = Path(__file__).resolve().parents[2]
+        source = repository / 'desktop/test/fixtures/model_manager_v2.py'
+        (target / 'tools/model_manager_v2.py').write_bytes(source.read_bytes())
+        subprocess.run(['git', 'apply', str(repository / 'external/patches/yue-model-resume.patch')], cwd=target, check=True, capture_output=True)
+        commands: list[list[str]] = []
+        async def run(argv: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None, download_progress: bool = False) -> None:
+            commands.append(argv)
+            if argv[0] == 'git':
+                result = await asyncio.to_thread(subprocess.run, argv, cwd=cwd, capture_output=True)
+                if result.returncode:
+                    raise ModuleSetupError('installer_failed')
+            else:
+                self.assertTrue(download_progress)
+                self.assertIn('--progress', argv)
+        with patch.object(self.context, 'run', side_effect=run):
+            await install._native_weights(self.context, target, install.load_manifest(), True)
+            commands.clear()
+            await install._native_weights(self.context, target, install.load_manifest(), True)
+        self.assertEqual(sum(argv[0] == 'git' for argv in commands), 1, 'final-layer identity check must allow reviewed resume')
+        self.assertIn('DOWNLOAD_ATTEMPTS = 3', (target / 'tools/model_manager_v2.py').read_text())
+
+    async def test_speaker_setup_is_dependency_only_even_when_weights_selected(self) -> None:
+        from app import speaker_review
+        from app.speaker_review_contracts import SpeakerReviewCapability
+        target = self.environment.paths['speaker_review']
+        with patch.object(self.context, 'run', AsyncMock()) as run, patch.object(speaker_review, 'capability', return_value=SpeakerReviewCapability(available=False, deps_available=True, reason='speaker_weights_missing')):
+            outcome = await install.install(self.context, 'speaker_review', True)
+        self.assertEqual(outcome.state, 'manual')
+        self.assertEqual(run.call_count, 1)
+        command = run.call_args.args[0]
+        self.assertTrue(command[1].endswith('/scripts/setup_speaker_review.py'))
+        self.assertEqual(command[command.index('--runtime-root') + 1], str(target))
+        self.assertNotIn('--download-models', command)
+        self.assertIn('No weights', outcome.detail)
 
     def test_zip_traversal_and_tar_links_are_rejected_before_extraction(self) -> None:
         archive = self.root / 'bad.zip'

@@ -7,6 +7,7 @@ import ArtistSettings from './ArtistSettings.vue'
 import GenerationSettings from './GenerationSettings.vue'
 import ModuleSetupPanel from './ModuleSetupPanel.vue'
 import ProvidersPanel from './ProvidersPanel.vue'
+import LoudnessControls from '../../components/shared/LoudnessControls.vue'
 import { getAudioSettings, saveAudioSettings, type CompleteAudioEncodingSettings } from '../../api/audioSettings'
 import { parseAudioEncodingSettings } from '../../api/contracts'
 
@@ -48,7 +49,7 @@ let revision = 0
 let controller: AbortController | null = null
 
 function copy(settings: CompleteAudioEncodingSettings): CompleteAudioEncodingSettings {
-  return { mp3: { ...settings.mp3 }, wav: { ...settings.wav }, flac: { ...settings.flac } }
+  return { mp3: { ...settings.mp3 }, wav: { ...settings.wav }, flac: { ...settings.flac }, loudness: { ...settings.loudness } }
 }
 watch(draft, () => { revision++ }, { deep: true, flush: 'sync' })
 
@@ -126,6 +127,7 @@ onBeforeUnmount(() => { active = false; operation++; controller?.abort(); contro
       <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
       <button v-if="!draft && error" type="button" class="settings-button" :disabled="loading" @click="load">{{ t('settingsWorkspace.retryLoad') }}</button>
       <form v-if="draft" class="space-y-5" @submit.prevent="save">
+        <LoudnessControls v-model="draft.loudness" :disabled="saving || loading" />
         <div class="grid gap-4 lg:grid-cols-3">
           <fieldset class="settings-format">
             <legend class="px-1 text-sm font-semibold text-text">MP3</legend>

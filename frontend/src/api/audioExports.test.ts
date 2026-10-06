@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { createAudioExport, listAudioExports, cancelAudioExport, retryAudioExport } from './audioExports'
+import { createAudioExport, getAudioExport, listAudioExports, cancelAudioExport, retryAudioExport } from './audioExports'
 import type { AudioExportResponse } from './contracts'
 afterEach(() => vi.unstubAllGlobals())
 const versionId = 'a'.repeat(32)
@@ -27,4 +27,12 @@ it('rejects invalid identifiers before network access and malformed settings aft
   expect(fetch).not.toHaveBeenCalled()
   respond({ ...exported, settings: { mp3: { bitrate_kbps: 999 } } })
   await expect(createAudioExport(42, versionId, 'mp3')).rejects.toThrow()
+})
+
+it('polls the exact durable export and rejects invalid export identifiers before network access', async () => {
+  const fetch = respond(exported)
+  expect((await getAudioExport(42,versionId,exported.id)).id).toBe(exported.id)
+  expect(fetch).toHaveBeenCalledWith(`/api/tracks/42/versions/${versionId}/exports/${exported.id}`,expect.any(Object))
+  await expect(getAudioExport(42,versionId,'../private')).rejects.toThrow()
+  expect(fetch).toHaveBeenCalledOnce()
 })

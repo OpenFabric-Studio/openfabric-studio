@@ -11,6 +11,7 @@ import WaveformPlayer from './WaveformPlayer.vue'
 import StatusBadge from './StatusBadge.vue'
 import VoiceApplyStatus from './VoiceApplyStatus.vue'
 import TaggedAudioDownload from './TaggedAudioDownload.vue'
+import AudioQualityReport from './AudioQualityReport.vue'
 const props = defineProps<{ trackId: number; fallbackAudioUrl?: string | null; fallbackFilename?: string | null; voiceApplying?: boolean }>()
 const emit = defineEmits<{ playing: [value: boolean]; processing: [value: boolean] }>()
 const { t, te } = useI18n()
@@ -29,6 +30,14 @@ const playbackStarting = ref(false)
 watch(() => playerPlaying.value || playbackStarting.value, value => emit('playing', value), { flush: 'sync' })
 const voiceId = ref('')
 const format = ref<AudioExportFormat>('mp3')
+const sourceOrigin = ref<'auto' | 'recorded' | 'unknown'>('auto')
+const analysis = computed(() => [...exports.value].reverse().find(item => item.operation === 'analyze' && item.status === 'done' && item.version_id === selectedId.value))
+const playbackMetrics = computed(() => {
+  const selectedFile = playback.value
+  if (selectedFile?.export) return selectedFile.export.output_metrics
+  return analysis.value?.version_id === selectedFile?.version.id ? analysis.value?.input_metrics : undefined
+})
+const measurementsUnavailable = computed(() => Boolean(playback.value?.export && !playback.value.export.output_metrics))
 const originalAvailable = ref(false)
 const loaded = ref(false)
 const loading = ref(true)
@@ -99,7 +108,7 @@ function notePlaying(value: boolean): void {
 function errorText(cause: unknown) {
   const code = cause instanceof ApiError ? cause.message : ''
   const key = `trackAudio.errors.${code}`
-  return code && te(key) ? t(key) : t('trackAudio.errors.unknown')
+  return code && te(key) ? t(key) : code && te(`exportQuality.errors.${code}`) ? t(`exportQuality.errors.${code}`) : t('trackAudio.errors.unknown')
 }
 function upsertVersion(version: AudioVersion) { versions.value = [...versions.value.filter(item => item.id !== version.id), version] }
 function upsertExport(item: AudioExportResponse) { exports.value = [...exports.value.filter(existing => existing.id !== item.id), item] }
@@ -212,7 +221,16 @@ function addExport() {
   const version = selected.value, trackId = props.trackId, chosenFormat = format.value
   if (!version || version.status !== 'done') return
   void perform(async signal => {
-    const result = await createAudioExport(trackId, version.id, chosenFormat, signal)
+    const result = sourceOrigin.value === 'auto' ? await createAudioExport(trackId, version.id, chosenFormat, signal)
+      : await createAudioExport(trackId, version.id, chosenFormat, signal, { source_origin: sourceOrigin.value })
+    if (current(signal, trackId) && selectedId.value === version.id) upsertExport(result)
+  })
+}
+function analyzeSource() {
+  const version = selected.value, trackId = props.trackId
+  if (!version || version.status !== 'done') return
+  void perform(async signal => {
+    const result = await createAudioExport(trackId, version.id, 'wav', signal, { operation: 'analyze' })
     if (current(signal, trackId) && selectedId.value === version.id) upsertExport(result)
   })
 }
@@ -279,6 +297,8 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
     <WaveformPlayer v-if="playable" ref="player" :src="playable" @playing="notePlaying" />
     <a v-if="playable" :href="playable" :download="playbackFilename ?? ''" class="inline-block text-xs text-accent1 hover:underline">{{ t('trackAudio.downloadSelected', { format: playbackFormat }) }}</a>
     <TaggedAudioDownload v-if="playback" class="ml-3" :track-id="trackId" :version-id="playback.version.id" :export-id="playback.export?.id" />
+    <AudioQualityReport :metrics="playbackMetrics" :target-result="playback?.export?.target_result" :measurement-unavailable="measurementsUnavailable" />
+    <div v-if="playback?.export?.provenance" class="flex flex-wrap gap-3 text-xs text-text-dim"><span>{{ t('exportQuality.origin', { origin: playback.export.provenance.content_origin }) }}</span><a v-if="playback.export.provenance_url" :href="playback.export.provenance_url" download class="text-accent1 underline">{{ t('exportQuality.json') }}</a><a v-if="playback.export.manifest_url" :href="playback.export.manifest_url" download class="text-accent1 underline">{{ t('exportQuality.manifest') }}</a></div>
     <div v-if="selected && selected.status !== 'done' && !active(selected.status)" class="flex flex-wrap items-center gap-2 text-xs" aria-live="polite">
       <StatusBadge :status="selected.status" />
       <span v-if="selected.error_code" class="text-status-failed">{{ te(`trackAudio.errors.${selected.error_code}`) ? t(`trackAudio.errors.${selected.error_code}`) : t('trackAudio.errors.unknown') }}</span>
@@ -297,12 +317,15 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
         <div class="flex flex-wrap items-end gap-2">
           <label class="space-y-1 text-xs text-text-dim"><span class="block">{{ t('trackAudio.format') }}</span><select v-model="format" :disabled="pending" class="rounded-lg border border-border bg-panel p-2 text-text"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="flac">FLAC</option></select></label>
           <button type="button" :disabled="pending || selected?.status !== 'done'" class="rounded-lg border border-border bg-panel px-3 py-2 text-xs text-accent1 disabled:opacity-50" @click="addExport">{{ t('trackAudio.export') }}</button>
+          <button type="button" :disabled="pending || selected?.status !== 'done'" class="rounded-lg border border-border bg-panel px-3 py-2 text-xs text-accent1 disabled:opacity-50" @click="analyzeSource">{{ t('exportQuality.analyze') }}</button>
           <RouterLink to="/settings" class="text-xs text-accent1 hover:underline">{{ t('trackAudio.settings') }}</RouterLink>
         </div>
+        <label class="block space-y-1 text-xs text-text-dim"><span>{{ t('exportQuality.sourceOrigin') }}</span><select v-model="sourceOrigin" :disabled="pending" class="min-h-11 rounded-lg border border-border bg-panel p-2 text-text"><option value="auto">{{ t('exportQuality.originOptions.auto') }}</option><option value="recorded">{{ t('exportQuality.originOptions.recorded') }}</option><option value="unknown">{{ t('exportQuality.originOptions.unknown') }}</option></select></label>
+        <p class="text-xs text-text-dim">{{ t('exportQuality.originHint') }}</p>
         <p class="text-xs text-text-dim">{{ t('trackAudio.exportHint') }}</p>
         <ul v-if="exports.length" class="space-y-2">
           <li v-for="item in exports" :key="item.id" class="flex flex-wrap items-center gap-2 text-xs">
-            <span class="text-text-dim">{{ quality(item) }}</span>
+            <span class="text-text-dim">{{ item.operation === 'analyze' ? t('exportQuality.diagnostics') : quality(item) }}</span>
             <a v-if="item.status === 'done' && item.audio_url" :href="item.audio_url" :download="item.filename ?? ''" class="text-accent1 hover:underline">{{ t('common.download') }}</a>
             <template v-else><StatusBadge :status="item.status" /><span v-if="item.error_code" class="text-status-failed">{{ te(`trackAudio.errors.${item.error_code}`) ? t(`trackAudio.errors.${item.error_code}`) : t('trackAudio.errors.unknown') }}</span><button type="button" :disabled="pending" class="text-accent1 hover:underline disabled:opacity-50" @click="exportAction(item, active(item.status) ? 'cancel' : 'retry')">{{ active(item.status) ? t('common.cancel') : t('trackAudio.retry') }}</button></template>
           </li>

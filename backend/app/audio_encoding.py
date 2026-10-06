@@ -19,6 +19,8 @@ from pydantic_core import PydanticCustomError
 from . import db
 from .atomic_files import document_lock, write_object
 from .audio_version_contracts import AudioVersionId
+from .audio_quality_contracts import AudioMetrics, LoudnessSettings, TargetResult
+from .export_provenance_contracts import ExportProvenance
 from .contracts import Contract, JobStatus, JsonObject
 
 logger = logging.getLogger(__name__)
@@ -71,6 +73,7 @@ class AudioEncodingSettings(EncodingContract):
     mp3: Mp3EncodingSettings = Field(default_factory=Mp3EncodingSettings)
     wav: WavEncodingSettings = Field(default_factory=WavEncodingSettings)
     flac: FlacEncodingSettings = Field(default_factory=FlacEncodingSettings)
+    loudness: LoudnessSettings = Field(default_factory=LoudnessSettings)
 
 
 class AudioSettingsResponse(EncodingContract):
@@ -81,6 +84,8 @@ class AudioSettingsResponse(EncodingContract):
 class CreateAudioExportRequest(EncodingContract):
     format: AudioExportFormat
     settings: AudioEncodingSettings | None = None
+    operation: Literal['export','analyze'] = 'export'
+    source_origin: Literal['recorded','unknown'] | None = None
 
 
 StemName = Literal["vocals", "drums", "bass", "other"]
@@ -96,6 +101,16 @@ class AudioExportResult(EncodingContract):
     filename: str | None = None
     audio_url: str | None = None
     settings: AudioEncodingSettings
+    operation: Literal['export','analyze'] = 'export'
+    source_origin: Literal['recorded','unknown'] | None = None
+    input_metrics: AudioMetrics | None = None
+    output_metrics: AudioMetrics | None = None
+    target_result: TargetResult = 'off'
+    normalization_mode: Literal['none','linear','dynamic','unknown'] = 'none'
+    warnings: list[str] = Field(default_factory=list,max_length=10)
+    provenance: ExportProvenance | None = None
+    provenance_url: str | None = None
+    manifest_url: str | None = None
 
 
 class AudioExportResponse(AudioExportResult):

@@ -13,7 +13,7 @@ The official 0.16.0 tag resolves to `90f76c20864ea612071afbb4e714ceea99e38e34`. 
 
 These are source observations, not successful inference or compatibility measurements. Before changing the pin, port the wrapper against exact upstream files, test its argument and source-hash guards, and run the hardware matrix below. Keep the old executable/model snapshots available for rollback.
 
-## Actual local evidence
+## Actual local evidence — 5 October
 
 The read-only inventory measured a `Mac16,5` machine with **137,438,953,472 bytes (128 GiB)** physical memory. The configured engine checkout matched the reviewed pin. All fourteen LTX-2.3 and thirteen Gemma manifest files were present at their expected sizes, totalling **58,419,728,001 bytes**. LTX-2.5 files were absent. The engine Python dependency probe found MLX, the LTX pipeline and trainer modules without loading models. Model contents were not freshly rehashed in this inventory; readiness explicitly warns that its fingerprint uses file metadata.
 
@@ -47,3 +47,36 @@ The baseline requests 49 frames (about two seconds), seed 42, ten stage-one step
 4. Train one consented reviewed character dataset and compare both fixed-prompt held-out projects. Record identity consistency and motion defects across all prompts; do not use training images as evaluation proof.
 5. Export a dialogue reel and listen to the original cast soundtrack, check cue timing/captions and selective refresh, reload, undo and cancellation. Audio preservation and identity quality are separate acceptance conditions.
 6. Claim platform support only after native installation/process-ownership evidence on that platform. Current generated video remains Apple Silicon MLX; portable inventory and CPU media tests do not establish cross-platform GPU support.
+
+## Candidate experiment — 6 October
+
+The exact candidate is commit [`bfa5755371a973651ea218ac3b56dcd34aa92c45`](https://github.com/dgrauet/ltx-2-mlx/commit/bfa5755371a973651ea218ac3b56dcd34aa92c45), after the merged [unfused adapter change](https://github.com/dgrauet/ltx-2-mlx/pull/191) and [image-conditioning preprocessing fix](https://github.com/dgrauet/ltx-2-mlx/pull/193). It identifies itself as 0.16.0; 0.16.1 was still a pending release during inspection. The reviewed core/pipeline Python source, package metadata and uv lock have aggregate SHA-256 `ab4006d332cffb58c3a6fdf580df2ace7d31638509a902ff3ca483e0d4f8af8c`. The research runner verifies that exact aggregate before importing candidate code. Unknown source is rejected rather than using the production compatibility patch against it.
+
+The app and other model services were stopped for these runs. The candidate used a separate checkout/environment and the existing LTX-2.3/Gemma snapshots offline. No model weights were downloaded and the configured production engine, cache and library were not replaced. All cases used 704×448, 49 frames, 24 fps, seed 42, ten stage-one steps, three refinement steps and the same geometric-character prompt. Generated audio was disabled.
+
+| Case | Wall clock | Peak child RSS | Validation |
+| --- | --- | --- | --- |
+| Production 0.15.12 T2V, low RAM/fused | 168.15 s | 13.55 GiB | Passed decode/geometry/duration checks |
+| Candidate T2V, low RAM/fused | 163.30 s | 13.57 GiB | Passed decode/geometry/duration checks |
+| Candidate I2V, resident/unfused selected, synthetic reference | 145.21 s | 21.22 GiB | Passed decode/geometry/duration checks |
+
+These are individual runs, not a speed benchmark with repeated samples or a quality comparison. The I2V input was a deliberately synthetic odd-size image (673×431), not a held-out face. No character LoRA was supplied to that render; selecting unfused mode does not measure adapter influence or switching latency.
+
+Evidence: [production case](benchmarks/2026-10-06-production-lowram.json), [candidate baseline](benchmarks/2026-10-06-candidate-lowram.json), [candidate I2V](benchmarks/2026-10-06-candidate-resident-i2v.json). Videos/logs and environments are retained outside Git under `/tmp/openfabric-ltx-oct6-*`. Reports include output/reference hashes. Cached weights were checked against manifest sizes but not freshly hashed during these runs; that limitation remains explicit.
+
+The upstream candidate's `test_image_preprocess.py` and `test_unfused_lora.py` passed **38 tests** locally with offline environment flags. They exercise the official float-resize golden, EXIF/ICC/CRF behavior and synthetic quantized adapter attach/detach math. They do not test a trained character's appearance. Candidate `--low-ram` plus `--lora-mode unfused` is rejected by this harness because upstream still fuses streamed adapters; the high-rank distilled stage-two adapter also remains fused.
+
+MLX telemetry is recorded separately from process RSS. Upstream VAE decoding resets the allocator peak counter, so the returned value describes the peak since that last vendor reset, **not the whole render's maximum unified-memory allocation**. The report states that scope explicitly; it must not be used to claim total peak reduction.
+
+Reproduce the candidate after checking out the exact commit and creating its separate environment with `uv sync --frozen --no-dev`:
+
+```sh
+backend/.venv/bin/python backend/scripts/benchmark_video.py \
+  --candidate --engine-dir /path/to/isolated/candidate \
+  --cache-dir /path/to/existing/ltx-cache \
+  --output-dir /path/to/new/experiment --run --exclusive-offline
+```
+
+For resident adapter experiments append `--memory-mode resident --lora-mode unfused --adapter /path/to/reviewed/character.safetensors`. Use `--reference /path/to/held-out.png` for I2V. Selected inputs are copied/hash-checked into the experiment directory before launch. Existing worker/output evidence is not overwritten. This candidate harness supports T2V/I2V only; it does not certify or replace the app's maintained A2V tiling/LoRA wrapper.
+
+Remaining acceptance work: port and verify that A2V wrapper against exact candidate source, held-out consented faces and trained LoRAs, portrait geometry/memory cases, dialogue/lip-sync listening and repeated timing. The production engine pin remains unchanged.

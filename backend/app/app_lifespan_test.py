@@ -20,7 +20,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
         for module, method in [(main.audio_versions, 'recover'), (main.audio_exports, 'recover_exports'),
                                (main.reference_imports, 'start'), (main.video_jobs, 'recover'),
                                (main.optional_engines, 'recover'), (main.video_character_training, 'recover'), (main.video_character_comparison, 'recover'),
-                               (main.audiobook_workflows, 'start'), (main.audiobook_review, 'start'),
+                               (main.audiobook_workflows, 'start'), (main.audiobook_review, 'start'), (main.speaker_review, 'start'),
                                (main.module_jobs, 'recover')]:
             self.enterContext(patch.object(module, method, new=AsyncMock()))
         recovery = self.enterContext(patch.object(main.audiobook_publish, 'start', new=AsyncMock()))
@@ -40,7 +40,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
                                (main.voice_comparisons, 'shutdown'), (main.video_jobs, 'shutdown'),
                                (main.stems, 'shutdown'), (main.midi, 'shutdown'), (main.tagging, 'shutdown'),
                                (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
-                               (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'),
+                               (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'), (main.speaker_review, 'shutdown'),
                                (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'),
                                (main.speech_clone, 'shutdown'), (main.yue_upload, 'shutdown'),
                                (main.optional_engines, 'shutdown'), (main.video_character_training, 'shutdown'), (main.video_character_comparison, 'shutdown'),
@@ -94,7 +94,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
             (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
             (main.audiobooks, 'shutdown'), (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'), (main.speech_clone, 'shutdown'),
             (main.yue_upload, 'shutdown'), (main.optional_engines, 'shutdown'), (main.video_character_training, 'shutdown'),
-            (main.video_character_comparison, 'shutdown'), (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'), (main.audiobook_publish, 'shutdown'),
+            (main.video_character_comparison, 'shutdown'), (main.audiobook_workflows, 'shutdown'), (main.audiobook_review, 'shutdown'), (main.speaker_review, 'shutdown'), (main.audiobook_publish, 'shutdown'),
         ]]
         stop = self.enterContext(patch.object(main.manager, 'stop_all', new=AsyncMock()))
 

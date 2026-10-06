@@ -660,6 +660,8 @@ def finish_book(book_id: str, *, wav: Path, mp3: Path | None, m4b: Path | None, 
             (str(wav), str(mp3) if mp3 else None, str(m4b) if m4b else None, note[:500], _now(), book_id),
         )
         connection.commit()
+    from .audiobook_publish import safe_finalize_book_provenance
+    safe_finalize_book_provenance(book_id)
 
 
 def set_cast(book_id: str, members: list[CastMember]) -> AudiobookBook:

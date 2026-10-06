@@ -11,6 +11,7 @@ import re
 import sqlite3
 import sys
 import threading
+import time
 from typing import IO, Literal
 import uuid
 
@@ -20,12 +21,12 @@ from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
 from .module_catalog import approval_scope, ModuleEnvironment, configured_environment, DEFINITIONS, now, plan
 from .module_contracts import (
     ModuleId, ModuleInstallJob, ModuleInstallRequest, ModuleJobsResponse, ModuleJobStep, ModulePlan,
-    ModulePlanRequest, ModuleStepState,
+    ModulePlanRequest, ModuleStepState, ModuleDownloadProgress,
 )
 from .video_process import spawn_owned, terminate_verified, WorkerIdentity
 
 logger = logging.getLogger(__name__)
-ModuleErrorCode = Literal['plan_changed', 'setup_busy', 'insufficient_disk', 'job_missing', 'invalid_job', 'job_corrupt', 'installation_failed', 'installer_failed', 'installer_output_limit', 'installer_timeout', 'worker_unverified', 'unsafe_install_path', 'not_managed', 'unsupported_platform', 'artifact_integrity', 'archive_unsafe', 'installation_conflict', 'environment_unverified', 'setup_not_resumable']
+ModuleErrorCode = Literal['plan_changed', 'setup_busy', 'insufficient_disk', 'job_missing', 'invalid_job', 'job_corrupt', 'installation_failed', 'installer_failed', 'installer_output_limit', 'installer_timeout', 'worker_unverified', 'unsafe_install_path', 'not_managed', 'unsupported_platform', 'artifact_integrity', 'archive_unsafe', 'installation_conflict', 'environment_unverified', 'setup_not_resumable', 'download_failed', 'download_stalled']
 
 
 class ModuleSetupError(Exception):
@@ -133,6 +134,32 @@ class InstallContext:
         self.environment = service.environment
         self.identifier = identifier
         self.workspace = self.environment.root / '.setup' / 'staging' / identifier
+        self._download_at = 0.0
+        self._download_phase = ''
+
+    def update_download(self, progress: ModuleDownloadProgress) -> None:
+        """Event-loop-only: fresh read/write has no await or cancellation gap."""
+        phase = f'{progress.artifact_name}:{progress.attempt}:{progress.phase}'
+        current = time.monotonic()
+        if phase == self._download_phase and current - self._download_at < .25:
+            return
+        stored = self.service.store.read(self.identifier)
+        if stored.job.state != 'running' or stored.job.current_step is None:
+            return
+        stored.job.steps[stored.job.current_step].download = progress
+        stored.job.updated_at = now()
+        self.service.store.write(stored)
+        self._download_at, self._download_phase = current, phase
+
+    def _progress_line(self, line: bytes) -> None:
+        prefix = b'OPENFABRIC_DOWNLOAD_PROGRESS '
+        if len(line) > 4096 or not line.startswith(prefix):
+            return
+        try:
+            progress = ModuleDownloadProgress.model_validate_json(line[len(prefix):])
+        except ValidationError:
+            return
+        self.update_download(progress)
 
     def confined(self, path: Path) -> Path:
         if path.is_symlink() or not path.resolve().is_relative_to(self.environment.root.resolve()):
@@ -140,7 +167,8 @@ class InstallContext:
         return path
 
     async def run(self, argv: list[str], *, cwd: Path | None = None,
-                  env: Mapping[str, str] | None = None, timeout: float = 3600) -> None:
+                  env: Mapping[str, str] | None = None, timeout: float = 3600,
+                  download_progress: bool = False) -> None:
         """Only catalog adapters construct argv; caller input never reaches it."""
         receipt = self.confined(self.environment.root / '.setup' / 'workers' / f'{self.identifier}.json')
         logs = self.confined(self.environment.root / '.setup' / 'logs')
@@ -161,12 +189,25 @@ class InstallContext:
                 raise ModuleSetupError('unsafe_install_path')
             with log_path.open('ab') as log:
                 written = log_path.stat().st_size
+                pending = b''
+                discarding = False
                 async with asyncio.timeout(timeout):
                     while chunk := await proc.stdout.read(16384):
                         written += len(chunk)
                         if written > 20 * 1024**2:
                             raise ModuleSetupError('installer_output_limit')
                         log.write(chunk)
+                        if download_progress:
+                            lines = (pending + chunk).split(b'\n')
+                            for index, line in enumerate(lines[:-1]):
+                                if not (discarding and index == 0):
+                                    self._progress_line(line)
+                            if len(lines) > 1:
+                                discarding = False
+                            pending = lines[-1]
+                            if len(pending) > 4096:
+                                pending = b''
+                                discarding = True
                     code = await proc.wait()
             if code != 0:
                 raise ModuleSetupError('installer_failed')
@@ -216,6 +257,7 @@ def speech_admission() -> Iterator[None]:
 
 
 def _application_busy() -> bool:
+    from .speaker_review import work_busy as speaker_work_busy
     from .orchestrator.manager import manager
     from .orchestrator.state import ModelStatus
     from .resource_admission import native_work_inflight
@@ -223,7 +265,7 @@ def _application_busy() -> bool:
     from .work_busy import local_work_busy
     from .video_jobs import work_busy as video_work_busy
     from .audiobook_narration import work_busy as narration_work_busy
-    return native_work_inflight() or gpu_lock.locked() or local_work_busy() or video_work_busy() or narration_work_busy() or any(
+    return speaker_work_busy() or native_work_inflight() or gpu_lock.locked() or local_work_busy() or video_work_busy() or narration_work_busy() or any(
         state.status in (ModelStatus.STARTING, ModelStatus.RUNNING, ModelStatus.STOPPING)
         for state in manager.state.models.values())
 

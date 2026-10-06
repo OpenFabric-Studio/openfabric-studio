@@ -47,6 +47,12 @@ Inspired by [darkyeg's pinned recovery candidate](https://github.com/darkyeg/rem
 
 Desktop update versions include the patch SHA256 and verify actual applied hunks plus the installed script digest. The pinned upstream fixture and Apache license under `desktop/test/fixtures/` provide offline regression coverage. Windows file locking and real provider/platform installation still require platform evidence; CPU tests do not establish those flows.
 
+### yue-model-download-reliability.patch
+
+Reviewed Settings native-model setup layers this patch **after** `yue-model-resume.patch`. It checks for the complete newer patch before trying to apply either layer, preserving already-managed installations. The original resume patch and raw pinned fixture are unchanged. Desktop packaging includes both patch files; the standalone native source-build helper still uses its existing reviewed patch set.
+
+The layer adds three bounded attempts with one/two-second backoff, capped numeric Retry-After (30 seconds), a 45-second socket stall timeout and bounded JSON byte/retry progress. Content identity is resolved once for each file and resumable staging stays bound to that identity. Permanent HTTP or integrity failures are not blindly replayed. The vendor's metadata HEAD check remains bounded at 60 seconds; failed metadata checks require manual resume. Arbitrary ACE/Demucs/LTX setup commands and paid generation requests are not automatically retried.
+
 `dev` is a moving branch upstream and gets rebased/force-pushed occasionally
 (this pin has already needed bumping once after the previous commit
 disappeared from its history) — if `setup_models.ps1` fails to check it out,

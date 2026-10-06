@@ -8,10 +8,18 @@ from unittest.mock import patch
 import httpx
 
 from app.module_catalog import ModuleEnvironment
-from app.module_runtime import RuntimeTarget, runtime_status
+from app.module_runtime import RuntimeTarget, runtime_status, speaker_status
 
 
 class ModuleRuntimeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_unverified_speaker_weights_are_never_labelled_verified(self) -> None:
+        from app import speaker_review
+        from app.speaker_review_contracts import SpeakerReviewCapability
+        with tempfile.TemporaryDirectory() as root, patch.object(speaker_review, 'capability', return_value=SpeakerReviewCapability(available=False, deps_available=True, weights_available=True, reason='speaker_weights_unverified')):
+            status = speaker_status(ModuleEnvironment.for_root(Path(root)))
+        self.assertFalse(status.ready)
+        self.assertFalse(next(item for item in status.evidence if item.code == 'speaker_weights').verified)
+
     async def test_ace_requires_service_identity_and_initialized_models(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             env = ModuleEnvironment.for_root(Path(temporary))

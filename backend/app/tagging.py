@@ -22,12 +22,13 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.responses import FileResponse
 from starlette.types import Receive, Scope, Send
 
-from . import artist_settings, audio_exports, audio_version_store, audio_versions, db
+from . import artist_settings, audio_exports, audio_version_store, audio_versions, db, export_provenance
 from .audio_version_contracts import AudioVersion
 from .config import MODELS
 from .contracts import Contract, SavedTrack
 from .job_lifecycle import await_cleanup, kill_process_tree
 from .track_view import track_response
+from .export_provenance_contracts import ContentOrigin
 from .tagging_genres import guess_genre
 from .video_io import copy_verified, hash_file
 from .video_media import VideoMediaError, tool
@@ -106,7 +107,7 @@ def _bounded_text(value: str, max_bytes: int = 4096) -> str:
 
 def build_tags(track: SavedTrack, version: AudioVersion, artist: str,
                options: TaggedDownloadOptions, previous_comment: str = "",
-               album_default: str = "") -> dict[str, str]:
+               album_default: str = "", content_origin: ContentOrigin | None = None) -> dict[str, str]:
     title = _bounded_text(" ".join(track.title.split()), 2048) or "Untitled"
     album = options.album if options.album is not None and options.album.strip() else album_default
     tags = {"title": title, "artist": artist, "album": (album or title).strip(), "encoded_by": "OpenFabric"}
@@ -127,13 +128,21 @@ def build_tags(track: SavedTrack, version: AudioVersion, artist: str,
     key = track.params.get("key_scale", track.params.get("keyscale"))
     if isinstance(key, str) and key.strip():
         tags["TKEY"] = _bounded_text(key.strip(), 160)
+    origin = content_origin or export_provenance.track_component(track.id,version.id,'0'*64,is_voice=version.kind=='voice').content_origin
+    tags['OPENFABRIC_CONTENT_ORIGIN'] = origin
     notes = [previous_comment] if previous_comment else []
+    notes.append(f'content_origin={origin}')
+    if origin in {'generated','mixed'}:
+        tags['AI_GENERATED'] = 'true'
     if track.model in {"ace_step", "yue2"}:
         label = MODELS[track.model].label
         tags.update({"AI_GENERATED": "true", "GENERATOR": label})
         notes.append(f"Generated with OpenFabric ({label})")
         if track.model == "yue2":
             notes.append("Check the terms of the exact model weights used")
+    elif track.model == "openrouter":
+        tags["GENERATOR"] = "OpenRouter"
+        notes.append("Generated with OpenFabric (OpenRouter)")
     elif track.model == "editor":
         notes.append("Mixed in the OpenFabric editor")
     if track.seed is not None:
@@ -261,7 +270,11 @@ async def _prepare(identifier: str, track_id: int, version_id: str | None,
                 [ffprobe, "-v", "error", *_INPUT, "-show_format", "-of", "json", str(captured)], directory,
                 max_bytes=_MAX_METADATA_BYTES + 8192))
             previous = next((value for key, value in probe.format.tags.items() if key.lower() == "comment"), "")
-            tags = build_tags(track, version, artist, options, previous, album_default=saved_tags.album)
+            captured_origin: ContentOrigin | None=None
+            if export_id is not None:
+                retained=audio_exports.get_export(track_id,version.id,export_id).provenance
+                if retained is not None and retained.artifact_sha256==digest:captured_origin=retained.content_origin
+            tags = build_tags(track, version, artist, options, previous, album_default=saved_tags.album,content_origin=captured_origin)
             metadata = directory / "metadata.txt"
             metadata.write_text(_metadata_document(probe.format.tags, tags), encoding="utf-8", newline="")
             extension = source.suffix.lower().lstrip(".")

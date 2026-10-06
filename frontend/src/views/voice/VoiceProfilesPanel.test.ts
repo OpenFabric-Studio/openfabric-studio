@@ -218,6 +218,8 @@ it.each(['completed', 'mock_completed'] as const)('plays and downloads identifie
   if (!(audio instanceof HTMLAudioElement)) throw new Error('Missing generated audio')
   expect(audio.getAttribute('src')).toBe(`/api/speech-clone/trials/${id}/audio`)
   expect(container.querySelector('[data-speech-trial] a[download]')?.getAttribute('href')).toBe(`/api/speech-clone/trials/${id}/audio`)
+  expect(container.querySelector('[data-speech-trial] [data-trial-manifest]')?.getAttribute('href')).toBe(`/api/speech-clone/trials/${id}/manifest`)
+  expect(container.querySelector('[data-speech-trial] [data-trial-provenance]')?.getAttribute('href')).toBe(`/api/speech-clone/trials/${id}/provenance`)
   expect(container.textContent).not.toContain('/private/')
   if (status === 'mock_completed') expect(container.querySelector('[data-speech-trial]')?.textContent).toContain('silent placeholder')
   const pause = vi.spyOn(audio, 'pause').mockImplementation(() => undefined)

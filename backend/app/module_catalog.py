@@ -26,15 +26,17 @@ from .module_contracts import (
     ModulePlan, ModulePlanRequest, ModulePlanStep, ModuleState,
 )
 from .module_evidence import environment_verified
-from .module_runtime import configured_targets, RuntimeEvidence, runtime_status
+from .module_licenses import declarations
+from .module_runtime import configured_targets, RuntimeEvidence, runtime_status, speaker_status
 
 CATALOG_VERSION = 'openfabric-modules-1'
-MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc')
+MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review')
 ENGINE_FOLDERS: Mapping[ModuleId, str] = {
     'ace_step': 'ACE-Step-1.5', 'yue2': 'YuE2', 'speech': 'gpt-sovits', 'singing': 'seed-vc',
     'separation': 'Demucs', 'video': 'ltx-2-mlx', 'media': 'ffmpeg', 'transcription': 'whisper.cpp',
     'source_import': 'reference-tools', 'ebooks': 'calibre',
     'kokoro': 'kokoro', 'chatterbox': 'chatterbox', 'wan22': 'mlx-video', 'rvc': 'rvc',
+    'speaker_review': 'SpeakerReview',
 }
 
 
@@ -52,6 +54,7 @@ class ModuleDefinition:
 
 
 DEFINITIONS: Mapping[ModuleId, ModuleDefinition] = {
+    'speaker_review': ModuleDefinition('speaker_review', 'Speaker review', 'Optional local CPU speaker similarity screening with human-approved references.', (), ('.openfabric-speaker-runtime.json', '.venv/pyvenv.cfg'), ('speechbrain', 'torch', 'torchaudio'), None, 'Set up the separate CPU dependency environment. No weights are downloaded, even with model downloads selected. Obtain and verify the reviewed ECAPA checkpoint explicitly, then configure OPENFABRIC_SPEAKER_REVIEW_PYTHON and OPENFABRIC_SPEAKER_REVIEW_WEIGHTS. Similarity is a screening hint, not an identity verdict.', 'https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb'),
     'ace_step': ModuleDefinition('ace_step', 'ACE-Step', 'Music generation, covers and section edits.', ('media',), ('acestep/api_server.py', 'pyproject.toml'), ('torch', 'fastapi'), None, 'Install the pinned ACE-Step source/environment. Select model downloads explicitly, then verify a short generation with your hardware.', 'https://github.com/ace-step/ACE-Step-1.5'),
     'yue2': ModuleDefinition('yue2', 'YuE', 'Native music generation, melody planning and MIDI tools.', ('media',), ('tools/model_manager_v2.py',), (), None, 'Install the native engine and selected weights. Windows needs NVIDIA compute capability 7.5+ and driver 580+. Linux requires the documented CUDA source build.', 'https://github.com/0xShug0/audio.cpp'),
     'speech': ModuleDefinition('speech', 'Speech', 'GPT-SoVITS speech and audiobook narration.', ('media',), ('api.py', 'GPT_SoVITS'), ('torch', 'librosa', 'soundfile'), None, 'Install the reviewed GPT-SoVITS checkout and Python 3.11 environment. Complete upstream pretrained-weight setup and start api.py on loopback port 9880. Review a short speech preview before narration.', 'https://github.com/RVC-Boss/GPT-SoVITS'),
@@ -96,12 +99,17 @@ class ModuleEnvironment:
 def configured_environment() -> ModuleEnvironment:
     from . import config
     root = Path(os.environ.get('OPENFABRIC_MODULE_ROOT') or str(Path.home() / '.openfabric-studio' / 'runtime'))
-    paths: Mapping[ModuleId, Path] = {
+    paths: dict[ModuleId, Path] = {
         'ace_step': config.ACE_STEP_DIR, 'yue2': config.YUE2_DIR, 'speech': config.GPT_SOVITS_DIR,
         'singing': config.SEED_VC_DIR, 'separation': config.DEMUCS_DIR, 'video': config.LTX_DIR,
         'kokoro': config.KOKORO_DIR, 'chatterbox': config.CHATTERBOX_DIR, 'wan22': config.WAN22_DIR,
         'rvc': config.RVC_DIR,
     }
+    if speaker_python := os.environ.get('OPENFABRIC_SPEAKER_REVIEW_PYTHON'):
+        interpreter = Path(speaker_python).expanduser()
+        if interpreter.parent.parent.name == '.venv':
+            # Preserve a deliberately configured external review environment.
+            paths['speaker_review'] = interpreter.parent.parent.parent
     base = ModuleEnvironment.for_root(root, paths=paths, data_dir=config.DATA_DIR)
     return ModuleEnvironment(base.root, base.data_dir, base.platform, base.architecture, base.paths,
         base.python, os.environ.get('UV_BIN') or base.uv, config.FFMPEG_BIN_DIR,
@@ -244,6 +252,11 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
             state = 'ready' if pinned and deno_ok and media_ready else 'partial' if pinned or deno else 'missing'
             evidence.extend((_evidence('pinned_packages', 'Exact yt-dlp and solver versions are installed.' if pinned else 'Pinned import packages are missing or incompatible.', pinned), _evidence('deno_version', 'Deno meets the required minimum version.' if deno_ok else 'Deno 2.6.6 or newer is required.', deno_ok), _evidence('provider_unverified', 'Tool readiness does not establish current YouTube availability.')))
             capabilities = ['source_import_tools'] if state == 'ready' else []
+        elif identifier == 'speaker_review':
+            speaker_runtime = speaker_status(env)
+            state = 'ready' if speaker_runtime.ready else 'partial' if speaker_runtime.installed or env.paths[identifier].exists() else 'missing'
+            evidence.extend(speaker_runtime.evidence)
+            capabilities.extend(speaker_runtime.capabilities)
         else:
             engine = env.paths[identifier]
             source = all((engine / marker).exists() for marker in definition.source_markers)
@@ -265,7 +278,7 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
                 elif runtime.installed:
                     state = 'installed'
         prerequisites = env.uv is not None and (identifier == 'separation' or shutil.which('git') is not None)
-        automatic = support and managed and ((identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc') and prerequisites)
+        automatic = support and managed and (identifier == 'speaker_review' or (identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc') and prerequisites)
         automation: Literal['unsupported', 'automatic', 'manual'] = 'unsupported' if not support else 'automatic' if automatic else 'manual'
         actions = [] if state == 'ready' else [_manual(definition)]
         if automatic and state != 'ready':
@@ -274,14 +287,14 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
             missing = 'uv' if env.uv is None else 'Git'
             evidence.append(_evidence('installer_prerequisite', f'{missing} is required before automatic setup.'))
             actions.insert(0, ModuleAction(kind='manual', label=f'Install {missing}', detail=f'Install {missing} and restart the app so its executable is available. Review the updated plan before source or model downloads.', url='https://docs.astral.sh/uv/getting-started/installation/' if missing == 'uv' else 'https://git-scm.com/downloads'))
-        if identifier not in ('media', 'ebooks', 'source_import') and state in ('installed', 'partial'):
+        if identifier not in ('media', 'ebooks', 'source_import', 'speaker_review') and state in ('installed', 'partial'):
             actions.append(ModuleAction(kind='verify', label='Verify a short preview', detail='Review the selected model and a short output in its workspace; setup does not claim GPU quality or performance.'))
         if not managed and identifier not in ('ebooks', 'source_import', 'transcription'):
             evidence.append(_evidence('external_installation', 'Configured external installation is preserved; automatic replacement is disabled.', True))
         modules.append(ModuleInfo(id=identifier, name=definition.name, description=definition.description,
             state=state, supported=support, managed=managed, automation=automation,
             dependencies=list(definition.dependencies), capabilities=capabilities, evidence=evidence,
-            actions=actions, estimated_download_bytes=definition.download_bytes))
+            actions=actions, estimated_download_bytes=definition.download_bytes, licenses=declarations(identifier)))
     ancestor = env.root
     while not ancestor.exists() and ancestor != ancestor.parent:
         ancestor = ancestor.parent
@@ -341,11 +354,11 @@ async def plan(request: ModulePlanRequest, environment: ModuleEnvironment | None
     for identifier in expanded_features(request.features):
         module = by_id[identifier]
         definition = DEFINITIONS[identifier]
-        external_verifiable = bool(definition.packages) and not module.managed and engine_python(env.paths[identifier], env.platform).is_file() and all((env.paths[identifier] / marker).exists() for marker in definition.source_markers)
+        external_verifiable = identifier != 'speaker_review' and bool(definition.packages) and not module.managed and engine_python(env.paths[identifier], env.platform).is_file() and all((env.paths[identifier] / marker).exists() for marker in definition.source_markers)
         operation: Literal['unsupported', 'verify', 'install', 'manual'] = 'unsupported' if not module.supported else 'verify' if module.state == 'ready' or external_verifiable else 'install' if module.automation == 'automatic' else 'manual'
         size = _download_bytes(identifier, env, request.download_models) if operation == 'install' else 0
         steps.append(ModulePlanStep(module_id=identifier, name=module.name, operation=operation,
-            estimated_download_bytes=size, detail=DEFINITIONS[identifier].guidance, actions=module.actions))
+            estimated_download_bytes=size, detail=DEFINITIONS[identifier].guidance, actions=module.actions, licenses=module.licenses))
         if operation == 'manual':
             warnings.append(f'{module.name} requires a visible manual step; setup cannot complete it automatically.')
     if not request.download_models:
@@ -355,8 +368,8 @@ async def plan(request: ModulePlanRequest, environment: ModuleEnvironment | None
     required = known + known // 2
     if unknown:
         # Admission floor, not an invented download estimate or sufficiency guarantee.
-        required += sum((24 if request.download_models else 8) * 1024**3 for step in steps if step.operation == 'install' and step.estimated_download_bytes is None)
-        warnings.append('Dependency/model download sizes are unknown. The disk check applies an 8 GiB minimum per unmeasured engine, or 24 GiB with models selected; actual requirements may be larger.')
+        required += sum((24 if request.download_models and step.module_id != 'speaker_review' else 8) * 1024**3 for step in steps if step.operation == 'install' and step.estimated_download_bytes is None)
+        warnings.append('Dependency/model download sizes are unknown. The disk check applies an 8 GiB minimum per unmeasured engine, or 24 GiB with models selected. Dependency-only speaker review always uses 8 GiB; actual requirements may be larger.')
     enough = status.free_bytes is not None and status.free_bytes >= required
     if not enough:
         warnings.append('The selected plan has insufficient or unverified free disk space.')

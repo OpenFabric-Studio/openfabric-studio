@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 import json
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
@@ -29,6 +31,27 @@ class RuntimeEvidence:
     installed: bool = False
     capabilities: tuple[str, ...] = ()
     evidence: tuple[ModuleEvidence, ...] = ()
+
+
+def speaker_status(environment: ModuleEnvironment) -> RuntimeEvidence:
+    """Inspect optional local metadata; dependency setup does not activate QA."""
+    from .module_catalog import engine_python
+    from .speaker_review import capability
+    python = engine_python(environment.paths['speaker_review'], environment.platform)
+    status = capability(python_path=python)
+    configured_python = os.environ.get('OPENFABRIC_SPEAKER_REVIEW_PYTHON', '')
+    try:
+        activated = bool(configured_python and Path(configured_python).expanduser().resolve() == python.resolve())
+    except (OSError, ValueError, RuntimeError):
+        # A malformed optional activation path cannot hide unrelated modules.
+        activated = False
+    ready = status.available and activated
+    weights_verified = status.available and status.encoder is not None
+    return RuntimeEvidence(ready, status.deps_available, ('speaker_similarity_screening',) if ready else (), (
+        ModuleEvidence(code='speaker_dependencies', detail='Separate CPU dependencies are compatible.' if status.deps_available else 'Separate CPU dependencies are missing or incompatible.', verified=status.deps_available),
+        ModuleEvidence(code='speaker_weights', detail='Reviewed local checkpoint verified.' if weights_verified else 'Select and verify the reviewed local checkpoint explicitly; setup does not download it.', verified=weights_verified),
+        ModuleEvidence(code='speaker_activation', detail='Optional speaker review is configured.' if ready else 'Configure OPENFABRIC_SPEAKER_REVIEW_PYTHON and OPENFABRIC_SPEAKER_REVIEW_WEIGHTS explicitly. Similarity needs human review and a calibrated threshold.', verified=ready),
+    ))
 
 
 class AceHealth(BaseModel):

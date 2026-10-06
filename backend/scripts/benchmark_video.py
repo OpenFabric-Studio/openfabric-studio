@@ -22,6 +22,10 @@ def main() -> int:
     parser.add_argument('--app-port',type=int,default=9000)
     parser.add_argument('--size',choices=['704x448','704x1280','1088x1920'],default='704x448')
     parser.add_argument('--reference',type=Path)
+    parser.add_argument('--candidate',action='store_true',help='Exact reviewed research source; does not change the app engine')
+    parser.add_argument('--memory-mode',choices=['low_ram','resident'],default='low_ram')
+    parser.add_argument('--lora-mode',choices=['fused','unfused'],default='fused')
+    parser.add_argument('--adapter',type=Path)
     args=parser.parse_args()
     output=args.output_dir
     if output.is_symlink() or output.resolve().is_relative_to(args.engine_dir.resolve()) or output.resolve().is_relative_to(args.cache_dir.resolve()):
@@ -34,14 +38,20 @@ def main() -> int:
     os.environ['OPENFABRIC_MODULE_ROOT']=str(output/'modules')
     os.environ['SEED_VC_DIR']=str(output/'seed')
     from app.video_benchmark import inventory, run_case
+    from app.video_candidate import CandidateSettings
     from app.video_engine import VideoEngineError, ProfileId
     profile: ProfileId='ltx23' if args.profile=='ltx23' else 'ltx25'
-    report=inventory(args.engine_dir,args.cache_dir,profile)
+    if not args.candidate and (args.memory_mode != 'low_ram' or args.lora_mode != 'fused' or args.adapter is not None):
+        parser.error('Memory/adapter experiments require --candidate')
+    report=inventory(args.engine_dir,args.cache_dir,profile,candidate=args.candidate)
     if args.run:
         width,height=(int(value) for value in args.size.split('x'))
+        candidate = CandidateSettings(memory_mode='resident' if args.memory_mode == 'resident' else 'low_ram',
+            lora_mode='unfused' if args.lora_mode == 'unfused' else 'fused', width=width, height=height,
+            reference=args.reference, adapter=args.adapter) if args.candidate else None
         try:
             report=asyncio.run(run_case(report,args.engine_dir,args.cache_dir,output,exclusive=args.exclusive_offline,
-                app_port=args.app_port,width=width,height=height,reference=args.reference))
+                app_port=args.app_port,width=width,height=height,reference=args.reference,candidate_settings=candidate))
         except (ValueError,VideoEngineError) as exc:
             report.inference_skip_reason=exc.code if isinstance(exc,VideoEngineError) else str(exc)
     payload=report.model_dump_json(indent=2)

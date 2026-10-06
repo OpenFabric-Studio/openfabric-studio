@@ -45,6 +45,7 @@ fs.cpSync(dist, path.join(out, 'frontend', 'dist'), { recursive: true });
 fs.mkdirSync(path.join(out, 'patches'), { recursive: true });
 fs.copyFileSync(path.join(root, 'external', 'patches', 'ace-step.patch'), path.join(out, 'patches', 'ace-step.patch'));
 fs.copyFileSync(path.join(root, 'external', 'patches', 'yue-model-resume.patch'), path.join(out, 'patches', 'yue-model-resume.patch'));
+fs.copyFileSync(path.join(root, 'external', 'patches', 'yue-model-download-reliability.patch'), path.join(out, 'patches', 'yue-model-download-reliability.patch'));
 
 // The optional native build verifier resolves these relative to backend/scripts,
 // so installed resources retain the source checkout's external/patches layout.

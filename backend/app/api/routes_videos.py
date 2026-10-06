@@ -601,3 +601,15 @@ def clear_project_character_adapter(project_id: str, body: VideoRevisionRequest)
         return projects.clear_character_adapter(project_id, body)
     except projects.VideoProjectError as exc:
         _project_error(exc)
+
+
+@router.get('/projects/{project_id}/provenance')
+def video_provenance(project_id: str) -> FileResponse:
+    try:return FileResponse(renders.provenance_file(project_id,'json'),media_type='application/json')
+    except projects.VideoProjectError as exc:_project_error(exc)
+
+
+@router.get('/projects/{project_id}/manifest')
+def video_manifest(project_id: str) -> FileResponse:
+    try:return FileResponse(renders.provenance_file(project_id,'txt'),media_type='text/plain',filename=f'{project_id}-provenance.txt')
+    except projects.VideoProjectError as exc:_project_error(exc)

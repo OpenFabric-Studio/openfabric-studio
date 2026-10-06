@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import FileResponse
@@ -15,6 +16,7 @@ from ..voice_profile_contracts import (
     CloudSpeechTrialsResponse,
 )
 
+from ..export_provenance_contracts import ExportProvenance
 from ..module_security import require_local_origin
 
 router = APIRouter(prefix="/api/speech-clone", tags=["speech clone"])
@@ -63,6 +65,43 @@ def create_speech_clone_trial(body: SpeechCloneTrialRequest, response: Response,
         raise HTTPException(status_code=exc.status, detail=exc.code) from exc
     response.status_code = speech_clone.http_status_for(result)
     return result
+
+
+def _require_manifest_consent(value: 'ExportProvenance') -> None:
+    # Only captured trial/profile identities supply consent ownership. Do not
+    # invent a profile association for legacy media without a retained manifest.
+    for component in value.components:
+        if component.role!='audio':continue
+        match=re.fullmatch(r'trial:[0-9a-f]{32}:profile:([0-9a-f]{32})',component.source_id)
+        if match is None:raise HTTPException(404,'manifest_unavailable')
+        try:profile=voice_profiles.get_profile(match[1])
+        except voice_profiles.VoiceProfileError as exc:raise HTTPException(exc.status,exc.code) from exc
+        if not profile.consent_confirmed:raise HTTPException(403,'consent_required')
+
+
+@router.get('/trials/{trial_id}/provenance')
+def get_speech_trial_provenance(trial_id: str) -> FileResponse:
+    from .. import export_provenance
+    # Reuse the exact contained audio and live-consent serving check.
+    audio=get_speech_clone_trial_audio(trial_id)
+    path=Path(audio.path)
+    try:
+        value=export_provenance.read(path)
+        _require_manifest_consent(value)
+    except export_provenance.ProvenanceError as exc:raise HTTPException(404,'manifest_unavailable') from exc
+    return FileResponse(export_provenance.path_for(path,'json'),media_type='application/json')
+
+
+@router.get('/trials/{trial_id}/manifest')
+def get_speech_trial_manifest(trial_id: str) -> FileResponse:
+    from .. import export_provenance
+    audio=get_speech_clone_trial_audio(trial_id);path=Path(audio.path)
+    try:
+        value=export_provenance.read(path)
+        _require_manifest_consent(value)
+        export_provenance.write(path,value)
+    except (OSError,export_provenance.ProvenanceError) as exc:raise HTTPException(404,'manifest_unavailable') from exc
+    return FileResponse(export_provenance.path_for(path,'txt'),media_type='text/plain',filename=f'{trial_id}-provenance.txt')
 
 
 @router.post("/quote",response_model=CloudSpeechQuote)

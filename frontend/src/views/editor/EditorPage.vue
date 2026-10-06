@@ -11,7 +11,12 @@ import type { ChannelSettings } from '../../audio/mixerEngine'
 import { clipDuration, stretchFactor } from '../../audio/timelineTypes'
 import type { Clip } from '../../audio/timelineTypes'
 import { encodeWav } from '../../audio/wavEncoder'
-import { encodeMp3 } from '../../audio/mp3Encoder'
+import { createPollingLoop } from '../../composables/polling'
+import { createAudioExport, getAudioExport } from '../../api/audioExports'
+import { listAudioVersions } from '../../api/audioVersions'
+import { getAudioSettings } from '../../api/audioSettings'
+import type { AudioExportResponse, JsonObject } from '../../api/contracts'
+import AudioQualityReport from '../../components/shared/AudioQualityReport.vue'
 import { timeStretchBuffer } from '../../audio/timeStretchEngine'
 import { TRACK_COLORS } from '../../utils/trackColors'
 import { detectBpm } from '../../audio/bpmDetector'
@@ -38,6 +43,7 @@ const exportFormat = ref<'wav' | 'mp3'>('wav')
 const exporting = ref(false)
 const exportError = ref<string | null>(null)
 const exportedOk = ref(false)
+const processedExport = ref<AudioExportResponse | null>(null)
 const showHelpModal = ref(false)
 
 const laneLevels = ref<{ peak: number; clipping: boolean; peakL: number; peakR: number }[]>([])
@@ -417,6 +423,42 @@ async function doSave(): Promise<void> {
 }
 
 let exportGeneration = 0
+let pendingExport: { trackId: number; versionId: string; exportId: string; name: string; format: 'wav' | 'mp3'; isCurrent: () => boolean } | null = null
+function acceptExport(result: AudioExportResponse, owner: NonNullable<typeof pendingExport>): boolean {
+  if (!owner.isCurrent()) return false
+  if (result.status === 'done' && result.audio_url) {
+    processedExport.value = result
+    exportedOk.value = true
+    exporting.value = false
+    const anchor = document.createElement('a')
+    anchor.href = result.audio_url
+    anchor.download = `${owner.name || 'mix'}.${owner.format}`
+    document.body.appendChild(anchor)
+    try { anchor.click() } finally { anchor.remove() }
+    return false
+  }
+  if (result.status === 'failed' || result.status === 'cancelled') {
+    exporting.value = false
+    exportError.value = t('exportQuality.errors.export_failed')
+    return false
+  }
+  return true
+}
+const exportPoll = createPollingLoop(async context => {
+  const owner = pendingExport
+  if (!owner || !owner.isCurrent()) return false
+  try {
+    const result = await getAudioExport(owner.trackId, owner.versionId, owner.exportId, context.signal)
+    if (!context.isCurrent() || owner !== pendingExport || !owner.isCurrent()) return false
+    return acceptExport(result, owner)
+  } catch {
+    if (context.isCurrent() && owner === pendingExport && owner.isCurrent()) {
+      exporting.value = false
+      exportError.value = t('exportQuality.errors.export_failed')
+    }
+    return false
+  }
+}, 1000)
 async function doExport(): Promise<void> {
   if (exporting.value || unmounted) return
   const token = ++exportGeneration
@@ -426,40 +468,46 @@ async function doExport(): Promise<void> {
   const projectId = store.projectId
   const format = exportFormat.value
   const duration = store.totalDuration
+  const snapshot = parseTimelineProject(project)
   const sourceBuffers = new Map(buffers.value)
   const isCurrent = () => !unmounted && token === exportGeneration && currentLoad === loadToken && store.project === project
   exporting.value = true
   exportError.value = null
   exportedOk.value = false
+  processedExport.value = null
+  let tracking = false
   try {
-    const rendered = await engine.render(parseTimelineProject(project), sourceBuffers, duration)
-    const blob = format === 'wav' ? encodeWav(rendered) : encodeMp3(rendered)
-    
-    // Automatically trigger file download
-    if (isCurrent()) {
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      try {
-        a.href = url
-        a.download = `${name || 'mix'}.${format}`
-        document.body.appendChild(a)
-        a.click()
-      } finally {
-        a.remove()
-        URL.revokeObjectURL(url)
-      }
+    const settings = (await getAudioSettings()).settings
+    const rendered = await engine.render(snapshot, sourceBuffers, duration)
+    // Keep rendered PCM independent from the codec/house target. Only app-owned
+    // library URLs supply ancestry; arbitrary imports remain unknown.
+    const sourceClips = snapshot.lanes.flatMap(lane => lane.clips)
+    const sourceIds = [...new Set(sourceClips.flatMap(clip => {
+      const match = /^\/api\/tracks\/([1-9][0-9]*)\//.exec(clip.sourceUrl ?? '')
+      const id = match ? Number(match[1]) : NaN
+      return Number.isSafeInteger(id) ? [id] : []
+    }))]
+    const ancestryComplete = sourceClips.every(clip => /^\/api\/tracks\/[1-9][0-9]*\//.test(clip.sourceUrl ?? ''))
+    const params: JsonObject = { project_export: true, project_id: projectId }
+    if (sourceIds.length && sourceIds.length <= 100) {
+      params.source_track_ids = sourceIds
+      if (!ancestryComplete) params.source_ancestry_complete = false
     }
-
-    await tracksApi.saveTrack(
-      { model: 'editor', title: name, lyrics: '', params: { project_export: true, project_id: projectId } },
-      blob,
-      format,
-    )
-    if (isCurrent()) exportedOk.value = true
-  } catch (e) {
-    if (isCurrent()) exportError.value = e instanceof Error ? e.message : String(e)
+    const saved = await tracksApi.saveTrack({ model: 'editor', title: name, lyrics: '', params }, encodeWav(rendered), 'wav')
+    const versions = await listAudioVersions(saved.id)
+    const original = versions.versions?.find(version => version.kind === 'original' && version.status === 'done')
+    if (!original) throw new Error('Original audio unavailable')
+    const result = await createAudioExport(saved.id, original.id, format, undefined, { settings })
+    const owner = { trackId: saved.id, versionId: original.id, exportId: result.id, name, format, isCurrent }
+    if (isCurrent() && acceptExport(result, owner)) {
+      pendingExport = owner
+      tracking = true
+      exportPoll.start()
+    }
+  } catch {
+    if (isCurrent()) exportError.value = t('exportQuality.errors.export_failed')
   } finally {
-    if (!unmounted && token === exportGeneration) exporting.value = false
+    if (isCurrent() && !tracking) exporting.value = false
   }
 }
 
@@ -470,6 +518,9 @@ let loadToken = 0
 async function load(): Promise<void> {
   const token = ++loadToken
   exportGeneration++
+  exportPoll.stop()
+  pendingExport = null
+  processedExport.value = null
   exporting.value = false
   exportedOk.value = false
   exportError.value = null
@@ -878,6 +929,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unmounted = true
+  exportPoll.stop()
+  pendingExport = null
   loadToken++
   projectWatchGeneration++
   playbackGeneration++
@@ -1212,7 +1265,13 @@ onBeforeRouteLeave(() => {
 
       <!-- Panels moved to top -->
       <p v-if="exportError" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ exportError }}</p>
-      <p v-if="exportedOk" class="rounded-lg bg-panel-2 p-2 text-xs text-text-dim">{{ t('editor.exportedAsNewTrack') }}</p>
+      <div v-if="exportedOk && processedExport" class="rounded-lg bg-panel-2 p-3 space-y-3">
+        <p class="text-xs text-text-dim">{{ t('editor.exportedAsNewTrack') }}</p>
+        <audio v-if="processedExport.audio_url" :key="processedExport.id" :src="processedExport.audio_url" controls :aria-label="t('editor.export')" />
+        <AudioQualityReport :metrics="processedExport.output_metrics" :target-result="processedExport.target_result" />
+        <a v-if="processedExport.manifest_url" :href="processedExport.manifest_url" download class="text-xs underline">{{ t('exportQuality.manifest') }}</a>
+        <a v-if="processedExport.provenance_url" :href="processedExport.provenance_url" download class="ml-3 text-xs underline">{{ t('exportQuality.json') }}</a>
+      </div>
     </template>
 
     <LibraryPicker v-if="pickerOpenForNewLane" @pick="onPickForNewLane" @close="pickerOpenForNewLane = false" />

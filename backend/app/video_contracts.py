@@ -6,6 +6,9 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .contracts import Contract
 from .openrouter_contracts import OpenRouterReceipt, OpenRouterQuote
+from .audio_quality_contracts import LoudnessSettings
+from .export_provenance_contracts import ExportProvenance
+from .voice_profile_contracts import CloudSpeechProvenance
 
 VideoId = Annotated[str, Field(pattern=r"^[0-9a-f]{32}$")]
 VideoSeconds = Literal[2, 4, 6, 8, 10, 12]
@@ -70,6 +73,8 @@ class VideoExportSettings(VideoContract):
     include_overlays: bool = True
     # Silent stays the default. Speech is muxed at export and is not a model input.
     attach_speech: bool = False
+    loudness: LoudnessSettings = Field(default_factory=LoudnessSettings)
+    visible_ai_label: bool = False
 
 
 class VideoShotDraft(VideoContract):
@@ -225,6 +230,8 @@ class VideoDialogueCue(VideoContract):
     end_sec: float = Field(gt=0, le=15)
     audio_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     waveform_peaks: list[Annotated[float, Field(ge=0, le=1)]] = Field(default_factory=list, max_length=160)
+    renderer: Literal['local','openrouter'] | None = None
+    cloud_provenance: CloudSpeechProvenance | None = None
 
 
 class DialogueReelSelection(VideoContract):
@@ -299,6 +306,9 @@ class VideoProject(VideoContract):
     file_url: str = ""
     poster_url: str = ""
     output_version: str = ""
+    export_provenance: ExportProvenance | None = None
+    provenance_url: str = ''
+    manifest_url: str = ''
     warnings: list[str] = Field(default_factory=list, max_length=30)
 
 

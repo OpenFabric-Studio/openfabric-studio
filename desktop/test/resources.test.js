@@ -34,7 +34,7 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   await fs.cp(starterAssets, path.join(fixture, 'backend', 'assets', 'starter-voices'), { recursive: true });
   const fontAssets = path.join(repo, 'backend', 'assets', 'fonts');
   await fs.cp(fontAssets, path.join(fixture, 'backend', 'assets', 'fonts'), { recursive: true });
-  const patches = ['ace-step.patch', 'yue-model-resume.patch', 'yue-workspace-release.patch', 'yue-progress.patch'];
+  const patches = ['ace-step.patch', 'yue-model-resume.patch', 'yue-model-download-reliability.patch', 'yue-workspace-release.patch', 'yue-progress.patch'];
   await fs.mkdir(path.join(fixture, 'external', 'patches'), { recursive: true });
   for (const name of [...patches, 'README.md']) {
     await fs.copyFile(path.join(repo, 'external', 'patches', name), path.join(fixture, 'external', 'patches', name));
@@ -68,7 +68,7 @@ async function packagingFixture(t) {
   await fs.mkdir(path.join(root, 'frontend/dist'), { recursive: true });
   await fs.writeFile(path.join(root, 'frontend/dist/index.html'), '<html></html>');
   await fs.mkdir(path.join(root, 'external/patches'), { recursive: true });
-  for (const name of ['ace-step.patch', 'yue-model-resume.patch', 'yue-workspace-release.patch', 'yue-progress.patch', 'README.md']) {
+  for (const name of ['ace-step.patch', 'yue-model-resume.patch', 'yue-model-download-reliability.patch', 'yue-workspace-release.patch', 'yue-progress.patch', 'README.md']) {
     await fs.copyFile(path.join(repo, 'external/patches', name), path.join(root, 'external/patches', name));
   }
   return { root, run: () => execFileSync(process.execPath, [script, '--skip-frontend-build'], { stdio: 'pipe' }) };

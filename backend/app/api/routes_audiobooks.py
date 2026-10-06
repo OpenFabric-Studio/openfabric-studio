@@ -347,6 +347,50 @@ def download_audiobook_collection(book_id: str) -> Response:
     return CollectionResponse(book_id)
 
 
+def _book_manifest_path(book_id: str, fmt: str, kind: str) -> Path:
+    from .. import export_provenance
+    from ..audiobook_cast import require_cast
+    try:
+        with audiobooks.publication_lock(book_id):
+            book=audiobooks.get_book(book_id)
+            if not voice_profiles.get_profile(book.profile_id).consent_confirmed:
+                raise audiobooks.AudiobookError('consent_required',403)
+            require_cast(book.cast)
+            # Cast edits preserve accepted PCM. Check the voices captured in
+            # those completed passages, rather than only today's cast settings.
+            for job in audiobooks.list_jobs(book_id=book_id):
+                if job.status!='done':continue
+                accepted=audiobook_workflows.get_passages(book_id,job.chapter_index)
+                for passage in accepted.passages:
+                    if passage.status!='done':continue
+                    if not voice_profiles.get_profile(passage.profile_id).consent_confirmed:
+                        raise audiobooks.AudiobookError('consent_required',403)
+                    try:
+                        audiobook_workflows.passage_render_snapshot(book_id,job.chapter_index,passage.id,accepted.revision)
+                    except audiobooks.AudiobookError as exc:
+                        if exc.code!='passage_snapshot_unavailable':raise
+            media=audiobooks.export_format_path(book_id,fmt)
+            value=export_provenance.read(media)
+            # Regenerate the readable copy only from the exact retained receipt.
+            export_provenance.write(media,value)
+            return export_provenance.path_for(media,'json' if kind=='json' else 'txt')
+    except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+    except (OSError,export_provenance.ProvenanceError) as exc:
+        raise HTTPException(404,'manifest_unavailable') from exc
+
+
+@router.get('/{book_id}/exports/{fmt}/provenance')
+def download_audiobook_provenance(book_id: str,fmt: str) -> FileResponse:
+    return FileResponse(_book_manifest_path(book_id,fmt,'json'),media_type='application/json')
+
+
+@router.get('/{book_id}/exports/{fmt}/manifest')
+def download_audiobook_manifest(book_id: str,fmt: str) -> FileResponse:
+    return FileResponse(_book_manifest_path(book_id,fmt,'txt'),media_type='text/plain',filename=f'{fmt}-provenance.txt')
+
+
 @router.get("/{book_id}/exports/{fmt}")
 def download_audiobook_format(book_id: str, fmt: str) -> FileResponse:
     try:

@@ -1,0 +1,163 @@
+--- a/tools/model_manager_v2.py
++++ b/tools/model_manager_v2.py
+@@ -4,6 +4,8 @@
+ import argparse
+ from contextlib import contextmanager
+ import hashlib
++from http.client import HTTPResponse, IncompleteRead
++import math
+ import re
+ import errno
+ from concurrent.futures import ThreadPoolExecutor
+@@ -18,7 +20,7 @@
+ from pathlib import Path
+ from typing import Any
+ from typing import Callable, Iterator
+-from urllib.error import HTTPError
++from urllib.error import HTTPError, URLError
+ from urllib.parse import quote
+ from urllib.request import Request, urlopen
+ 
+@@ -33,6 +35,40 @@
+ 
+ class InstallCancelled(ManagerError):
+     pass
++
++
++DOWNLOAD_ATTEMPTS = 3
++DOWNLOAD_STALL_SECONDS = 45
++TRANSIENT_HTTP = frozenset((408, 429, 500, 502, 503, 504))
++
++
++class RetryableDownload(ManagerError):
++    def __init__(self, delay: float | None = None) -> None:
++        self.delay = delay
++        super().__init__("download interrupted; verified partial data retained")
++
++
++def open_download(request: Request) -> HTTPResponse:
++    try:
++        return urlopen(request, timeout=DOWNLOAD_STALL_SECONDS)
++    except HTTPError as error:
++        if error.code not in TRANSIENT_HTTP:
++            raise
++        value = error.headers.get("Retry-After", "")
++        delay = min(30.0, max(0.0, float(value))) if re.fullmatch(r"[0-9]{1,3}(?:\.[0-9]{1,3})?", value) else None
++        error.close()
++        raise RetryableDownload(delay) from error
++    except (URLError, OSError) as error:
++        raise RetryableDownload() from error
++
++
++def download_progress(remote_path: str, received: int, total: int | None, attempt: int,
++                      phase: str, enabled: bool, delay: float | None = None) -> None:
++    if enabled:
++        payload = {"artifact_name": Path(remote_path).name[-120:], "bytes_received": received,
++                   "total_bytes": total, "attempt": attempt, "max_attempts": DOWNLOAD_ATTEMPTS,
++                   "phase": phase, "retry_after_sec": delay}
++        print("OPENFABRIC_DOWNLOAD_PROGRESS " + json.dumps(payload), flush=True)
+ 
+ 
+ @dataclass(frozen=True)
+@@ -445,7 +481,23 @@
+ ) -> None:
+     lock = output_path.parent / (".remiqora-lock-" + hashlib.sha256(output_path.name.encode()).hexdigest())
+     with writer_lock(lock, cancel_file):
+-        _download_file(package, remote_path, output_path, progress, cancel_file)
++        # Resolve exactly once: all resumed requests use the same revision/ETag.
++        info = check_remote_file(package, remote_path)
++        content_digest(info)
++        for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
++            try:
++                _download_file(package, remote_path, output_path, progress, cancel_file, info, attempt)
++                return
++            except RetryableDownload as error:
++                if attempt == DOWNLOAD_ATTEMPTS:
++                    raise ManagerError("download retry limit reached; partial data retained for reviewed resume") from error
++                delay = error.delay if error.delay is not None else float(2 ** (attempt - 1))
++                have = output_path.stat().st_size if output_path.is_file() else 0
++                download_progress(remote_path, have, info.size, attempt, "retrying", progress is not None, delay)
++                for _ in range(math.ceil(delay / .1)):
++                    if cancellation_requested(cancel_file):
++                        raise InstallCancelled("download cancelled by user")
++                    time.sleep(.1)
+ 
+ 
+ def _download_file(
+@@ -454,9 +506,10 @@
+     output_path: Path,
+     progress: Callable[[int, int | None], None] | None,
+     cancel_file: Path | None,
++    info: RemoteFileInfo,
++    attempt: int,
+ ) -> None:
+     repo = package.download["repo"]
+-    info = check_remote_file(package, remote_path)
+     content_digest(info)  # A length alone never establishes model identity.
+     resolved = package
+     if info.revision:
+@@ -471,6 +524,7 @@
+     if have and verified_download(output_path, info):
+         if progress is not None:
+             progress(have, have)
++        download_progress(remote_path, have, info.size, attempt, "complete", progress is not None)
+         return
+     if info.size is not None and have >= info.size:
+         have = 0  # Equal-sized corruption cannot be accepted through HTTP 416.
+@@ -481,12 +535,15 @@
+             pass
+     atomic_download_identity(sidecar, identity)
+     headers = http_headers(package_source(package))
++    headers["Accept-Encoding"] = "identity"
+     headers["If-Match"] = '"' + info.etag.strip('"') + '"'
+     if have:
+         headers["Range"] = f"bytes={have}-"
+     request = Request(identity.url, headers=headers)
+     try:
+-        with urlopen(request, timeout=300) as response:
++        with open_download(request) as response:
++            if response.headers.get("Content-Encoding", "identity").lower() != "identity":
++                raise ManagerError("encoded response cannot establish file byte identity")
+             status = getattr(response, "status", 200)
+             expected_header = response.headers.get("Content-Length")
+             if expected_header is not None and not expected_header.isdigit():
+@@ -514,11 +571,15 @@
+             last_report = total
+             if progress is not None:
+                 progress(total, expected)
++            download_progress(remote_path, total, expected, attempt, "downloading", progress is not None)
+             with output_path.open(mode) as handle:
+                 while True:
+                     if cancellation_requested(cancel_file):
+                         raise InstallCancelled("download cancelled by user")
+-                    chunk = response.read(1024 * 1024)
++                    try:
++                        chunk = response.read(1024 * 1024)
++                    except (OSError, IncompleteRead) as error:
++                        raise RetryableDownload() from error
+                     if not chunk:
+                         break
+                     if expected is not None and total + len(chunk) > expected:
+@@ -527,17 +588,21 @@
+                     total += len(chunk)
+                     if progress is not None and total - last_report >= 8 * 1024 * 1024:
+                         progress(total, expected)
++                        download_progress(remote_path, total, expected, attempt, "downloading", True)
+                         last_report = total
+             if cancellation_requested(cancel_file):
+                 raise InstallCancelled("download cancelled by user")
+             if expected is not None and total != expected:
+-                raise ManagerError(f"downloaded size mismatch for {output_path}: {total} != {expected}")
++                raise RetryableDownload()
++            download_progress(remote_path, total, expected, attempt, "verifying", progress is not None)
+             if not verified_download(output_path, info):
+                 sidecar.unlink(missing_ok=True)
+                 raise ManagerError(f"downloaded content digest mismatch for {output_path}")
+             if progress is not None:
+                 progress(total, expected)
++            download_progress(remote_path, total, expected, attempt, "complete", progress is not None)
+     except HTTPError as error:
++        error.close()
+         if error.code == 416 and have:
+             match = re.fullmatch(r"bytes \*/([0-9]+)", error.headers.get("Content-Range", ""))
+             if match is not None and int(match.group(1)) == have and verified_download(output_path, info):

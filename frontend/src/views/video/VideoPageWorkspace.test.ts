@@ -436,3 +436,10 @@ it('versions retained export media and cast previews with their artifact identit
   expect(document.querySelector('[data-talking-voice] audio')?.getAttribute('src')).toContain('clip=' + project.speech_clip?.id)
   expect(document.querySelector('a[download]')?.getAttribute('href')).toContain('version=' + project.output_version)
 })
+
+it.each(['warning','inconclusive'] as const)('shows the published %s loudness assessment when encoded video metrics are absent', async result => {
+  project.file_url='/published.mp4'
+  project.export_provenance={export_id:'d'.repeat(32),subject:'video',created_at:'now',artifact_sha256:'a'.repeat(64),content_origin:'mixed',components:[{role:'audio',content_origin:'generated',source_id:'fixture',source_sha256:'b'.repeat(64)}],audio_target:{profile:'spoken_word'},audio_target_result:result,measured_audio:null}
+  await mount();button('5 Export').click();await flush()
+  expect(document.querySelector('[data-audio-quality]')?.textContent).toContain(i18n.global.t(`exportQuality.targetResult.${result}`))
+})

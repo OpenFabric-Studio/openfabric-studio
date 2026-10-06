@@ -22,6 +22,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from . import db
+from . import audio_quality, export_provenance
 from .atomic_files import write_object
 from .audio_encoding import (
     AudioEncodingSettings,
@@ -105,6 +106,7 @@ class ProbeStream(BaseModel):
 
 class ProbeFormat(BaseModel):
     duration: str = "0"
+    tags: dict[str,str] = Field(default_factory=dict)
 
 
 class AudioProbe(BaseModel):
@@ -174,6 +176,11 @@ def save_document(document: ExportDocument) -> None:
         raise AudioExportError("export_write_failed") from exc
 
 
+def _manifest_url(document: ExportDocument,kind: Literal['provenance','manifest']) -> str:
+    source=f'stems/{document.stem_name}' if document.stem_name is not None else f'versions/{document.version_id}'
+    return f'/api/tracks/{document.track_id}/{source}/exports/{document.id}/{kind}'
+
+
 def _response(document: ExportDocument) -> AudioExportResponse:
     # Explicit projection keeps paths/worker proof out of the public contract.
     available = document.status != "done" or _output_current(document)
@@ -189,6 +196,16 @@ def _response(document: ExportDocument) -> AudioExportResponse:
         filename=document.filename if ready else None,
         audio_url=document.audio_url if ready else None,
         settings=document.settings,
+        operation=document.operation,
+        source_origin=document.source_origin,
+        input_metrics=document.input_metrics,
+        output_metrics=document.output_metrics,
+        target_result=document.target_result,
+        normalization_mode=document.normalization_mode,
+        warnings=document.warnings,
+        provenance=document.provenance,
+        provenance_url=_manifest_url(document,'provenance') if ready and document.provenance is not None else None,
+        manifest_url=_manifest_url(document,'manifest') if ready and document.provenance is not None else None,
     )
 
 
@@ -236,12 +253,29 @@ def export_file(track_id: int, version_id: str, identifier: str) -> Path:
     document = load_document(track_id, identifier)
     if document.stem_name is not None or document.version_id != _identifier(version_id):
         raise AudioExportError("export_not_found")
-    if document.status != "done":
+    if document.status != "done" or document.operation != 'export':
         raise AudioExportError("export_not_ready")
     path = _artifact(document)
     if not _output_current(document):
         raise AudioExportError("export_not_found")
     return path
+
+
+def manifest_file(track_id: int,version_id: str,identifier: str,format: Literal['json','txt']) -> Path:
+    media=export_file(track_id,version_id,identifier)
+    document=load_document(track_id,identifier)
+    return _published_manifest(document,media,format)
+
+
+def _published_manifest(document: ExportDocument,media: Path,format: Literal['json','txt']) -> Path:
+    if document.provenance is None:raise AudioExportError('manifest_unavailable')
+    try:
+        if export_provenance.digest(media)!=document.provenance.artifact_sha256:
+            raise AudioExportError('manifest_media_changed')
+        export_provenance.write(media,document.provenance)
+    except (OSError,export_provenance.ProvenanceError) as exc:
+        raise AudioExportError('manifest_unavailable') from exc
+    return export_provenance.path_for(media,format)
 
 
 def _output_identity(path: Path) -> OutputIdentity:
@@ -256,6 +290,8 @@ def _output_identity(path: Path) -> OutputIdentity:
 
 
 def _output_current(document: ExportDocument) -> bool:
+    if document.operation == 'analyze':
+        return document.input_metrics is not None
     try:
         path = _artifact(document)
         return (
@@ -349,7 +385,7 @@ async def _probe(document: ExportDocument, path: Path) -> tuple[AudioProbe, floa
             "error",
             *_INPUT,
             "-show_entries",
-            "stream=codec_type,codec_name,sample_rate,channels,bits_per_sample,bits_per_raw_sample,bit_rate:format=duration",
+            "stream=codec_type,codec_name,sample_rate,channels,bits_per_sample,bits_per_raw_sample,bit_rate:format=duration:format_tags",
             "-of",
             "json",
             str(path),
@@ -440,12 +476,21 @@ async def _validate(
 def _publish(document: ExportDocument) -> None:
     document.status = "done"
     document.error_code = ""
+    if document.operation == 'analyze':
+        document.filename = None
+        document.audio_url = None
+        save_document(document)
+        return
     document.filename = f"{document.version_id}.{document.format}"
     document.audio_url = f"/api/tracks/{document.track_id}/versions/{document.version_id}/exports/{document.id}/audio"
     if document.stem_name is not None:
         document.filename = f"{document.stem_name}.{document.format}"
         document.audio_url = f"/api/tracks/{document.track_id}/stems/{document.stem_name}/exports/{document.id}/audio"
     document.output_identity = _output_identity(_artifact(document))
+    if document.provenance is not None:
+        export_provenance.write(_artifact(document),document.provenance)
+        document.provenance_url=_manifest_url(document,'provenance')
+        document.manifest_url=_manifest_url(document,'manifest')
     save_document(document)
     if document.expected_primary is not None:
         connection = db.get_db()
@@ -464,15 +509,41 @@ async def _run(document: ExportDocument) -> None:
             source = _source(document)
             if await asyncio.to_thread(_digest, source) != document.source_sha256:
                 raise AudioExportError("source_changed")
-            _, duration = await _probe(document, source)
+            source_probe, duration = await _probe(document, source)
+            from .audio_version_store import get as get_version
+            version = get_version(db.get_db(),document.version_id)
+            component = export_provenance.track_component(document.track_id,document.version_id,document.source_sha256,
+                is_voice=version is not None and version.public.kind=='voice')
+            if document.source_origin is not None and component.content_origin=='unknown':
+                component.content_origin=document.source_origin
+                component.classification_basis='user_declared'
+            prior_comment=next((value for key,value in source_probe.format.tags.items() if key.casefold()=='comment'),'')
+            async def quality_command(argv: list[str], timeout: float) -> bytes:
+                return await _command(document, argv, timeout)
+            measurement: audio_quality.Measurement | None = None
+            try:
+                measurement = await audio_quality.measure(source, _directory(document.track_id,document.id), quality_command)
+                document.input_metrics = measurement.metrics
+            except (audio_quality.AudioQualityError, AudioExportError, VideoMediaError) as exc:
+                if isinstance(exc,AudioExportError) and exc.code != 'encode_failed':raise
+                if document.operation == 'analyze':
+                    raise AudioExportError('audio_measurement_failed') from exc
+                document.warnings.append('audio_measurement_failed')
+            if document.operation == 'analyze':
+                if await asyncio.to_thread(_digest,source) != document.source_sha256:
+                    raise AudioExportError('source_changed')
+                document.target_result = audio_quality.target_result(document.settings.loudness,document.input_metrics)
+                _publish(document)
+                return
+            processing = audio_quality.normalization_filter(document.settings.loudness,measurement) if measurement is not None else None
             partial = _artifact(document, partial=True)
             partial.unlink(missing_ok=True)
-            await _command(
+            encoded_report = await _command(
                 document,
                 [
                     tool("ffmpeg"),
                     "-v",
-                    "error",
+                    "info" if processing is not None else "error",
                     "-nostats",
                     "-nostdin",
                     "-y",
@@ -483,7 +554,9 @@ async def _run(document: ExportDocument) -> None:
                     "0:a:0",
                     "-vn",
                     "-map_metadata",
-                    "-1",
+                    "0",
+                    *export_provenance.metadata_args(document.id,component.content_origin,prior_comment),
+                    *(['-af',processing] if processing is not None else []),
                     *encoding_args(document.format, document.settings),
                     "-fs",
                     str(_MAX_BYTES),
@@ -492,11 +565,27 @@ async def _run(document: ExportDocument) -> None:
                 3600,
             )
             await _validate(document, partial, duration)
+            if processing is not None:
+                normalized = audio_quality.report(encoded_report).normalization_type
+                if normalized == 'linear':document.normalization_mode = 'linear'
+                elif normalized == 'dynamic':document.normalization_mode = 'dynamic'
+                else:document.normalization_mode = 'unknown'
+            try:
+                document.output_metrics = (await audio_quality.measure(partial,_directory(document.track_id,document.id),quality_command,name='output')).metrics
+            except (audio_quality.AudioQualityError, AudioExportError, VideoMediaError) as exc:
+                if isinstance(exc,AudioExportError) and exc.code != 'encode_failed':raise
+                document.warnings.append('audio_measurement_failed')
+            document.target_result = audio_quality.target_result(document.settings.loudness,document.output_metrics)
+            if document.target_result in {'warning','inconclusive'}:
+                document.warnings.append('loudness_target_'+document.target_result)
             if await asyncio.to_thread(_digest, source) != document.source_sha256:
                 raise AudioExportError("source_changed")
             with partial.open("rb") as handle:
                 os.fsync(handle.fileno())
             document.output_sha256 = await asyncio.to_thread(_digest, partial)
+            document.provenance = export_provenance.manifest(document.id,'stem' if document.stem_name else 'track_audio',partial,[component],
+                transformations=[f'encode:{document.format}',f'loudness:{document.settings.loudness.profile}:{document.normalization_mode}'],
+                measured_audio=document.output_metrics,audio_target=document.settings.loudness,audio_target_result=document.target_result)
             # This proof survives a crash between the final rename and the
             # terminal metadata switch; completed identity changes can then
             # be distinguished from a byte-identical library migration.
@@ -524,6 +613,8 @@ async def _run(document: ExportDocument) -> None:
     finally:
         if document.id not in _processes:
             _artifact(document, partial=True).unlink(missing_ok=True)
+            for temporary in _directory(document.track_id,document.id).glob('*.analysis.f32'):
+                temporary.unlink(missing_ok=True)
             if _tasks.get(document.id) is asyncio.current_task():
                 _tasks.pop(document.id)
                 _running.pop(document.id, None)
@@ -537,6 +628,8 @@ async def create_export(
     *,
     update_default: bool = False,
     _stem: StemName | None = None,
+    operation: Literal['export','analyze'] = 'export',
+    source_origin: Literal['recorded','unknown'] | None = None,
 ) -> AudioExportResponse:
     version_id = _identifier(version_id)
     profile = AudioEncodingSettings.model_validate_json(
@@ -562,6 +655,12 @@ async def create_export(
         except (OSError, ValueError) as exc:
             raise AudioExportError("source_unavailable") from exc
         digest = await asyncio.to_thread(_digest, source)
+        if source_origin is not None:
+            from .audio_version_store import get as get_version
+            version=get_version(db.get_db(),version_id)
+            content=export_provenance.track_component(track_id,version_id,digest,is_voice=version is not None and version.public.kind=='voice')
+            if content.content_origin not in {'unknown',source_origin}:
+                raise AudioExportError('source_origin_conflict')
         expected_primary = str(row["audio_path"]) if update_default else None
         matching = [
             _running.get(stored.id, stored)
@@ -571,6 +670,8 @@ async def create_export(
             and stored.format == format
             and stored.settings == profile
             and stored.source_sha256 == digest
+            and stored.operation == operation
+            and stored.source_origin == source_origin
         ]
         if update_default:
             # Find the prior guard before reusing a newer manual export; record
@@ -610,6 +711,8 @@ async def create_export(
             source_sha256=digest,
             expected_primary=expected_primary,
             stem_name=_stem,
+            operation=operation,
+            source_origin=source_origin,
         )
         directory = _directory(track_id, document.id)
         try:
@@ -682,7 +785,7 @@ async def retry_export(
     ):
         raise AudioExportError("worker_identity_unverified")
     response = await create_export(
-        track_id, version_id, document.format, document.settings
+        track_id, version_id, document.format, document.settings, operation=document.operation,source_origin=document.source_origin
     )
     if document.expected_primary is not None:
         async with _lock:
@@ -778,6 +881,11 @@ def stem_export_file(track_id: int, name: str, identifier: str) -> Path:
     if document.status != 'done' or not _output_current(document):
         raise AudioExportError('export_not_ready')
     return _artifact(document)
+
+
+def stem_manifest_file(track_id: int,name: str,identifier: str,format: Literal['json','txt']) -> Path:
+    media=stem_export_file(track_id,name,identifier)
+    return _published_manifest(_stem_document(track_id,name,identifier),media,format)
 
 
 async def cancel_stem_export(track_id: int, name: str, identifier: str) -> StemAudioExportResponse:
@@ -890,6 +998,16 @@ async def recover_exports() -> None:
                     save_document(document)
                     continue
                 document = load_document(document.track_id, document.id)
+            if document.operation == 'analyze':
+                if document.status not in {'queued','running','done'}:continue
+                try:
+                    valid_analysis=document.input_metrics is not None and await asyncio.to_thread(_digest,_source(document)) == document.source_sha256
+                except (AudioExportError,OSError):valid_analysis=False
+                if valid_analysis:
+                    _publish(document)
+                elif document.status in {'queued','running'}:
+                    document.status='failed';document.error_code='export_interrupted';save_document(document)
+                continue
             if document.status == "done" and _output_current(document):
                 if (
                     document.expected_primary is not None

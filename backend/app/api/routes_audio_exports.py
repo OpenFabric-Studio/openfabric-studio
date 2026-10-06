@@ -49,7 +49,7 @@ async def create_export(
 ) -> AudioExportResponse:
     try:
         return await audio_exports.create_export(
-            track_id, version_id, body.format, body.settings
+            track_id, version_id, body.format, body.settings, operation=body.operation,source_origin=body.source_origin
         )
     except (audio_exports.AudioExportError, AudioEncodingError) as exc:
         _raise(exc)
@@ -109,3 +109,15 @@ async def export_audio(
 async def export_download(track_id: TrackId, version_id: VersionId, export_id: VersionId,
                           options: Annotated[TaggedDownloadOptions, Depends(download_options)], request: Request) -> TaggedFileResponse:
     return await tagged_download_response(track_id, version_id, export_id, options, request)
+
+
+@router.get('/{track_id}/versions/{version_id}/exports/{export_id}/provenance')
+def export_provenance(track_id: TrackId,version_id: VersionId,export_id: VersionId) -> FileResponse:
+    try:return FileResponse(audio_exports.manifest_file(track_id,version_id,export_id,'json'),media_type='application/json')
+    except audio_exports.AudioExportError as exc:_raise(exc)
+
+
+@router.get('/{track_id}/versions/{version_id}/exports/{export_id}/manifest')
+def export_manifest(track_id: TrackId,version_id: VersionId,export_id: VersionId) -> FileResponse:
+    try:return FileResponse(audio_exports.manifest_file(track_id,version_id,export_id,'txt'),media_type='text/plain',filename=f'{export_id}-provenance.txt')
+    except audio_exports.AudioExportError as exc:_raise(exc)

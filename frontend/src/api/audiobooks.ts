@@ -88,7 +88,7 @@ export function audiobookExportUrl(bookId: string): string {
   return `/api/audiobooks/${encodeURIComponent(bookId)}/export`
 }
 
-export function audiobookExportFormatUrl(bookId: string, format: 'mp3' | 'm4b'): string {
+export function audiobookExportFormatUrl(bookId: string, format: 'wav' | 'mp3' | 'm4b'): string {
   return `/api/audiobooks/${encodeURIComponent(bookId)}/exports/${format}`
 }
 

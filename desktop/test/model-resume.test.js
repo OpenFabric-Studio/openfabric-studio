@@ -15,6 +15,8 @@ test('pinned YuE model manager resumes verified content and serializes recovery 
   const patch = path.join(__dirname, '..', '..', 'external', 'patches', 'yue-model-resume.patch');
   // Exercise the same Git patch mechanism as the active backend installer.
   execFileSync('git', ['apply', '--whitespace=nowarn', patch], { cwd: root, stdio: 'pipe' });
+  const reliability = path.join(__dirname, '..', '..', 'external', 'patches', 'yue-model-download-reliability.patch');
+  execFileSync('git', ['apply', '--whitespace=nowarn', reliability], { cwd: root, stdio: 'pipe' });
   try {
     const result = await promisify(execFile)(process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3'), [path.join(__dirname, 'fixtures', 'test_model_resume.py'), root], { timeout: 30000,
       env: { ...process.env, HOME: root, USERPROFILE: root, HF_HOME: path.join(root, 'hf-cache'), HF_TOKEN: '', HUGGING_FACE_HUB_TOKEN: '', AUDIOCPP_MS_TOKEN: '' },
