@@ -1,0 +1,39 @@
+{
+  "engine_commit": "bfa5755371a973651ea218ac3b56dcd34aa92c45",
+  "engine_version": "0.16.0+193",
+  "system": "Darwin",
+  "machine": "Mac16,5",
+  "physical_memory_bytes": 137438953472,
+  "readiness": {
+    "profile_id": "ltx23",
+    "ready": true,
+    "engine_ready": true,
+    "model_fingerprint": "60ea324176b354fb9765e812c27beaf6d13e5f7486df9f20fac186a3480f1f28",
+    "model_revision": "6671a7572a530862d1d60ce393b5d93491e3f76b",
+    "text_revision": "86cc6a8dedbc456dd0e4af01a9d09f396f77e558",
+    "expected_bytes": 58419728001,
+    "uncached_bytes": 0,
+    "free_bytes": 614408224768,
+    "missing_files": [],
+    "warnings": [
+      "visual_quality_unverified",
+      "model_fingerprint_uses_file_metadata",
+      "experimental_candidate"
+    ]
+  },
+  "inference_executed": true,
+  "inference_skip_reason": "",
+  "elapsed_sec": 163.29634454194456,
+  "peak_child_rss_bytes": 14571929600,
+  "peak_mlx_memory_bytes": 12556709478,
+  "output": "Retained outside Git: baseline.mp4 (candidate-lowram)",
+  "output_validated": true,
+  "error_code": "",
+  "source_sha256": "ab4006d332cffb58c3a6fdf580df2ace7d31638509a902ff3ca483e0d4f8af8c",
+  "memory_mode": "low_ram",
+  "lora_mode": "fused",
+  "reference_sha256": null,
+  "adapter_sha256": null,
+  "output_sha256": "721d58c4554737e1515d78d7ba362b59d2d8c4dda1abb863bf918363e2addb57",
+  "mlx_memory_scope": "allocator_peak_since_last_vendor_reset; not whole-process RSS"
+}

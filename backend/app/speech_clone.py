@@ -14,6 +14,8 @@ import struct
 import threading
 import uuid
 import wave
+import hashlib
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -239,6 +241,8 @@ class SynthesisOutcome:
     detail: str
     output_path: Path | None = None
     install_hints: list[str] = field(default_factory=list)
+    source_record_sha256: str | None = None
+    reference_sha256: str | None = None
 
 
 def _synthesize_unlocked(
@@ -312,6 +316,13 @@ def _synthesize_unlocked(
     prompt_language_value = snapshot.prompt_language if snapshot is not None else reference_language
     text_language_value = snapshot.text_language if snapshot is not None else target_language
     refer = snapshot.reference_audio_path if snapshot is not None else str(Path(profile.reference_audio_path).resolve())
+    try:reference_identity=file_digest(Path(refer))
+    except OSError:reference_identity=None
+    source_record={'profile_id':profile_id,'reference_sha256':reference_identity,'prompt_language':prompt_language_value,
+        'text_language':text_language_value,'text_sha256':hashlib.sha256(cleaned.encode()).hexdigest(),
+        'prompt_sha256':hashlib.sha256(resolved_prompt.encode()).hexdigest(),
+        'snapshot_identity':snapshot.identity if snapshot is not None else None,
+        'sampling_settings':'captured_explicit_settings' if snapshot is not None else 'external_api_defaults'}
     try:
         produced = _synthesize_via_api(
             refer_wav_path=refer,
@@ -330,6 +341,8 @@ def _synthesize_unlocked(
             status="completed",
             detail=f"Synthesized via GPT-SoVITS api.py at {api_base_url()}.",
             output_path=produced,
+            source_record_sha256=hashlib.sha256(json.dumps(source_record,sort_keys=True,separators=(',',':')).encode()).hexdigest(),
+            reference_sha256=reference_identity,
         )
     except Exception:  # noqa: BLE001 — keep technical details on the backend
         _LOG.exception("Speech synthesis failed")
@@ -415,6 +428,26 @@ def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
     )
     from .cloud_speech import read_provenance
     provenance = read_provenance(out) if outcome.output_path else None
+    if outcome.output_path is not None:
+        from . import export_provenance
+        from .export_provenance_contracts import ProvenanceComponent
+        try:
+            component=ProvenanceComponent(role='audio',content_origin='unknown' if outcome.status=='mock_completed' else 'generated',
+                source_id=f'trial:{trial_id}:profile:{profile.id}',source_sha256=export_provenance.digest(out),
+                engine='mock-placeholder' if outcome.status=='mock_completed' else 'openrouter' if provenance else 'gpt-sovits',
+                engine_fingerprint=provenance.model_fingerprint if provenance else known_engine_identity(),
+                model_id=provenance.model if provenance else None,provider_receipt_id=provenance.receipt_id if provenance else None,
+                provider_job_id=provenance.generation_id if provenance else None,
+                source_records_sha256=snapshot.identity if snapshot is not None else outcome.source_record_sha256,
+                source_record_count=1 if snapshot is not None or outcome.source_record_sha256 is not None else 0)
+            components=[component]
+            if outcome.reference_sha256 is not None:
+                components.append(ProvenanceComponent(role='conditioning_reference',content_origin='unknown',classification_basis='unverified',
+                    source_id=f'reference:profile:{profile.id}',source_sha256=outcome.reference_sha256))
+            value=export_provenance.manifest(trial_id,'speech_trial',out,components,transformations=['speech_synthesis' if outcome.status=='completed' else 'mock_placeholder'])
+            export_provenance.write(out,value)
+        except (OSError,export_provenance.ProvenanceError):
+            _LOG.warning('Speech trial completed without a verified export manifest',exc_info=True)
     return SpeechCloneTrialResponse(
         status=outcome.status,
         detail=outcome.detail,

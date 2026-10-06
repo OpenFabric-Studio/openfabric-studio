@@ -20,6 +20,34 @@ class StemExportTests(unittest.IsolatedAsyncioTestCase):
         db.update_track_stems(self.track_id, {'vocals': str(path)})
         return path
 
+    async def test_advertised_stem_manifests_serve_exact_media_and_reject_wrong_owner(self) -> None:
+        import httpx
+        from fastapi import FastAPI
+        from app.api import routes_audio_exports,routes_stem_exports
+        from app import export_provenance
+        from app.export_provenance_contracts import ExportProvenance
+        self.make_source()
+        job=await exports.create_stem_export(self.track_id,'vocals','mp3')
+        await asyncio.wait_for(exports._tasks[job.id],15)
+        done=exports.get_stem_export(self.track_id,'vocals',job.id)
+        self.assertEqual(done.status,'done',done.error_code)
+        app=FastAPI();app.include_router(routes_audio_exports.router);app.include_router(routes_stem_exports.router)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://fixture') as client:
+            for url in (done.provenance_url,done.manifest_url):
+                if url is None:raise AssertionError('missing stem manifest URL')
+                response=await client.get(url)
+                self.assertEqual(response.status_code,200,response.text)
+                self.assertIn(f'/stems/vocals/exports/{job.id}/',url)
+                wrong=await client.get(url.replace('/stems/vocals/','/stems/drums/'))
+                self.assertEqual(wrong.status_code,404)
+            if done.provenance_url is None:raise AssertionError('missing stem JSON URL')
+            proof=ExportProvenance.model_validate_json((await client.get(done.provenance_url)).content)
+            self.assertEqual(proof.artifact_sha256,export_provenance.digest(exports.stem_export_file(self.track_id,'vocals',job.id)))
+            self.assertEqual(proof.subject,'stem')
+            media=exports.stem_export_file(self.track_id,'vocals',job.id)
+            media.write_bytes(b'tampered')
+            self.assertEqual((await client.get(done.provenance_url)).status_code,409)
+
     async def test_stem_mp3_uses_exact_stem_and_survives_restart(self) -> None:
         source = self.make_source()
         job = await exports.create_stem_export(self.track_id, 'vocals', 'mp3')

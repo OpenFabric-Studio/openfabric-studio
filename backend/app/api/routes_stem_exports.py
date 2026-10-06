@@ -69,3 +69,15 @@ async def export_audio(track_id: TrackId, stem_name: StemName, export_id: Export
         return FileResponse(path, filename=f'{stem_name}.{path.suffix.lstrip(".")}')
     except audio_exports.AudioExportError as exc:
         _raise(exc)
+
+
+@router.get('/{track_id}/stems/{stem_name}/exports/{export_id}/provenance')
+def export_provenance(track_id: TrackId,stem_name: StemName,export_id: ExportId) -> FileResponse:
+    try:return FileResponse(audio_exports.stem_manifest_file(track_id,stem_name,export_id,'json'),media_type='application/json')
+    except audio_exports.AudioExportError as exc:_raise(exc)
+
+
+@router.get('/{track_id}/stems/{stem_name}/exports/{export_id}/manifest')
+def export_manifest(track_id: TrackId,stem_name: StemName,export_id: ExportId) -> FileResponse:
+    try:return FileResponse(audio_exports.stem_manifest_file(track_id,stem_name,export_id,'txt'),media_type='text/plain',filename=f'{stem_name}-provenance.txt')
+    except audio_exports.AudioExportError as exc:_raise(exc)

@@ -96,6 +96,10 @@ def _cleanup_stages(state: _RepairState) -> None:
         if str(path) not in selected and not path.is_symlink():
             audiobook_narration._contained(path, root)
             path.unlink(missing_ok=True)
+            from .export_provenance import path_for
+            for suffix in ('json','txt'):
+                manifest=path_for(path,'json' if suffix=='json' else 'txt')
+                if not manifest.is_symlink():manifest.unlink(missing_ok=True)
             if path.suffix==".wav":
                 provenance = path.with_suffix(".cloud.json")
                 if not provenance.is_symlink():
@@ -210,6 +214,35 @@ def passage_audio_path(book_id: str, passage_id: str, revision: int | None = Non
         if not path.is_file():
             raise audiobooks.AudiobookError("passage_not_ready", 404)
         return path
+
+
+def passage_render_snapshot(book_id: str, chapter_index: int, passage_id: str, revision: int) -> SpeechRenderSnapshot:
+    """Read the accepted acoustic inputs; never synthesize missing legacy inputs."""
+    with audiobooks.publication_lock(book_id), audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+        passage_audio_path(book_id, passage_id, revision)
+        row = connection.execute("""SELECT s.snapshot_json FROM audiobook_sections s
+            JOIN audiobook_jobs j ON j.id=s.job_id WHERE j.book_id=? AND j.chapter_index=? AND s.passage_id=?
+            AND s.status='done' AND j.revision=?""", (book_id, chapter_index, passage_id, revision)).fetchone()
+        if row is None or not row[0]:
+            raise audiobooks.AudiobookError("passage_snapshot_unavailable", 409)
+        snapshot = SpeechRenderSnapshot.model_validate_json(str(row[0]))
+        if not _preview_allowed(snapshot.profile_id, snapshot):
+            raise audiobooks.AudiobookError("consent_required", 403)
+        return snapshot
+
+
+def audition_clip_snapshot(identifier: str, index: int) -> SpeechRenderSnapshot:
+    """An explicitly selected completed clip retains its original voice inputs."""
+    with audiobooks._LOCK:
+        state = _AuditionState.model_validate_json(_load(identifier, "audition"))
+        clip = next((item for item in state.public.clips if item.index == index and item.status == "done"), None)
+        if state.public.status != "done" or clip is None or not 0 <= index < len(state.snapshots):
+            raise audiobooks.AudiobookError("audition_clip_unavailable", 409)
+        snapshot = state.snapshots[index]
+        if not _preview_allowed(snapshot.profile_id, snapshot):
+            raise audiobooks.AudiobookError("consent_required", 403)
+        audition_audio_path(identifier, index)
+        return snapshot
 
 
 def _excerpt(text: str, limit: int) -> str:
@@ -517,11 +550,14 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
             jobs = audiobooks.list_jobs(book_id=book_id)
             chapter_paths = [chapter_target if job.chapter_index == public.chapter_index else audiobooks.chapter_audio_path(book_id, job.chapter_index) for job in jobs]
             audiobook_narration.concat_wavs(book_id, chapter_paths, export_target, controlled=False)
-            from .audiobook_publish import publish_formats
+            from .audiobook_publish import publish_formats,BookProvenanceReplacement
+            from .cloud_speech import read_provenance
+            prospective_identity=hashlib.sha256(f'{state.snapshot.identity}\n{public.text}\n{file_digest(accepted_pcm)}\n{identifier}'.encode()).hexdigest()
             book = audiobooks.get_book(book_id)
             mp3, m4b, note = publish_formats(book_id, title=book.title, author=book.author,
                 chapters=[(job.chapter_title, path) for job, path in zip(jobs, chapter_paths, strict=True)], cover=audiobooks.cover_path_for(book_id),
-                canonical_wav=export_target, destination_stem=f"export-{token}")
+                canonical_wav=export_target, destination_stem=f"export-{token}",
+                provenance_replacement=BookProvenanceReplacement(public.chapter_index,public.passage_id,chapter_target,state.snapshot,prospective_identity,read_provenance(accepted_pcm)))
             if ":export_failed" in note or (book.mp3_ready and mp3 is None) or (book.m4b_ready and m4b is None):
                 raise audiobooks.AudiobookError("export_failed", 503)
             cursor = 0
@@ -561,6 +597,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
                 connection.execute("UPDATE audiobook_workflows SET payload=? WHERE id=?", (state.model_dump_json(), identifier))
                 connection.commit()
                 committed = True
+            from .audiobook_publish import safe_finalize_book_provenance
+            safe_finalize_book_provenance(book_id)
         except (OSError, EOFError, wave.Error, sqlite3.Error):
             _LOG.exception("Repair acceptance publication failed")
             raise audiobooks.AudiobookError("audiobook_storage_unavailable", 503) from None

@@ -1,0 +1,18 @@
+export const exportQuality = {
+  target: 'Loudness target',
+  houseHint: 'Choose a house target to adjust export level. Originals stay unchanged. Preview and download use the same processed file.',
+  profiles: { off: 'Off — preserve level', music: 'Music · −14 LUFS / −1 dBTP', spoken_word: 'Spoken word · −16 LUFS / −2 dBTP', ebu: 'EBU reference · −23 LUFS / −1 dBTP', custom: 'Custom target' },
+  integrated: 'Integrated loudness (LUFS)', truePeak: 'Maximum true peak (dBTP)',
+  analyze: 'Analyze source', diagnostics: 'Measured audio', unavailable: 'Not measurable',
+  metrics: '{loudness} LUFS · {truePeak} dBTP · {samplePeak} dBFS sample peak',
+  fullScale: 'Full-scale samples: {fraction}%. Listen for distortion.',
+  targetResult: { off: 'Level preserved', met: 'Measured target met', warning: 'Measured target differs — review before delivery', inconclusive: 'Target could not be verified' },
+  sourceOrigin: 'Source description', originOptions: { auto: 'Use known source facts', recorded: 'Recorded — my declaration', unknown: 'Origin unknown' },
+  originHint: 'A declaration cannot override a known generated source. Imported audio is unknown until described.',
+  json: 'Provenance JSON', manifest: 'Readable provenance', origin: 'Content origin: {origin}',
+  visibleLabel: 'Add a visible AI disclosure when the export contains known generated content',
+  videoHint: 'The disclosure uses the bundled font. Provider marks remain in the source pictures.',
+  assessment: 'Audio assessment', measurementUnavailable: 'Measurements are unavailable for this selected file.',
+  editorPreview: 'Processed export preview',
+  errors: { export_failed: 'The processed export could not be completed. The saved original remains in your library.', audio_measurement_failed: 'Audio measurements could not be completed.', source_origin_conflict: 'This source has known generated content; that description cannot override it.', manifest_unavailable: 'This export has no verified provenance manifest.', manifest_media_changed: 'The media changed after publication.', loudness_target_warning: 'The encoded file differs from the chosen loudness target.', loudness_target_inconclusive: 'The encoded target could not be measured.' },
+}

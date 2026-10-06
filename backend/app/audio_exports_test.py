@@ -55,7 +55,9 @@ class AudioExportTests(unittest.IsolatedAsyncioTestCase):
             db._db.close()
 
     async def done(self, identifier: str) -> exports.AudioExportResponse:
-        for _ in range(400):
+        # Exports now include source and encoded-output measurements, not just
+        # encoding. Keep a bounded deadline that tolerates concurrent CPU CI.
+        for _ in range(1200):
             response = exports.get_export(self.track_id, self.version_id, identifier)
             if response.status not in {"queued", "running"}:
                 return response

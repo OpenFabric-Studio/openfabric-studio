@@ -1,0 +1,15 @@
+export const speakerReviewEn={
+  title:'Local speaker screening',intro:'Compare this accepted passage with another take you have listened to. This is a local screening hint, not proof of identity or a voice quality verdict.',
+  reference:'Reviewed reference take',choose:'Choose a listened reference',empty:'No other compatible accepted passage or saved cast audition is available for this voice. Create and listen to a cast audition before selecting it.',
+  approval:'I have listened to this reference and approve it as the intended voice for this speaker.',
+  threshold:'Your calibrated cosine threshold (−1 to 1)',thresholdHint:'Choose a threshold based on recordings you have reviewed. There is no universal threshold. A score below your value suggests listening again.',
+  run:'Compare speaker locally',cancel:'Cancel screening',pending:'Comparing local recordings…',unavailable:'The optional local encoder is unavailable. Install its separate CPU environment and explicitly configure reviewed weights in Settings.',
+  failed:'Could not compare these recordings. Reload the passage or check the local encoder setup.',score:'Cosine similarity: {score} · your threshold: {threshold}',
+  below:'Below your chosen threshold. Listen to both takes before deciding on a fresh take.',above:'At or above your chosen threshold. This does not prove the voices match.',
+  resultReference:'Compared with the approved take: {reference}',
+  listen:'Reference audio',noNetwork:'No provider request, speech generation or automatic acceptance occurs.',
+  speaker_renderer_unverified:'The renderer checkpoint is unverified. This compares accepted audio bytes; an unreported external model switch cannot be detected. Reselect and review the reference after a switch.',
+  partial_analysis:'Only the first 30 seconds of each recording are analyzed. Later voice changes may be missed.',
+  activity_not_speech_detection:'Duration and amplitude checks screen short or silent audio. They do not verify speech, exclude noise or measure voice quality.',
+  states:{unavailable:'Encoder unavailable',skipped:'Not enough usable audio or inputs changed; no score published.',failed:'Screening failed',canceled:'Screening canceled',stale:'Inputs changed. Select and approve a current reference before another review.',completed:'Screening completed',queued:'Queued',running:'Running'},
+}

@@ -96,6 +96,21 @@ it('opens on saved chapters and reveals creation on demand beside a searchable l
   expect(container.querySelector('form')).not.toBeNull()
 })
 
+it('offers retained WAV provenance beside completed book downloads only', async () => {
+  const pending = book('b'.repeat(32), 'Pending book', 'queued')
+  vi.mocked(api.listAudiobooks).mockResolvedValue([book(), pending])
+  const node = await mount()
+  const manifest = node.querySelector<HTMLAnchorElement>('[data-book-manifest]')
+  const provenance = node.querySelector<HTMLAnchorElement>('[data-book-provenance]')
+  expect(manifest?.getAttribute('href')).toBe(`/api/audiobooks/${book().id}/exports/wav/manifest`)
+  expect(provenance?.getAttribute('href')).toBe(`/api/audiobooks/${book().id}/exports/wav/provenance`)
+  expect(manifest?.textContent).toBe(en.exportQuality.manifest)
+  expect(provenance?.textContent).toBe(en.exportQuality.json)
+  await selectBook(node, pending.id)
+  expect(node.querySelector('[data-book-manifest]')).toBeNull()
+  expect(node.querySelector('[data-book-provenance]')).toBeNull()
+})
+
 it('retains narrator and chapter drafts after hiding the mode or returning to saved books', async () => {
   const otherProfile = { ...profile, id: 'd'.repeat(32), name: 'Other narrator' }
   vi.mocked(profilesApi.listSpeechVoiceProfiles).mockResolvedValue([profile, otherProfile])

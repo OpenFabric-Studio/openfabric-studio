@@ -80,6 +80,8 @@ Optional installation preserves existing external or modified engine trees. Engi
 
 The backend’s reviewed native model setup applies [yue-model-resume.patch](../external/patches/yue-model-resume.patch) with Git before downloading weights. It saves remote content identity, validates SHA256 or Git blob SHA1, serializes writers, and keeps failed/cancelled staging directories compatible with `clean-partial`. Unknown digests are rejected rather than accepting file length as verification. Disk/writability checks run inside the installer. Changing the document version query after upgrades retains the backend origin and browser storage.
 
+Settings setup also layers [yue-model-download-reliability.patch](../external/patches/yue-model-download-reliability.patch) onto that reviewed resume patch. It adds bounded transient retries, stall detection and byte/attempt progress while retaining the original content identity. Both patches ship as resources. [Module license cards and quality review](../docs/quality-and-provenance.md) distinguish integration code from weight/source terms and document the optional dedicated CPU speaker-screening environment.
+
 Startup accepts the backend only after a bounded readiness response matches its process ID and a fresh per-launch identity. Setup controls are restricted to the shipped setup document’s top frame. Packaging excludes private environment variants and refuses resource symlinks.
 
 ## Verification switches

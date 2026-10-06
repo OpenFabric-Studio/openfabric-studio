@@ -363,6 +363,8 @@ onBeforeUnmount(() => {
             <p class="text-sm text-text-dim">{{ t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.trialMock' : 'speechWorkspace.trialCompleted') }}</p>
             <SpeechAudioPreview :src="trialAudioUrl" :label="t(trialResult?.status === 'mock_completed' ? 'speechWorkspace.mockTrialAudio' : 'speechWorkspace.trialAudio')" :active="active && !createOpen" />
             <a :href="trialAudioUrl" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('speechWorkspace.downloadTrial') }}</a>
+            <a data-trial-manifest :href="trialAudioUrl.replace(/\/audio$/, '/manifest')" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('exportQuality.manifest') }}</a>
+            <a data-trial-provenance :href="trialAudioUrl.replace(/\/audio$/, '/provenance')" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('exportQuality.json') }}</a>
           </div>
           <p v-else-if="trialResult?.output_path && (trialResult.status === 'completed' || trialResult.status === 'mock_completed')" class="rounded-lg border border-border bg-panel-2 p-3 text-sm text-text-dim">{{ t('speechWorkspace.playbackUnavailable') }}</p>
         </template>

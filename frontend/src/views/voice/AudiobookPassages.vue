@@ -7,6 +7,7 @@ import { ApiError } from '../../api/http'
 import type { AudiobookPassagesResponse, AudiobookRepair, AudiobookPassage } from '../../api/contracts'
 import { createPollingLoop } from '../../composables/polling'
 import PassageAsrReview from './PassageAsrReview.vue'
+import SpeakerPassageReview from './SpeakerPassageReview.vue'
 import PauseAnalysisSettings from './PauseAnalysisSettings.vue'
 import CloudSpeechCost from './CloudSpeechCost.vue'
 import {quoteRepair} from '../../api/cloudSpeech'
@@ -181,6 +182,7 @@ onBeforeUnmount(() => { alive = false; generation++; for (const request of contr
             <div class="flex flex-wrap gap-3"><button v-if="repair.status === 'ready'" type="button" :disabled="accepting || busy" class="min-h-11 rounded-lg bg-accent1 px-3 text-sm text-white disabled:opacity-50" @click="accept">{{ accepting ? t('audiobookReview.accepting') : t('audiobookReview.accept') }}</button><button type="button" :disabled="accepting || busy" class="min-h-11 px-3 text-xs text-text-dim" @click="keep">{{ t('audiobookReview.discard') }}</button></div>
           </div>
           <PassageAsrReview v-if="selected.render_identity && data" :key="selected.id + data.revision" :book-id="bookId" :chapter-index="chapterIndex" :passage-id="selected.id" :revision="data.revision" :render-identity="selected.render_identity" :active="active" />
+          <SpeakerPassageReview v-if="selected.render_identity && data" :key="selected.id + data.revision+'speaker'" :book-id="bookId" :chapter-index="chapterIndex" :passage-id="selected.id" :revision="data.revision" :render-identity="selected.render_identity" :active="active" />
         </div>
       </div>
       <PauseAnalysisSettings />

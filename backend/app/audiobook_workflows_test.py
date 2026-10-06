@@ -532,6 +532,61 @@ class EncodedRepairTests(_WorkflowFixture):
             capture_output=True, text=True, timeout=10, check=True)
         return float(result.stdout.strip())
 
+    def test_manifest_checks_the_accepted_voice_after_cast_metadata_changes(self) -> None:
+        from app.api.routes_audiobooks import download_audiobook_provenance
+        from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+        from fastapi import HTTPException
+        reference=self.root/'second.wav';pcm(reference)
+        narrator=voice_profiles.create_profile(name='New narrator',consent_confirmed=True,audio_bytes=reference.read_bytes(),filename='reference.wav',reference_transcript='Reference.')
+        book=audiobooks.create_book(CreateAudiobookRequest(title='Cast',profile_id=narrator.id,
+            cast=[CastMember(name='Guest',profile_id=self.profile.id)],chapters=[AudiobookChapterInput(title='One',text='Guest: Accepted original voice.')])).book
+        audiobooks.set_cast(book.id,[CastMember(name='Guest',profile_id=narrator.id)])
+        voice_profiles.patch_profile(self.profile.id,PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+        with self.assertRaises(HTTPException) as denied:download_audiobook_provenance(book.id,'wav')
+        self.assertEqual(denied.exception.status_code,403)
+
+    def test_book_manifest_downloads_bind_selected_format_and_check_revoked_consent(self) -> None:
+        from app.api.routes_audiobooks import download_audiobook_provenance, download_audiobook_manifest
+        from app import export_provenance
+        from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
+        from fastapi import HTTPException
+        identifier=self.create()
+        for format in ('wav','mp3','m4b'):
+            media=audiobooks.export_format_path(identifier,format)
+            response=download_audiobook_provenance(identifier,format)
+            self.assertEqual(Path(response.path),export_provenance.path_for(media,'json'))
+            export_provenance.path_for(media,'txt').unlink()
+            download_audiobook_manifest(identifier,format)
+            self.assertTrue(export_provenance.path_for(media,'txt').is_file())
+        profile_id=audiobooks.get_book(identifier).profile_id
+        voice_profiles.patch_profile(profile_id,PatchSpeechVoiceProfileRequest(consent_confirmed=False))
+        with self.assertRaises(HTTPException) as denied:download_audiobook_provenance(identifier,'wav')
+        self.assertEqual(denied.exception.status_code,403)
+
+    def test_repair_rebinds_manifests_to_new_accepted_snapshot_without_modifying_previous_outputs(self) -> None:
+        from app import export_provenance
+        identifier=self.create()
+        version=audiobook_workflows.get_passages(identifier,0)
+        original=audiobooks.export_format_path(identifier,'wav')
+        sidecar=export_provenance.path_for(original,'json')
+        self.assertTrue(sidecar.is_file(),'published audiobook needs retained output provenance')
+        before=sidecar.read_bytes();previous=export_provenance.read(original)
+        def fresh(**kwargs: object) -> speech_clone.SynthesisOutcome:
+            target=kwargs['output_path']
+            if not isinstance(target,Path):raise AssertionError('missing repair target')
+            pcm(target,value=14000,frames=16000,rate=16000)
+            return speech_clone.SynthesisOutcome(status='completed',detail='',output_path=target)
+        with patch.object(speech_clone,'synthesize_to_path',side_effect=fresh):
+            repair=audiobook_workflows.start_repair(identifier,0,version.passages[0].id,CreateAudiobookRepairRequest(revision=version.revision))
+        audiobook_workflows.accept_repair(repair.id,AcceptAudiobookRepairRequest(revision=version.revision))
+        for format in ('wav','mp3','m4b'):
+            selected=audiobooks.export_format_path(identifier,format)
+            current=export_provenance.read(selected)
+            self.assertEqual(current.artifact_sha256,export_provenance.digest(selected))
+            self.assertNotEqual(current.components[0].source_records_sha256,previous.components[0].source_records_sha256)
+            self.assertEqual(current.components[0].source_record_count,1)
+        self.assertEqual(sidecar.read_bytes(),before)
+
     def test_all_encoded_formats_contain_the_repaired_canonical_audio(self) -> None:
         identifier = self.create()
         version = audiobook_workflows.get_passages(identifier, 0)
@@ -566,9 +621,10 @@ class EncodedRepairTests(_WorkflowFixture):
         publish = audiobook_publish.publish_formats
 
         def revoke(book_id: str, *, title: str, author: str, chapters: list[tuple[str, Path]], cover: Path | None,
-                   canonical_wav: Path | None = None, destination_stem: str = "export") -> tuple[Path | None, Path | None, str]:
+                   canonical_wav: Path | None = None, destination_stem: str = "export",
+                   provenance_replacement: audiobook_publish.BookProvenanceReplacement | None = None) -> tuple[Path | None, Path | None, str]:
             result = publish(book_id, title=title, author=author, chapters=chapters, cover=cover,
-                canonical_wav=canonical_wav, destination_stem=destination_stem)
+                canonical_wav=canonical_wav, destination_stem=destination_stem,provenance_replacement=provenance_replacement)
             voice_profiles.patch_profile(self.profile.id, PatchSpeechVoiceProfileRequest(consent_confirmed=False))
             return result
 

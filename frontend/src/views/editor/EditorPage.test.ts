@@ -11,6 +11,10 @@ import { decodeStem } from '../../audio/mixerEngine'
 import type { SavedTrack } from '../../api/contracts'
 import { detectBpm } from '../../audio/bpmDetector'
 import { TestAudioBuffer } from '../../audio/testWebAudio'
+import * as exportsApi from '../../api/audioExports'
+import * as versionsApi from '../../api/audioVersions'
+import * as settingsApi from '../../api/audioSettings'
+import { audioSettingsResponse } from '../settings/settingsTestFixtures'
 
 const audioClock = vi.hoisted(() => ({ currentTime: 0 }))
 const engine = vi.hoisted(() => ({
@@ -24,6 +28,9 @@ vi.mock('../../composables/audioPlayback', () => ({ getSharedAudioCtx: () => aud
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), uploadTrack: vi.fn(), saveTrack: vi.fn() }))
 vi.mock('../../audio/mixerEngine', async (original) => ({ ...await original<typeof import('../../audio/mixerEngine')>(), decodeStem: vi.fn() }))
 vi.mock('../../audio/bpmDetector', () => ({ detectBpm: vi.fn(async () => 120) }))
+vi.mock('../../api/audioExports', () => ({ createAudioExport: vi.fn(), getAudioExport: vi.fn() }))
+vi.mock('../../api/audioVersions', () => ({ listAudioVersions: vi.fn() }))
+vi.mock('../../api/audioSettings', () => ({ getAudioSettings: vi.fn() }))
 
 let app: App | undefined
 const frames = new Map<number, FrameRequestCallback>()
@@ -33,6 +40,10 @@ beforeEach(() => {
   engine.play.mockImplementation(async () => audioClock.currentTime + 0.05)
   vi.stubGlobal('AudioBuffer', TestAudioBuffer)
   vi.mocked(detectBpm).mockResolvedValue(120)
+  vi.mocked(settingsApi.getAudioSettings).mockResolvedValue(audioSettingsResponse())
+  vi.mocked(tracksApi.saveTrack).mockResolvedValue({ id: 42, short_id: 42, model: 'editor', created_at: 'now', title: 'Mix', lyrics: '', seed: null, duration_ms: 1000, wall_ms: null, params: {}, filename: 'mix.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null })
+  vi.mocked(versionsApi.listAudioVersions).mockResolvedValue({ track_id: 42, original_available: true, versions: [{ id: 'a'.repeat(32), track_id: 42, kind: 'original', status: 'done', created_at: 'now', audio_url: '/source.wav' }] })
+  vi.mocked(exportsApi.createAudioExport).mockResolvedValue({ id: 'b'.repeat(32), track_id: 42, version_id: 'a'.repeat(32), format: 'mp3', status: 'done', created_at: 'now', settings: audioSettingsResponse().settings, audio_url: '/processed.mp3' })
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -377,4 +388,37 @@ it('retains the captured export project and format after navigation without down
   await settlePlayback(); await settlePlayback()
   expect(tracksApi.saveTrack).toHaveBeenCalledWith(expect.objectContaining({ title: 'Project A', params: { project_export: true, project_id: 10 } }), expect.any(Blob), 'wav')
   expect(download).not.toHaveBeenCalled()
+})
+
+it('keeps a canonical WAV and delegates selected MP3 processing to the durable backend export', async () => {
+  engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { container } = await mountEditor()
+  const select = container.querySelector('select[aria-label="Export format"]')
+  if (!(select instanceof HTMLSelectElement)) throw new Error('Missing export format')
+  select.value = 'mp3'; select.dispatchEvent(new Event('change', { bubbles: true }))
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(button instanceof HTMLButtonElement)) throw new Error('Missing export action')
+  button.click(); for (let index = 0; index < 20; index++) await nextTick()
+  expect(tracksApi.saveTrack).toHaveBeenCalledWith(expect.any(Object), expect.any(Blob), 'wav')
+  expect(exportsApi.createAudioExport).toHaveBeenCalledWith(42, 'a'.repeat(32), 'mp3', undefined, { settings: audioSettingsResponse().settings })
+})
+
+it('does not download a completed durable export when its owned polling response arrives after navigation', async () => {
+  engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  const completed = { id: 'b'.repeat(32), track_id: 42, version_id: 'a'.repeat(32), format: 'mp3' as const, status: 'done' as const, created_at: 'now', settings: audioSettingsResponse().settings, audio_url: '/processed.mp3' }
+  vi.mocked(exportsApi.createAudioExport).mockResolvedValue({ ...completed, status: 'queued', audio_url: null })
+  const response = deferred<ReturnType<typeof exportsApi.getAudioExport> extends Promise<infer Result> ? Result : never>()
+  vi.mocked(exportsApi.getAudioExport).mockReturnValue(response.promise)
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { container, router } = await mountEditor()
+  const action = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(action instanceof HTMLButtonElement)) throw new Error('Missing export action')
+  action.click(); for (let index=0; index<20; index++) await settlePlayback()
+  expect(exportsApi.getAudioExport).toHaveBeenCalledOnce()
+  await router.push('/editor')
+  response.resolve(completed)
+  await settlePlayback(); await settlePlayback()
+  expect(download).not.toHaveBeenCalled()
+  expect(exportsApi.createAudioExport).toHaveBeenCalledOnce()
 })

@@ -109,7 +109,7 @@ class CloudJobsTests(unittest.IsolatedAsyncioTestCase):
         from app.video_contracts import VideoSpeechClip, VideoExportRequest, VideoExportSettings, ApproveVideoVariantRequest
         from app.video_media import probe_media
         provider_file=self.root/'remote.mp4'
-        subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=1280x720:r=30:d=4','-f','lavfi','-i','sine=frequency=900:duration=4','-c:v','libx264','-c:a','aac','-shortest',str(provider_file)],check=True,timeout=20)
+        subprocess.run(['ffmpeg','-v','error','-f','lavfi','-i','color=c=blue:s=1280x720:r=30:d=4','-f','lavfi','-i','sine=frequency=900:duration=4','-c:v','libx264','-c:a','aac','-metadata','comment=Provider mark=retained','-shortest',str(provider_file)],check=True,timeout=20)
         document=store.load(self.project.id);document.project.duration_sec=4
         speech=store.artifact(self.project.id,'speech/accepted.wav');speech.parent.mkdir(parents=True)
         original=array('h',(int(math.sin(2*math.pi*330*index/16000)*10000) for index in range(64000)))
@@ -147,10 +147,19 @@ class CloudJobsTests(unittest.IsolatedAsyncioTestCase):
         picture=await probe_media(render.variant_path(self.project.id,self.shot.id,variant.id))
         self.assertEqual((picture.width,picture.height),(1280,720));self.assertEqual(picture.audio_duration,0)
         approved=await render.approve(self.project.id,self.shot.id,ApproveVideoVariantRequest(revision=completed.revision,variant_id=variant.id))
-        await render.export(self.project.id,VideoExportRequest(revision=approved.revision,settings=VideoExportSettings(attach_speech=True)))
+        await render.export(self.project.id,VideoExportRequest(revision=approved.revision,settings=VideoExportSettings(attach_speech=True,visible_ai_label=True)))
         await asyncio.gather(*tuple(render._tasks.values()))
         finished=store.get(self.project.id);self.assertEqual(finished.job.status,'ready')
+        self.assertIsNotNone(getattr(finished,'export_provenance',None))
         output=render.output_file(self.project.id);info=await probe_media(output)
+        from pydantic import TypeAdapter
+        raw_tags=subprocess.check_output(['ffprobe','-v','error','-show_entries','format_tags','-of','json',str(output)])
+        tags=TypeAdapter(dict[str,dict[str,dict[str,str]]]).validate_json(raw_tags)['format']['tags']
+        self.assertIn('Provider mark=retained',tags.get('comment',''))
+        self.assertEqual(tags.get('OPENFABRIC_CONTENT_ORIGIN'),finished.export_provenance.content_origin)
+        self.assertTrue(finished.export_provenance.visible_ai_label)
+        pixels=subprocess.check_output(['ffmpeg','-v','error','-i',str(output),'-frames:v','1','-vf','crop=1280:100:0:0','-pix_fmt','rgb24','-f','rawvideo','-'])
+        self.assertGreater(sum(1 for index in range(0,len(pixels),3) if min(pixels[index:index+3])>180),20,'visible disclosure must produce readable bright pixels over the blue source')
         self.assertAlmostEqual(info.video_duration,4,places=1);self.assertGreater(info.audio_duration,3.9)
         decoded=subprocess.run(['ffmpeg','-v','error','-i',str(output),'-map','0:a:0','-ar','16000','-ac','1','-f','s16le','-'],check=True,capture_output=True,timeout=20).stdout
         recovered=array('h');recovered.frombytes(decoded[:len(original)*2])

@@ -1197,6 +1197,33 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
             "Tail flashed black instead of holding approved blue frame",
         )
 
+    async def test_visible_disclosure_covers_known_mixed_soundtrack_and_leaves_unknown_source_unlabeled(self) -> None:
+        import json
+        def row(identifier: int) -> dict[str,object]:
+            if identifier==1:return {'id':1,'title':'Song','audio_path':str(self.audio),'duration_ms':5000,'model':'editor','params_json':json.dumps({'source_track_ids':[2],'source_ancestry_complete':False})}
+            return {'id':2,'model':'ace_step'}
+        self.enterContext(patch.object(self.p.db,'get_track',side_effect=row))
+        self.project=await self.r.start(self.project.id,VideoRenderRequest(revision=self.project.revision),operation='preview')
+        await self.finish()
+        self.assertEqual(self.project.job.status,'ready',self.project.job.error_code)
+        for shot in self.project.shots:
+            self.project=await self.r.approve(self.project.id,shot.id,ApproveVideoVariantRequest(revision=self.project.revision,variant_id=shot.variants[0].id))
+        for known in (True,False):
+            current=row(1)
+            if not known:current.update({'model':'upload','params_json':'{}'})
+            with patch.object(self.p.db,'get_track',side_effect=row if known else lambda identifier:current):
+                self.project=await self.r.export(self.project.id,VideoExportRequest(revision=self.project.revision,settings=VideoExportSettings(visible_ai_label=True)))
+                await self.finish()
+            self.assertEqual(self.project.job.status,'ready',self.project.job.error_code)
+            proof=self.project.export_provenance
+            if proof is None:raise AssertionError('missing completed export proof')
+            self.assertEqual(proof.content_origin,'mixed' if known else 'unknown')
+            self.assertEqual(proof.visible_ai_label,known)
+            pixels=subprocess.check_output(['ffmpeg','-v','error','-i',str(self.r.output_file(self.project.id)),'-frames:v','1','-vf','crop=704:70:0:0','-pix_fmt','rgb24','-f','rawvideo','-'])
+            bright=sum(1 for index in range(0,len(pixels),3) if min(pixels[index:index+3])>180)
+            if known:self.assertGreater(bright,20,'known mixed AI soundtrack must have a visible disclosure')
+            else:self.assertEqual(bright,0,'unknown uploaded source must not be relabeled as generated')
+
     async def test_visualizer_square_export_applies_only_timed_overlay(self) -> None:
         from app.video_contracts import VideoOverlay
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import replace
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -29,6 +30,46 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('media', modules['speech'].dependencies)
         self.assertEqual(modules['yue2'].automation, 'manual')
 
+    async def test_catalog_separates_declared_code_weight_terms_and_unknown_local_assets(self) -> None:
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+            inventory = await catalog.inventory(self.environment)
+            review = await catalog.plan(ModulePlanRequest(features=['video', 'singing', 'rvc']), self.environment)
+        modules = {module.id: module for module in inventory.modules}
+        self.assertTrue(hasattr(modules['video'], 'licenses'), 'licence declarations must be backend contracts')
+        ltx = modules['video'].licenses
+        self.assertTrue(any(row.scope == 'code' and row.declared_license == 'MIT' for row in ltx))
+        self.assertTrue(any(row.component_id == 'ltx-2.3' and row.declared_license == 'LTX-2 Community License' for row in ltx))
+        self.assertTrue(any(row.scope == 'model' and row.status == 'unknown' for row in modules['rvc'].licenses))
+        self.assertTrue(any(row.scope == 'code' and row.declared_license == 'GPL-3.0' for row in modules['singing'].licenses))
+        self.assertTrue(all(module.licenses for module in inventory.modules))
+        self.assertTrue(all(row.source_url is None or row.source_url.startswith('https://') for module in inventory.modules for row in module.licenses))
+        self.assertEqual(next(step for step in review.steps if step.module_id == 'singing').licenses, modules['singing'].licenses)
+        from app.module_install import load_manifest
+        native_rows = {row.component_id: row for row in modules['yue2'].licenses}
+        for package in load_manifest().weights.packages:
+            self.assertIn(package, native_rows, 'every selected native model variant needs its own declaration or explicit unknown')
+            self.assertEqual(native_rows[package].scope, 'model')
+
+    async def test_speaker_dependency_setup_is_optional_and_does_not_imply_weights_or_activation(self) -> None:
+        from app import speaker_review
+        from app.speaker_review_contracts import SpeakerReviewCapability
+        status = SpeakerReviewCapability(available=False, deps_available=True, reason='speaker_weights_missing', setup_hint='Select verified local weights explicitly.')
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(speaker_review, 'capability', return_value=status) as capability:
+            inventory = await catalog.inventory(self.environment)
+            reviewed = await catalog.plan(ModulePlanRequest(features=['speaker_review'], download_models=True), self.environment)
+            dependencies_only = await catalog.plan(ModulePlanRequest(features=['speaker_review'], download_models=False), self.environment)
+        module = next((item for item in inventory.modules if item.id == 'speaker_review'), None)
+        self.assertIsNotNone(module, 'the optional CPU review has a visible setup stage')
+        assert module is not None
+        self.assertEqual(module.state, 'partial')
+        self.assertEqual(module.automation, 'automatic')
+        self.assertFalse(module.dependencies)
+        self.assertTrue(any(row.code == 'speaker_dependencies' and row.verified for row in module.evidence))
+        self.assertEqual([step.module_id for step in reviewed.steps], ['speaker_review'])
+        self.assertIn('No weights are downloaded', reviewed.steps[0].detail)
+        self.assertEqual(reviewed.required_free_bytes, dependencies_only.required_free_bytes, 'ignored weight flag must not add an invented model disk requirement')
+        self.assertEqual(capability.call_args.kwargs['python_path'], catalog.engine_python(self.environment.paths['speaker_review'], self.environment.platform))
+
     async def test_existing_engine_folders_and_http_do_not_mean_ready(self) -> None:
         engine = self.environment.paths['speech']
         (engine / 'GPT_SoVITS').mkdir(parents=True)
@@ -47,6 +88,16 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
             await catalog.inventory(self.environment)
         self.assertEqual(list(self.root.iterdir()), [])
         self.assertNotIn('torch', sys.modules)
+
+    async def test_invalid_optional_activation_path_keeps_other_modules_visible(self) -> None:
+        loop = self.root / 'invalid-speaker-python'
+        loop.symlink_to(loop)
+        with patch.dict(os.environ, {'OPENFABRIC_SPEAKER_REVIEW_PYTHON': str(loop), 'OPENFABRIC_SPEAKER_REVIEW_WEIGHTS': ''}), patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+            inventory = await catalog.inventory(self.environment)
+        modules = {module.id: module for module in inventory.modules}
+        self.assertEqual(modules['speaker_review'].state, 'missing')
+        self.assertEqual(modules['media'].state, 'missing')
+        self.assertFalse(next(row for row in modules['speaker_review'].evidence if row.code == 'speaker_activation').verified)
 
     async def test_external_installations_are_reviewed_without_automatic_mutation(self) -> None:
         external = self.root / 'outside-managed-layout'

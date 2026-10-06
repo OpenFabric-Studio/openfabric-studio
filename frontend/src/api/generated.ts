@@ -166,6 +166,7 @@ export type AudioEncodingSettings = {
   "mp3"?: Mp3EncodingSettings
   "wav"?: WavEncodingSettings
   "flac"?: FlacEncodingSettings
+  "loudness"?: LoudnessSettings
 }
 
 export type AudioExportResponse = {
@@ -178,11 +179,36 @@ export type AudioExportResponse = {
   "filename"?: (string | null)
   "audio_url"?: (string | null)
   "settings": AudioEncodingSettings
+  "operation"?: "export" | "analyze"
+  "source_origin"?: ("recorded" | "unknown" | null)
+  "input_metrics"?: (AudioMetrics | null)
+  "output_metrics"?: (AudioMetrics | null)
+  "target_result"?: "off" | "met" | "warning" | "inconclusive"
+  "normalization_mode"?: "none" | "linear" | "dynamic" | "unknown"
+  "warnings"?: Array<string>
+  "provenance"?: (ExportProvenance | null)
+  "provenance_url"?: (string | null)
+  "manifest_url"?: (string | null)
   "version_id": string
 }
 
 export type AudioExportsResponse = {
   "exports"?: Array<AudioExportResponse>
+}
+
+export type AudioMetrics = {
+  "duration_sec": number
+  "integrated_lufs"?: (number | null)
+  "loudness_range_lu"?: (number | null)
+  "true_peak_dbtp"?: (number | null)
+  "sample_peak_dbfs"?: (number | null)
+  "full_scale_fraction"?: number
+  "near_full_scale_fraction"?: number
+  "measurement_method"?: "ffmpeg-loudnorm-oversampled-v1"
+  "ffmpeg_version"?: string
+  "source_sha256"?: string
+  "samples_analyzed"?: number
+  "warnings"?: Array<"silence" | "full_scale_samples" | "true_peak_over" | "short_programme">
 }
 
 export type AudioSettingsResponse = {
@@ -494,6 +520,8 @@ export type CloudSpeechTrialsResponse = {
 export type CreateAudioExportRequest = {
   "format": "mp3" | "wav" | "flac"
   "settings"?: (AudioEncodingSettings | null)
+  "operation"?: "export" | "analyze"
+  "source_origin"?: ("recorded" | "unknown" | null)
 }
 
 export type CreateAudioVersionRequest = {
@@ -651,6 +679,23 @@ export type EbookImportWarning = {
   "message": string
 }
 
+export type ExportProvenance = {
+  "schema_version"?: 1
+  "export_id": string
+  "subject": "track_audio" | "stem" | "speech_trial" | "audiobook" | "video"
+  "created_at": string
+  "artifact_sha256": string
+  "content_origin": "generated" | "mixed" | "recorded" | "unknown"
+  "classification_basis"?: "app_workflow" | "contains_user_declaration"
+  "components": Array<ProvenanceComponent>
+  "transformations"?: Array<string>
+  "measured_audio"?: (AudioMetrics | null)
+  "audio_target"?: (LoudnessSettings | null)
+  "audio_target_result"?: ("off" | "met" | "warning" | "inconclusive" | null)
+  "visible_ai_label"?: boolean
+  "informational_only"?: true
+}
+
 export type FlacEncodingSettings = {
   "bit_depth"?: 16 | 24
   "compression_level"?: number
@@ -688,6 +733,12 @@ export type GenerationHistoryResponse = {
   "data": Array<GenerationHistoryEntry>
   "total": number
   "retention_limit": number
+}
+
+export type GenerationIdentity = {
+  "engine": string
+  "model_id"?: (string | null)
+  "engine_identity"?: (string | null)
 }
 
 export type GenerationLibrarySettings = {
@@ -805,6 +856,12 @@ export type LocalVideoProviderConfig = {
   "provider"?: "local"
 }
 
+export type LoudnessSettings = {
+  "profile"?: "off" | "music" | "spoken_word" | "ebu" | "custom"
+  "integrated_lufs"?: number
+  "true_peak_dbtp"?: number
+}
+
 export type MidiSourceState = {
   "status": "idle" | "queued" | "running" | "done" | "failed" | "cancelled"
   "error": (string | null)
@@ -849,6 +906,16 @@ export type ModuleAction = {
   "url"?: (string | null)
 }
 
+export type ModuleDownloadProgress = {
+  "artifact_name": string
+  "bytes_received": number
+  "total_bytes"?: (number | null)
+  "attempt": number
+  "max_attempts"?: number
+  "phase": "downloading" | "retrying" | "verifying" | "complete"
+  "retry_after_sec"?: (number | null)
+}
+
 export type ModuleEvidence = {
   "code": string
   "detail": string
@@ -856,19 +923,20 @@ export type ModuleEvidence = {
 }
 
 export type ModuleInfo = {
-  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
+  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "description": string
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
   "automation": "automatic" | "manual" | "unsupported"
-  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
+  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "capabilities": Array<string>
   "evidence": Array<ModuleEvidence>
   "actions": Array<ModuleAction>
   "estimated_download_bytes"?: (number | null)
   "restart_required"?: boolean
+  "licenses"?: Array<ModuleLicenseDeclaration>
 }
 
 export type ModuleInstallJob = {
@@ -876,7 +944,7 @@ export type ModuleInstallJob = {
   "state": "queued" | "running" | "completed" | "awaiting_manual" | "failed" | "cancelled" | "interrupted"
   "created_at": string
   "updated_at": string
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
   "steps": Array<ModuleJobStep>
   "current_step"?: (number | null)
@@ -885,7 +953,7 @@ export type ModuleInstallJob = {
 }
 
 export type ModuleInstallRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
   "plan_token": string
 }
@@ -901,19 +969,31 @@ export type ModuleInventory = {
 }
 
 export type ModuleJobStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "state": "queued" | "running" | "verified" | "manual" | "skipped" | "failed"
   "detail": string
   "error_code"?: (string | null)
+  "download"?: (ModuleDownloadProgress | null)
 }
 
 export type ModuleJobsResponse = {
   "jobs": Array<ModuleInstallJob>
 }
 
+export type ModuleLicenseDeclaration = {
+  "component_id": string
+  "name": string
+  "scope": "code" | "model" | "tool" | "auxiliary" | "source_data"
+  "status": "declared" | "unknown"
+  "declared_license"?: (string | null)
+  "source_url"?: (string | null)
+  "notes": string
+  "reviewed_at": string
+}
+
 export type ModulePlan = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
   "plan_token": string
   "steps": Array<ModulePlanStep>
@@ -926,17 +1006,18 @@ export type ModulePlan = {
 }
 
 export type ModulePlanRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc">
+  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
 }
 
 export type ModulePlanStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc"
+  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "operation": "install" | "verify" | "manual" | "unsupported"
   "estimated_download_bytes"?: (number | null)
   "detail": string
   "actions": Array<ModuleAction>
+  "licenses"?: Array<ModuleLicenseDeclaration>
 }
 
 export type Mp3EncodingSettings = {
@@ -1151,6 +1232,23 @@ export type PronunciationEntry = {
   "spoken": string
 }
 
+export type ProvenanceComponent = {
+  "role": "audio" | "video" | "conditioning_reference"
+  "content_origin": "generated" | "mixed" | "recorded" | "unknown"
+  "source_id": string
+  "source_sha256": string
+  "hash_scope"?: "file" | "pcm"
+  "classification_basis"?: "app_workflow" | "user_declared" | "unverified"
+  "generation_identities"?: Array<GenerationIdentity>
+  "source_records_sha256"?: (string | null)
+  "source_record_count"?: number
+  "engine"?: (string | null)
+  "model_id"?: (string | null)
+  "engine_fingerprint"?: (string | null)
+  "provider_receipt_id"?: (string | null)
+  "provider_job_id"?: (string | null)
+}
+
 export type ReferenceAbcRequest = {
   "abc": string
   "transpose_semitones"?: number
@@ -1348,6 +1446,83 @@ export type ShotRequest = {
   "prompt"?: string
 }
 
+export type SpeakerEncoderIdentity = {
+  "family"?: "speechbrain-ecapa-voxceleb"
+  "pipeline"?: "ecapa-voxceleb-16k-fbank80-sentence-mean-l2-v1"
+  "weights_sha256": string
+  "speechbrain_version": string
+  "torch_version": string
+  "torchaudio_version": string
+}
+
+export type SpeakerReferenceCandidate = {
+  "id": string
+  "kind": "passage" | "audition"
+  "source_id": string
+  "chapter_index": number
+  "clip_index"?: (number | null)
+  "revision"?: (number | null)
+  "source_identity": string
+  "render_snapshot_identity": string
+  "audio_sha256": string
+  "profile_id": string
+  "speaker": string
+  "renderer": "local" | "openrouter"
+  "label": string
+  "audio_url": string
+  "duration_ms": number
+}
+
+export type SpeakerReferencesResponse = {
+  "references"?: Array<SpeakerReferenceCandidate>
+}
+
+export type SpeakerReview = {
+  "id": string
+  "book_id": string
+  "chapter_index": number
+  "passage_id": string
+  "revision": number
+  "render_identity": string
+  "audio_sha256": string
+  "reference": SpeakerReferenceCandidate
+  "reference_reviewed": true
+  "encoder"?: (SpeakerEncoderIdentity | null)
+  "threshold": number
+  "renderer_identity_verified"?: boolean
+  "warnings"?: Array<"speaker_renderer_unverified" | "partial_analysis" | "activity_not_speech_detection">
+  "score"?: (number | null)
+  "below_threshold"?: (boolean | null)
+  "analyzed_ms"?: number
+  "reference_analyzed_ms"?: number
+  "state": "queued" | "running" | "completed" | "unavailable" | "skipped" | "failed" | "canceled" | "stale"
+  "reason"?: string
+  "created_at": string
+  "updated_at": string
+}
+
+export type SpeakerReviewCapability = {
+  "available": boolean
+  "configured"?: boolean
+  "deps_available"?: boolean
+  "weights_available"?: boolean
+  "encoder"?: (SpeakerEncoderIdentity | null)
+  "reason"?: string
+  "setup_hint"?: string
+}
+
+export type SpeakerReviewRequest = {
+  "revision": number
+  "render_identity": string
+  "reference_id": string
+  "reference_reviewed": true
+  "threshold": number
+}
+
+export type SpeakerReviewsResponse = {
+  "reviews"?: Array<SpeakerReview>
+}
+
 export type SpeechCloneEngineStatus = {
   "installed": boolean
   "mock": boolean
@@ -1427,6 +1602,16 @@ export type StemAudioExportResponse = {
   "filename"?: (string | null)
   "audio_url"?: (string | null)
   "settings": AudioEncodingSettings
+  "operation"?: "export" | "analyze"
+  "source_origin"?: ("recorded" | "unknown" | null)
+  "input_metrics"?: (AudioMetrics | null)
+  "output_metrics"?: (AudioMetrics | null)
+  "target_result"?: "off" | "met" | "warning" | "inconclusive"
+  "normalization_mode"?: "none" | "linear" | "dynamic" | "unknown"
+  "warnings"?: Array<string>
+  "provenance"?: (ExportProvenance | null)
+  "provenance_url"?: (string | null)
+  "manifest_url"?: (string | null)
   "stem_name": "vocals" | "drums" | "bass" | "other"
 }
 
@@ -1636,6 +1821,8 @@ export type VideoDialogueCue = {
   "end_sec": number
   "audio_sha256": string
   "waveform_peaks"?: Array<number>
+  "renderer"?: ("local" | "openrouter" | null)
+  "cloud_provenance"?: (CloudSpeechProvenance | null)
 }
 
 export type VideoEnergyPoint = {
@@ -1666,6 +1853,8 @@ export type VideoExportSettings = {
   "quality"?: "fast" | "standard" | "high"
   "include_overlays"?: boolean
   "attach_speech"?: boolean
+  "loudness"?: LoudnessSettings
+  "visible_ai_label"?: boolean
 }
 
 export type VideoJobResponse = {
@@ -1760,6 +1949,9 @@ export type VideoProject = {
   "file_url"?: string
   "poster_url"?: string
   "output_version"?: string
+  "export_provenance"?: (ExportProvenance | null)
+  "provenance_url"?: string
+  "manifest_url"?: string
   "warnings"?: Array<string>
 }
 
@@ -3239,6 +3431,39 @@ const schemas = {
     "title": "FlacEncodingSettings",
     "type": "object"
   },
+  "LoudnessSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "profile": {
+        "default": "off",
+        "enum": [
+          "off",
+          "music",
+          "spoken_word",
+          "ebu",
+          "custom"
+        ],
+        "title": "Profile",
+        "type": "string"
+      },
+      "integrated_lufs": {
+        "default": -16,
+        "maximum": -8,
+        "minimum": -40,
+        "title": "Integrated Lufs",
+        "type": "number"
+      },
+      "true_peak_dbtp": {
+        "default": -2,
+        "maximum": -0.1,
+        "minimum": -9,
+        "title": "True Peak Dbtp",
+        "type": "number"
+      }
+    },
+    "title": "LoudnessSettings",
+    "type": "object"
+  },
   "AudioEncodingSettings": {
     "additionalProperties": false,
     "properties": {
@@ -3250,6 +3475,9 @@ const schemas = {
       },
       "flac": {
         "$ref": "#/$defs/FlacEncodingSettings"
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
       }
     },
     "title": "AudioEncodingSettings",
@@ -3294,12 +3522,493 @@ const schemas = {
           }
         ],
         "default": null
+      },
+      "operation": {
+        "default": "export",
+        "enum": [
+          "export",
+          "analyze"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "source_origin": {
+        "anyOf": [
+          {
+            "enum": [
+              "recorded",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Origin"
       }
     },
     "required": [
       "format"
     ],
     "title": "CreateAudioExportRequest",
+    "type": "object"
+  },
+  "AudioMetrics": {
+    "additionalProperties": false,
+    "properties": {
+      "duration_sec": {
+        "maximum": 86400,
+        "minimum": 0,
+        "title": "Duration Sec",
+        "type": "number"
+      },
+      "integrated_lufs": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Integrated Lufs"
+      },
+      "loudness_range_lu": {
+        "anyOf": [
+          {
+            "maximum": 200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Loudness Range Lu"
+      },
+      "true_peak_dbtp": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "True Peak Dbtp"
+      },
+      "sample_peak_dbfs": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Sample Peak Dbfs"
+      },
+      "full_scale_fraction": {
+        "default": 0,
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Full Scale Fraction",
+        "type": "number"
+      },
+      "near_full_scale_fraction": {
+        "default": 0,
+        "maximum": 1,
+        "minimum": 0,
+        "title": "Near Full Scale Fraction",
+        "type": "number"
+      },
+      "measurement_method": {
+        "const": "ffmpeg-loudnorm-oversampled-v1",
+        "default": "ffmpeg-loudnorm-oversampled-v1",
+        "title": "Measurement Method",
+        "type": "string"
+      },
+      "ffmpeg_version": {
+        "default": "unavailable",
+        "maxLength": 200,
+        "title": "Ffmpeg Version",
+        "type": "string"
+      },
+      "source_sha256": {
+        "default": "",
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "samples_analyzed": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Samples Analyzed",
+        "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "silence",
+            "full_scale_samples",
+            "true_peak_over",
+            "short_programme"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "title": "Warnings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "duration_sec"
+    ],
+    "title": "AudioMetrics",
+    "type": "object"
+  },
+  "ExportProvenance": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "export_id": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Export Id",
+        "type": "string"
+      },
+      "subject": {
+        "enum": [
+          "track_audio",
+          "stem",
+          "speech_trial",
+          "audiobook",
+          "video"
+        ],
+        "title": "Subject",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "artifact_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Artifact Sha256",
+        "type": "string"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "title": "Content Origin",
+        "type": "string"
+      },
+      "classification_basis": {
+        "default": "app_workflow",
+        "enum": [
+          "app_workflow",
+          "contains_user_declaration"
+        ],
+        "title": "Classification Basis",
+        "type": "string"
+      },
+      "components": {
+        "items": {
+          "$ref": "#/$defs/ProvenanceComponent"
+        },
+        "maxItems": 1000,
+        "minItems": 1,
+        "title": "Components",
+        "type": "array"
+      },
+      "transformations": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 20,
+        "title": "Transformations",
+        "type": "array"
+      },
+      "measured_audio": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "audio_target": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LoudnessSettings"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "audio_target_result": {
+        "anyOf": [
+          {
+            "enum": [
+              "off",
+              "met",
+              "warning",
+              "inconclusive"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Audio Target Result"
+      },
+      "visible_ai_label": {
+        "default": false,
+        "title": "Visible Ai Label",
+        "type": "boolean"
+      },
+      "informational_only": {
+        "const": true,
+        "default": true,
+        "title": "Informational Only",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "export_id",
+      "subject",
+      "created_at",
+      "artifact_sha256",
+      "content_origin",
+      "components"
+    ],
+    "title": "ExportProvenance",
+    "type": "object"
+  },
+  "GenerationIdentity": {
+    "properties": {
+      "engine": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Engine",
+        "type": "string"
+      },
+      "model_id": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Id"
+      },
+      "engine_identity": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine Identity"
+      }
+    },
+    "required": [
+      "engine"
+    ],
+    "title": "GenerationIdentity",
+    "type": "object"
+  },
+  "ProvenanceComponent": {
+    "additionalProperties": false,
+    "properties": {
+      "role": {
+        "enum": [
+          "audio",
+          "video",
+          "conditioning_reference"
+        ],
+        "title": "Role",
+        "type": "string"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "title": "Content Origin",
+        "type": "string"
+      },
+      "source_id": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Source Id",
+        "type": "string"
+      },
+      "source_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "hash_scope": {
+        "default": "file",
+        "enum": [
+          "file",
+          "pcm"
+        ],
+        "title": "Hash Scope",
+        "type": "string"
+      },
+      "classification_basis": {
+        "default": "app_workflow",
+        "enum": [
+          "app_workflow",
+          "user_declared",
+          "unverified"
+        ],
+        "title": "Classification Basis",
+        "type": "string"
+      },
+      "generation_identities": {
+        "items": {
+          "$ref": "#/$defs/GenerationIdentity"
+        },
+        "maxItems": 32,
+        "title": "Generation Identities",
+        "type": "array"
+      },
+      "source_records_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Records Sha256"
+      },
+      "source_record_count": {
+        "default": 0,
+        "maximum": 20000,
+        "minimum": 0,
+        "title": "Source Record Count",
+        "type": "integer"
+      },
+      "engine": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine"
+      },
+      "model_id": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Model Id"
+      },
+      "engine_fingerprint": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Engine Fingerprint"
+      },
+      "provider_receipt_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Receipt Id"
+      },
+      "provider_job_id": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Job Id"
+      }
+    },
+    "required": [
+      "role",
+      "content_origin",
+      "source_id",
+      "source_sha256"
+    ],
+    "title": "ProvenanceComponent",
     "type": "object"
   },
   "AudioExportResponse": {
@@ -3370,6 +4079,118 @@ const schemas = {
       },
       "settings": {
         "$ref": "#/$defs/AudioEncodingSettings"
+      },
+      "operation": {
+        "default": "export",
+        "enum": [
+          "export",
+          "analyze"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "source_origin": {
+        "anyOf": [
+          {
+            "enum": [
+              "recorded",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Origin"
+      },
+      "input_metrics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "output_metrics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "target_result": {
+        "default": "off",
+        "enum": [
+          "off",
+          "met",
+          "warning",
+          "inconclusive"
+        ],
+        "title": "Target Result",
+        "type": "string"
+      },
+      "normalization_mode": {
+        "default": "none",
+        "enum": [
+          "none",
+          "linear",
+          "dynamic",
+          "unknown"
+        ],
+        "title": "Normalization Mode",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "title": "Warnings",
+        "type": "array"
+      },
+      "provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExportProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "provenance_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provenance Url"
+      },
+      "manifest_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Manifest Url"
       },
       "version_id": {
         "pattern": "^[0-9a-f]{32}$",
@@ -3472,6 +4293,118 @@ const schemas = {
       "settings": {
         "$ref": "#/$defs/AudioEncodingSettings"
       },
+      "operation": {
+        "default": "export",
+        "enum": [
+          "export",
+          "analyze"
+        ],
+        "title": "Operation",
+        "type": "string"
+      },
+      "source_origin": {
+        "anyOf": [
+          {
+            "enum": [
+              "recorded",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Origin"
+      },
+      "input_metrics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "output_metrics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "target_result": {
+        "default": "off",
+        "enum": [
+          "off",
+          "met",
+          "warning",
+          "inconclusive"
+        ],
+        "title": "Target Result",
+        "type": "string"
+      },
+      "normalization_mode": {
+        "default": "none",
+        "enum": [
+          "none",
+          "linear",
+          "dynamic",
+          "unknown"
+        ],
+        "title": "Normalization Mode",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "type": "string"
+        },
+        "maxItems": 10,
+        "title": "Warnings",
+        "type": "array"
+      },
+      "provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExportProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "provenance_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provenance Url"
+      },
+      "manifest_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Manifest Url"
+      },
       "stem_name": {
         "enum": [
           "vocals",
@@ -3524,6 +4457,84 @@ const schemas = {
       }
     },
     "title": "CreateStemExportRequest",
+    "type": "object"
+  },
+  "CloudSpeechProvenance": {
+    "properties": {
+      "receipt_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Receipt Id",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "model": {
+        "maxLength": 200,
+        "minLength": 3,
+        "title": "Model",
+        "type": "string"
+      },
+      "model_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Model Fingerprint",
+        "type": "string"
+      },
+      "voice": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Voice"
+      },
+      "reference_transferred": {
+        "default": false,
+        "title": "Reference Transferred",
+        "type": "boolean"
+      },
+      "generation_id": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Generation Id"
+      },
+      "actual_cost_usd": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Actual Cost Usd"
+      }
+    },
+    "required": [
+      "receipt_id",
+      "profile_id",
+      "model",
+      "model_fingerprint"
+    ],
+    "title": "CloudSpeechProvenance",
     "type": "object"
   },
   "LocalVideoProviderConfig": {
@@ -3886,6 +4897,33 @@ const schemas = {
         "maxItems": 160,
         "title": "Waveform Peaks",
         "type": "array"
+      },
+      "renderer": {
+        "anyOf": [
+          {
+            "enum": [
+              "local",
+              "openrouter"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Renderer"
+      },
+      "cloud_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       }
     },
     "required": [
@@ -3961,6 +4999,14 @@ const schemas = {
       "attach_speech": {
         "default": false,
         "title": "Attach Speech",
+        "type": "boolean"
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      },
+      "visible_ai_label": {
+        "default": false,
+        "title": "Visible Ai Label",
         "type": "boolean"
       }
     },
@@ -4979,6 +6025,27 @@ const schemas = {
       "output_version": {
         "default": "",
         "title": "Output Version",
+        "type": "string"
+      },
+      "export_provenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ExportProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "provenance_url": {
+        "default": "",
+        "title": "Provenance Url",
+        "type": "string"
+      },
+      "manifest_url": {
+        "default": "",
+        "title": "Manifest Url",
         "type": "string"
       },
       "warnings": {
@@ -9405,84 +10472,6 @@ const schemas = {
       "expires_at"
     ],
     "title": "CloudSpeechQuote",
-    "type": "object"
-  },
-  "CloudSpeechProvenance": {
-    "properties": {
-      "receipt_id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "title": "Receipt Id",
-        "type": "string"
-      },
-      "profile_id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "title": "Profile Id",
-        "type": "string"
-      },
-      "model": {
-        "maxLength": 200,
-        "minLength": 3,
-        "title": "Model",
-        "type": "string"
-      },
-      "model_fingerprint": {
-        "pattern": "^[0-9a-f]{64}$",
-        "title": "Model Fingerprint",
-        "type": "string"
-      },
-      "voice": {
-        "anyOf": [
-          {
-            "maxLength": 200,
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Voice"
-      },
-      "reference_transferred": {
-        "default": false,
-        "title": "Reference Transferred",
-        "type": "boolean"
-      },
-      "generation_id": {
-        "anyOf": [
-          {
-            "maxLength": 160,
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Generation Id"
-      },
-      "actual_cost_usd": {
-        "anyOf": [
-          {
-            "maximum": 1000000,
-            "minimum": 0,
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "default": null,
-        "title": "Actual Cost Usd"
-      }
-    },
-    "required": [
-      "receipt_id",
-      "profile_id",
-      "model",
-      "model_fingerprint"
-    ],
-    "title": "CloudSpeechProvenance",
     "type": "object"
   },
   "CloudSpeechTrial": {
@@ -14651,6 +15640,90 @@ const schemas = {
     "title": "ModuleAction",
     "type": "object"
   },
+  "ModuleLicenseDeclaration": {
+    "additionalProperties": false,
+    "properties": {
+      "component_id": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Component Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 160,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "scope": {
+        "enum": [
+          "code",
+          "model",
+          "tool",
+          "auxiliary",
+          "source_data"
+        ],
+        "title": "Scope",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "declared",
+          "unknown"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "declared_license": {
+        "anyOf": [
+          {
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Declared License"
+      },
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[^\\s]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Url"
+      },
+      "notes": {
+        "maxLength": 1000,
+        "title": "Notes",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "title": "Reviewed At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "component_id",
+      "name",
+      "scope",
+      "status",
+      "notes",
+      "reviewed_at"
+    ],
+    "title": "ModuleLicenseDeclaration",
+    "type": "object"
+  },
   "ModuleInfo": {
     "properties": {
       "id": {
@@ -14668,7 +15741,8 @@ const schemas = {
           "kokoro",
           "chatterbox",
           "wan22",
-          "rvc"
+          "rvc",
+          "speaker_review"
         ],
         "title": "Id",
         "type": "string"
@@ -14727,7 +15801,8 @@ const schemas = {
             "kokoro",
             "chatterbox",
             "wan22",
-            "rvc"
+            "rvc",
+            "speaker_review"
           ],
           "type": "string"
         },
@@ -14772,6 +15847,14 @@ const schemas = {
         "default": false,
         "title": "Restart Required",
         "type": "boolean"
+      },
+      "licenses": {
+        "items": {
+          "$ref": "#/$defs/ModuleLicenseDeclaration"
+        },
+        "maxItems": 20,
+        "title": "Licenses",
+        "type": "array"
       }
     },
     "required": [
@@ -14869,7 +15952,8 @@ const schemas = {
             "kokoro",
             "chatterbox",
             "wan22",
-            "rvc"
+            "rvc",
+            "speaker_review"
           ],
           "type": "string"
         },
@@ -14907,7 +15991,8 @@ const schemas = {
           "kokoro",
           "chatterbox",
           "wan22",
-          "rvc"
+          "rvc",
+          "speaker_review"
         ],
         "title": "Module Id",
         "type": "string"
@@ -14949,6 +16034,14 @@ const schemas = {
         },
         "title": "Actions",
         "type": "array"
+      },
+      "licenses": {
+        "items": {
+          "$ref": "#/$defs/ModuleLicenseDeclaration"
+        },
+        "maxItems": 20,
+        "title": "Licenses",
+        "type": "array"
       }
     },
     "required": [
@@ -14979,7 +16072,8 @@ const schemas = {
             "kokoro",
             "chatterbox",
             "wan22",
-            "rvc"
+            "rvc",
+            "speaker_review"
           ],
           "type": "string"
         },
@@ -15073,7 +16167,8 @@ const schemas = {
             "kokoro",
             "chatterbox",
             "wan22",
-            "rvc"
+            "rvc",
+            "speaker_review"
           ],
           "type": "string"
         },
@@ -15100,6 +16195,82 @@ const schemas = {
     "title": "ModuleInstallRequest",
     "type": "object"
   },
+  "ModuleDownloadProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "artifact_name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Artifact Name",
+        "type": "string"
+      },
+      "bytes_received": {
+        "maximum": 100000000000,
+        "minimum": 0,
+        "title": "Bytes Received",
+        "type": "integer"
+      },
+      "total_bytes": {
+        "anyOf": [
+          {
+            "maximum": 100000000000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Total Bytes"
+      },
+      "attempt": {
+        "maximum": 3,
+        "minimum": 1,
+        "title": "Attempt",
+        "type": "integer"
+      },
+      "max_attempts": {
+        "default": 3,
+        "maximum": 3,
+        "minimum": 1,
+        "title": "Max Attempts",
+        "type": "integer"
+      },
+      "phase": {
+        "enum": [
+          "downloading",
+          "retrying",
+          "verifying",
+          "complete"
+        ],
+        "title": "Phase",
+        "type": "string"
+      },
+      "retry_after_sec": {
+        "anyOf": [
+          {
+            "maximum": 30,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Retry After Sec"
+      }
+    },
+    "required": [
+      "artifact_name",
+      "bytes_received",
+      "attempt",
+      "phase"
+    ],
+    "title": "ModuleDownloadProgress",
+    "type": "object"
+  },
   "ModuleJobStep": {
     "properties": {
       "module_id": {
@@ -15117,7 +16288,8 @@ const schemas = {
           "kokoro",
           "chatterbox",
           "wan22",
-          "rvc"
+          "rvc",
+          "speaker_review"
         ],
         "title": "Module Id",
         "type": "string"
@@ -15153,6 +16325,17 @@ const schemas = {
         ],
         "default": null,
         "title": "Error Code"
+      },
+      "download": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ModuleDownloadProgress"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
       }
     },
     "required": [
@@ -15208,7 +16391,8 @@ const schemas = {
             "kokoro",
             "chatterbox",
             "wan22",
-            "rvc"
+            "rvc",
+            "speaker_review"
           ],
           "type": "string"
         },
@@ -16562,6 +17746,467 @@ const schemas = {
       "jobs"
     ],
     "title": "CloudMusicJobs",
+    "type": "object"
+  },
+  "SpeakerEncoderIdentity": {
+    "properties": {
+      "family": {
+        "const": "speechbrain-ecapa-voxceleb",
+        "default": "speechbrain-ecapa-voxceleb",
+        "title": "Family",
+        "type": "string"
+      },
+      "pipeline": {
+        "const": "ecapa-voxceleb-16k-fbank80-sentence-mean-l2-v1",
+        "default": "ecapa-voxceleb-16k-fbank80-sentence-mean-l2-v1",
+        "title": "Pipeline",
+        "type": "string"
+      },
+      "weights_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Weights Sha256",
+        "type": "string"
+      },
+      "speechbrain_version": {
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Speechbrain Version",
+        "type": "string"
+      },
+      "torch_version": {
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Torch Version",
+        "type": "string"
+      },
+      "torchaudio_version": {
+        "maxLength": 100,
+        "minLength": 1,
+        "title": "Torchaudio Version",
+        "type": "string"
+      }
+    },
+    "required": [
+      "weights_sha256",
+      "speechbrain_version",
+      "torch_version",
+      "torchaudio_version"
+    ],
+    "title": "SpeakerEncoderIdentity",
+    "type": "object"
+  },
+  "SpeakerReviewCapability": {
+    "properties": {
+      "available": {
+        "title": "Available",
+        "type": "boolean"
+      },
+      "configured": {
+        "default": false,
+        "title": "Configured",
+        "type": "boolean"
+      },
+      "deps_available": {
+        "default": false,
+        "title": "Deps Available",
+        "type": "boolean"
+      },
+      "weights_available": {
+        "default": false,
+        "title": "Weights Available",
+        "type": "boolean"
+      },
+      "encoder": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SpeakerEncoderIdentity"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 100,
+        "title": "Reason",
+        "type": "string"
+      },
+      "setup_hint": {
+        "default": "",
+        "maxLength": 500,
+        "title": "Setup Hint",
+        "type": "string"
+      }
+    },
+    "required": [
+      "available"
+    ],
+    "title": "SpeakerReviewCapability",
+    "type": "object"
+  },
+  "SpeakerReferenceCandidate": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "passage",
+          "audition"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "clip_index": {
+        "anyOf": [
+          {
+            "maximum": 16,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Clip Index"
+      },
+      "revision": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revision"
+      },
+      "source_identity": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Identity",
+        "type": "string"
+      },
+      "render_snapshot_identity": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Render Snapshot Identity",
+        "type": "string"
+      },
+      "audio_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Audio Sha256",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "speaker": {
+        "maxLength": 40,
+        "minLength": 1,
+        "title": "Speaker",
+        "type": "string"
+      },
+      "renderer": {
+        "enum": [
+          "local",
+          "openrouter"
+        ],
+        "title": "Renderer",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Label",
+        "type": "string"
+      },
+      "audio_url": {
+        "maxLength": 300,
+        "pattern": "^/api/audiobooks/",
+        "title": "Audio Url",
+        "type": "string"
+      },
+      "duration_ms": {
+        "maximum": 600000,
+        "minimum": 0,
+        "title": "Duration Ms",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "source_id",
+      "chapter_index",
+      "source_identity",
+      "render_snapshot_identity",
+      "audio_sha256",
+      "profile_id",
+      "speaker",
+      "renderer",
+      "label",
+      "audio_url",
+      "duration_ms"
+    ],
+    "title": "SpeakerReferenceCandidate",
+    "type": "object"
+  },
+  "SpeakerReferencesResponse": {
+    "properties": {
+      "references": {
+        "items": {
+          "$ref": "#/$defs/SpeakerReferenceCandidate"
+        },
+        "maxItems": 100,
+        "title": "References",
+        "type": "array"
+      }
+    },
+    "title": "SpeakerReferencesResponse",
+    "type": "object"
+  },
+  "SpeakerReviewRequest": {
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "render_identity": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Render Identity",
+        "type": "string"
+      },
+      "reference_id": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Reference Id",
+        "type": "string"
+      },
+      "reference_reviewed": {
+        "const": true,
+        "title": "Reference Reviewed",
+        "type": "boolean"
+      },
+      "threshold": {
+        "maximum": 1,
+        "minimum": -1,
+        "title": "Threshold",
+        "type": "number"
+      }
+    },
+    "required": [
+      "revision",
+      "render_identity",
+      "reference_id",
+      "reference_reviewed",
+      "threshold"
+    ],
+    "title": "SpeakerReviewRequest",
+    "type": "object"
+  },
+  "SpeakerReview": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "book_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Book Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "passage_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Passage Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "render_identity": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Render Identity",
+        "type": "string"
+      },
+      "audio_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Audio Sha256",
+        "type": "string"
+      },
+      "reference": {
+        "$ref": "#/$defs/SpeakerReferenceCandidate"
+      },
+      "reference_reviewed": {
+        "const": true,
+        "title": "Reference Reviewed",
+        "type": "boolean"
+      },
+      "encoder": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SpeakerEncoderIdentity"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "threshold": {
+        "maximum": 1,
+        "minimum": -1,
+        "title": "Threshold",
+        "type": "number"
+      },
+      "renderer_identity_verified": {
+        "default": false,
+        "title": "Renderer Identity Verified",
+        "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "speaker_renderer_unverified",
+            "partial_analysis",
+            "activity_not_speech_detection"
+          ],
+          "type": "string"
+        },
+        "maxItems": 3,
+        "title": "Warnings",
+        "type": "array"
+      },
+      "score": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": -1,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Score"
+      },
+      "below_threshold": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Below Threshold"
+      },
+      "analyzed_ms": {
+        "default": 0,
+        "maximum": 30000,
+        "minimum": 0,
+        "title": "Analyzed Ms",
+        "type": "integer"
+      },
+      "reference_analyzed_ms": {
+        "default": 0,
+        "maximum": 30000,
+        "minimum": 0,
+        "title": "Reference Analyzed Ms",
+        "type": "integer"
+      },
+      "state": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "unavailable",
+          "skipped",
+          "failed",
+          "canceled",
+          "stale"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "reason": {
+        "default": "",
+        "maxLength": 100,
+        "title": "Reason",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "book_id",
+      "chapter_index",
+      "passage_id",
+      "revision",
+      "render_identity",
+      "audio_sha256",
+      "reference",
+      "reference_reviewed",
+      "threshold",
+      "state",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "SpeakerReview",
+    "type": "object"
+  },
+  "SpeakerReviewsResponse": {
+    "properties": {
+      "reviews": {
+        "items": {
+          "$ref": "#/$defs/SpeakerReview"
+        },
+        "maxItems": 100,
+        "title": "Reviews",
+        "type": "array"
+      }
+    },
+    "title": "SpeakerReviewsResponse",
     "type": "object"
   }
 } as const
@@ -18082,6 +19727,14 @@ export function parseModuleAction(value: unknown): ModuleAction {
   return value
 }
 
+function isModuleLicenseDeclaration(value: unknown): value is ModuleLicenseDeclaration {
+  return decodeSchema(schemas.ModuleLicenseDeclaration, value, schemas)
+}
+export function parseModuleLicenseDeclaration(value: unknown): ModuleLicenseDeclaration {
+  if (!isModuleLicenseDeclaration(value)) throw new TypeError("Invalid ModuleLicenseDeclaration response")
+  return value
+}
+
 function isModuleInfo(value: unknown): value is ModuleInfo {
   return decodeSchema(schemas.ModuleInfo, value, schemas)
 }
@@ -18127,6 +19780,14 @@ function isModuleInstallRequest(value: unknown): value is ModuleInstallRequest {
 }
 export function parseModuleInstallRequest(value: unknown): ModuleInstallRequest {
   if (!isModuleInstallRequest(value)) throw new TypeError("Invalid ModuleInstallRequest response")
+  return value
+}
+
+function isModuleDownloadProgress(value: unknown): value is ModuleDownloadProgress {
+  return decodeSchema(schemas.ModuleDownloadProgress, value, schemas)
+}
+export function parseModuleDownloadProgress(value: unknown): ModuleDownloadProgress {
+  if (!isModuleDownloadProgress(value)) throw new TypeError("Invalid ModuleDownloadProgress response")
   return value
 }
 
@@ -18367,5 +20028,77 @@ function isCloudMusicJobs(value: unknown): value is CloudMusicJobs {
 }
 export function parseCloudMusicJobs(value: unknown): CloudMusicJobs {
   if (!isCloudMusicJobs(value)) throw new TypeError("Invalid CloudMusicJobs response")
+  return value
+}
+
+function isSpeakerEncoderIdentity(value: unknown): value is SpeakerEncoderIdentity {
+  return decodeSchema(schemas.SpeakerEncoderIdentity, value, schemas)
+}
+export function parseSpeakerEncoderIdentity(value: unknown): SpeakerEncoderIdentity {
+  if (!isSpeakerEncoderIdentity(value)) throw new TypeError("Invalid SpeakerEncoderIdentity response")
+  return value
+}
+
+function isSpeakerReviewCapability(value: unknown): value is SpeakerReviewCapability {
+  return decodeSchema(schemas.SpeakerReviewCapability, value, schemas)
+}
+export function parseSpeakerReviewCapability(value: unknown): SpeakerReviewCapability {
+  if (!isSpeakerReviewCapability(value)) throw new TypeError("Invalid SpeakerReviewCapability response")
+  return value
+}
+
+function isSpeakerReferenceCandidate(value: unknown): value is SpeakerReferenceCandidate {
+  return decodeSchema(schemas.SpeakerReferenceCandidate, value, schemas)
+}
+export function parseSpeakerReferenceCandidate(value: unknown): SpeakerReferenceCandidate {
+  if (!isSpeakerReferenceCandidate(value)) throw new TypeError("Invalid SpeakerReferenceCandidate response")
+  return value
+}
+
+function isSpeakerReferencesResponse(value: unknown): value is SpeakerReferencesResponse {
+  return decodeSchema(schemas.SpeakerReferencesResponse, value, schemas)
+}
+export function parseSpeakerReferencesResponse(value: unknown): SpeakerReferencesResponse {
+  if (!isSpeakerReferencesResponse(value)) throw new TypeError("Invalid SpeakerReferencesResponse response")
+  return value
+}
+
+function isSpeakerReviewRequest(value: unknown): value is SpeakerReviewRequest {
+  return decodeSchema(schemas.SpeakerReviewRequest, value, schemas)
+}
+export function parseSpeakerReviewRequest(value: unknown): SpeakerReviewRequest {
+  if (!isSpeakerReviewRequest(value)) throw new TypeError("Invalid SpeakerReviewRequest response")
+  return value
+}
+
+function isSpeakerReview(value: unknown): value is SpeakerReview {
+  return decodeSchema(schemas.SpeakerReview, value, schemas)
+}
+export function parseSpeakerReview(value: unknown): SpeakerReview {
+  if (!isSpeakerReview(value)) throw new TypeError("Invalid SpeakerReview response")
+  return value
+}
+
+function isSpeakerReviewsResponse(value: unknown): value is SpeakerReviewsResponse {
+  return decodeSchema(schemas.SpeakerReviewsResponse, value, schemas)
+}
+export function parseSpeakerReviewsResponse(value: unknown): SpeakerReviewsResponse {
+  if (!isSpeakerReviewsResponse(value)) throw new TypeError("Invalid SpeakerReviewsResponse response")
+  return value
+}
+
+function isExportProvenance(value: unknown): value is ExportProvenance {
+  return decodeSchema(schemas.ExportProvenance, value, schemas)
+}
+export function parseExportProvenance(value: unknown): ExportProvenance {
+  if (!isExportProvenance(value)) throw new TypeError("Invalid ExportProvenance response")
+  return value
+}
+
+function isProvenanceComponent(value: unknown): value is ProvenanceComponent {
+  return decodeSchema(schemas.ProvenanceComponent, value, schemas)
+}
+export function parseProvenanceComponent(value: unknown): ProvenanceComponent {
+  if (!isProvenanceComponent(value)) throw new TypeError("Invalid ProvenanceComponent response")
   return value
 }

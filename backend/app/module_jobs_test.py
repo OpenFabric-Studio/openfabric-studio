@@ -45,6 +45,31 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other.get(created.id).steps[0].state, 'manual')
         await service.shutdown()
 
+    async def test_download_bytes_and_retry_phase_survive_a_new_service_reader(self) -> None:
+        from app import module_contracts
+        self.assertTrue(hasattr(module_contracts, 'ModuleDownloadProgress'), 'download progress needs an app-owned persisted schema')
+        started = asyncio.Event()
+        release = asyncio.Event()
+        async def install(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
+            self.assertTrue(hasattr(context, 'update_download'), 'installer byte progress must reach the durable step')
+            progress = module_contracts.ModuleDownloadProgress(artifact_name='pinned.zip', bytes_received=4, total_bytes=10,
+                attempt=2, max_attempts=3, phase='retrying', retry_after_sec=2)
+            context.update_download(progress)
+            started.set()
+            await release.wait()
+            return jobs.InstallOutcome('verified', 'Verified fixture.')
+        service = jobs.ModuleJobService(self.environment, installer=install)
+        created = await service.create(await self.request(['media']))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            retained = jobs.ModuleJobService(self.environment).get(created.id)
+            self.assertEqual(retained.steps[0].download.bytes_received, 4)
+            self.assertEqual(retained.steps[0].download.phase, 'retrying')
+            self.assertEqual(retained.steps[0].download.attempt, 2)
+        finally:
+            release.set()
+            await service.shutdown()
+
     async def test_create_requires_unchanged_reviewed_plan(self) -> None:
         service = jobs.ModuleJobService(self.environment)
         request = await self.request(['ebooks'])
@@ -52,6 +77,46 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(jobs.ModuleSetupError, 'plan_changed'):
             await service.create(request)
         self.assertEqual(list(self.root.iterdir()), [])
+
+    async def test_late_progress_cannot_mutate_cancelled_job_or_its_last_bytes(self) -> None:
+        from app.module_contracts import ModuleDownloadProgress
+        contexts: list[jobs.InstallContext] = []
+        started = asyncio.Event()
+        retained = ModuleDownloadProgress(artifact_name='model.bin', bytes_received=5, total_bytes=20, attempt=1, phase='downloading')
+        async def install(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
+            contexts.append(context)
+            context.update_download(retained)
+            started.set()
+            await asyncio.Event().wait()
+            return jobs.InstallOutcome('verified', 'unreachable')
+        service = jobs.ModuleJobService(self.environment, installer=install)
+        try:
+            created = await service.create(await self.request(['media']))
+            await started.wait()
+            cancelled = await service.cancel(created.id)
+            contexts[0].update_download(ModuleDownloadProgress(artifact_name='model.bin', bytes_received=20, total_bytes=20, attempt=1, phase='complete'))
+            self.assertEqual(jobs.ModuleJobService(self.environment).get(created.id), cancelled)
+            self.assertEqual(cancelled.steps[0].download, retained)
+        finally:
+            await service.shutdown()
+
+    async def test_native_progress_stream_is_bounded_validated_and_survives_reload(self) -> None:
+        from app.module_contracts import ModuleDownloadProgress
+        progress = ModuleDownloadProgress(artifact_name='model.gguf', bytes_received=5, total_bytes=20, attempt=2, phase='retrying', retry_after_sec=1)
+        payload = 'OPENFABRIC_DOWNLOAD_PROGRESS ' + progress.model_dump_json()
+        script = 'import sys;sys.stdout.write(' + repr('OPENFABRIC_DOWNLOAD_PROGRESS ' + 'x' * 10000 + '\n' + 'OPENFABRIC_DOWNLOAD_PROGRESS {"bytes_received":-1}\n' + payload + '\n') + ');sys.stdout.flush()'
+        async def install(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
+            await context.run([sys.executable, '-c', script], download_progress=True)
+            return jobs.InstallOutcome('verified', 'Offline fixture.')
+        service = jobs.ModuleJobService(self.environment, installer=install)
+        try:
+            created = await service.create(await self.request(['media']))
+            await self.wait_for_terminal(service, created.id)
+            retained = jobs.ModuleJobService(self.environment).get(created.id)
+            self.assertEqual(retained.state, 'completed')
+            self.assertEqual(retained.steps[0].download, progress)
+        finally:
+            await service.shutdown()
 
     async def test_concurrent_requests_share_one_owned_installation(self) -> None:
         started = asyncio.Event()

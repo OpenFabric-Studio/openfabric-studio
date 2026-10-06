@@ -7,10 +7,12 @@ from installing and checking an environment.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 import hashlib
 import json
 import os
+import re
 from pathlib import Path, PurePosixPath
 import shutil
 import stat
@@ -24,7 +26,7 @@ from pydantic import BaseModel, Field, ValidationError
 from .atomic_files import write_object
 from .contracts import JsonValue
 from .module_catalog import engine_python, is_managed, MODULE_IDS, platform_key, supported
-from .module_contracts import ModuleId
+from .module_contracts import ModuleId, ModuleDownloadProgress
 from .module_evidence import environment_fingerprint
 from .module_jobs import InstallContext, InstallOutcome, ModuleSetupError
 from .job_lifecycle import await_cleanup
@@ -111,42 +113,107 @@ def _sha256(path: Path) -> str:
         return hashlib.file_digest(source, 'sha256').hexdigest()
 
 
-async def download_artifact(artifact: DownloadArtifact, destination: Path, context: InstallContext,
-                            *, client: httpx.AsyncClient | None = None) -> Path:
-    context.confined(destination)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.is_file() and destination.stat().st_size == artifact.bytes and await asyncio.to_thread(_sha256, destination) == artifact.sha256:
-        return destination
-    partial = context.confined(destination.with_name(destination.name + '.part'))
+DOWNLOAD_ATTEMPTS = 3
+DOWNLOAD_STALL_SECONDS = 45.0
+_TRANSIENT_HTTP = frozenset({408, 429, 500, 502, 503, 504})
+
+
+class _IncompleteDownload(Exception):
+    pass
+
+
+def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
+    value = response.headers.get('retry-after', '') if response is not None else ''
+    return min(30.0, float(value)) if value.isascii() and value.isdigit() and len(value) < 10 else float(2 ** (attempt - 1))
+
+
+def _download_progress(artifact: DownloadArtifact, received: int, attempt: int,
+                       phase: Literal['downloading', 'retrying', 'verifying', 'complete'],
+                       callback: Callable[[ModuleDownloadProgress], None] | None, delay: float | None = None) -> None:
+    if callback is not None:
+        callback(ModuleDownloadProgress(artifact_name=Path(artifact.url).name[-120:] or 'Pinned asset',
+            bytes_received=min(received, artifact.bytes), total_bytes=artifact.bytes, attempt=attempt,
+            max_attempts=DOWNLOAD_ATTEMPTS, phase=phase, retry_after_sec=delay))
+
+
+async def _download_once(artifact: DownloadArtifact, partial: Path, client: httpx.AsyncClient, attempt: int,
+                         callback: Callable[[ModuleDownloadProgress], None] | None) -> None:
     offset = partial.stat().st_size if partial.is_file() else 0
-    if offset > artifact.bytes:
+    if offset >= artifact.bytes:
+        if offset == artifact.bytes and await await_cleanup(asyncio.to_thread(_sha256, partial)) == artifact.sha256:
+            return
         partial.unlink()
         offset = 0
-    if client is None:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(60, connect=15)) as owned:
-            return await download_artifact(artifact, destination, context, client=owned)
-    headers = {'Range': f'bytes={offset}-'} if offset else {}
+    _download_progress(artifact, offset, attempt, 'downloading', callback)
+    headers = {'Range': f'bytes={offset}-', 'Accept-Encoding': 'identity'} if offset else {'Accept-Encoding': 'identity'}
     async with client.stream('GET', artifact.url, headers=headers) as response:
-        if response.status_code == 416 and offset == artifact.bytes:
-            pass
-        else:
-            response.raise_for_status()
-            append = response.status_code == 206 and offset > 0
-            if append and not response.headers.get('content-range', '').startswith(f'bytes {offset}-'):
+        response.raise_for_status()
+        append = response.status_code == 206
+        length = response.headers.get('content-length')
+        if response.headers.get('content-encoding', 'identity').lower() != 'identity':
+            raise ModuleSetupError('artifact_integrity')
+        expected = artifact.bytes
+        if append:
+            match = re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)', response.headers.get('content-range', ''))
+            if match is None:
                 raise ModuleSetupError('artifact_integrity')
-            written = offset if append else 0
-            with partial.open('ab' if append else 'wb') as output:
-                async for chunk in response.aiter_bytes(1024 * 1024):
-                    written += len(chunk)
-                    if written > artifact.bytes:
-                        raise ModuleSetupError('artifact_integrity')
-                    output.write(chunk)
-                output.flush()
-                os.fsync(output.fileno())
-    if partial.stat().st_size != artifact.bytes or await asyncio.to_thread(_sha256, partial) != artifact.sha256:
+            start, end, total = (int(value) for value in match.groups())
+            if start != offset or total != artifact.bytes or end != artifact.bytes - 1:
+                raise ModuleSetupError('artifact_integrity')
+            expected -= offset
+        elif response.status_code != 200:
+            raise ModuleSetupError('artifact_integrity')
+        if length is not None and (not length.isascii() or not length.isdigit() or int(length) > expected or append and int(length) != expected):
+            raise ModuleSetupError('artifact_integrity')
+        written = offset if append else 0
+        with partial.open('ab' if append else 'wb') as output:
+            chunks = response.aiter_bytes(65536).__aiter__()
+            while True:
+                try:
+                    async with asyncio.timeout(DOWNLOAD_STALL_SECONDS):
+                        chunk = await anext(chunks)
+                except StopAsyncIteration:
+                    break
+                written += len(chunk)
+                if written > artifact.bytes:
+                    raise ModuleSetupError('artifact_integrity')
+                output.write(chunk)
+                _download_progress(artifact, written, attempt, 'downloading', callback)
+            output.flush()
+            os.fsync(output.fileno())
+        if written != artifact.bytes:
+            raise _IncompleteDownload()
+
+
+async def download_artifact(artifact: DownloadArtifact, destination: Path, context: InstallContext,
+                            *, client: httpx.AsyncClient | None = None,
+                            on_progress: Callable[[ModuleDownloadProgress], None] | None = None) -> Path:
+    context.confined(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and destination.stat().st_size == artifact.bytes and await await_cleanup(asyncio.to_thread(_sha256, destination)) == artifact.sha256:
+        return destination
+    partial = context.confined(destination.with_name(destination.name + '.part'))
+    if client is None:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=httpx.Timeout(45, connect=15)) as owned:
+            return await download_artifact(artifact, destination, context, client=owned, on_progress=on_progress)
+    for attempt in range(1, DOWNLOAD_ATTEMPTS + 1):
+        try:
+            await _download_once(artifact, partial, client, attempt, on_progress)
+            break
+        except (httpx.TransportError, httpx.HTTPStatusError, TimeoutError, _IncompleteDownload) as error:
+            if isinstance(error, httpx.HTTPStatusError) and error.response.status_code not in _TRANSIENT_HTTP:
+                raise ModuleSetupError('download_failed') from error
+            if attempt == DOWNLOAD_ATTEMPTS:
+                raise ModuleSetupError('download_stalled' if isinstance(error, (TimeoutError, httpx.TimeoutException)) else 'download_failed') from error
+            delay = _retry_delay(attempt, error.response if isinstance(error, httpx.HTTPStatusError) else None)
+            _download_progress(artifact, partial.stat().st_size if partial.is_file() else 0, attempt, 'retrying', on_progress, delay)
+            await asyncio.sleep(delay)
+    _download_progress(artifact, partial.stat().st_size, attempt, 'verifying', on_progress)
+    if partial.stat().st_size != artifact.bytes or await await_cleanup(asyncio.to_thread(_sha256, partial)) != artifact.sha256:
         partial.unlink(missing_ok=True)
         raise ModuleSetupError('artifact_integrity')
     partial.replace(destination)
+    _download_progress(artifact, artifact.bytes, attempt, 'complete', on_progress)
     return destination
 
 
@@ -306,6 +373,8 @@ async def verify(context: InstallContext, identifier: ModuleId) -> InstallOutcom
     module = next(item for item in status.modules if item.id == identifier)
     if module.state == 'ready':
         return InstallOutcome('verified', 'Current bounded tool or runtime/model checks passed. No engine files were changed.')
+    if identifier == 'speaker_review':
+        return _speaker_outcome(context)
     definition = DEFINITIONS[identifier]
     target = context.environment.paths[identifier]
     if definition.packages and all((target / marker).exists() for marker in definition.source_markers) and engine_python(target, context.environment.platform).is_file():
@@ -314,12 +383,22 @@ async def verify(context: InstallContext, identifier: ModuleId) -> InstallOutcom
     raise ModuleSetupError('environment_unverified')
 
 
+def _speaker_outcome(context: InstallContext) -> InstallOutcome:
+    from .module_runtime import speaker_status
+    status = speaker_status(context.environment)
+    if not status.installed:
+        raise ModuleSetupError('environment_unverified')
+    if status.ready:
+        return InstallOutcome('verified', 'Separate CPU dependencies and the reviewed explicitly configured local checkpoint are verified. Similarity still requires human review.')
+    return InstallOutcome('manual', 'Separate CPU dependencies verified. No weights were downloaded. Select the reviewed local ECAPA checkpoint explicitly and configure OPENFABRIC_SPEAKER_REVIEW_PYTHON and OPENFABRIC_SPEAKER_REVIEW_WEIGHTS before speaker review.')
+
+
 async def _media(context: InstallContext, target: Path, assets: AssetManifest) -> InstallOutcome:
     artifact = assets.ffmpeg.assets.get(platform_key(context.environment))
     if artifact is None:
         return InstallOutcome('manual', 'Install both ffmpeg and ffprobe with your operating-system package manager.')
     cached = context.environment.root / 'cache/downloads' / Path(artifact.url).name
-    await download_artifact(artifact, cached, context)
+    await download_artifact(artifact, cached, context, on_progress=context.update_download)
     staged = context.confined(context.workspace / 'media')
     if staged.exists():
         await await_cleanup(asyncio.to_thread(shutil.rmtree, staged))
@@ -329,7 +408,7 @@ async def _media(context: InstallContext, target: Path, assets: AssetManifest) -
         if artifact.ffprobe is None:
             return InstallOutcome('manual', 'This platform manifest has no pinned FFprobe; install a paired toolchain manually.')
         probe_cached = context.environment.root / 'cache/downloads' / Path(artifact.ffprobe.url).name
-        await download_artifact(artifact.ffprobe, probe_cached, context)
+        await download_artifact(artifact.ffprobe, probe_cached, context, on_progress=context.update_download)
         shutil.copyfile(cached, staged / 'bin/ffmpeg')
         shutil.copyfile(probe_cached, staged / 'bin/ffprobe')
     else:
@@ -367,7 +446,7 @@ async def _native(context: InstallContext, target: Path, assets: AssetManifest, 
     binary_dir.mkdir(parents=True)
     for index, file in enumerate(artifact.files):
         cached = context.environment.root / 'cache/downloads' / Path(file.url).name
-        await download_artifact(file, cached, context)
+        await download_artifact(file, cached, context, on_progress=context.update_download)
         extracted = context.confined(context.workspace / f'native-archive-{index}')
         if extracted.exists():
             await await_cleanup(asyncio.to_thread(shutil.rmtree, extracted))
@@ -394,22 +473,33 @@ async def _native_weights(context: InstallContext, target: Path, assets: AssetMa
         return InstallOutcome('manual', 'Native engine installed. Review the plan with model downloads selected to install required weights.')
     if shutil.which('git') is None:
         return InstallOutcome('manual', 'Git is required to apply the verified resumable model downloader before installing weights.')
-    patch = Path(__file__).resolve().parents[2] / 'external/patches/yue-model-resume.patch'
-    if not patch.is_file():
-        patch = Path(__file__).resolve().parents[2] / 'patches/yue-model-resume.patch'
+    patch_dir = Path(__file__).resolve().parents[2] / 'external/patches'
+    if not (patch_dir / 'yue-model-resume.patch').is_file():
+        patch_dir = Path(__file__).resolve().parents[2] / 'patches'
+    reliability = patch_dir / 'yue-model-download-reliability.patch'
     try:
-        await context.run(['git', 'apply', '--reverse', '--check', str(patch)], cwd=target)
+        # Check the final layer first: it changes old-patch context, so checking
+        # the old layer alone is no longer a reliable installed-state probe.
+        await context.run(['git', 'apply', '--reverse', '--check', str(reliability)], cwd=target)
     except ModuleSetupError as exc:
         if exc.code != 'installer_failed':
             raise
-        await context.run(['git', 'apply', '--check', str(patch)], cwd=target)
-        await context.run(['git', 'apply', '--whitespace=nowarn', str(patch)], cwd=target)
+        patch = patch_dir / 'yue-model-resume.patch'
+        try:
+            await context.run(['git', 'apply', '--reverse', '--check', str(patch)], cwd=target)
+        except ModuleSetupError as previous:
+            if previous.code != 'installer_failed':
+                raise
+            await context.run(['git', 'apply', '--check', str(patch)], cwd=target)
+            await context.run(['git', 'apply', '--whitespace=nowarn', str(patch)], cwd=target)
+        await context.run(['git', 'apply', '--check', str(reliability)], cwd=target)
+        await context.run(['git', 'apply', '--whitespace=nowarn', str(reliability)], cwd=target)
     # Refresh ownership before any awaited model download can be interrupted.
     _record_owned(context, 'yue2', target, assets.engine.tag)
     for package in assets.weights.packages:
         if package not in ('yue2_main_q8_0', 'yue2_main_q4_0', 'yue2_vae_f16', 'sheetsage2_orig', 'muscriptor_small_f32'):
             raise ModuleSetupError('artifact_integrity')
-        await context.run([str(context.environment.python), 'tools/model_manager_v2.py', 'install', package], cwd=target, env=_uv_env(context))
+        await context.run([str(context.environment.python), 'tools/model_manager_v2.py', 'install', package, '--progress'], cwd=target, env=_uv_env(context), download_progress=True)
     return InstallOutcome('manual', 'Native packages downloaded by the verified model manager. Verify GPU compatibility and a short generation in Music before claiming readiness.')
 
 
@@ -421,10 +511,22 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
         return InstallOutcome('manual', 'The configured external installation is preserved. Review its setup outside the managed installer.')
     target = context.confined(env.paths[identifier])
     assets = load_manifest()
-    version = assets.aceStep.commit if identifier == 'ace_step' else assets.engine.tag if identifier == 'yue2' else SOURCE_PINS[identifier].commit if identifier in SOURCE_PINS else hashlib.sha256(manifest_path().read_bytes()).hexdigest()
+    version = 'speechbrain-1.0.3-torch-2.6.0-cpu-v1' if identifier == 'speaker_review' else assets.aceStep.commit if identifier == 'ace_step' else assets.engine.tag if identifier == 'yue2' else SOURCE_PINS[identifier].commit if identifier in SOURCE_PINS else hashlib.sha256(manifest_path().read_bytes()).hexdigest()
     owned = _owned(context, identifier, target, version)
     if target.exists() and not owned:
         return InstallOutcome('manual', 'An existing or modified installation was preserved. Use a separate managed root or review the existing setup manually.')
+    if identifier == 'speaker_review':
+        target.mkdir(parents=True, exist_ok=True)
+        marker = context.confined(target / '.openfabric-speaker-runtime.json')
+        write_object(marker, {'schema_version': 1, 'dependency_setup': version})
+        # Claim only this app-created runtime before the awaited setup, so
+        # cancelled dependency installation can be resumed without overwriting
+        # an unrelated existing environment.
+        _record_owned(context, identifier, target, version)
+        await context.run([str(env.python), str(Path(__file__).resolve().parents[1] / 'scripts/setup_speaker_review.py'), '--runtime-root', str(target), '--python', str(env.python)], env=_uv_env(context))
+        result = _speaker_outcome(context)
+        _record_owned(context, identifier, target, version)
+        return result
     if identifier == 'media':
         if owned:
             from .module_catalog import inventory

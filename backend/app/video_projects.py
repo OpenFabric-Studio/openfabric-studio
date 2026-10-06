@@ -30,6 +30,7 @@ from .video_contracts import (
 from .video_media import tool, probe_media
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
 from .video_process import WorkerIdentity
+from .export_provenance_contracts import ExportProvenance
 
 logger = logging.getLogger(__name__)
 _lock = threading.RLock()
@@ -69,6 +70,7 @@ class PendingExport(VideoContract):
     fingerprint: str
     output_sha256: str = ""
     project_revision: int = Field(default=0, ge=0)
+    provenance: ExportProvenance | None = None
 
 
 class VideoHistorySnapshot(VideoContract):

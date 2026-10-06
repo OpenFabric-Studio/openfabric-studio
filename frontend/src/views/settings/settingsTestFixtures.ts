@@ -5,6 +5,7 @@ export function encodingSettings(): CompleteAudioEncodingSettings {
     mp3: { mode: 'cbr', bitrate_kbps: 320, vbr_quality: 2, sample_rate: 48000, channels: 2 },
     wav: { bit_depth: 24, sample_rate: 48000, channels: 2 },
     flac: { bit_depth: 24, compression_level: 5, sample_rate: 48000, channels: 2 },
+    loudness: { profile: 'off', integrated_lufs: -16, true_peak_dbtp: -2 },
   }
 }
 export function audioSettingsResponse(): CompleteAudioSettingsResponse {

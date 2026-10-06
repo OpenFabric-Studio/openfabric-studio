@@ -206,7 +206,8 @@ async def _prepare(body: CreateDialogueReelRequest, project_id: str, *, target: 
                 passage_id=passage.id, source_revision=body.revision, render_identity=passage.render_identity,
                 profile_id=passage.profile_id, speaker=passage.speaker, text=passage.text, language=passage.language,
                 source_duration_ms=source_duration_ms, source_start_ms=selection.clip_start_ms, source_end_ms=round(end * 1000 / rate),
-                start_sec=cursor, end_sec=cursor + clip_duration, audio_sha256=hashlib.sha256(pcm).hexdigest(), waveform_peaks=_peaks(pcm)))
+                start_sec=cursor, end_sec=cursor + clip_duration, audio_sha256=hashlib.sha256(pcm).hexdigest(), waveform_peaks=_peaks(pcm),
+                renderer=passage.renderer,cloud_provenance=passage.cloud_provenance))
             caption = selection.caption if selection.caption is not None else passage.text
             if len(caption) > 500:
                 raise store.VideoProjectError('dialogue_caption_limit')

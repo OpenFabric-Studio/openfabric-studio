@@ -14,12 +14,18 @@ import subprocess
 import threading
 import sys
 import uuid
+import hashlib
+import json
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import audiobooks
 from .video_process import WorkerIdentity, WorkerReceipt, WorkerOutputError, spawn_owned, read_owned_output, terminate_verified
 from .job_lifecycle import await_cleanup, kill_process_tree
 from pydantic import ValidationError
+from .export_provenance_contracts import GenerationIdentity, ProvenanceComponent
+from .speech_references import SpeechRenderSnapshot
+from .voice_profile_contracts import CloudSpeechProvenance
 
 _LOG = logging.getLogger(__name__)
 _FFMPEG_TIMEOUT = 120
@@ -242,6 +248,7 @@ def publish_formats(
     cover: Path | None,
     canonical_wav: Path | None = None,
     destination_stem: str = "export",
+    provenance_replacement: BookProvenanceReplacement | None = None,
 ) -> tuple[Path | None, Path | None, str]:
     """Return mp3 path, m4b path, and a short machine-readable note."""
     root = audiobooks.book_dir(book_id)
@@ -257,6 +264,9 @@ def publish_formats(
         raise audiobooks.AudiobookError("export_not_ready", 404)
     encoders = available_encoders()
     notes: list[str] = []
+    components=book_provenance_components(book_id,chapters,replacement=provenance_replacement)
+    from . import export_provenance
+    content=export_provenance.origin(components)
     mp3_path: Path | None = None
     m4b_path: Path | None = None
     if "libmp3lame" not in encoders:
@@ -266,6 +276,7 @@ def publish_formats(
         metadata = ["-metadata", f"title={title}", "-metadata", f"album={title}"]
         if author:
             metadata.extend(["-metadata", f"artist={author}"])
+        metadata.extend(export_provenance.metadata_args(destination_stem,content))
         if _publish_one(["-y", "-i", str(wav), "-vn", "-c:a", "libmp3lame", "-q:a", "4", *metadata, "-f", "mp3"], target):
             mp3_path = target
         else:
@@ -285,11 +296,94 @@ def publish_formats(
             args.extend(["-i", str(meta), "-map", "0:a"])
             if meta_index == 2:
                 args.extend(["-map", "1:v", "-c:v", "mjpeg", "-disposition:v:0", "attached_pic"])
-            args.extend(["-map_metadata", str(meta_index), "-c:a", "aac", "-b:a", "96k", "-f", "mp4"])
+            # Keep iTunes metadata atoms: FFmpeg MDTA mode omits the cover covr atom.
+            # Origin remains in the standard comment and the hash-bound JSON manifest.
+            args.extend(["-map_metadata", str(meta_index),*export_provenance.metadata_args(destination_stem,content), "-c:a", "aac", "-b:a", "96k", "-f", "mp4"])
             if _publish_one(args, target):
                 m4b_path = target
             else:
                 notes.append("m4b:export_failed")
         finally:
             meta.unlink(missing_ok=True)
+    for media in (wav,mp3_path,m4b_path):
+        if media is not None:
+            value=export_provenance.manifest(destination_stem,'audiobook',media,components,
+                transformations=['join_chapters_from_captured_takes',f'encode:{media.suffix.lstrip(".")}'])
+            export_provenance.write(media,value)
     return mp3_path, m4b_path, ";".join(notes)[:500]
+
+
+@dataclass(frozen=True)
+class BookProvenanceReplacement:
+    chapter_index: int
+    passage_id: str
+    chapter_path: Path
+    snapshot: SpeechRenderSnapshot
+    render_identity: str
+    cloud: CloudSpeechProvenance | None
+
+
+def book_provenance_components(book_id: str,chapters: list[tuple[str,Path]],*,
+    replacement: BookProvenanceReplacement | None=None) -> list[ProvenanceComponent]:
+    """One component per chapter; record digests include every captured take."""
+    from . import audiobook_workflows as workflows,export_provenance
+    if not 1<=len(chapters)<=100:raise audiobooks.AudiobookError('manifest_capacity_exceeded',409)
+    result: list[ProvenanceComponent]=[]
+    for index,(_,path) in enumerate(chapters):
+        component=ProvenanceComponent(role='audio',content_origin='unknown',classification_basis='unverified',
+            source_id=f'book:{book_id}:chapter:{index}',source_sha256=export_provenance.digest(path))
+        records: list[str]=[];identities: dict[str,GenerationIdentity]={};mock=False
+        try:
+            accepted=audiobooks.chapter_audio_path(book_id,index)
+            changed=replacement if replacement is not None and replacement.chapter_index==index and replacement.chapter_path==path else None
+            if accepted.resolve()!=path.resolve() and changed is None:raise audiobooks.AudiobookError('snapshot_unavailable',409)
+            passages=workflows.get_passages(book_id,index)
+            for passage in passages.passages:
+                if changed is not None and changed.passage_id==passage.id:
+                    snapshot=changed.snapshot;render_identity=changed.render_identity;cloud=changed.cloud
+                else:
+                    snapshot=workflows.passage_render_snapshot(book_id,index,passage.id,passages.revision)
+                    render_identity=passage.render_identity or '';cloud=passage.cloud_provenance
+                mock=mock or snapshot.engine_identity=='openfabric-mock-pcm-v1'
+                records.append(snapshot.identity+':'+render_identity+':'+(cloud.model_dump_json() if cloud else ''))
+                identity=GenerationIdentity(engine=snapshot.engine,model_id=snapshot.cloud.model if snapshot.cloud else 'gpt-sovits',
+                    engine_identity=snapshot.cloud.model_fingerprint if snapshot.cloud else snapshot.engine_identity)
+                identities[identity.model_dump_json()]=identity
+            if records:
+                if len(identities)>32:raise audiobooks.AudiobookError('manifest_capacity_exceeded',409)
+                component.content_origin='unknown' if mock else 'generated';component.classification_basis='app_workflow'
+                component.generation_identities=list(identities.values());component.source_record_count=len(records)
+                component.source_records_sha256=hashlib.sha256(json.dumps(records,separators=(',',':')).encode()).hexdigest()
+        except audiobooks.AudiobookError as exc:
+            if exc.code=='manifest_capacity_exceeded':raise
+            # Missing legacy snapshots never borrow today's profile settings.
+        result.append(component)
+    return result
+
+
+def finalize_book_provenance(book_id: str) -> None:
+    """Repair metadata is adopted only when the accepted chapter hashes agree."""
+    from . import export_provenance
+    with audiobooks.publication_lock(book_id):
+        book=audiobooks.get_book(book_id)
+        if book.status!='done':return
+        jobs=audiobooks.list_jobs(book_id=book_id)
+        components=book_provenance_components(book_id,[(job.chapter_title,audiobooks.chapter_audio_path(book_id,job.chapter_index)) for job in jobs])
+        for format in ('wav','mp3','m4b'):
+            try:media=audiobooks.export_format_path(book_id,format)
+            except audiobooks.AudiobookError:continue
+            if not export_provenance.path_for(media,'json').exists():
+                # Legacy output (or an explicit model-boundary test fixture)
+                # has no captured proof to adopt. Leave origin unknown.
+                continue
+            previous=export_provenance.read(media)
+            if previous.components!=components:raise export_provenance.ProvenanceError('manifest_source_changed')
+            # Reading verifies both retained source facts and exact output
+            # bytes. Missing manifests require explicit retry of publication.
+
+
+def safe_finalize_book_provenance(book_id: str) -> None:
+    from .export_provenance import ProvenanceError
+    try:finalize_book_provenance(book_id)
+    except (OSError,ProvenanceError,audiobooks.AudiobookError):
+        _LOG.warning('Published audiobook provenance could not be verified',exc_info=True)

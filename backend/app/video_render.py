@@ -62,6 +62,32 @@ _cancelling: dict[str, int] = {}
 _ACTIVE = {"queued", "running"}
 
 
+class _SourceFormat(VideoContract):
+    tags: dict[str,str]=Field(default_factory=dict)
+
+
+class _SourceMetadata(VideoContract):
+    format: _SourceFormat=Field(default_factory=_SourceFormat)
+
+
+async def _retained_metadata(project_id: str,paths: list[Path]) -> dict[str,str]:
+    merged: dict[str,tuple[str,list[str]]]={}
+    total=0
+    for path in dict.fromkeys(paths):
+        raw=await _command(project_id,[tool('ffprobe'),'-v','error','-show_entries','format_tags','-of','json',str(path)],'retaining_metadata',timeout=60)
+        try:parsed=_SourceMetadata.model_validate_json(raw)
+        except ValidationError as exc:raise store.VideoProjectError('invalid_media') from exc
+        for key,value in parsed.format.tags.items():
+            total+=len(key.encode())+len(value.encode())
+            if total>65536 or len(key)>200 or len(value.encode())>16384 or '=' in key or any(ord(char)<32 for char in key):
+                raise store.VideoProjectError('metadata_too_large')
+            folded=key.casefold()
+            if folded not in merged:merged[folded]=(key,[value])
+            elif value not in merged[folded][1]:merged[folded][1].append(value)
+    return {original: '; '.join(values) if key=='comment' else values[0] if len(values)==1 else json.dumps(values,ensure_ascii=False)
+            for key,(original,values) in merged.items()}
+
+
 class VariantReceipt(VideoContract):
     variant_id: str
     shot_id: str
@@ -143,7 +169,7 @@ async def _command(
     *,
     variant_id: str | None = None,
     timeout: float = 300,
-) -> None:
+) -> bytes:
     from .video_jobs import parse_video_phase
 
     document = store.load(project_id)
@@ -215,6 +241,10 @@ async def _command(
         if waiter is not None:
             await await_cleanup(asyncio.gather(waiter, return_exceptions=True))
         _worker(project_id, None)
+    with log_path.open('rb') as output:
+        output.seek(0,2)
+        output.seek(max(0,output.tell()-1024*1024))
+        return output.read(1024*1024)
 
 
 def readiness() -> VideoReadinessResponse:
@@ -958,7 +988,36 @@ async def _assemble(
     output.parent.mkdir(parents=True, exist_ok=True)
     partial = output.with_name(output.stem + ".partial.mp4")
     from .video_text import font_identity
-    caption_font = font_identity() if settings.include_overlays and project.overlays else ""
+    from . import export_provenance, audio_quality
+    components=export_provenance.video_components(document,attach_speech=settings.attach_speech)
+    sources=[variant_path(project.id,shot.id,variant.id) for shot in project.shots for variant in shot.variants
+        if variant.id==shot.approved_variant_id and variant.status=='ready']
+    if soundtrack is not None:sources.append(soundtrack)
+    retained_tags=await _retained_metadata(project.id,sources)
+    previous_comment=next((value for key,value in retained_tags.items() if key.casefold()=='comment'),'')
+    export_overlays=list(project.overlays) if settings.include_overlays else []
+    visible_label=False
+    if settings.visible_ai_label and any(item.role!='conditioning_reference' and item.content_origin in {'generated','mixed'} for item in components):
+        from .video_contracts import VideoOverlay
+        label='AI-generated' if export_provenance.origin(components)=='generated' else 'Contains AI-generated content'
+        export_overlays.append(VideoOverlay(id=uuid.uuid4().hex,kind='title',text=label,start_sec=0,end_sec=duration,
+            font_size=max(14,min(28,round(width*.035))),position='top'))
+        visible_label=True
+    caption_font = font_identity() if export_overlays else ""
+    async def quality_command(command: list[str],timeout: float) -> bytes:
+        return await _command(project.id,command,'audio_quality',timeout=timeout)
+    if soundtrack is not None and settings.loudness.target is not None:
+        fitted=run/'programme.wav'
+        await _command(project.id,[tool('ffmpeg'),'-v','error','-nostdin','-y','-i',str(soundtrack),'-vn','-af',
+            fitted_speech_filter(duration) if speech is not None else f'atrim=duration={duration}',
+            '-c:a','pcm_f32le',str(fitted)],'preparing_soundtrack')
+        measured=await audio_quality.measure(fitted,run,quality_command)
+        processing=audio_quality.normalization_filter(settings.loudness,measured)
+        if processing is not None:
+            normalized_audio=run/'programme.normalized.wav'
+            await _command(project.id,[tool('ffmpeg'),'-v','info','-nostdin','-y','-i',str(fitted),'-af',processing,
+                '-ar','48000','-c:a','pcm_f32le',str(normalized_audio)],'normalizing_soundtrack')
+            soundtrack=normalized_audio
     export_fingerprint = hashlib.sha256(
         (
             project.model_dump_json(
@@ -992,13 +1051,13 @@ async def _assemble(
         ]
         if soundtrack is not None:
             argv += ["-i", str(soundtrack)]
-        if settings.include_overlays and project.overlays:
+        if export_overlays:
             from .video_text import render_text
 
             chain = "[0:v]null[v0]"
             last = "v0"
             input_index = 2 if soundtrack is not None else 1
-            for index, overlay in enumerate(project.overlays):
+            for index, overlay in enumerate(export_overlays):
                 image = run / f"text_{index}.png"
                 render_text(overlay, width, height, image)
                 argv += ["-i", str(image)]
@@ -1033,6 +1092,9 @@ async def _assemble(
             else:
                 argv += ["-an"]
         argv += [
+            *(part for key,value in retained_tags.items() if key.casefold() not in {'comment','openfabric_content_origin','openfabric_export_id'} for part in ('-metadata',f'{key}={value}')),
+            *export_provenance.metadata_args(job.id,export_provenance.origin(components),previous_comment),
+            '-movflags','+use_metadata_tags',
             "-t",
             str(duration),
             "-f",
@@ -1043,14 +1105,28 @@ async def _assemble(
         await validate_media(
             partial, duration, (width, height), require_audio=soundtrack is not None
         )
+        metrics=None
+        if soundtrack is not None:
+            try:metrics=(await audio_quality.measure(partial,run,quality_command,name='export')).metrics
+            except audio_quality.AudioQualityError:
+                logger.warning('Video export audio measurement unavailable',exc_info=True)
+            except store.VideoProjectError as exc:
+                if exc.code!='processing_failed':raise
+                logger.warning('Video export audio measurement process failed',exc_info=True)
+        target=audio_quality.target_result(settings.loudness,metrics)
+        provenance=export_provenance.manifest(job.id,'video',partial,components,
+            transformations=[f'assemble:{width}x{height}:24fps',f'loudness:{settings.loudness.profile}:result={target}'],
+            measured_audio=metrics,visible_ai_label=visible_label,audio_target=settings.loudness,audio_target_result=target)
         output_hash = await hash_file(partial)
 
         def verified(saved: store.StoredVideoProject) -> None:
             if saved.pending_export is not None:
                 saved.pending_export.output_sha256 = output_hash
+                saved.pending_export.provenance=provenance
 
         store.mutate(project.id, verified, busy_ok=True, bump=False)
         partial.replace(output)
+        export_provenance.write(output,provenance)
         poster = output.with_suffix(".png")
         await _poster(project.id, output, poster)
 
@@ -1062,6 +1138,12 @@ async def _assemble(
             saved.project.file_url = f"/api/videos/projects/{project.id}/file"
             saved.project.poster_url = f"/api/videos/projects/{project.id}/poster"
             saved.project.export_settings = settings
+            saved.project.export_provenance=provenance
+            saved.project.provenance_url=f'/api/videos/projects/{project.id}/provenance'
+            saved.project.manifest_url=f'/api/videos/projects/{project.id}/manifest'
+            saved.project.warnings=[code for code in saved.project.warnings if code not in {'loudness_target_warning','loudness_target_inconclusive'}]
+            if target in {'warning','inconclusive'}:
+                saved.project.warnings=list(dict.fromkeys([*saved.project.warnings,'loudness_target_'+target]))
 
         _publish_checked(project.id, publish)
     finally:
@@ -1521,6 +1603,18 @@ def output_file(project_id: str, *, poster: bool = False) -> Path:
     return path
 
 
+def provenance_file(project_id: str,format: Literal['json','txt']) -> Path:
+    from . import export_provenance
+    document=store.load(project_id)
+    media=output_file(project_id)
+    value=document.project.export_provenance
+    if value is None:raise store.VideoProjectError('manifest_unavailable')
+    try:export_provenance.write(media,value)
+    except (OSError,export_provenance.ProvenanceError) as exc:
+        raise store.VideoProjectError('manifest_unavailable') from exc
+    return export_provenance.path_for(media,format)
+
+
 def variant_file(
     project_id: str, shot_id: str, variant_id: str, *, poster: bool = False
 ) -> Path:
@@ -1603,6 +1697,7 @@ async def recover() -> None:
         pending = document.pending_export
         adopted = False
         if pending is not None:
+            from . import export_provenance
             try:
                 path = store.artifact(project.id, pending.path)
                 if (
@@ -1615,14 +1710,25 @@ async def recover() -> None:
                     path,
                     pending.duration_sec,
                     (pending.width, pending.height),
-                    require_audio=True,
+                    require_audio=document.source is not None or bool(document.speech_path and (document.requested_export_settings or project.export_settings).attach_speech),
                 )
+                if pending.provenance is not None:
+                    from . import export_provenance
+                    export_provenance.write(path,pending.provenance)
 
                 def publish(saved: store.StoredVideoProject) -> None:
                     saved.published_file = pending.path
                     saved.pending_export = None
                     saved.worker = None
                     saved.project.file_url = f"/api/videos/projects/{project.id}/file"
+                    saved.project.export_provenance=pending.provenance
+                    if pending.provenance is not None and pending.provenance.audio_target_result is not None:
+                        saved.project.warnings=[code for code in saved.project.warnings if code not in {'loudness_target_warning','loudness_target_inconclusive'}]
+                        if pending.provenance.audio_target_result in {'warning','inconclusive'}:
+                            saved.project.warnings.append('loudness_target_'+pending.provenance.audio_target_result)
+                    if pending.provenance is not None:
+                        saved.project.provenance_url=f'/api/videos/projects/{project.id}/provenance'
+                        saved.project.manifest_url=f'/api/videos/projects/{project.id}/manifest'
                     if saved.requested_export_settings is not None:
                         saved.project.export_settings = saved.requested_export_settings
                     saved.project.poster_url = (
@@ -1633,7 +1739,7 @@ async def recover() -> None:
 
                 _publish_checked(project.id, publish)
                 adopted = True
-            except (VideoMediaError, OSError):
+            except (VideoMediaError, OSError, export_provenance.ProvenanceError):
                 pass
         _finish(
             project.id,

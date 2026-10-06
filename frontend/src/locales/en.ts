@@ -10,6 +10,8 @@ import { videoDirectionEn } from './videoDirection'
 import { videoLibraryEn } from './videoLibrary'
 import { audiobookWorkspaceEn } from './audiobookWorkspace'
 import { audiobookReviewEn } from './audiobookReview'
+import { speakerReviewEn } from './speakerReview'
+import { exportQuality } from './exportQuality'
 import { speechWorkspaceEn } from './speechWorkspace'
 import { localEnginesEn } from './localEngines'
 import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
@@ -24,6 +26,8 @@ import { trackFavoritesEn } from './trackFavorites'
 import { upstreamLibraryEn } from './upstreamLibrary'
 import { upstreamWorkspaceEn } from './upstreamWorkspace'
 export default {
+  speakerReview: speakerReviewEn,
+  exportQuality,
   videoCloud: videoCloudEn,
   cloudSpeech: cloudSpeechEn,
   cloudMusic: cloudMusicEn,

@@ -31,6 +31,7 @@ beforeEach(() => {
       mp3: { ...response.settings.mp3, ...settings.mp3 },
       wav: { ...response.settings.wav, ...settings.wav },
       flac: { ...response.settings.flac, ...settings.flac },
+      loudness: { ...response.settings.loudness, ...settings.loudness },
     } }
   })
   vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>().mockImplementation(async input => {
@@ -84,6 +85,15 @@ it('loads explicit per-format controls and explains future exports and source li
   expect(container.textContent).toContain('future exports'); expect(container.textContent).toContain('queued exports keep'); expect(container.textContent).toContain('cannot restore')
   await change(container, 'MP3 encoding mode', 'vbr')
   expect(select(container, 'MP3 VBR quality').value).toBe('2')
+})
+
+it('keeps loudness off until an explicit house target is chosen and saved', async () => {
+  const container = await mount()
+  expect(select(container, 'Loudness target').value).toBe('off')
+  await change(container, 'Loudness target', 'spoken_word')
+  button(container, 'Save audio settings').click(); await settle()
+  expect(audioApi.saveAudioSettings).toHaveBeenCalledWith(expect.objectContaining({ loudness: expect.objectContaining({ profile: 'spoken_word' }) }), expect.any(AbortSignal))
+  expect(container.textContent).toContain('house target')
 })
 
 it('shows loading and a safe failed-load retry without inventing loaded settings', async () => {

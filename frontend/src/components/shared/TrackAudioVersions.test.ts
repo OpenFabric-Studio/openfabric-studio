@@ -49,6 +49,36 @@ it('forwards playing and processing state for cards retained by pagination', asy
   app.unmount(); app = undefined; expect(playing.at(-1)).toBe(false)
 })
 it('switches between immutable original and voice playback and downloads', async () => { const node = mount(); await settle(); expect(node.querySelector('audio')?.src).toContain('/voice.wav'); button(node, 'Original').click(); await settle(); expect(node.querySelector('audio')?.src).toContain('/original.wav'); expect(node.querySelector('a[download]')?.getAttribute('href')).toBe('/original.wav'); expect(api.exports).toHaveBeenLastCalledWith(42, original.id, expect.any(AbortSignal)) })
+
+it('does not display another inspected version analysis over the retained native player', async () => {
+  vi.useFakeTimers()
+  api.list.mockResolvedValue({track_id:42,original_available:true,versions:[original,queued]})
+  api.exports.mockImplementation((_trackId: number,versionId: string) => Promise.resolve({exports:versionId===queued.id ? [{...exported,id:'e'.repeat(32),version_id:queued.id,operation:'analyze',audio_url:null,input_metrics:{duration_sec:1,integrated_lufs:-3,true_peak_dbtp:2,sample_peak_dbfs:0}}] : []}))
+  const node=mount();await settle()
+  expect(node.querySelector('audio')?.getAttribute('src')).toBe('/original.wav')
+  button(node,'Other singer · Queued').click();await settle()
+  expect(node.querySelector('audio')?.getAttribute('src')).toBe('/original.wav')
+  expect(node.querySelector('[data-audio-quality]')).toBeNull()
+  expect(node.textContent).not.toContain('-3.0 LUFS')
+})
+
+it('does not substitute dry-source measurements for an unmeasured processed export', async () => {
+  const sourceAnalysis: AudioExportResponse = { ...exported, id: 'd'.repeat(32), operation: 'analyze', audio_url: null, input_metrics: { duration_sec: 1, integrated_lufs: -7, true_peak_dbtp: 3, sample_peak_dbfs: -1 } }
+  exportsForOriginal([{ ...exported, output_metrics: null, target_result: 'inconclusive' }, sourceAnalysis])
+  const node = mount(); await settle(); button(node, 'Original').click(); await settle()
+  expect(node.querySelector('[data-audio-quality]')?.textContent).toContain('-7.0 LUFS')
+  formatButton(node, 'MP3').click(); await settle()
+  expect(node.querySelector('[data-audio-quality]')?.textContent ?? '').not.toContain('-7.0 LUFS')
+  expect(node.textContent).toContain('Measurements are unavailable for this selected file.')
+  expect(node.textContent).toContain('Target could not be verified')
+})
+
+it('runs persisted source diagnostics without replacing selected playback', async () => {
+  const node = mount(); await settle()
+  button(node, 'Analyze source').click(); await settle()
+  expect(api.export).toHaveBeenCalledWith(42, voice.id, 'wav', expect.any(AbortSignal), { operation: 'analyze' })
+  expect(node.querySelector('audio')?.src).toContain('/voice.wav')
+})
 it('tags the exact selected export without changing playback or raw download selection', async () => {
   exportsForOriginal(); vi.mocked(downloadApi.downloadTrackAudio).mockResolvedValue({ blob: new Blob(['audio']), filename: 'Singer - Song.mp3' })
   vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:download'); vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {}); vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})

@@ -10,9 +10,13 @@ function base(trackId: number, versionId: string) {
 export async function listAudioExports(trackId: number, versionId: string, signal?: AbortSignal) {
   return parseAudioExportsResponse(await apiFetch(base(trackId, versionId), { signal }))
 }
-export async function createAudioExport(trackId: number, versionId: string, format: AudioExportFormat, signal?: AbortSignal) {
-  const body = parseCreateAudioExportRequest({ format })
+export async function createAudioExport(trackId: number, versionId: string, format: AudioExportFormat, signal?: AbortSignal, options?: Pick<CreateAudioExportRequest, 'settings' | 'operation' | 'source_origin'>) {
+  const body = parseCreateAudioExportRequest({ format, ...options })
   return parseAudioExportResponse(await apiFetch(base(trackId, versionId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }))
+}
+export async function getAudioExport(trackId: number, versionId: string, exportId: string, signal?: AbortSignal) {
+  if (!/^[0-9a-f]{32}$/.test(exportId)) throw new Error('Invalid audio export')
+  return parseAudioExportResponse(await apiFetch(`${base(trackId, versionId)}/${exportId}`, { signal }))
 }
 async function action(trackId: number, versionId: string, exportId: string, kind: 'cancel' | 'retry', signal?: AbortSignal) {
   if (!/^[0-9a-f]{32}$/.test(exportId)) throw new Error('Invalid audio export')
