@@ -177,6 +177,19 @@ class CompatibilityTests(unittest.TestCase):
         self.apply()
         self.assertEqual(before, {path: path.read_bytes() for path in self.engine.rglob('*.py')})
 
+    def test_legacy_branding_is_migrated_idempotently(self):
+        self.apply()
+        for path in self.engine.rglob('*.py'):
+            path.write_text(path.read_text().replace('# OpenFabric:', '# Remiqora:')
+                            .replace('_openfabric_', '_remiqora_')
+                            .replace('OPENFABRIC_PROGRESS ', 'REMIQORA_PROGRESS '))
+        self.apply()
+        before = {path: path.read_bytes() for path in self.engine.rglob('*.py')}
+        self.assertNotIn('# Remiqora:', (self.engine / 'train.py').read_text())
+        self.assertNotIn('_remiqora_', (self.engine / 'inference.py').read_text())
+        self.apply()
+        self.assertEqual(before, {path: path.read_bytes() for path in self.engine.rglob('*.py')})
+
     def test_fresh_build_ignores_old_checkpoints_and_resume_loads_full_state(self):
         self.apply()
         source = ast.parse((self.engine / 'train.py').read_text())

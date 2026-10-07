@@ -282,8 +282,13 @@ def ensure_compatibility(engine_dir: Path) -> None:
         except (OSError, UnicodeError) as exc:
             raise EngineCompatibilityError(f'{patch.relative_path}: unreadable') from exc
         # The after signature may contain the before signature (argument insertion).
+        legacy_after = (patch.after.replace('# OpenFabric:', '# Remiqora:')
+                        .replace('_openfabric_', '_remiqora_')
+                        .replace('OPENFABRIC_PROGRESS ', 'REMIQORA_PROGRESS '))
         if source.count(patch.after) == 1:
             staged[path] = source
+        elif legacy_after != patch.after and source.count(legacy_after) == 1:
+            staged[path] = source.replace(legacy_after, patch.after, 1)
         elif source.count(patch.before) == 1:
             staged[path] = source.replace(patch.before, patch.after, 1)
         else:
