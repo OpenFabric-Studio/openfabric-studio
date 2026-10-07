@@ -49,8 +49,8 @@ def main() -> int:
     os.environ['HF_HUB_DISABLE_IMPLICIT_TOKEN'] = '1'
     try:
         if parsed.candidate:
-            from app.video_candidate import verify_candidate
-            verify_candidate(root)
+            from app.video_candidate import install_candidate_compatibility
+            install_candidate_compatibility(root)
         else:
             install_compatibility(root)
         for package in ('ltx-core-mlx', 'ltx-pipelines-mlx'):

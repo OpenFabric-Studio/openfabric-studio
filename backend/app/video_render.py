@@ -349,7 +349,9 @@ def _publish_checked(project_id: str, change: Callable[[store.StoredVideoProject
     from . import voice_profiles
     from .video_dialogue import require_consent
     with store._lock, voice_profiles._LOCK:
-        require_consent(store.load(project_id).project)
+        document = store.load(project_id)
+        require_consent(document.project)
+        store.require_retained_consent(document)
         store.mutate(project_id, change, busy_ok=True, bump=False)
 
 
@@ -1321,6 +1323,7 @@ async def start(
         project = document.project
         from .video_dialogue import require_consent
         require_consent(project)
+        store.require_retained_consent(document)
         if document.worker is not None:
             raise store.VideoProjectError("worker_identity_unverified")
         if body.revision != project.revision:
@@ -1591,6 +1594,7 @@ async def shutdown() -> None:
 
 def output_file(project_id: str, *, poster: bool = False) -> Path:
     document = store.load(project_id)
+    store.require_retained_consent(document)
     if not document.published_file:
         raise store.VideoProjectError("not_found")
     path = store.artifact(project_id, document.published_file)
@@ -1696,6 +1700,7 @@ async def recover() -> None:
                     _set_variant(project.id, shot.id, variant.id, interrupted)
         pending = document.pending_export
         adopted = False
+        recovery_error = 'interrupted'
         if pending is not None:
             from . import export_provenance
             try:
@@ -1739,12 +1744,14 @@ async def recover() -> None:
 
                 _publish_checked(project.id, publish)
                 adopted = True
+            except store.VideoProjectError as exc:
+                recovery_error = exc.code
             except (VideoMediaError, OSError, export_provenance.ProvenanceError):
                 pass
         _finish(
             project.id,
             "ready" if adopted else "failed",
-            "" if adopted else "interrupted",
+            "" if adopted else recovery_error,
         )
         _worker(project.id, None)
         for partial in store.project_dir(project.id).rglob("*.partial.mp4"):

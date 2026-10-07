@@ -35,6 +35,7 @@ class _Chapter(BaseModel):
     language: str = ""
     bypass_cache: bool = False
     revision: int = 1
+    reassemble_only: bool = False
 
 
 class _Section(BaseModel):
@@ -49,6 +50,8 @@ class _Section(BaseModel):
     snapshot_json: str | None = None
     start_ms: int = 0
     end_ms: int = 0
+    display_text: str | None = None
+    gap_after_ms: int | None = None
 
 
 class _Stopped(Exception):
@@ -120,17 +123,36 @@ def concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled:
         return _concat_wavs(identifier,prepared,target,controlled=controlled)
 
 
+def concat_timed_wavs(identifier: str, paths: list[Path], target: Path, gaps_after_ms: list[int], *, controlled: bool = True) -> list[tuple[int, int]]:
+    """Join accepted dry takes and silence, deriving cue edges from output samples."""
+    from .cloud_speech import compatible_pcm
+    if len(paths) != len(gaps_after_ms) or any(gap < 0 or gap > 10000 for gap in gaps_after_ms):
+        raise audiobooks.AudiobookError("invalid_pacing")
+    root = audiobooks.book_dir(identifier)
+    for path in paths:
+        _contained(path, root)
+    with compatible_pcm(paths, target.parent, cloud_workflow=bool(audiobooks.get_book(identifier).cloud_models)) as prepared:
+        return _join_pcm(identifier, prepared, target, gaps_after_ms, controlled=controlled)
+
+
 def _concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled: bool = True) -> Path:
+    _join_pcm(identifier, paths, target, [0] * len(paths), controlled=controlled)
+    return target
+
+
+def _join_pcm(identifier: str, paths: list[Path], target: Path, gaps_after_ms: list[int], *, controlled: bool) -> list[tuple[int, int]]:
     """Stream matching PCM sections without an unmanaged ffmpeg subprocess."""
     if not paths:
         raise audiobooks.AudiobookError("audio_missing")
     root = audiobooks.book_dir(identifier)
     _contained(target, root)
     temporary = target.with_name(f".{target.stem}.{uuid.uuid4().hex}.tmp.wav")
+    cursor = 0
+    offsets: list[tuple[int, int]] = []
     try:
         parameters: tuple[int, int, int] | None = None
         with wave.open(str(temporary), "wb") as destination:
-            for path in paths:
+            for path, gap_ms in zip(paths, gaps_after_ms, strict=True):
                 _contained(path, root)
                 with wave.open(str(path), "rb") as source:
                     actual = (source.getnchannels(), source.getsampwidth(), source.getframerate())
@@ -141,14 +163,27 @@ def _concat_wavs(identifier: str, paths: list[Path], target: Path, *, controlled
                         destination.setframerate(actual[2])
                     elif actual != parameters:
                         raise audiobooks.AudiobookError("audio_format_mismatch")
+                    start_frame = cursor
                     while frames := source.readframes(65536):
                         if controlled and not _active(identifier):
                             raise _Stopped()
                         destination.writeframesraw(frames)
+                        cursor += len(frames) // (actual[0] * actual[1])
+                    offsets.append((round(start_frame * 1000 / actual[2]), round(cursor * 1000 / actual[2])))
+                    gap_frames = round(gap_ms * actual[2] / 1000)
+                    # PCM8 is unsigned, all other integer PCM widths use signed zero.
+                    zero = bytes([128]) if actual[1] == 1 else bytes(actual[1])
+                    while gap_frames:
+                        if controlled and not _active(identifier):
+                            raise _Stopped()
+                        count = min(gap_frames, 65536)
+                        destination.writeframesraw(zero * actual[0] * count)
+                        cursor += count
+                        gap_frames -= count
         with temporary.open("rb") as handle:
             os.fsync(handle.fileno())
         temporary.replace(target)
-        return target
+        return offsets
     finally:
         temporary.unlink(missing_ok=True)
 
@@ -182,6 +217,44 @@ def plan_text(chapter_text: str, narrator_id: str, cast: list[CastMember], pronu
     return pieces
 
 
+def plan_display_text(chapter_text: str, narrator_id: str, cast: list[CastMember], pronunciations: list[PronunciationEntry]) -> list[str | None]:
+    """Retain original spelling only at boundaries that survive spoken replacements.
+
+    A section split inside a replacement has no precise written equivalent and
+    deliberately returns null. Never reconstruct old wording from current text.
+    """
+    from .audiobook_cast import split_turns
+    from .audiobook_pronounce import apply_pronunciations_with_mapping
+    result: list[str | None] = []
+    for _, _, original in split_turns(chapter_text, narrator_id, cast):
+        spoken, boundaries = apply_pronunciations_with_mapping(original, pronunciations)
+        if not spoken.strip():
+            continue
+        offset = 0
+        for piece in split_sections(spoken):
+            end = offset + len(piece)
+            start_source, end_source = boundaries[offset], boundaries[end]
+            result.append(original[start_source:end_source] if start_source is not None and end_source is not None else None)
+            offset = end
+    return result
+
+
+
+def passage_gaps(book: AudiobookBook, speakers: list[str], overrides: list[int | None]) -> list[int]:
+    if len(speakers) != len(overrides):
+        raise audiobooks.AudiobookError("invalid_pacing")
+    return [override if override is not None else
+        book.passage_gap_ms + (book.speaker_change_gap_ms if speaker != speakers[index + 1] else 0)
+        if index + 1 < len(speakers) else 0
+        for index, (speaker, override) in enumerate(zip(speakers, overrides, strict=True))]
+
+
+def _stored_sections(chapter: _Chapter) -> list[_Section]:
+    with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
+        rows = connection.execute("SELECT * FROM audiobook_sections WHERE job_id=? ORDER BY section_index", (chapter.id,)).fetchall()
+    return [_Section.model_validate(dict(row)) for row in rows]
+
+
 def _section_matches(section: _Section, index: int, text: str, profile_id: str, speaker: str, narrator_id: str) -> bool:
     stored_profile = section.profile_id or narrator_id
     if section.section_index != index or section.section_text != text or stored_profile != profile_id:
@@ -197,7 +270,7 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         audiobooks._ensure_schema(connection)
         rows = connection.execute(
-            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms
+            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms, display_text, gap_after_ms
                FROM audiobook_sections WHERE job_id = ? ORDER BY section_index""",
             (chapter.id,),
         ).fetchall()
@@ -208,6 +281,18 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
                 for index, (section, (text, profile_id, speaker)) in enumerate(zip(sections, planned, strict=True))
             ):
                 raise audiobooks.AudiobookError("narration_sections_changed")
+            # Newly seeded cloud/redo rows have a frozen speech snapshot before
+            # this worker runs. Only still-unrendered rows can acquire original
+            # wording from the current source; never retrofit historical PCM.
+            book_id = str(connection.execute("SELECT book_id FROM audiobook_jobs WHERE id=?", (chapter.id,)).fetchone()[0])
+            book = audiobooks.get_book(book_id)
+            originals = plan_text(chapter.chapter_text, narrator_id, book.cast, book.pronunciations)
+            displays = plan_display_text(chapter.chapter_text, narrator_id, book.cast, book.pronunciations)
+            for index, section in enumerate(sections):
+                if section.status != "done" and section.display_text is None and index < len(originals) and originals[index] == (section.section_text, section.profile_id or narrator_id, section.speaker_name or "Narrator"):
+                    section.display_text = displays[index]
+                    connection.execute("UPDATE audiobook_sections SET display_text=? WHERE job_id=? AND section_index=?", (section.display_text, chapter.id, section.section_index))
+            connection.commit()
             pending = [section for section in sections if section.snapshot_json is None and
                 (section.status != "done" or section.output_path is None or not Path(section.output_path).is_file())]
             if pending:
@@ -230,15 +315,19 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
         language = (chapter.language or audiobooks.get_book(book_id).language or "en").lower().split("-", 1)[0]
         reference_root = _contained(audiobooks.book_dir(book_id) / "references", audiobooks.book_dir(book_id))
         snapshots = {voice_id: capture(voice_id, language, reference_root, speech_clone.known_engine_identity()) for voice_id in dict.fromkeys(voice for _, voice, _ in planned)}
+        book = audiobooks.get_book(book_id)
+        displays = plan_display_text(chapter.chapter_text, narrator_id, book.cast, book.pronunciations)
+        originals = plan_text(chapter.chapter_text, narrator_id, book.cast, book.pronunciations)
         for index, (text, profile_id, speaker) in enumerate(planned):
+            display = displays[index] if index < len(originals) and originals[index] == (text, profile_id, speaker) else None
             connection.execute("""INSERT INTO audiobook_sections
-                (job_id, section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json)
-                VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?)""",
-                (chapter.id, index, text, hashlib.sha256(text.encode()).hexdigest(), profile_id, speaker, uuid.uuid5(uuid.UUID(chapter.id), str(index)).hex, snapshots[profile_id].model_dump_json()))
+                (job_id, section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json,display_text)
+                VALUES (?, ?, ?, ?, 'queued', NULL, ?, ?, ?, ?, ?)""",
+                (chapter.id, index, text, hashlib.sha256(text.encode()).hexdigest(), profile_id, speaker, uuid.uuid5(uuid.UUID(chapter.id), str(index)).hex, snapshots[profile_id].model_dump_json(), display))
         connection.execute("UPDATE audiobook_jobs SET render_language = ? WHERE id = ?", (language, chapter.id))
         connection.commit()
         rows = connection.execute(
-            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms
+            """SELECT section_index, section_text, text_sha256, status, output_path, profile_id, speaker_name, passage_id, snapshot_json, start_ms, end_ms, display_text, gap_after_ms
                FROM audiobook_sections WHERE job_id = ? ORDER BY section_index""",
             (chapter.id,),
         ).fetchall()
@@ -246,16 +335,22 @@ def _sections(chapter: _Chapter, planned: list[tuple[str, str, str]], narrator_i
 
 
 def _section_status(job_id: str, index: int, status: str, path: Path | None = None) -> None:
+    measured_snapshot: SpeechRenderSnapshot | None = None
+    measured_text = ""
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
         connection.execute("UPDATE audiobook_sections SET status = ?, output_path = ? WHERE job_id = ? AND section_index = ?", (status, str(path) if path else None, job_id, index))
         if status == "done" and path is not None:
             row = connection.execute("SELECT snapshot_json,section_text,passage_id FROM audiobook_sections WHERE job_id=? AND section_index=?", (job_id, index)).fetchone()
             if row is not None and row[0]:
                 snapshot = SpeechRenderSnapshot.model_validate_json(str(row[0]))
+                measured_snapshot, measured_text = snapshot, str(row[1])
                 from .speech_references import file_digest
                 identity = hashlib.sha256(f"{snapshot.identity}\n{row[1]}\n{file_digest(path)}\n{path.name}".encode()).hexdigest()
                 connection.execute("UPDATE audiobook_sections SET render_identity=? WHERE job_id=? AND section_index=?", (identity, job_id, index))
         connection.commit()
+    if measured_snapshot is not None and path is not None:
+        from .narration_duration import record_measurement
+        record_measurement(measured_snapshot, measured_text, path)
 
 
 def _job_status(job_id: str, status: str, detail: str = "", path: Path | None = None) -> None:
@@ -307,7 +402,8 @@ def _collapse_spans(spans: list[dict[str, object]]) -> list[dict[str, object]]:
 def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> None:
     from .audiobook_pronounce import PronunciationError
     try:
-        planned = _planned(identifier, chapter.chapter_text, chapter.id)
+        retained_sections = _stored_sections(chapter) if chapter.reassemble_only else None
+        planned = [(section.section_text, section.profile_id or profile_id, section.speaker_name or "Narrator") for section in retained_sections] if retained_sections is not None else _planned(identifier, chapter.chapter_text, chapter.id)
     except PronunciationError as exc:
         _job_status(chapter.id, "failed", exc.code)
         return
@@ -320,7 +416,8 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
     paths: list[Path] = []
     _job_status(chapter.id, "running", "narrating_sections")
     try:
-        for section in _sections(chapter, planned, profile_id):
+        sections = retained_sections if retained_sections is not None else _sections(chapter, planned, profile_id)
+        for section in sections:
             if not _active(identifier):
                 raise _Stopped()
             voice_id = section.profile_id or profile_id
@@ -335,6 +432,8 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
                 if retained.is_file():
                     paths.append(retained)
                     continue
+            if chapter.reassemble_only:
+                raise audiobooks.AudiobookError("accepted_audio_missing", 409)
             _section_status(chapter.id, section.section_index, "running")
             temporary = target.with_name(f".{target.stem}.{uuid.uuid4().hex}.partial.wav")
             try:
@@ -357,27 +456,29 @@ def _process_chapter(identifier: str, profile_id: str, chapter: _Chapter) -> Non
             _section_status(chapter.id, section.section_index, "done", target)
             paths.append(target)
         _require_current_consent(identifier)
-        target = concat_wavs(identifier, paths, output_root / f"{chapter.chapter_index:04d}-{uuid.uuid4().hex}.wav")
+        gaps = passage_gaps(audiobooks.get_book(identifier), [section.speaker_name or "Narrator" for section in sections], [section.gap_after_ms for section in sections])
+        target = output_root / f"{chapter.chapter_index:04d}-{uuid.uuid4().hex}.wav"
+        offsets = concat_timed_wavs(identifier, paths, target, gaps)
         try:
             from .narration_pauses import chunk_wav
             audiobooks.save_pause_spans(chapter.id, chunk_wav(target))
         except (OSError, wave.Error, ValueError):
             _LOG.warning("Pause spans were not stored for %s", chapter.id, exc_info=True)
-        cursor = 0
         spans: list[dict[str, object]] = []
-        for section, path in zip(_sections(chapter, planned, profile_id), paths, strict=True):
-            duration = _wav_ms(path)
-            spans.append({"speaker": section.speaker_name or "Narrator", "start_ms": cursor, "end_ms": cursor + duration})
+        for section, (start, end) in zip(sections, offsets, strict=True):
+            spans.append({"speaker": section.speaker_name or "Narrator", "start_ms": start, "end_ms": end})
             with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
-                connection.execute("UPDATE audiobook_sections SET start_ms = ?, end_ms = ? WHERE job_id = ? AND section_index = ?", (cursor, cursor + duration, chapter.id, section.section_index))
+                connection.execute("UPDATE audiobook_sections SET start_ms = ?, end_ms = ? WHERE job_id = ? AND section_index = ?", (start, end, chapter.id, section.section_index))
                 connection.commit()
-            cursor += duration
         audiobooks.save_cast_spans(chapter.id, _collapse_spans(spans))
         # Publication and revocation use the same profile lock. Keep the
         # established book→profile lock order and hold neither during encoding.
         with audiobooks._LOCK, voice_profiles._LOCK:
             _require_current_consent(identifier)
             _job_status(chapter.id, "done", "narration_completed", target)
+            with closing(audiobooks._connect()) as connection:
+                connection.execute("UPDATE audiobook_jobs SET duration_ms=? WHERE id=?", (_wav_ms(target), chapter.id))
+                connection.commit()
     except _Stopped:
         status = "cancelled" if audiobooks.get_book(identifier).status == "cancelled" else "queued"
         _job_status(chapter.id, status, "stopped_at_section_boundary")
@@ -397,11 +498,13 @@ def _process_book(identifier: str) -> None:
         if transition.rowcount == 0:
             return
         connection.commit()
-        rows = connection.execute("SELECT id, chapter_index, chapter_text, language, revision, bypass_cache FROM audiobook_jobs WHERE book_id = ? AND status != 'done' ORDER BY chapter_index", (identifier,)).fetchall()
+        rows = connection.execute("SELECT id, chapter_index, chapter_text, language, revision, bypass_cache,reassemble_only FROM audiobook_jobs WHERE book_id = ? AND status != 'done' ORDER BY chapter_index", (identifier,)).fetchall()
         chapters = [_Chapter.model_validate(dict(row)) for row in rows]
     profile_id = audiobooks.get_book(identifier).profile_id
     # Freeze every chapter's reference inputs before the first upstream call.
     for chapter in chapters:
+        if chapter.reassemble_only:
+            continue
         try:
             _sections(chapter, _planned(identifier, chapter.chapter_text, chapter.id), profile_id)
         except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:

@@ -491,12 +491,27 @@ class CharacterDatasetArtifact(VideoContract):
     kind: Literal["photo", "clip"]
 
 
+class CharacterTrainingRecipe(VideoContract):
+    """Effective built-in recipe, rather than an inferred hardware quality tier."""
+    width: int = Field(default=960, ge=64, le=4096)
+    height: int = Field(default=544, ge=64, le=4096)
+    frames: int = Field(default=97, ge=1, le=1000)
+    frame_rate: int = Field(default=24, ge=1, le=60)
+    learning_rate: float = Field(default=0.0002, gt=0, le=1)
+    batch_size: int = Field(default=1, ge=1, le=64)
+    optimizer: Literal['adamw'] = 'adamw'
+    memory_mode: Literal['low_ram'] = 'low_ram'
+    gradient_checkpointing: bool = True
+    generate_audio: Literal[False] = False
+
+
 class CharacterTrainingProvenance(VideoContract):
     engine_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
     base_revision: str = Field(pattern=r"^[0-9a-f]{40}$")
     dataset_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     settings_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     settings: CharacterTrainingSettings
+    recipe: CharacterTrainingRecipe | None = None
     artifacts: list[CharacterDatasetArtifact] = Field(min_length=4, max_length=18)
     comparison_prompts: list[str] = Field(min_length=1, max_length=4)
     evaluated: bool = False

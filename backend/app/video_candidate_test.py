@@ -7,6 +7,28 @@ from unittest.mock import patch
 
 
 class VideoCandidateTests(unittest.TestCase):
+    def test_candidate_parser_accepts_reviewed_modality_tiling_only_once(self) -> None:
+        from app.video_candidate import candidate_tiling_cli
+        from app.video_engine import VideoEngineError
+        source = '_add_generation_args(a2v, modality_tiling=False)\n'
+        self.assertEqual(candidate_tiling_cli(source), '_add_generation_args(a2v, modality_tiling=True)\n')
+        with self.assertRaises(VideoEngineError):
+            candidate_tiling_cli(source + source)
+
+    def test_candidate_a2v_uses_explicit_audio_and_refuses_unreviewed_adapters(self) -> None:
+        from app.video_candidate import CandidateSettings, candidate_argv
+        from app.video_engine import VideoEngineError
+        with tempfile.TemporaryDirectory() as temporary, patch('app.video_candidate.verify_candidate'):
+            root = Path(temporary)
+            audio = root / 'audio.wav'
+            audio.write_bytes(b'fixture')
+            argv = candidate_argv(root, root / 'cache', root / 'out', CandidateSettings(source_audio=audio))
+            self.assertIn('a2v', argv)
+            self.assertNotIn('--no-audio', argv)
+            self.assertEqual(argv[argv.index('--audio') + 1], str(audio.resolve()))
+            with self.assertRaisesRegex(VideoEngineError, 'candidate_a2v_adapter_unreviewed'):
+                candidate_argv(root, root / 'cache', root / 'out', CandidateSettings(source_audio=audio, adapter=root / 'adapter.safetensors'))
+
     def test_source_changes_and_symlink_escape_are_rejected(self) -> None:
         from app.video_candidate import candidate_digest, verify_candidate
         from app.video_engine import VideoEngineError

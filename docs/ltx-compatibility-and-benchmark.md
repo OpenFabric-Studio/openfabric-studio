@@ -80,3 +80,23 @@ backend/.venv/bin/python backend/scripts/benchmark_video.py \
 For resident adapter experiments append `--memory-mode resident --lora-mode unfused --adapter /path/to/reviewed/character.safetensors`. Use `--reference /path/to/held-out.png` for I2V. Selected inputs are copied/hash-checked into the experiment directory before launch. Existing worker/output evidence is not overwritten. This candidate harness supports T2V/I2V only; it does not certify or replace the app's maintained A2V tiling/LoRA wrapper.
 
 Remaining acceptance work: port and verify that A2V wrapper against exact candidate source, held-out consented faces and trained LoRAs, portrait geometry/memory cases, dialogue/lip-sync listening and repeated timing. The production engine pin remains unchanged.
+
+## Candidate A2V compatibility — 7 October
+
+The research harness now targets released **0.16.1**, commit `f0c12418afd601807199eaa1366584a2a53edcf0`, with aggregate Python/package/lock digest `50c81592904e4822890fd2cc76c243aee9c67f24a819465f731a062ace9e4130`. Production remains **0.15.12**. The earlier 6 October reports describe their historical candidate and require that historical app/source revision to reproduce.
+
+The maintained overlay was ported against the exact released CLI and A2V pipeline, retaining separate half/full-resolution modality tilers. A first actual worker attempt found that 0.16.1 explicitly disables A2V tiling arguments in its parser. It failed before model inference; see [the failed attempt](benchmarks/2026-10-07-candidate-a2v-parser-failure.json). A candidate-only, exact-signature parser overlay enables those arguments as well as forwarding the tile configuration. Unknown or edited vendor sources still fail closed. Overlays are installed in memory inside the child; the vendor checkout and configured production environment are not rewritten.
+
+A real offline A2V case then used a copied synthetic 2.2-second tone, no reference/character adapter, 704×448, 49 frames at 24 fps, seed 42, ten guided steps, three refinement steps, low RAM mode and two temporal/two spatial tiles. It completed in **710.999 seconds**, with successful output decode/geometry/duration validation. Peak child RSS was **11,065,737,216 bytes**; reported MLX peak was **13,850,911,956 bytes**, scoped to the allocator since the vendor's last reset, not the maximum of the whole render. See [the recorded case](benchmarks/2026-10-07-candidate-a2v-tiled.json). Cached LTX-2.3/Gemma weights were reused offline and not freshly rehashed; no weights were downloaded. Source and output hashes are in the report; media/logs remain outside Git.
+
+This is one compatibility smoke case on the recorded Mac, not a speed comparison. CPU regressions ran concurrently, so its timing is not a controlled hardware performance measurement. Tone-conditioned geometric video does not establish face identity, speech preservation or lip synchronization. Candidate A2V with a character adapter is deliberately rejected. Before upgrading production, retain the held-out face/LoRA, portrait-memory, repeated timing, matching production A2V and audio-listening acceptance cases above.
+
+Reproduce in an exclusive stopped-app session with the exact candidate checkout/environment and existing model cache:
+
+```sh
+backend/.venv/bin/python backend/scripts/benchmark_video.py \
+  --candidate --engine-dir /path/to/ltx-0.16.1 \
+  --cache-dir /path/to/existing/ltx-cache \
+  --output-dir /path/to/new/a2v-case --audio /path/to/fixture.wav \
+  --temporal-tiles 2 --spatial-tiles 2 --run --exclusive-offline
+```

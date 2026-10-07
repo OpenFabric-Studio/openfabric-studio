@@ -4,11 +4,11 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
-from .video_engine import ImageReference, RenderSettings, VideoEngineError, local_snapshot, validate_settings
+from .video_engine import ImageReference, RenderSettings, VideoEngineError, local_snapshot, validate_settings, patch_a2v_sources, install_source_overlay
 
-CANDIDATE_COMMIT = 'bfa5755371a973651ea218ac3b56dcd34aa92c45'
-CANDIDATE_VERSION = '0.16.0+193'
-CANDIDATE_SHA256 = 'ab4006d332cffb58c3a6fdf580df2ace7d31638509a902ff3ca483e0d4f8af8c'
+CANDIDATE_COMMIT = 'f0c12418afd601807199eaa1366584a2a53edcf0'
+CANDIDATE_VERSION = '0.16.1'
+CANDIDATE_SHA256 = '50c81592904e4822890fd2cc76c243aee9c67f24a819465f731a062ace9e4130'
 
 
 def candidate_digest(root: Path) -> str:
@@ -32,6 +32,26 @@ def verify_candidate(root: Path) -> None:
         raise VideoEngineError('candidate_source_invalid')
 
 
+def candidate_sources(root: Path) -> dict[str, str]:
+    verify_candidate(root)
+    prefix = root / 'packages/ltx-pipelines-mlx/src/ltx_pipelines_mlx'
+    sources = patch_a2v_sources((prefix / 'cli.py').read_text(), (prefix / 'a2vid_two_stage.py').read_text())
+    sources['ltx_pipelines_mlx.cli'] = candidate_tiling_cli(sources['ltx_pipelines_mlx.cli'])
+    verify_candidate(root)
+    return sources
+
+
+def candidate_tiling_cli(source: str) -> str:
+    before = '_add_generation_args(a2v, modality_tiling=False)'
+    if source.count(before) != 1:
+        raise VideoEngineError('candidate_source_invalid')
+    return source.replace(before, '_add_generation_args(a2v, modality_tiling=True)', 1)
+
+
+def install_candidate_compatibility(root: Path) -> None:
+    install_source_overlay(root, candidate_sources(root))
+
+
 @dataclass(frozen=True)
 class CandidateSettings:
     memory_mode: Literal['low_ram', 'resident'] = 'low_ram'
@@ -41,6 +61,9 @@ class CandidateSettings:
     reference: Path | None = None
     adapter: Path | None = None
     adapter_strength: float = 1.0
+    source_audio: Path | None = None
+    temporal_tiles: int = 1
+    spatial_tiles: int = 1
 
 
 def candidate_argv(engine: Path, cache: Path, output: Path, settings: CandidateSettings) -> list[str]:
@@ -48,26 +71,34 @@ def candidate_argv(engine: Path, cache: Path, output: Path, settings: CandidateS
         raise VideoEngineError('bad_settings')
     if settings.memory_mode == 'low_ram' and settings.lora_mode == 'unfused':
         raise VideoEngineError('candidate_unfused_requires_resident')
+    if settings.source_audio is not None and settings.adapter is not None:
+        raise VideoEngineError('candidate_a2v_adapter_unreviewed')
     verify_candidate(engine)
     rendered = RenderSettings(output=output / 'baseline.mp4', frames=49,
         prompt='A simple geometric character turns slowly in daylight', seed=42,
         width=settings.width, height=settings.height, stage1_steps=10, stage2_steps=3,
         references=(ImageReference(settings.reference),) if settings.reference is not None else (),
-        mode='i2v' if settings.reference is not None else 't2v', adapter=settings.adapter,
-        adapter_strength=settings.adapter_strength)
+        mode='a2v' if settings.source_audio is not None else 'i2v' if settings.reference is not None else 't2v', source_audio=settings.source_audio, adapter=settings.adapter,
+        adapter_strength=settings.adapter_strength, temporal_tiles=settings.temporal_tiles, spatial_tiles=settings.spatial_tiles)
     validate_settings(rendered)
     if settings.reference is not None and not settings.reference.is_file():
         raise VideoEngineError('reference_missing')
     runner = Path(__file__).resolve().parents[1] / 'scripts/run_video.py'
     argv = [str(engine / '.venv/bin/python'), str(runner), '--engine-dir', str(engine.resolve()),
-        '--candidate', '--telemetry', str(output / 'telemetry.json'), '--', 'generate',
-        '--two-stage', '--no-audio', '--prompt', rendered.prompt, '--seed', '42',
+        '--candidate', '--telemetry', str(output / 'telemetry.json'), '--', 'a2v' if settings.source_audio is not None else 'generate',
+        '--prompt', rendered.prompt, '--seed', '42',
         '--model', str(local_snapshot(cache, 'ltx23').resolve()),
         '--gemma', str(local_snapshot(cache, 'gemma3').resolve()),
         '--output', str(rendered.output), '--frames', '49', '--frame-rate', '24',
         '--width', str(settings.width), '--height', str(settings.height),
         '--stage1-steps', '10', '--stage2-steps', '3', '--cfg-scale', '3',
-        '--tile-frames', '1', '--tile-spatial', '1']
+        '--tile-frames', str(settings.temporal_tiles), '--tile-spatial', str(settings.spatial_tiles)]
+    if settings.source_audio is None:
+        argv.extend(['--two-stage', '--no-audio'])
+    else:
+        if settings.source_audio.is_symlink() or not settings.source_audio.is_file():
+            raise VideoEngineError('audio_missing')
+        argv.extend(['--audio', str(settings.source_audio.resolve())])
     if settings.memory_mode == 'low_ram':
         argv.append('--low-ram')
     if settings.reference is not None:

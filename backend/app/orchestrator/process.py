@@ -59,6 +59,25 @@ class ManagedProcess:
     def is_running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    def require_owned(self) -> None:
+        """Verify the owned supervisor identity before a user-requested stop.
+
+        Never infer ownership from an HTTP port or a numeric PID. Windows
+        retains the kernel job handle; POSIX supervisors issue a token-bound
+        receipt before they start an engine.
+        """
+        if self._proc is None or not self.is_running:
+            raise RuntimeError('Native process ownership could not be verified')
+        if IS_WINDOWS:
+            if self._windows_job is None:
+                raise RuntimeError('Native process ownership could not be verified')
+            return
+        if not self._owns_group or self._supervisor_token is None or self._supervisor_receipt is None:
+            raise RuntimeError('Native process ownership could not be verified')
+        receipt = read_receipt(self._supervisor_receipt, self._supervisor_token, self._proc.pid)
+        if receipt is None or receipt.returncode is not None:
+            raise RuntimeError('Native process ownership could not be verified')
+
     def exit_summary(self) -> str:
         code = self._proc.returncode if self._proc else None
         if self._proc is not None and self._supervisor_receipt is not None and self._supervisor_token is not None:

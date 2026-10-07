@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { routerKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ApiError } from '../../api/http'
 import * as audiobooksApi from '../../api/audiobooks'
@@ -10,6 +11,10 @@ import { createPollingLoop } from '../../composables/polling'
 import EbookImportPanel from './EbookImportPanel.vue'
 import CastAuditionPanel from './CastAuditionPanel.vue'
 import AudiobookPassages from './AudiobookPassages.vue'
+import AudiobookPacingPanel from './AudiobookPacingPanel.vue'
+import NarrationDurationBudget from './NarrationDurationBudget.vue'
+import ChapterReadAlong from '../../components/ChapterReadAlong.vue'
+import RetainedAudioVideo from '../../components/RetainedAudioVideo.vue'
 import CloudSpeechCost from './CloudSpeechCost.vue'
 import * as cloudApi from '../../api/cloudSpeech'
 import type { CloudSpeechApproval, AudiobookCloudControlRequest } from '../../api/contracts'
@@ -18,6 +23,10 @@ import type { EbookDraft, EbookChapterDraft } from '../../api/contracts'
 const emit = defineEmits<{ activity: [message: string] }>()
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const { t } = useI18n()
+const router = inject(routerKey, undefined)
+function openVideo(projectId: string) {
+  if (mounted && props.active && /^[0-9a-f]{32}$/.test(projectId)) void router?.push({ name: 'video', query: { project: projectId } })
+}
 type ChapterDraft = { id: number; title: string; text: string; included: boolean; sourceCues?: EbookChapterDraft['source_cues'] }
 const importedDraft = ref<EbookDraft | null>(null), draftSaving = ref(false), deletingImport = ref(false), previewing = ref(false), controlling = ref(false)
 const chapterEditorIndex = ref(0)
@@ -362,6 +371,13 @@ function upsertBook(book: AudiobookBook) {
   const existing = books.value.findIndex(item => item.id === book.id)
   if (existing < 0) books.value.unshift(book)
   else books.value.splice(existing, 1, book)
+}
+
+async function pacingUpdated(book: AudiobookBook) {
+  if (!mounted) return
+  upsertBook(book)
+  if (selectedBookId.value === book.id) await loadJobs(book.id)
+  updatePolling()
 }
 
 /** Accepted edits update the library, while editor feedback belongs to one selection. */
@@ -737,6 +753,7 @@ onBeforeUnmount(() => {
         <p class="text-xs text-text-dim">{{ t(importedDraft ? 'audiobookWorkspace.importedDraftHint' : 'audiobookWorkspace.draftHint') }}</p>
         <button v-if="importedDraft" type="button" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" :disabled="draftSaving || deletingImport || saving || !title.trim() || chapters.some(chapter => !chapter.text.trim())" @click="onSaveDraft">{{ t('audiobookWorkspace.saveDraft') }}</button>
         <p v-if="retrying" role="status" class="text-xs text-text-dim">{{ t('audiobookWorkspace.retrying') }}</p>
+        <NarrationDurationBudget v-if="draftNarratorAvailable && chapters[chapterEditorIndex]?.included && !castDraft.length && !pronunciations.length" :profile-id="profileId" :language="draftLanguage || 'en'" :text="chapters[chapterEditorIndex]?.text || ''" :active="active && creating" />
         <CloudSpeechCost :enabled="draftHasCloud" :input-key="creationQuoteKey" :load="quoteCreation" :active="active&&creating" :disabled="saving||draftSaving||!auditionDraft" @approval="value=>draftCloudApproval=value" />
         <button type="submit" class="min-h-11 rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="loading || saving || retrying || loadingProfiles || draftSaving || deletingImport || previewing || !draftNarratorAvailable || !includedChapters.length || draftHasCloud&&!draftCloudApproval">{{ saving ? t('audiobookWorkspace.creating') : t('audiobooks.create') }}</button>
       </form>
@@ -775,6 +792,7 @@ onBeforeUnmount(() => {
         <label v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" class="flex min-h-11 flex-wrap items-center gap-3 text-sm text-text"><span>{{ t('audiobookWorkspace.cover') }}</span><input type="file" accept="image/png,image/jpeg" :aria-label="t('audiobookWorkspace.cover')" class="text-xs" @change="onCover"></label>
         <p class="text-xs text-text-dim">{{ t('audiobookReview.savedAuditionHint') }}</p>
         <CastAuditionPanel :book-id="selectedBook.id" :cloud="selectedHasCloud" :active="active && !creating" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :revision="Math.max(1, ...jobs.map(job => job.revision ?? 1))" />
+        <AudiobookPacingPanel :book="selectedBook" :jobs="jobs" :active="active && !creating" @updated="pacingUpdated" />
         <details class="rounded-lg border border-border p-3">
           <summary class="cursor-pointer text-sm font-medium text-text focus-visible:outline-2 focus-visible:outline-accent1">{{ t('audiobookReview.bookInputs') }}</summary>
           <div class="mt-3 space-y-3">
@@ -840,9 +858,12 @@ onBeforeUnmount(() => {
               </details>
               <p v-if="chapterHint(job)" class="mt-2 text-xs text-text-dim">{{ chapterHint(job) }}</p>
               <p v-if="job.total_sections" class="mt-2 text-xs text-text-dim">{{ t('audiobookWorkspace.sections', { done: job.completed_sections ?? 0, total: job.total_sections }) }}</p>
+              <p v-if="job.status === 'done' && job.duration_ms != null" class="mt-2 text-xs text-text-dim">{{ t('audiobookReview.exactDuration', { seconds: (job.duration_ms / 1000).toFixed(2) }) }}</p>
               <button v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" type="button" class="mt-3 min-h-11 rounded-lg border border-accent1/50 px-3 text-xs font-medium text-accent1 disabled:opacity-50" :disabled="regeneratingIndex !== null || retrying || selectedHasCloud&&(!controlCloudApproval||cloudAction!=='regenerate'||cloudChapter!==job.chapter_index)" :aria-label="t('audiobookWorkspace.regenerateChapter')" @click="onRegenerate(job.chapter_index)">{{ regeneratingIndex === job.chapter_index ? t('audiobookWorkspace.regenerating') : t('audiobookWorkspace.regenerateChapter') }}</button>
               <audio v-if="job.status === 'done'" ref="audioPlayers" class="mt-3 h-9 w-full" controls preload="none" :aria-label="t('audiobookWorkspace.playChapter', { title: job.chapter_title || t('audiobookWorkspace.chapterName', { number: job.chapter_index + 1 }) })" :src="audiobooksApi.audiobookChapterAudioUrl(selectedBook.id, job.chapter_index) + '?revision=' + (job.revision ?? 1)" @timeupdate="updateChapterTime(job.id, $event)" />
               <AudiobookPassages v-if="job.status === 'done'" :key="selectedBook.id + job.id" :book-id="selectedBook.id" :chapter-index="job.chapter_index" :chapter-revision="job.revision" :active="active && !creating" :playback-seconds="chapterPlayback[job.id] ?? 0" @updated="loadJobs(selectedBook.id)" />
+              <ChapterReadAlong v-if="job.status === 'done'" :book-id="selectedBook.id" :chapter-index="job.chapter_index" :revision="job.revision ?? 1" :active="active && !creating" :disabled="selectedBook.status !== 'done'" />
+              <RetainedAudioVideo v-if="job.status === 'done'" :source="{ kind: 'chapter', source_id: selectedBook.id, chapter_index: job.chapter_index, revision: job.revision ?? 1 }" :active="active && !creating" @open-video="openVideo" />
             </li>
           </ol>
         </div>

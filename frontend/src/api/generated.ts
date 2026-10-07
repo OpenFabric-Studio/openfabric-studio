@@ -290,6 +290,8 @@ export type AudiobookBook = {
   "export_note"?: string
   "language"?: string
   "cast"?: Array<CastMember>
+  "passage_gap_ms"?: number
+  "speaker_change_gap_ms"?: number
 }
 
 export type AudiobookBooksResponse = {
@@ -329,10 +331,17 @@ export type AudiobookJob = {
   "chapter_text"?: string
   "revision"?: number
   "render_language"?: string
+  "duration_ms"?: (number | null)
 }
 
 export type AudiobookJobsResponse = {
   "jobs": Array<AudiobookJob>
+}
+
+export type AudiobookPacingChapter = {
+  "chapter_index": number
+  "revision": number
+  "passages"?: Array<AudiobookPassageGap>
 }
 
 export type AudiobookPassage = {
@@ -349,6 +358,14 @@ export type AudiobookPassage = {
   "audio_url"?: (string | null)
   "render_identity"?: (string | null)
   "language"?: string
+  "display_text"?: (string | null)
+  "gap_after_ms"?: (number | null)
+  "effective_gap_after_ms"?: number
+}
+
+export type AudiobookPassageGap = {
+  "passage_id": string
+  "gap_after_ms"?: (number | null)
 }
 
 export type AudiobookPassagesResponse = {
@@ -423,11 +440,25 @@ export type CharacterTrainingProvenance = {
   "dataset_sha256": string
   "settings_sha256": string
   "settings": CharacterTrainingSettings
+  "recipe"?: (CharacterTrainingRecipe | null)
   "artifacts": Array<CharacterDatasetArtifact>
   "comparison_prompts": Array<string>
   "evaluated"?: boolean
   "evaluation_notes"?: string
   "evaluation_updated_at"?: string
+}
+
+export type CharacterTrainingRecipe = {
+  "width"?: number
+  "height"?: number
+  "frames"?: number
+  "frame_rate"?: number
+  "learning_rate"?: number
+  "batch_size"?: number
+  "optimizer"?: "adamw"
+  "memory_mode"?: "low_ram"
+  "gradient_checkpointing"?: boolean
+  "generate_audio"?: false
 }
 
 export type CharacterTrainingSettings = {
@@ -537,6 +568,8 @@ export type CreateAudiobookAuditionRequest = {
   "pronunciations"?: Array<PronunciationEntry>
   "language"?: string
   "cast"?: Array<CastMember>
+  "passage_gap_ms"?: number
+  "speaker_change_gap_ms"?: number
   "chapter_index"?: number
   "mode"?: "cast" | "scene"
   "max_chars"?: number
@@ -566,6 +599,8 @@ export type CreateAudiobookRequest = {
   "pronunciations"?: Array<PronunciationEntry>
   "language"?: string
   "cast"?: Array<CastMember>
+  "passage_gap_ms"?: number
+  "speaker_change_gap_ms"?: number
 }
 
 export type CreateCloudSpeechVoiceProfileRequest = {
@@ -677,6 +712,19 @@ export type EbookDraftsResponse = {
 export type EbookImportWarning = {
   "code": "chapter_detection" | "chapter_split" | "non_narrative_content" | "nonlinear_content" | "unsupported_content" | "subtitle_overlap" | "cast_review_required" | "independent_reimport"
   "message": string
+}
+
+export type EngineRuntime = {
+  "id": "ace_step" | "yue2"
+  "state": "stopped" | "starting" | "running" | "stopping" | "error"
+  "owned": boolean
+  "instance_id": (string | null)
+  "idle_state": "idle" | "busy" | "unknown"
+  "can_stop": boolean
+}
+
+export type EngineRuntimeResponse = {
+  "engines": Array<EngineRuntime>
 }
 
 export type ExportProvenance = {
@@ -1028,6 +1076,34 @@ export type Mp3EncodingSettings = {
   "channels"?: 1 | 2
 }
 
+export type NarrationDurationGuidance = {
+  "state": "approximate" | "unavailable"
+  "reason": "measured_takes" | "model_unverified" | "no_matching_takes" | "insufficient_speech"
+  "target_seconds": 15 | 30 | 60 | 90
+  "measurement_count"?: number
+  "measured_audio_ms"?: number
+  "characters_per_second"?: (number | null)
+  "suggested_characters"?: (number | null)
+  "estimated_min_ms"?: (number | null)
+  "estimated_max_ms"?: (number | null)
+  "render_key"?: (string | null)
+}
+
+export type NarrationDurationPassageSource = {
+  "book_id": string
+  "chapter_index": number
+  "passage_id": string
+  "revision": number
+}
+
+export type NarrationDurationRequest = {
+  "profile_id": string
+  "language"?: string
+  "text"?: string
+  "target_seconds"?: 15 | 30 | 60 | 90
+  "passage_source"?: (NarrationDurationPassageSource | null)
+}
+
 export type OpenRouterCatalog = {
   "models"?: Array<OpenRouterModel>
   "fingerprint": string
@@ -1249,6 +1325,45 @@ export type ProvenanceComponent = {
   "provider_job_id"?: (string | null)
 }
 
+export type ReadAlongExport = {
+  "id": string
+  "book_id": string
+  "chapter_index": number
+  "source_revision": number
+  "source_sha256": string
+  "status": "queued" | "running" | "done" | "failed" | "cancelled"
+  "detail"?: string
+  "aspect": "portrait" | "landscape"
+  "preview_seconds"?: (number | null)
+  "duration_ms": number
+  "timing"?: "passage"
+  "text_basis"?: "original_mapping" | "spoken_fallback"
+  "created_at": string
+  "updated_at": string
+  "video_url"?: (string | null)
+  "srt_url"?: (string | null)
+  "vtt_url"?: (string | null)
+  "manifest_url"?: (string | null)
+}
+
+export type ReadAlongExportsResponse = {
+  "exports": Array<ReadAlongExport>
+}
+
+export type ReadAlongRequest = {
+  "revision": number
+  "aspect"?: "portrait" | "landscape"
+  "preview_seconds"?: (number | null)
+}
+
+export type ReadingCue = {
+  "passage_id": string
+  "start_ms": number
+  "end_ms": number
+  "display_text": string
+  "spoken_text": string
+}
+
 export type ReferenceAbcRequest = {
   "abc": string
   "transpose_semitones"?: number
@@ -1377,6 +1492,28 @@ export type RefreshDialogueCueRequest = {
   "source": CreateDialogueReelRequest
 }
 
+export type RetainedAudioInfo = {
+  "source": RetainedAudioSource
+  "duration_ms": number
+  "source_sha256": string
+  "content_origin": "generated" | "mixed" | "recorded" | "unknown"
+}
+
+export type RetainedAudioSource = {
+  "kind": "speech_trial" | "chapter"
+  "source_id": string
+  "chapter_index"?: (number | null)
+  "revision"?: (number | null)
+}
+
+export type RetainedAudioVideoRequest = {
+  "source": RetainedAudioSource
+  "source_sha256": string
+  "name"?: string
+  "clip_start_ms"?: number
+  "clip_end_ms"?: (number | null)
+}
+
 export type ReviewCharacterAdapterRequest = {
   "comparison_id": string
   "notes": string
@@ -1422,6 +1559,12 @@ export type SelectVoiceSamplesRequest = {
 export type SetAudiobookLanguagesRequest = {
   "language"?: string
   "chapters"?: Array<ChapterLanguageUpdate>
+}
+
+export type SetAudiobookPacingRequest = {
+  "passage_gap_ms"?: number
+  "speaker_change_gap_ms"?: number
+  "chapters": Array<AudiobookPacingChapter>
 }
 
 export type SetCastRequest = {
@@ -1625,6 +1768,11 @@ export type StemsStatusResponse = {
   "stems"?: (Record<string, string> | null)
 }
 
+export type StopEngineRequest = {
+  "engine_id": "ace_step" | "yue2"
+  "instance_id": string
+}
+
 export type SubtitleSourceCue = {
   "cue_id": string
   "order": number
@@ -1632,6 +1780,42 @@ export type SubtitleSourceCue = {
   "start_ms": number
   "end_ms": number
   "text": string
+}
+
+export type SupportAction = {
+  "id": "refresh_engines" | "preview_report" | "stop_engine" | "download_report"
+  "outcome": "completed" | "failed"
+  "error_code"?: ("engine_busy" | "engine_changed" | "engine_not_owned" | "engine_inactive" | "engine_state_unverified" | "engine_stop_failed" | "support_unavailable" | "backend_unreachable" | null)
+}
+
+export type SupportEngineState = {
+  "id": "ace_step" | "yue2"
+  "state": "stopped" | "starting" | "running" | "stopping" | "error"
+  "owned": boolean
+  "idle_state": "idle" | "busy" | "unknown"
+}
+
+export type SupportModuleState = {
+  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
+  "supported": boolean
+  "managed": boolean
+  "restart_required": boolean
+}
+
+export type SupportReport = {
+  "schema_version"?: 1
+  "source": "backend" | "browser_fallback"
+  "app_version"?: (string | null)
+  "python_version"?: (string | null)
+  "platform": "darwin" | "win32" | "linux" | "unknown"
+  "architecture": "arm64" | "x64" | "x86" | "unknown"
+  "acceleration": "apple_silicon" | "nvidia_unverified" | "cpu" | "unknown"
+  "physical_memory_bytes"?: (number | null)
+  "backend_connection": "reachable" | "unreachable" | "unverified"
+  "modules"?: Array<SupportModuleState>
+  "engines"?: Array<SupportEngineState>
+  "recent_actions"?: Array<SupportAction>
 }
 
 export type SwitchRequest = {
@@ -7076,6 +7260,17 @@ const schemas = {
       "settings": {
         "$ref": "#/$defs/CharacterTrainingSettings"
       },
+      "recipe": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CharacterTrainingRecipe"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
       "artifacts": {
         "items": {
           "$ref": "#/$defs/CharacterDatasetArtifact"
@@ -7121,6 +7316,79 @@ const schemas = {
       "comparison_prompts"
     ],
     "title": "CharacterTrainingProvenance",
+    "type": "object"
+  },
+  "CharacterTrainingRecipe": {
+    "additionalProperties": false,
+    "description": "Effective built-in recipe, rather than an inferred hardware quality tier.",
+    "properties": {
+      "width": {
+        "default": 960,
+        "maximum": 4096,
+        "minimum": 64,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "default": 544,
+        "maximum": 4096,
+        "minimum": 64,
+        "title": "Height",
+        "type": "integer"
+      },
+      "frames": {
+        "default": 97,
+        "maximum": 1000,
+        "minimum": 1,
+        "title": "Frames",
+        "type": "integer"
+      },
+      "frame_rate": {
+        "default": 24,
+        "maximum": 60,
+        "minimum": 1,
+        "title": "Frame Rate",
+        "type": "integer"
+      },
+      "learning_rate": {
+        "default": 0.0002,
+        "exclusiveMinimum": 0,
+        "maximum": 1,
+        "title": "Learning Rate",
+        "type": "number"
+      },
+      "batch_size": {
+        "default": 1,
+        "maximum": 64,
+        "minimum": 1,
+        "title": "Batch Size",
+        "type": "integer"
+      },
+      "optimizer": {
+        "const": "adamw",
+        "default": "adamw",
+        "title": "Optimizer",
+        "type": "string"
+      },
+      "memory_mode": {
+        "const": "low_ram",
+        "default": "low_ram",
+        "title": "Memory Mode",
+        "type": "string"
+      },
+      "gradient_checkpointing": {
+        "default": true,
+        "title": "Gradient Checkpointing",
+        "type": "boolean"
+      },
+      "generate_audio": {
+        "const": false,
+        "default": false,
+        "title": "Generate Audio",
+        "type": "boolean"
+      }
+    },
+    "title": "CharacterTrainingRecipe",
     "type": "object"
   },
   "CharacterTrainingSettings": {
@@ -11212,6 +11480,20 @@ const schemas = {
         "maxItems": 16,
         "title": "Cast",
         "type": "array"
+      },
+      "passage_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Passage Gap Ms",
+        "type": "integer"
+      },
+      "speaker_change_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Speaker Change Gap Ms",
+        "type": "integer"
       }
     },
     "required": [
@@ -11330,6 +11612,19 @@ const schemas = {
         "maxLength": 35,
         "title": "Render Language",
         "type": "string"
+      },
+      "duration_ms": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Duration Ms"
       }
     },
     "required": [
@@ -11476,6 +11771,20 @@ const schemas = {
         "maxItems": 16,
         "title": "Cast",
         "type": "array"
+      },
+      "passage_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Passage Gap Ms",
+        "type": "integer"
+      },
+      "speaker_change_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Speaker Change Gap Ms",
+        "type": "integer"
       }
     },
     "required": [
@@ -12140,6 +12449,40 @@ const schemas = {
         "maxLength": 35,
         "title": "Language",
         "type": "string"
+      },
+      "display_text": {
+        "anyOf": [
+          {
+            "maxLength": 20000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Display Text"
+      },
+      "gap_after_ms": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Gap After Ms"
+      },
+      "effective_gap_after_ms": {
+        "default": 0,
+        "maximum": 10000,
+        "minimum": 0,
+        "title": "Effective Gap After Ms",
+        "type": "integer"
       }
     },
     "required": [
@@ -12153,6 +12496,296 @@ const schemas = {
       "status"
     ],
     "title": "AudiobookPassage",
+    "type": "object"
+  },
+  "AudiobookPassageGap": {
+    "properties": {
+      "passage_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Passage Id",
+        "type": "string"
+      },
+      "gap_after_ms": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Gap After Ms"
+      }
+    },
+    "required": [
+      "passage_id"
+    ],
+    "title": "AudiobookPassageGap",
+    "type": "object"
+  },
+  "AudiobookPacingChapter": {
+    "properties": {
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "passages": {
+        "items": {
+          "$ref": "#/$defs/AudiobookPassageGap"
+        },
+        "maxItems": 2000,
+        "title": "Passages",
+        "type": "array"
+      }
+    },
+    "required": [
+      "chapter_index",
+      "revision"
+    ],
+    "title": "AudiobookPacingChapter",
+    "type": "object"
+  },
+  "SetAudiobookPacingRequest": {
+    "properties": {
+      "passage_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Passage Gap Ms",
+        "type": "integer"
+      },
+      "speaker_change_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Speaker Change Gap Ms",
+        "type": "integer"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/AudiobookPacingChapter"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Chapters",
+        "type": "array"
+      }
+    },
+    "required": [
+      "chapters"
+    ],
+    "title": "SetAudiobookPacingRequest",
+    "type": "object"
+  },
+  "NarrationDurationPassageSource": {
+    "properties": {
+      "book_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Book Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "passage_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Passage Id",
+        "type": "string"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "book_id",
+      "chapter_index",
+      "passage_id",
+      "revision"
+    ],
+    "title": "NarrationDurationPassageSource",
+    "type": "object"
+  },
+  "NarrationDurationRequest": {
+    "properties": {
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "language": {
+        "default": "en",
+        "maxLength": 35,
+        "minLength": 2,
+        "title": "Language",
+        "type": "string"
+      },
+      "text": {
+        "default": "",
+        "maxLength": 20000,
+        "title": "Text",
+        "type": "string"
+      },
+      "target_seconds": {
+        "default": 30,
+        "enum": [
+          15,
+          30,
+          60,
+          90
+        ],
+        "title": "Target Seconds",
+        "type": "integer"
+      },
+      "passage_source": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/NarrationDurationPassageSource"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      }
+    },
+    "required": [
+      "profile_id"
+    ],
+    "title": "NarrationDurationRequest",
+    "type": "object"
+  },
+  "NarrationDurationGuidance": {
+    "properties": {
+      "state": {
+        "enum": [
+          "approximate",
+          "unavailable"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "reason": {
+        "enum": [
+          "measured_takes",
+          "model_unverified",
+          "no_matching_takes",
+          "insufficient_speech"
+        ],
+        "title": "Reason",
+        "type": "string"
+      },
+      "target_seconds": {
+        "enum": [
+          15,
+          30,
+          60,
+          90
+        ],
+        "title": "Target Seconds",
+        "type": "integer"
+      },
+      "measurement_count": {
+        "default": 0,
+        "maximum": 100,
+        "minimum": 0,
+        "title": "Measurement Count",
+        "type": "integer"
+      },
+      "measured_audio_ms": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Measured Audio Ms",
+        "type": "integer"
+      },
+      "characters_per_second": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 100,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Characters Per Second"
+      },
+      "suggested_characters": {
+        "anyOf": [
+          {
+            "maximum": 20000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Suggested Characters"
+      },
+      "estimated_min_ms": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estimated Min Ms"
+      },
+      "estimated_max_ms": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estimated Max Ms"
+      },
+      "render_key": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Render Key"
+      }
+    },
+    "required": [
+      "state",
+      "reason",
+      "target_seconds"
+    ],
+    "title": "NarrationDurationGuidance",
     "type": "object"
   },
   "AudiobookPassagesResponse": {
@@ -12291,6 +12924,20 @@ const schemas = {
         "maxItems": 16,
         "title": "Cast",
         "type": "array"
+      },
+      "passage_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Passage Gap Ms",
+        "type": "integer"
+      },
+      "speaker_change_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Speaker Change Gap Ms",
+        "type": "integer"
       },
       "chapter_index": {
         "default": 0,
@@ -18208,6 +18855,783 @@ const schemas = {
     },
     "title": "SpeakerReviewsResponse",
     "type": "object"
+  },
+  "ReadingCue": {
+    "properties": {
+      "passage_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Passage Id",
+        "type": "string"
+      },
+      "start_ms": {
+        "minimum": 0,
+        "title": "Start Ms",
+        "type": "integer"
+      },
+      "end_ms": {
+        "exclusiveMinimum": 0,
+        "title": "End Ms",
+        "type": "integer"
+      },
+      "display_text": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "title": "Display Text",
+        "type": "string"
+      },
+      "spoken_text": {
+        "maxLength": 20000,
+        "minLength": 1,
+        "title": "Spoken Text",
+        "type": "string"
+      }
+    },
+    "required": [
+      "passage_id",
+      "start_ms",
+      "end_ms",
+      "display_text",
+      "spoken_text"
+    ],
+    "title": "ReadingCue",
+    "type": "object"
+  },
+  "ReadAlongRequest": {
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "aspect": {
+        "default": "portrait",
+        "enum": [
+          "portrait",
+          "landscape"
+        ],
+        "title": "Aspect",
+        "type": "string"
+      },
+      "preview_seconds": {
+        "anyOf": [
+          {
+            "maximum": 25,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Preview Seconds"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "title": "ReadAlongRequest",
+    "type": "object"
+  },
+  "ReadAlongExport": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "book_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Book Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "source_revision": {
+        "minimum": 1,
+        "title": "Source Revision",
+        "type": "integer"
+      },
+      "source_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "detail": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Detail",
+        "type": "string"
+      },
+      "aspect": {
+        "enum": [
+          "portrait",
+          "landscape"
+        ],
+        "title": "Aspect",
+        "type": "string"
+      },
+      "preview_seconds": {
+        "anyOf": [
+          {
+            "maximum": 25,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Preview Seconds"
+      },
+      "duration_ms": {
+        "exclusiveMinimum": 0,
+        "title": "Duration Ms",
+        "type": "integer"
+      },
+      "timing": {
+        "const": "passage",
+        "default": "passage",
+        "title": "Timing",
+        "type": "string"
+      },
+      "text_basis": {
+        "default": "original_mapping",
+        "enum": [
+          "original_mapping",
+          "spoken_fallback"
+        ],
+        "title": "Text Basis",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "title": "Updated At",
+        "type": "string"
+      },
+      "video_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Video Url"
+      },
+      "srt_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Srt Url"
+      },
+      "vtt_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Vtt Url"
+      },
+      "manifest_url": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Manifest Url"
+      }
+    },
+    "required": [
+      "id",
+      "book_id",
+      "chapter_index",
+      "source_revision",
+      "source_sha256",
+      "status",
+      "aspect",
+      "duration_ms",
+      "created_at",
+      "updated_at"
+    ],
+    "title": "ReadAlongExport",
+    "type": "object"
+  },
+  "ReadAlongExportsResponse": {
+    "properties": {
+      "exports": {
+        "items": {
+          "$ref": "#/$defs/ReadAlongExport"
+        },
+        "title": "Exports",
+        "type": "array"
+      }
+    },
+    "required": [
+      "exports"
+    ],
+    "title": "ReadAlongExportsResponse",
+    "type": "object"
+  },
+  "RetainedAudioSource": {
+    "properties": {
+      "kind": {
+        "enum": [
+          "speech_trial",
+          "chapter"
+        ],
+        "title": "Kind",
+        "type": "string"
+      },
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "chapter_index": {
+        "anyOf": [
+          {
+            "maximum": 99,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Chapter Index"
+      },
+      "revision": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revision"
+      }
+    },
+    "required": [
+      "kind",
+      "source_id"
+    ],
+    "title": "RetainedAudioSource",
+    "type": "object"
+  },
+  "RetainedAudioInfo": {
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/RetainedAudioSource"
+      },
+      "duration_ms": {
+        "exclusiveMinimum": 0,
+        "title": "Duration Ms",
+        "type": "integer"
+      },
+      "source_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "title": "Content Origin",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "duration_ms",
+      "source_sha256",
+      "content_origin"
+    ],
+    "title": "RetainedAudioInfo",
+    "type": "object"
+  },
+  "RetainedAudioVideoRequest": {
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/RetainedAudioSource"
+      },
+      "source_sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Source Sha256",
+        "type": "string"
+      },
+      "name": {
+        "default": "Narration video",
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "clip_start_ms": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Clip Start Ms",
+        "type": "integer"
+      },
+      "clip_end_ms": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Clip End Ms"
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256"
+    ],
+    "title": "RetainedAudioVideoRequest",
+    "type": "object"
+  },
+  "EngineRuntime": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "enum": [
+          "ace_step",
+          "yue2"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "stopped",
+          "starting",
+          "running",
+          "stopping",
+          "error"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "owned": {
+        "title": "Owned",
+        "type": "boolean"
+      },
+      "instance_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "title": "Instance Id"
+      },
+      "idle_state": {
+        "enum": [
+          "idle",
+          "busy",
+          "unknown"
+        ],
+        "title": "Idle State",
+        "type": "string"
+      },
+      "can_stop": {
+        "title": "Can Stop",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "state",
+      "owned",
+      "instance_id",
+      "idle_state",
+      "can_stop"
+    ],
+    "title": "EngineRuntime",
+    "type": "object"
+  },
+  "EngineRuntimeResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/EngineRuntime"
+        },
+        "maxItems": 2,
+        "title": "Engines",
+        "type": "array"
+      }
+    },
+    "required": [
+      "engines"
+    ],
+    "title": "EngineRuntimeResponse",
+    "type": "object"
+  },
+  "StopEngineRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine_id": {
+        "enum": [
+          "ace_step",
+          "yue2"
+        ],
+        "title": "Engine Id",
+        "type": "string"
+      },
+      "instance_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Instance Id",
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine_id",
+      "instance_id"
+    ],
+    "title": "StopEngineRequest",
+    "type": "object"
+  },
+  "SupportAction": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "enum": [
+          "refresh_engines",
+          "preview_report",
+          "stop_engine",
+          "download_report"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "outcome": {
+        "enum": [
+          "completed",
+          "failed"
+        ],
+        "title": "Outcome",
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "engine_busy",
+              "engine_changed",
+              "engine_not_owned",
+              "engine_inactive",
+              "engine_state_unverified",
+              "engine_stop_failed",
+              "support_unavailable",
+              "backend_unreachable"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Error Code"
+      }
+    },
+    "required": [
+      "id",
+      "outcome"
+    ],
+    "title": "SupportAction",
+    "type": "object"
+  },
+  "SupportModuleState": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "speech",
+          "singing",
+          "separation",
+          "video",
+          "media",
+          "transcription",
+          "source_import",
+          "ebooks",
+          "kokoro",
+          "chatterbox",
+          "wan22",
+          "rvc",
+          "speaker_review"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "unsupported",
+          "missing",
+          "partial",
+          "installed",
+          "ready"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "supported": {
+        "title": "Supported",
+        "type": "boolean"
+      },
+      "managed": {
+        "title": "Managed",
+        "type": "boolean"
+      },
+      "restart_required": {
+        "title": "Restart Required",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "state",
+      "supported",
+      "managed",
+      "restart_required"
+    ],
+    "title": "SupportModuleState",
+    "type": "object"
+  },
+  "SupportEngineState": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "enum": [
+          "ace_step",
+          "yue2"
+        ],
+        "title": "Id",
+        "type": "string"
+      },
+      "state": {
+        "enum": [
+          "stopped",
+          "starting",
+          "running",
+          "stopping",
+          "error"
+        ],
+        "title": "State",
+        "type": "string"
+      },
+      "owned": {
+        "title": "Owned",
+        "type": "boolean"
+      },
+      "idle_state": {
+        "enum": [
+          "idle",
+          "busy",
+          "unknown"
+        ],
+        "title": "Idle State",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "state",
+      "owned",
+      "idle_state"
+    ],
+    "title": "SupportEngineState",
+    "type": "object"
+  },
+  "SupportReport": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "default": 1,
+        "title": "Schema Version",
+        "type": "integer"
+      },
+      "source": {
+        "enum": [
+          "backend",
+          "browser_fallback"
+        ],
+        "title": "Source",
+        "type": "string"
+      },
+      "app_version": {
+        "anyOf": [
+          {
+            "maxLength": 50,
+            "pattern": "^\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "App Version"
+      },
+      "python_version": {
+        "anyOf": [
+          {
+            "maxLength": 20,
+            "pattern": "^\\d+\\.\\d+\\.\\d+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Python Version"
+      },
+      "platform": {
+        "enum": [
+          "darwin",
+          "win32",
+          "linux",
+          "unknown"
+        ],
+        "title": "Platform",
+        "type": "string"
+      },
+      "architecture": {
+        "enum": [
+          "arm64",
+          "x64",
+          "x86",
+          "unknown"
+        ],
+        "title": "Architecture",
+        "type": "string"
+      },
+      "acceleration": {
+        "enum": [
+          "apple_silicon",
+          "nvidia_unverified",
+          "cpu",
+          "unknown"
+        ],
+        "title": "Acceleration",
+        "type": "string"
+      },
+      "physical_memory_bytes": {
+        "anyOf": [
+          {
+            "maximum": 17592186044416,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Physical Memory Bytes"
+      },
+      "backend_connection": {
+        "enum": [
+          "reachable",
+          "unreachable",
+          "unverified"
+        ],
+        "title": "Backend Connection",
+        "type": "string"
+      },
+      "modules": {
+        "items": {
+          "$ref": "#/$defs/SupportModuleState"
+        },
+        "maxItems": 16,
+        "title": "Modules",
+        "type": "array"
+      },
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/SupportEngineState"
+        },
+        "maxItems": 2,
+        "title": "Engines",
+        "type": "array"
+      },
+      "recent_actions": {
+        "items": {
+          "$ref": "#/$defs/SupportAction"
+        },
+        "maxItems": 20,
+        "title": "Recent Actions",
+        "type": "array"
+      }
+    },
+    "required": [
+      "source",
+      "platform",
+      "architecture",
+      "acceleration",
+      "backend_connection"
+    ],
+    "title": "SupportReport",
+    "type": "object"
   }
 } as const
 
@@ -19295,6 +20719,54 @@ export function parseAudiobookPassage(value: unknown): AudiobookPassage {
   return value
 }
 
+function isAudiobookPassageGap(value: unknown): value is AudiobookPassageGap {
+  return decodeSchema(schemas.AudiobookPassageGap, value, schemas)
+}
+export function parseAudiobookPassageGap(value: unknown): AudiobookPassageGap {
+  if (!isAudiobookPassageGap(value)) throw new TypeError("Invalid AudiobookPassageGap response")
+  return value
+}
+
+function isAudiobookPacingChapter(value: unknown): value is AudiobookPacingChapter {
+  return decodeSchema(schemas.AudiobookPacingChapter, value, schemas)
+}
+export function parseAudiobookPacingChapter(value: unknown): AudiobookPacingChapter {
+  if (!isAudiobookPacingChapter(value)) throw new TypeError("Invalid AudiobookPacingChapter response")
+  return value
+}
+
+function isSetAudiobookPacingRequest(value: unknown): value is SetAudiobookPacingRequest {
+  return decodeSchema(schemas.SetAudiobookPacingRequest, value, schemas)
+}
+export function parseSetAudiobookPacingRequest(value: unknown): SetAudiobookPacingRequest {
+  if (!isSetAudiobookPacingRequest(value)) throw new TypeError("Invalid SetAudiobookPacingRequest response")
+  return value
+}
+
+function isNarrationDurationRequest(value: unknown): value is NarrationDurationRequest {
+  return decodeSchema(schemas.NarrationDurationRequest, value, schemas)
+}
+export function parseNarrationDurationRequest(value: unknown): NarrationDurationRequest {
+  if (!isNarrationDurationRequest(value)) throw new TypeError("Invalid NarrationDurationRequest response")
+  return value
+}
+
+function isNarrationDurationPassageSource(value: unknown): value is NarrationDurationPassageSource {
+  return decodeSchema(schemas.NarrationDurationPassageSource, value, schemas)
+}
+export function parseNarrationDurationPassageSource(value: unknown): NarrationDurationPassageSource {
+  if (!isNarrationDurationPassageSource(value)) throw new TypeError("Invalid NarrationDurationPassageSource response")
+  return value
+}
+
+function isNarrationDurationGuidance(value: unknown): value is NarrationDurationGuidance {
+  return decodeSchema(schemas.NarrationDurationGuidance, value, schemas)
+}
+export function parseNarrationDurationGuidance(value: unknown): NarrationDurationGuidance {
+  if (!isNarrationDurationGuidance(value)) throw new TypeError("Invalid NarrationDurationGuidance response")
+  return value
+}
+
 function isAudiobookPassagesResponse(value: unknown): value is AudiobookPassagesResponse {
   return decodeSchema(schemas.AudiobookPassagesResponse, value, schemas)
 }
@@ -20100,5 +21572,117 @@ function isProvenanceComponent(value: unknown): value is ProvenanceComponent {
 }
 export function parseProvenanceComponent(value: unknown): ProvenanceComponent {
   if (!isProvenanceComponent(value)) throw new TypeError("Invalid ProvenanceComponent response")
+  return value
+}
+
+function isReadingCue(value: unknown): value is ReadingCue {
+  return decodeSchema(schemas.ReadingCue, value, schemas)
+}
+export function parseReadingCue(value: unknown): ReadingCue {
+  if (!isReadingCue(value)) throw new TypeError("Invalid ReadingCue response")
+  return value
+}
+
+function isReadAlongRequest(value: unknown): value is ReadAlongRequest {
+  return decodeSchema(schemas.ReadAlongRequest, value, schemas)
+}
+export function parseReadAlongRequest(value: unknown): ReadAlongRequest {
+  if (!isReadAlongRequest(value)) throw new TypeError("Invalid ReadAlongRequest response")
+  return value
+}
+
+function isReadAlongExport(value: unknown): value is ReadAlongExport {
+  return decodeSchema(schemas.ReadAlongExport, value, schemas)
+}
+export function parseReadAlongExport(value: unknown): ReadAlongExport {
+  if (!isReadAlongExport(value)) throw new TypeError("Invalid ReadAlongExport response")
+  return value
+}
+
+function isReadAlongExportsResponse(value: unknown): value is ReadAlongExportsResponse {
+  return decodeSchema(schemas.ReadAlongExportsResponse, value, schemas)
+}
+export function parseReadAlongExportsResponse(value: unknown): ReadAlongExportsResponse {
+  if (!isReadAlongExportsResponse(value)) throw new TypeError("Invalid ReadAlongExportsResponse response")
+  return value
+}
+
+function isRetainedAudioSource(value: unknown): value is RetainedAudioSource {
+  return decodeSchema(schemas.RetainedAudioSource, value, schemas)
+}
+export function parseRetainedAudioSource(value: unknown): RetainedAudioSource {
+  if (!isRetainedAudioSource(value)) throw new TypeError("Invalid RetainedAudioSource response")
+  return value
+}
+
+function isRetainedAudioInfo(value: unknown): value is RetainedAudioInfo {
+  return decodeSchema(schemas.RetainedAudioInfo, value, schemas)
+}
+export function parseRetainedAudioInfo(value: unknown): RetainedAudioInfo {
+  if (!isRetainedAudioInfo(value)) throw new TypeError("Invalid RetainedAudioInfo response")
+  return value
+}
+
+function isRetainedAudioVideoRequest(value: unknown): value is RetainedAudioVideoRequest {
+  return decodeSchema(schemas.RetainedAudioVideoRequest, value, schemas)
+}
+export function parseRetainedAudioVideoRequest(value: unknown): RetainedAudioVideoRequest {
+  if (!isRetainedAudioVideoRequest(value)) throw new TypeError("Invalid RetainedAudioVideoRequest response")
+  return value
+}
+
+function isEngineRuntime(value: unknown): value is EngineRuntime {
+  return decodeSchema(schemas.EngineRuntime, value, schemas)
+}
+export function parseEngineRuntime(value: unknown): EngineRuntime {
+  if (!isEngineRuntime(value)) throw new TypeError("Invalid EngineRuntime response")
+  return value
+}
+
+function isEngineRuntimeResponse(value: unknown): value is EngineRuntimeResponse {
+  return decodeSchema(schemas.EngineRuntimeResponse, value, schemas)
+}
+export function parseEngineRuntimeResponse(value: unknown): EngineRuntimeResponse {
+  if (!isEngineRuntimeResponse(value)) throw new TypeError("Invalid EngineRuntimeResponse response")
+  return value
+}
+
+function isStopEngineRequest(value: unknown): value is StopEngineRequest {
+  return decodeSchema(schemas.StopEngineRequest, value, schemas)
+}
+export function parseStopEngineRequest(value: unknown): StopEngineRequest {
+  if (!isStopEngineRequest(value)) throw new TypeError("Invalid StopEngineRequest response")
+  return value
+}
+
+function isSupportAction(value: unknown): value is SupportAction {
+  return decodeSchema(schemas.SupportAction, value, schemas)
+}
+export function parseSupportAction(value: unknown): SupportAction {
+  if (!isSupportAction(value)) throw new TypeError("Invalid SupportAction response")
+  return value
+}
+
+function isSupportModuleState(value: unknown): value is SupportModuleState {
+  return decodeSchema(schemas.SupportModuleState, value, schemas)
+}
+export function parseSupportModuleState(value: unknown): SupportModuleState {
+  if (!isSupportModuleState(value)) throw new TypeError("Invalid SupportModuleState response")
+  return value
+}
+
+function isSupportEngineState(value: unknown): value is SupportEngineState {
+  return decodeSchema(schemas.SupportEngineState, value, schemas)
+}
+export function parseSupportEngineState(value: unknown): SupportEngineState {
+  if (!isSupportEngineState(value)) throw new TypeError("Invalid SupportEngineState response")
+  return value
+}
+
+function isSupportReport(value: unknown): value is SupportReport {
+  return decodeSchema(schemas.SupportReport, value, schemas)
+}
+export function parseSupportReport(value: unknown): SupportReport {
+  if (!isSupportReport(value)) throw new TypeError("Invalid SupportReport response")
   return value
 }

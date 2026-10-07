@@ -1,0 +1,40 @@
+{
+  "audio_sha256": "09a070ea627020f04f55fd08e00bef9c32a7b500023b6503d0ffc9de101e683a",
+  "engine_commit": "f0c12418afd601807199eaa1366584a2a53edcf0",
+  "engine_version": "0.16.1",
+  "system": "Darwin",
+  "machine": "Mac16,5",
+  "physical_memory_bytes": 137438953472,
+  "readiness": {
+    "profile_id": "ltx23",
+    "ready": true,
+    "engine_ready": true,
+    "model_fingerprint": "ab16c156f16f90f8050b762e173a67136adc3b0d4fa44bc6eaa81cb5c15db658",
+    "model_revision": "6671a7572a530862d1d60ce393b5d93491e3f76b",
+    "text_revision": "86cc6a8dedbc456dd0e4af01a9d09f396f77e558",
+    "expected_bytes": 58419728001,
+    "uncached_bytes": 0,
+    "free_bytes": 620543266816,
+    "missing_files": [],
+    "warnings": [
+      "visual_quality_unverified",
+      "model_fingerprint_uses_file_metadata",
+      "experimental_candidate"
+    ]
+  },
+  "inference_executed": true,
+  "inference_skip_reason": "",
+  "elapsed_sec": 710.9994272079784,
+  "peak_child_rss_bytes": 11065737216,
+  "peak_mlx_memory_bytes": 13850911956,
+  "output": "Retained outside Git: baseline.mp4 (candidate-a2v-tiled)",
+  "output_validated": true,
+  "error_code": "",
+  "source_sha256": "50c81592904e4822890fd2cc76c243aee9c67f24a819465f731a062ace9e4130",
+  "memory_mode": "low_ram",
+  "lora_mode": "fused",
+  "reference_sha256": null,
+  "adapter_sha256": null,
+  "output_sha256": "6366789c4fb3f20a31268bda9cc5ecf51b79f513c4d022e0b2af60c3233a9834",
+  "mlx_memory_scope": "allocator_peak_since_last_vendor_reset; not whole-process RSS"
+}

@@ -24,6 +24,7 @@ from fastapi import UploadFile
 from .config import DATA_DIR, LTX_DIR
 from .gpu_lease import gpu_lease
 from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, kill_process_tree, spawn_process
+from .image_normalization import normalization_argv
 from .video_process import WorkerIdentity, spawn_owned, terminate_verified
 from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
 from .stems import gpu_lock
@@ -510,14 +511,19 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                 target = root / ("held_out" if held_out else "photos") / f"{index:02d}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 proc = await spawn_process(
-                    tool("ffmpeg"), "-v", "error", "-y", "-i", str(temporary),
-                    "-frames:v", "1", str(target),
+                    *normalization_argv(temporary, target),
                     stdout=asyncio.subprocess.DEVNULL,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                await communicate_process(proc, 30)
+                try:
+                    await communicate_process(proc, 30)
+                finally:
+                    await await_cleanup(kill_process_tree(proc))
                 if proc.returncode != 0 or not target.is_file():
                     raise VideoProjectError("invalid_reference")
+                original = root / "originals" / f"{index:02d}.bin"
+                original.parent.mkdir(parents=True, exist_ok=True)
+                temporary.replace(original)
                 if not held_out:
                     photos.append(target)
                 dataset_paths.append(target)
@@ -559,7 +565,7 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
         if review is not None:
             from .video_training_review import build_provenance
             try:
-                provenance = build_provenance(root, dataset_paths, dataset_kinds, review)
+                provenance = build_provenance(root, dataset_paths, dataset_kinds, review, builtin=command is not None and _uses_engine_python(command))
             except ValueError as exc:
                 raise VideoProjectError(str(exc)) from exc
             manifest = root / "dataset.json"

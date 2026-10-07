@@ -132,6 +132,9 @@ class VideoProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((reference.width, reference.height), (80, 60))
             self.assertEqual(reference.bytes, len(payload))
             self.assertTrue(upload.file.closed)
+            normalized = self.p.reference_file(project.id, reference.id)
+            self.assertEqual(normalized.with_suffix('.original').read_bytes(), payload)
+            self.assertTrue(normalized.with_suffix('.normalization.json').is_file())
             with Image.open(self.p.reference_file(project.id, reference.id)) as image:
                 self.assertEqual(image.format, "PNG")
                 self.assertEqual(image.size, (80, 60))
@@ -142,6 +145,10 @@ class VideoProjectTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 self.p.reference_file(project.id, original.id).read_bytes(),
                 self.p.reference_file(duplicate.id, copied.id).read_bytes(),
+            )
+            self.assertEqual(
+                self.p.reference_file(project.id, original.id).with_suffix('.original').read_bytes(),
+                self.p.reference_file(duplicate.id, copied.id).with_suffix('.original').read_bytes(),
             )
         self.assertEqual(list(self.p.project_dir(project.id).glob("*.upload")), [])
 

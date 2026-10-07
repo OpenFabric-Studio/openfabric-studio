@@ -114,6 +114,11 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
                     await native_yue.recover_quarantined()
                 lease = await reserve_native(video_jobs.work_busy, model_id=model_id, exclusive=model_id == 'yue2')
                 owner = _ProxyOwnership(model_id, lease)
+                # Stop may have drained the engine while this request waited
+                # for admission. Never forward its earlier RUNNING snapshot.
+                if rs.status != ModelStatus.RUNNING:
+                    await await_cleanup(owner.close())
+                    return JSONResponse({'error': 'model_inactive'}, status_code=503)
             response = await _proxy_to(MODELS[model_id].proxy_target, request, path, owner)
             if owner:
                 previous = response.background

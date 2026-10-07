@@ -25,7 +25,11 @@ import { trackAudioEn } from './trackAudio'
 import { trackFavoritesEn } from './trackFavorites'
 import { upstreamLibraryEn } from './upstreamLibrary'
 import { upstreamWorkspaceEn } from './upstreamWorkspace'
+import { readingMediaEn } from './readingMedia'
+import { supportWorkspaceEn } from './supportWorkspace'
 export default {
+  readingMedia: readingMediaEn,
+  supportWorkspace: supportWorkspaceEn,
   speakerReview: speakerReviewEn,
   exportQuality,
   videoCloud: videoCloudEn,

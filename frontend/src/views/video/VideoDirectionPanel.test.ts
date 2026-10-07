@@ -120,6 +120,27 @@ it('updates picture dimensions as a supported pair without accepting unknown siz
   expect(draft.value.settings).toMatchObject({ width: 1280, height: 704 })
 })
 
+it('adds conservative portrait direction without generating or changing timeline settings', async () => {
+  const picture = videoProjectFixture(undefined, null)
+  const { draft, analyze, project } = await mount({ project: picture })
+  const settings = { ...draft.value.settings }
+  button('Apply portrait close-up').click(); await flush()
+  expect(draft.value.direction).toContain('A quiet neon city')
+  expect(draft.value.direction).toContain('restrained facial motion')
+  expect(draft.value.settings).toEqual(settings)
+  expect(draft.value.shots).toEqual([])
+  expect(project.value).toEqual(picture)
+  expect(analyze).not.toHaveBeenCalled()
+  expect(document.body.textContent).toContain('150–200 pixels')
+  expect(document.body.textContent).toContain('does not synchronize lips')
+})
+
+it('cannot apply a portrait preset while direction is read-only', async () => {
+  const { draft } = await mount({ project: videoProjectFixture(undefined, null), readOnly: true })
+  expect(button('Apply portrait close-up').disabled).toBe(true)
+  expect(draft.value.direction).toBe('A quiet neon city')
+})
+
 it('explains an unavailable comparison model publicly and leaves direction editable', async () => {
   await mount({ readiness: { ...videoReadinessFixture, options: videoReadinessFixture.options.map(option => ({ ...option, available: false, reason: 'model_not_installed' })) } })
   const model = field('[data-video-model]', HTMLSelectElement)

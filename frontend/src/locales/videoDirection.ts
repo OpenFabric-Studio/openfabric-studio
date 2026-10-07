@@ -1,4 +1,11 @@
 export const videoDirectionEn = {
+  portraitTitle: 'Portrait direction',
+  portraitHint: 'Use a neutral, closed-mouth reference and frame the face at roughly 150–200 pixels wide in the working video. This is a framing heuristic; likeness is not guaranteed.',
+  portraitApply: 'Apply portrait close-up', staticApply: 'Apply near-static portrait',
+  portraitPrompt: 'Close-up portrait, face large in frame, neutral expression, restrained facial motion, steady camera, soft even lighting.',
+  staticPrompt: 'Near-static portrait, face large in frame, subtle blinking and breathing, minimal head movement, locked camera, consistent lighting.',
+  portraitBoundary: 'These presets add prompt guidance only. Speech remains an export soundtrack and does not synchronize lips. Structural motion control is not enabled.',
+  portraitTooLong: 'Shorten the direction before adding this preset; the limit is 2,000 characters.',
   intro: 'Choose the look for this video, then build or edit its storyboard.',
   generatedHint: 'Create new scenes from your visual direction and shot descriptions.',
   coverHint: 'Add gentle camera motion to an uploaded image.',

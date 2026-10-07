@@ -22,6 +22,7 @@ from .video_candidate import CANDIDATE_COMMIT, CANDIDATE_VERSION, CANDIDATE_SHA2
 
 
 class VideoBenchmarkReport(VideoContract):
+    audio_sha256: str | None = None
     engine_commit: str = ENGINE_COMMIT
     engine_version: str = ENGINE_VERSION
     system: str
@@ -152,6 +153,9 @@ async def run_case(report: VideoBenchmarkReport, engine: Path, cache: Path, outp
         reference = snapshot_input(reference, output / ('reference' + reference.suffix))
     if candidate_settings is not None:
         candidate_settings = replace(candidate_settings, reference=reference)
+        if candidate_settings.source_audio is not None:
+            source_audio = candidate_settings.source_audio
+            candidate_settings = replace(candidate_settings, source_audio=snapshot_input(source_audio, output / ('audio' + source_audio.suffix)))
         if candidate_settings.adapter is not None:
             adapter = candidate_settings.adapter
             staged_adapter = output / 'adapter.safetensors'
@@ -180,6 +184,8 @@ async def run_case(report: VideoBenchmarkReport, engine: Path, cache: Path, outp
         result.reference_sha256 = file_sha256(reference)
     if candidate_settings is not None:
         result.memory_mode, result.lora_mode = candidate_settings.memory_mode, candidate_settings.lora_mode
+        if candidate_settings.source_audio is not None:
+            result.audio_sha256 = file_sha256(candidate_settings.source_audio)
         if candidate_settings.adapter is not None:
             result.adapter_sha256 = file_sha256(candidate_settings.adapter)
     try:

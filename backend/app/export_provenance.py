@@ -152,7 +152,11 @@ def video_components(document: 'StoredVideoProject',*,attach_speech: bool) -> li
     if project.track_id is not None and document.source is not None:
         components.append(track_component(project.track_id,'original',document.source.sha256))
     elif project.speech_clip is not None and attach_speech:
-        if project.dialogue_cues:
+        if document.retained_audio is not None:
+            from . import retained_audio
+            store.require_retained_consent(document)
+            components.extend(retained_audio.video_components(document.retained_audio, project.speech_clip.sha256))
+        elif project.dialogue_cues:
             for cue in project.dialogue_cues:
                 component=ProvenanceComponent(role='audio',content_origin='generated' if cue.renderer is not None else 'unknown',source_id=f'passage:{cue.passage_id}:take:{cue.render_identity}',
                     source_sha256=cue.audio_sha256,hash_scope='pcm',engine=cue.renderer,
