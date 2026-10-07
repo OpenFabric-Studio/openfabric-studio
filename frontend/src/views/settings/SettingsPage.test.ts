@@ -185,6 +185,15 @@ it('moves the existing library migration workflow from Home into Settings', asyn
   expect(folder.value).toBe('/test/library'); expect(folder.getAttribute('spellcheck')).toBe('false')
 })
 
+it('loads runtime controls only when the support tab is opened and tears them down on navigation', async () => {
+  const container = await mount(SettingsPage, '/settings')
+  expect(container.textContent).not.toContain('Preview support report')
+  button(container, 'Runtime & support').click(); await settle()
+  expect(container.textContent).toContain('Preview support report')
+  button(container, 'Library').click(); await settle()
+  expect(container.textContent).not.toContain('Preview support report')
+})
+
 it('allows full long library catalog paths to wrap instead of widening the mobile page', async () => {
   const path = `/temporary/${'long-library-name-'.repeat(20)}`
   vi.stubGlobal('fetch', vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(JSON.stringify({ data_dir: path, pending_data_dir: '', restart_required: false, error: '', can_pick: false, folders: [{ path: 'files', key: 'tracks' }] }))))

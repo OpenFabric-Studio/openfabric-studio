@@ -72,3 +72,16 @@ it('observes an accepted training job until completion', async () => {
   await vi.advanceTimersByTimeAsync(9000)
   expect(api.listCharacterTraining).toHaveBeenCalledTimes(2)
 })
+
+it('shows effective recorded recipe and separates completion from likeness review', async () => {
+  vi.mocked(api.listCharacterTraining).mockResolvedValue({ jobs: [{ ...job, status: 'completed', adapter_ready: true,
+    provenance: { engine_commit: 'b'.repeat(40), base_revision: 'c'.repeat(40), dataset_sha256: 'd'.repeat(64), settings_sha256: 'e'.repeat(64),
+      settings: { base_profile: 'ltx23', steps: 120, rank: 16 }, artifacts: [], comparison_prompts: [],
+      recipe: { width: 960, height: 544, frames: 97, frame_rate: 24, learning_rate: 0.0002, memory_mode: 'low_ram' } } }] })
+  const node = await mount()
+  expect(node.textContent).toContain('Effective built-in recipe')
+  expect(node.textContent).toContain('120 steps · rank 16')
+  expect(node.textContent).toContain('960×544')
+  expect(node.textContent).toContain('Likeness has not been evaluated')
+  expect(node.textContent).toContain('does not establish likeness')
+})

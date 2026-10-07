@@ -13,6 +13,7 @@ const emit = defineEmits<{ analyze: []; continue: []; duplicate: []; upload: [fi
 const { t, te } = useI18n()
 const panelId = useId()
 const uploadError = ref('')
+const presetError = ref('')
 watch(() => props.project.id, () => { uploadError.value = '' })
 const approachChoices: { mode: VideoDraft['mode']; title: string; hint: string; icon: AppIconName }[] = [
   { mode: 'generated', title: 'videoWorkspace.generated', hint: 'videoDirection.generatedHint', icon: 'video' },
@@ -68,6 +69,15 @@ function filesChanged(event: Event) {
 }
 function analyze() { if (analysisAllowed.value) emit('analyze') }
 function duplicate() { if (!props.readOnly) emit('duplicate') }
+function portraitPreset(kind: 'close' | 'static') {
+  if (props.readOnly || !picture.value || !generated.value || cloud.value) return
+  const prompt = t(kind === 'close' ? 'videoDirection.portraitPrompt' : 'videoDirection.staticPrompt')
+  if (draft.value.direction.includes(prompt)) return
+  const combined = [draft.value.direction.trim(), prompt].filter(Boolean).join('\n')
+  if (combined.length > 2000) { presetError.value = t('videoDirection.portraitTooLong'); return }
+  presetError.value = ''
+  draft.value.direction = combined
+}
 </script>
 
 <template>
@@ -86,6 +96,16 @@ function duplicate() { if (!props.readOnly) emit('duplicate') }
     <VideoCloudProvider v-model="draft" :project="project" :read-only="readOnly" @detach-adapter="emit('detachAdapter')" />
     <fieldset :disabled="readOnly" class="min-w-0 space-y-5 rounded-xl border border-border bg-panel p-4 sm:p-5">
       <div v-if="generated" class="space-y-4">
+        <div v-if="picture && !cloud" class="space-y-2 rounded-lg bg-panel-2 p-3" data-portrait-guidance>
+          <h3 class="font-medium">{{ t('videoDirection.portraitTitle') }}</h3>
+          <p class="field-hint">{{ t('videoDirection.portraitHint') }}</p>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" :disabled="readOnly" @click="portraitPreset('close')">{{ t('videoDirection.portraitApply') }}</button>
+            <button type="button" :disabled="readOnly" @click="portraitPreset('static')">{{ t('videoDirection.staticApply') }}</button>
+          </div>
+          <p class="field-hint">{{ t('videoDirection.portraitBoundary') }}</p>
+          <p v-if="presetError" role="alert" class="text-sm text-status-failed">{{ presetError }}</p>
+        </div>
         <label>{{ t('videoWorkspace.directionPrompt') }}
           <textarea v-model="draft.direction" data-video-direction-prompt rows="3" maxlength="2000" :placeholder="t('video.promptPlaceholder')" :aria-describedby="`${panelId}-direction-hint`" />
           <span :id="`${panelId}-direction-hint`" class="field-hint">{{ draft.character_lock && picture ? t('videoWorkspace.characterDirectionHint') : t('videoWorkspace.directionHint') }}</span>

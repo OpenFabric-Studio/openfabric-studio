@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { routerKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import * as profilesApi from '../../api/voiceProfiles'
 import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProfile } from '../../api/voiceProfiles'
@@ -12,12 +13,18 @@ import SpeechReferenceDetails from './SpeechReferenceDetails.vue'
 import CloudSpeechProfile from './CloudSpeechProfile.vue'
 import CloudSpeechCost from './CloudSpeechCost.vue'
 import CloudSpeechTrials from './CloudSpeechTrials.vue'
+import NarrationDurationBudget from './NarrationDurationBudget.vue'
+import RetainedAudioVideo from '../../components/RetainedAudioVideo.vue'
 import { quoteTrial } from '../../api/cloudSpeech'
 import type { CloudSpeechApproval } from '../../api/contracts'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
 const emit = defineEmits<{ activity: [message: string] }>()
 const { t } = useI18n()
+const router = inject(routerKey, undefined)
+function openVideo(projectId: string) {
+  if (alive && props.active && /^[0-9a-f]{32}$/.test(projectId)) void router?.push({ name: 'video', query: { project: projectId } })
+}
 const workspace = ref<HTMLElement | null>(null)
 const profiles = ref<SpeechVoiceProfile[]>([])
 const search = ref('')
@@ -353,6 +360,7 @@ onBeforeUnmount(() => {
           <label class="block space-y-2"><span class="text-sm font-medium text-text">{{ t('voiceProfiles.trialTextLabel') }}</span><textarea ref="trialTextInput" v-model="trialText" rows="7" maxlength="8000" :aria-label="t('voiceProfiles.trialTextLabel')" :placeholder="t('voiceProfiles.trialTextPlaceholder')" class="w-full rounded-lg border border-border bg-panel-2 p-3 text-sm leading-relaxed text-text focus-visible:outline-2 focus-visible:outline-accent1" /></label>
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><input v-if="selectedProfile.renderer==='openrouter'" v-model="trialLanguage" maxlength="16" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><select v-else v-model="trialLanguage" :disabled="cloning" :aria-label="t('audiobookReview.outputLanguage')" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><option value="en">English</option><option value="zh">中文</option><option value="ja">日本語</option><option value="ko">한국어</option><option value="yue">粵語</option></select></label>
           <p v-if="selectedProfile.renderer==='openrouter'" class="text-xs text-text-dim">{{t('cloudSpeech.languageHelp')}}</p>
+          <NarrationDurationBudget :profile-id="selectedProfile.id" :language="trialLanguage" :text="trialText" :active="active && !createOpen" :refresh-key="JSON.stringify([selectedProfile.updated_at, trialResult?.trial_id])" />
           <CloudSpeechCost :enabled="selectedProfile.renderer==='openrouter'" :input-key="trialKey" :load="quoteCurrentTrial" :active="active&&!createOpen" :disabled="cloning||!trialText.trim()" @approval="value=>cloudApproval=value" />
           <p v-if="!selectedProfile.consent_confirmed" class="text-xs text-status-failed">{{ t('speechWorkspace.consentRequired') }}</p>
           <p v-else-if="cloning" role="status" class="text-xs text-text-dim">{{ t('speechWorkspace.trialPendingHelp') }}</p>
@@ -365,6 +373,7 @@ onBeforeUnmount(() => {
             <a :href="trialAudioUrl" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('speechWorkspace.downloadTrial') }}</a>
             <a data-trial-manifest :href="trialAudioUrl.replace(/\/audio$/, '/manifest')" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('exportQuality.manifest') }}</a>
             <a data-trial-provenance :href="trialAudioUrl.replace(/\/audio$/, '/provenance')" download class="inline-block min-h-11 rounded-lg px-2 py-3 text-sm text-text underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('exportQuality.json') }}</a>
+            <RetainedAudioVideo v-if="trialResult?.trial_id && trialResult.status === 'completed'" :source="{ kind: 'speech_trial', source_id: trialResult.trial_id }" :active="active && !createOpen" @open-video="openVideo" />
           </div>
           <p v-else-if="trialResult?.output_path && (trialResult.status === 'completed' || trialResult.status === 'mock_completed')" class="rounded-lg border border-border bg-panel-2 p-3 text-sm text-text-dim">{{ t('speechWorkspace.playbackUnavailable') }}</p>
         </template>

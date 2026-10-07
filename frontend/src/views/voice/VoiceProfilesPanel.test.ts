@@ -8,9 +8,11 @@ import type { SpeechCloneEngineStatus, SpeechCloneTrialResponse, SpeechVoiceProf
 import type { StarterSpeechVoice } from '../../api/contracts'
 import { ApiError } from '../../api/http'
 import en from '../../locales/en'
+import * as timingApi from '../../api/narrationTiming'
 import { speechWorkspaceEn } from '../../locales/speechWorkspace'
 import { hasOpenDialog } from '../../composables/useDialogA11y'
 
+vi.mock('../../api/narrationTiming', async original => ({ ...await original<typeof import('../../api/narrationTiming')>(), durationGuidance: vi.fn() }))
 vi.mock('../../api/openrouter', async original => ({ ...await original<typeof import('../../api/openrouter')>(), getProviderCatalog: vi.fn().mockResolvedValue({ models: [], fingerprint: 'a'.repeat(64), fetched_at: '', expires_at: 0 }) }))
 vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
   listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
@@ -35,6 +37,7 @@ function trial(profileId = first.id): SpeechCloneTrialResponse {
 let app: App | undefined
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(timingApi.durationGuidance).mockResolvedValue({ state: 'unavailable', reason: 'model_unverified', target_seconds: 30 })
   vi.mocked(api.listSpeechVoiceProfiles).mockResolvedValue([first, second])
   vi.mocked(api.getSpeechCloneEngine).mockResolvedValue({ installed: true, mock: false, api_reachable: true, install_hints: ['Install the official engine.'], root: '/private/engine', api_base_url: 'http://localhost:9880' })
   vi.mocked(api.deleteSpeechVoiceProfile).mockResolvedValue(undefined)
@@ -253,7 +256,7 @@ it('searches the profile library and selects the synthesis profile without a sec
   await click(container, 'Second narrator')
   expect(container.querySelector('[aria-pressed=true]')?.textContent).toContain('Second narrator')
   expect(form(container, 'Speech synthesis').textContent).toContain('Second narrator')
-  expect([...container.querySelectorAll('select')].filter(input => !input.closest('[data-local-engines]')).map(input => input.getAttribute('aria-label'))).toEqual(['Narration language'])
+  expect([...container.querySelectorAll('select')].filter(input => !input.closest('[data-local-engines]')).map(input => input.getAttribute('aria-label'))).toEqual(['Narration language', 'Duration target'])
   await change(container, 'Search speech profiles', '')
   expect(button(container, 'First narrator')).toBeDefined()
 })

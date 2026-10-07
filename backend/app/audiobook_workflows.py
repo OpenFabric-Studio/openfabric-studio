@@ -62,6 +62,12 @@ def _prepare_admission() -> Iterator[None]:
 class _AuditionState(BaseModel):
     public: AudiobookAudition
     snapshots: list[SpeechRenderSnapshot]
+    passage_gap_ms: int = Field(default=0, ge=0, le=5000)
+    speaker_change_gap_ms: int = Field(default=0, ge=0, le=5000)
+
+
+class _AuditionStopped(Exception):
+    pass
 
 
 class _RepairState(BaseModel):
@@ -179,18 +185,22 @@ def _preview_allowed(profile_id: str, snapshot: SpeechRenderSnapshot | None = No
 
 def get_passages(book_id: str, chapter_index: int) -> AudiobookPassagesResponse:
     with audiobooks._LOCK, closing(audiobooks._connect()) as connection:
-        audiobooks.get_book(book_id)
+        book = audiobooks.get_book(book_id)
         job = connection.execute("SELECT * FROM audiobook_jobs WHERE book_id=? AND chapter_index=?", (book_id, chapter_index)).fetchone()
         if job is None:
             raise audiobooks.AudiobookError("chapter_not_found", 404)
         rows = connection.execute("SELECT * FROM audiobook_sections WHERE job_id=? ORDER BY section_index", (job["id"],)).fetchall()
+        gaps = audiobook_narration.passage_gaps(book, [str(row["speaker_name"] or "Narrator") for row in rows],
+            [int(row["gap_after_ms"]) if row["gap_after_ms"] is not None else None for row in rows])
         revision = int(job["revision"])
         passages: list[AudiobookPassage] = []
-        for row in rows:
+        for row, gap in zip(rows, gaps, strict=True):
             snapshot = SpeechRenderSnapshot.model_validate_json(str(row["snapshot_json"])) if row["snapshot_json"] else None
             complete = row["status"] == "done" and row["output_path"] is not None
             passages.append(AudiobookPassage(id=str(row["passage_id"]), section_index=int(row["section_index"]),
-                text=str(row["section_text"]), profile_id=str(row["profile_id"] or audiobooks.get_book(book_id).profile_id),
+                text=str(row["section_text"]), profile_id=str(row["profile_id"] or book.profile_id),
+                display_text=str(row["display_text"]) if row["display_text"] is not None else None,
+                gap_after_ms=int(row["gap_after_ms"]) if row["gap_after_ms"] is not None else None, effective_gap_after_ms=gap,
                 speaker=str(row["speaker_name"] or "Narrator"), start_ms=int(row["start_ms"]), end_ms=int(row["end_ms"]),
                 status=row["status"], audio_url=f"/api/audiobooks/{book_id}/passages/{row['passage_id']}/audio?revision={revision}" if complete else None,
                 renderer="openrouter" if snapshot and snapshot.cloud else "local",
@@ -307,7 +317,8 @@ def _start_audition(body: CreateAudiobookAuditionRequest, *, book_id: str | None
     from .cloud_speech import approve_snapshots
     prepared = [snapshots_by_profile[(clip.profile_id, clip.language)] for clip in clips]
     authorization = approve_snapshots([(clip.text, snapshot) for clip, snapshot in zip(clips, prepared, strict=True)], body.cloud_approval)
-    _save(identifier, "audition", _AuditionState(public=public, snapshots=[snapshot.model_copy(update={"cloud_authorization_id": authorization}) for snapshot in prepared]))
+    _save(identifier, "audition", _AuditionState(public=public, snapshots=[snapshot.model_copy(update={"cloud_authorization_id": authorization}) for snapshot in prepared],
+        passage_gap_ms=body.passage_gap_ms, speaker_change_gap_ms=body.speaker_change_gap_ms))
     _schedule(identifier, "audition")
     return get_audition(identifier)
 
@@ -321,6 +332,7 @@ def start_book_audition(book_id: str, options: AudiobookAuditionOptions) -> Audi
         request = CreateAudiobookAuditionRequest(title=book.title, profile_id=book.profile_id,
             chapters=[AudiobookChapterInput(title=job.chapter_title, text=job.chapter_text) for job in jobs],
             pronunciations=book.pronunciations, cast=book.cast, language=jobs[options.chapter_index].language,
+            passage_gap_ms=book.passage_gap_ms, speaker_change_gap_ms=book.speaker_change_gap_ms,
             **options.model_dump())
         return _start_audition(request, book_id=book_id, revision=jobs[options.chapter_index].revision, chapter_languages=[job.language for job in jobs])
 
@@ -360,16 +372,23 @@ def _consent(profiles: list[str]) -> None:
             raise audiobooks.AudiobookError("consent_required", 403)
 
 
-def _join(paths: list[Path], target: Path, *, cloud_workflow: bool = False) -> None:
+def _join(paths: list[Path], target: Path, *, cloud_workflow: bool = False, gaps_after_ms: list[int] | None = None, cancelled: threading.Event | None = None) -> None:
     from .cloud_speech import compatible_pcm
     with compatible_pcm(paths,target.parent,cloud_workflow=cloud_workflow) as prepared:
-        _join_pcm(prepared,target)
+        try:
+            _join_pcm(prepared,target, gaps_after_ms=gaps_after_ms, cancelled=cancelled)
+        except _AuditionStopped:
+            target.unlink(missing_ok=True)
+            raise
 
 
-def _join_pcm(paths: list[Path], target: Path) -> None:
+def _join_pcm(paths: list[Path], target: Path, *, gaps_after_ms: list[int] | None = None, cancelled: threading.Event | None = None) -> None:
+    gaps = gaps_after_ms if gaps_after_ms is not None else [0] * len(paths)
+    if len(paths) != len(gaps) or any(gap < 0 or gap > 10000 for gap in gaps):
+        raise audiobooks.AudiobookError("invalid_pacing")
     parameters: tuple[int, int, int] | None = None
     with wave.open(str(target), "wb") as destination:
-        for path in paths:
+        for path, gap in zip(paths, gaps, strict=True):
             _validate_audio(path)
             with wave.open(str(path), "rb") as source:
                 actual = (source.getnchannels(), source.getsampwidth(), source.getframerate())
@@ -379,7 +398,17 @@ def _join_pcm(paths: list[Path], target: Path) -> None:
                 elif parameters != actual:
                     raise audiobooks.AudiobookError("audio_format_mismatch")
                 while frames := source.readframes(65536):
+                    if cancelled is not None and cancelled.is_set():
+                        raise _AuditionStopped()
                     destination.writeframesraw(frames)
+                zero = bytes([128]) if actual[1] == 1 else bytes(actual[1])
+                gap_frames = round(gap * actual[2] / 1000)
+                while gap_frames:
+                    if cancelled is not None and cancelled.is_set():
+                        raise _AuditionStopped()
+                    count = min(65536, gap_frames)
+                    destination.writeframesraw(zero * actual[0] * count)
+                    gap_frames -= count
 
 
 def _run_audition(identifier: str, cancelled: threading.Event) -> None:
@@ -398,6 +427,8 @@ def _run_audition(identifier: str, cancelled: threading.Event) -> None:
             _save(identifier, "audition", state)
             target = _workspace(identifier) / f"clip-{clip.index}.wav"
             clip.mock = _synthesize(snapshot, clip.text, target)
+            from .narration_duration import record_measurement
+            record_measurement(snapshot, clip.text, target, mock=clip.mock)
             clip.cloud_provenance = _provenance(target)
             with audiobooks._LOCK, voice_profiles._LOCK:
                 _consent([clip.profile_id])
@@ -409,7 +440,10 @@ def _run_audition(identifier: str, cancelled: threading.Event) -> None:
             public.status = "cancelled"
         elif public.status != "cancelled":
             if public.mode == "scene":
-                _join(paths, _workspace(identifier) / "scene.wav",cloud_workflow=any(snapshot.cloud is not None for snapshot in state.snapshots))
+                gaps = [state.passage_gap_ms + (state.speaker_change_gap_ms if clip.speaker != public.clips[index + 1].speaker else 0)
+                    if index + 1 < len(public.clips) else 0 for index, clip in enumerate(public.clips)]
+                _join(paths, _workspace(identifier) / "scene.wav",cloud_workflow=any(snapshot.cloud is not None for snapshot in state.snapshots),
+                    gaps_after_ms=gaps, cancelled=cancelled)
             with audiobooks._LOCK, voice_profiles._LOCK:
                 _consent([clip.profile_id for clip in public.clips])
                 if public.mode == "scene":
@@ -418,6 +452,8 @@ def _run_audition(identifier: str, cancelled: threading.Event) -> None:
                 public.updated_at = audiobooks._now()
                 _save(identifier, "audition", state)
                 published = True
+    except _AuditionStopped:
+        public.status, public.detail = "cancelled", "audition_cancelled"
     except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         public.status, public.detail = "failed", exc.code
     except (OSError, EOFError, wave.Error):
@@ -546,7 +582,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
             if candidate.with_suffix(".cloud.json").is_file():
                 copyfile(candidate.with_suffix(".cloud.json"),accepted_pcm.with_suffix(".cloud.json"))
             paths = [accepted_pcm if item.id == public.passage_id else path for item, path in zip(version.passages, paths, strict=True)]
-            audiobook_narration.concat_wavs(book_id, paths, chapter_target, controlled=False)
+            joined_offsets = audiobook_narration.concat_timed_wavs(book_id, paths, chapter_target,
+                [item.effective_gap_after_ms for item in version.passages], controlled=False)
             jobs = audiobooks.list_jobs(book_id=book_id)
             chapter_paths = [chapter_target if job.chapter_index == public.chapter_index else audiobooks.chapter_audio_path(book_id, job.chapter_index) for job in jobs]
             audiobook_narration.concat_wavs(book_id, chapter_paths, export_target, controlled=False)
@@ -560,14 +597,11 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
                 provenance_replacement=BookProvenanceReplacement(public.chapter_index,public.passage_id,chapter_target,state.snapshot,prospective_identity,read_provenance(accepted_pcm)))
             if ":export_failed" in note or (book.mp3_ready and mp3 is None) or (book.m4b_ready and m4b is None):
                 raise audiobooks.AudiobookError("export_failed", 503)
-            cursor = 0
             offsets: list[tuple[int, int, str]] = []
             spans: list[dict[str, object]] = []
-            for item, path in zip(version.passages, paths, strict=True):
-                end = cursor + audiobook_narration._wav_ms(path)
-                offsets.append((cursor, end, item.id))
-                spans.append({"speaker": item.speaker, "start_ms": cursor, "end_ms": end})
-                cursor = end
+            for item, (start, end) in zip(version.passages, joined_offsets, strict=True):
+                offsets.append((start, end, item.id))
+                spans.append({"speaker": item.speaker, "start_ms": start, "end_ms": end})
             from .narration_pauses import chunk_wav
             pauses = chunk_wav(chapter_target)
             import json
@@ -581,6 +615,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
                 identity = hashlib.sha256(f"{state.snapshot.identity}\n{public.text}\n{file_digest(accepted_pcm)}\n{identifier}".encode()).hexdigest()
                 connection.execute("UPDATE audiobook_sections SET section_text=?,text_sha256=?,output_path=?,snapshot_json=?,render_identity=? WHERE passage_id=?",
                     (public.text, hashlib.sha256(public.text.encode()).hexdigest(), str(accepted_pcm), state.snapshot.model_dump_json(), identity, public.passage_id))
+                if public.text != state.source_text:
+                    connection.execute("UPDATE audiobook_sections SET display_text=NULL WHERE passage_id=?", (public.passage_id,))
                 job_id = str(connection.execute("SELECT job_id FROM audiobook_sections WHERE passage_id=?", (public.passage_id,)).fetchone()[0])
                 original = connection.execute("SELECT source_sha256 FROM audiobook_reviewed_text WHERE job_id=? AND section_index=?", (job_id, state.section_index)).fetchone()
                 source_hash = str(original[0]) if original else hashlib.sha256(state.source_text.encode()).hexdigest()
@@ -588,8 +624,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
                 connection.execute("""INSERT INTO audiobook_reviewed_text(job_id,section_index,source_sha256,profile_id,speaker_name,text)
                     VALUES(?,?,?,?,?,?) ON CONFLICT(job_id,section_index) DO UPDATE SET text=excluded.text""",
                     (job_id, state.section_index, source_hash, state.snapshot.profile_id, speaker, public.text))
-                connection.execute("UPDATE audiobook_jobs SET output_path=?,revision=revision+1,pause_json=?,cast_spans_json=?,updated_at=? WHERE book_id=? AND chapter_index=?",
-                    (str(chapter_target), json.dumps(pauses), json.dumps(audiobook_narration._collapse_spans(spans)), audiobooks._now(), book_id, public.chapter_index))
+                connection.execute("UPDATE audiobook_jobs SET output_path=?,duration_ms=?,revision=revision+1,pause_json=?,cast_spans_json=?,updated_at=? WHERE book_id=? AND chapter_index=?",
+                    (str(chapter_target), audiobook_narration._wav_ms(chapter_target), json.dumps(pauses), json.dumps(audiobook_narration._collapse_spans(spans)), audiobooks._now(), book_id, public.chapter_index))
                 connection.execute("UPDATE audiobook_books SET export_path=?,mp3_export_path=?,m4b_export_path=?,export_note=?,updated_at=? WHERE id=?",
                     (str(export_target), str(mp3) if mp3 else None, str(m4b) if m4b else None, note, audiobooks._now(), book_id))
                 public.status, public.updated_at = "accepted", audiobooks._now()
@@ -599,6 +635,8 @@ def _accept_repair(identifier: str, body: AcceptAudiobookRepairRequest) -> Audio
                 committed = True
             from .audiobook_publish import safe_finalize_book_provenance
             safe_finalize_book_provenance(book_id)
+            from .narration_duration import record_measurement
+            record_measurement(state.snapshot, public.text, accepted_pcm, mock=public.mock)
         except (OSError, EOFError, wave.Error, sqlite3.Error):
             _LOG.exception("Repair acceptance publication failed")
             raise audiobooks.AudiobookError("audiobook_storage_unavailable", 503) from None

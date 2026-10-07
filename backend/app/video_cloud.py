@@ -45,6 +45,7 @@ def _context(project_id: str, body: VideoCloudQuoteRequest) -> tuple[store.Store
     if project.mode!='generated': raise store.VideoProjectError('cloud_mode_unsupported')
     from .video_dialogue import require_consent
     require_consent(project)
+    store.require_retained_consent(document)
     store.ensure_character_lock(project)
     shot=next((item for item in project.shots if item.id==body.shot_id),None)
     if shot is None: raise store.VideoProjectError('shot_not_found')
@@ -150,6 +151,7 @@ async def resume(project_id: str, body: VideoCloudResumeRequest) -> VideoProject
         if variant.fingerprint!=render.fingerprint(document,shot,variant.seed,engine): raise store.VideoProjectError('stale_variant')
         from .video_dialogue import require_consent
         require_consent(document.project)
+        store.require_retained_consent(document)
         if receipt.state=='canceled_tracking': receipt=ledger.update(receipt.id,state='submitted',remote_id=receipt.remote_id)
         def reserve(saved: store.StoredVideoProject) -> None:
             current=next(item for item in saved.project.shots if item.id==shot.id)
@@ -297,7 +299,16 @@ async def recover(project_id: str) -> bool:
                         target.file_url=prefix+'/file'
                         target.poster_url=prefix+'/poster' if path.with_suffix('.png').is_file() else ''
                         target.filmstrip_url=prefix+'/filmstrip' if path.with_name(path.stem+'.filmstrip.png').is_file() else ''
-                    render._publish_checked(project_id,adopt);render._finish(project_id,'ready','')
+                    try:
+                        render._publish_checked(project_id,adopt)
+                    except store.VideoProjectError as error:
+                        render._finish(project_id,'failed',error.code)
+                        def blocked(target: VideoVariant) -> None:
+                            target.status='failed'
+                            target.error_code=error.code
+                        render._set_variant(project_id,shot.id,variant.id,blocked)
+                        return True
+                    render._finish(project_id,'ready','')
                     return True
             if receipt.state in {'submitted','completed'} and receipt.remote_id is not None:
                 try:

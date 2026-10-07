@@ -117,6 +117,8 @@ def main() -> int:
         return _fail("invalid_reference", "Add photos or a short clip.", 2)
     steps = min(3000, max(100, args.steps))
     rank = min(64, max(8, args.rank))
+    from app.video_contracts import CharacterTrainingRecipe
+    recipe = CharacterTrainingRecipe()
     captions_by_path: dict[Path, str] = {}
     if args.dataset_manifest is not None:
         from app.video_contracts import CharacterTrainingProvenance
@@ -125,6 +127,8 @@ def main() -> int:
         import hashlib
         try:
             provenance = CharacterTrainingProvenance.model_validate_json(args.dataset_manifest.read_bytes())
+            if provenance.recipe is not None and provenance.recipe != recipe:
+                return _fail('character_adapter_incompatible', 'The recorded recipe does not match this trainer.', 2)
             if provenance.engine_commit != ENGINE_COMMIT or provenance.base_revision != model_packs()['ltx23'].revision:
                 return _fail('character_adapter_incompatible', 'The reviewed base model does not match this trainer.', 2)
             dataset_root = args.dataset_manifest.parent.resolve()
@@ -194,14 +198,14 @@ def main() -> int:
         },
         "training_strategy": {"name": "text_to_video", "generate_audio": False},
         "optimization": {
-            "learning_rate": 0.0002,
+            "learning_rate": recipe.learning_rate,
             "steps": steps,
-            "batch_size": 1,
+            "batch_size": recipe.batch_size,
             "gradient_accumulation_steps": 1,
             "max_grad_norm": 1.0,
-            "optimizer_type": "adamw",
+            "optimizer_type": recipe.optimizer,
             "scheduler_type": "cosine",
-            "enable_gradient_checkpointing": True,
+            "enable_gradient_checkpointing": recipe.gradient_checkpointing,
         },
         "data": {"preprocessed_data_root": str(precomputed)},
         "validation": {
@@ -230,8 +234,8 @@ def main() -> int:
     preprocess = [
         *base, "preprocess", "--videos", str(videos), "--output", str(precomputed),
         "--model", str(model), "--gemma", str(gemma),
-        "--height", "544", "--width", "960", "--max-frames", "97",
-        "--captions", str(captions), "--frame-rate", "24",
+        "--height", str(recipe.height), "--width", str(recipe.width), "--max-frames", str(recipe.frames),
+        "--captions", str(captions), "--frame-rate", str(recipe.frame_rate),
     ]
     train = [*base, "train", "--config", str(config_path), "--low-ram"]
     for argv in (preprocess, train):

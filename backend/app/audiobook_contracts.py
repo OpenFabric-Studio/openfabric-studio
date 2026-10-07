@@ -66,6 +66,8 @@ class CreateAudiobookRequest(Contract):
     pronunciations: list[PronunciationEntry] = Field(default_factory=list, max_length=100)
     language: str = Field(default="", max_length=35)
     cast: list[CastMember] = Field(default_factory=list, max_length=16)
+    passage_gap_ms: int = Field(default=0, ge=0, le=5000)
+    speaker_change_gap_ms: int = Field(default=0, ge=0, le=5000)
 
     @model_validator(mode="after")
     def language_code(self) -> CreateAudiobookRequest:
@@ -90,6 +92,7 @@ class AudiobookJob(Contract):
     chapter_text: str = Field(default="", max_length=20_000)
     revision: int = Field(default=1, ge=1)
     render_language: str = Field(default="", max_length=35)
+    duration_ms: int | None = Field(default=None, ge=0)
 
 
 class AudiobookBook(Contract):
@@ -111,6 +114,8 @@ class AudiobookBook(Contract):
     export_note: str = Field(default="", max_length=500)
     language: str = Field(default="", max_length=35)
     cast: list[CastMember] = Field(default_factory=list, max_length=16)
+    passage_gap_ms: int = Field(default=0, ge=0, le=5000)
+    speaker_change_gap_ms: int = Field(default=0, ge=0, le=5000)
 
 
 class ChapterLanguageUpdate(Contract):
@@ -261,6 +266,65 @@ class AudiobookPassage(Contract):
     audio_url: str | None = Field(default=None, max_length=300)
     render_identity: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
     language: str = Field(default="", max_length=35)
+    # Null means no verified original wording mapping is available (legacy or edited take).
+    display_text: str | None = Field(default=None, max_length=20_000)
+    gap_after_ms: int | None = Field(default=None, ge=0, le=10000)
+    effective_gap_after_ms: int = Field(default=0, ge=0, le=10000)
+
+
+class AudiobookPassageGap(Contract):
+    passage_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    # Null restores the book default. Zero explicitly removes the following pause.
+    gap_after_ms: int | None = Field(default=None, ge=0, le=10000)
+
+
+class AudiobookPacingChapter(Contract):
+    chapter_index: int = Field(ge=0, le=99)
+    revision: int = Field(ge=1)
+    passages: list[AudiobookPassageGap] = Field(default_factory=list, max_length=2000)
+
+
+class SetAudiobookPacingRequest(Contract):
+    passage_gap_ms: int = Field(default=0, ge=0, le=5000)
+    speaker_change_gap_ms: int = Field(default=0, ge=0, le=5000)
+    chapters: list[AudiobookPacingChapter] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def unique_chapters_and_passages(self) -> SetAudiobookPacingRequest:
+        if len({item.chapter_index for item in self.chapters}) != len(self.chapters):
+            raise ValueError("duplicate_chapter")
+        identifiers = [item.passage_id for chapter in self.chapters for item in chapter.passages]
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("duplicate_passage")
+        return self
+
+
+class NarrationDurationPassageSource(Contract):
+    book_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    chapter_index: int = Field(ge=0, le=99)
+    passage_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision: int = Field(ge=1)
+
+
+class NarrationDurationRequest(Contract):
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    language: str = Field(default="en", min_length=2, max_length=35)
+    text: str = Field(default="", max_length=20_000)
+    target_seconds: Literal[15, 30, 60, 90] = 30
+    passage_source: NarrationDurationPassageSource | None = None
+
+
+class NarrationDurationGuidance(Contract):
+    state: Literal["approximate", "unavailable"]
+    reason: Literal["measured_takes", "model_unverified", "no_matching_takes", "insufficient_speech"]
+    target_seconds: Literal[15, 30, 60, 90]
+    measurement_count: int = Field(default=0, ge=0, le=100)
+    measured_audio_ms: int = Field(default=0, ge=0)
+    characters_per_second: float | None = Field(default=None, gt=0, le=100, allow_inf_nan=False)
+    suggested_characters: int | None = Field(default=None, ge=0, le=20000)
+    estimated_min_ms: int | None = Field(default=None, ge=0)
+    estimated_max_ms: int | None = Field(default=None, ge=0)
+    render_key: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
 
 class AudiobookPassagesResponse(Contract):
@@ -371,6 +435,12 @@ AUDIOBOOK_CLIENT_MODELS: list[type[BaseModel]] = [
     SetChapterTextRequest,
     SubtitleSourceCue,
     AudiobookPassage,
+    AudiobookPassageGap,
+    AudiobookPacingChapter,
+    SetAudiobookPacingRequest,
+    NarrationDurationRequest,
+    NarrationDurationPassageSource,
+    NarrationDurationGuidance,
     AudiobookPassagesResponse,
     AudiobookAuditionOptions,
     CreateAudiobookAuditionRequest,

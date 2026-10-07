@@ -35,6 +35,8 @@ from .api.routes_speech_clone import router as speech_clone_router
 from .api.routes_audiobooks import router as audiobooks_router
 from .api.routes_audiobook_review import router as audiobook_review_router
 from .api.routes_speaker_review import router as speaker_review_router
+from .api.routes_reading_media import router as reading_media_router
+from .api.routes_support import router as support_router
 from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
@@ -46,7 +48,7 @@ from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
-from . import cloud_music, openrouter_client, speaker_review
+from . import cloud_music, openrouter_client, speaker_review, reading_media
 
 
 @asynccontextmanager
@@ -72,6 +74,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         speech_clone.start()
         ebook_import.start()
         await audiobook_publish.start()
+        await reading_media.start()
         await audiobooks.start()
         await audiobook_workflows.start()
         await audiobook_review.start()
@@ -93,7 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     outcomes = await asyncio.gather(
                         cloud_music.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
                         stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
-                        audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), speaker_review.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
+                        audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), speaker_review.shutdown(), reading_media.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
                         optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
                     )
                 finally:
@@ -145,6 +148,8 @@ app.include_router(speech_clone_router)
 app.include_router(audiobooks_router)
 app.include_router(audiobook_review_router)
 app.include_router(speaker_review_router)
+app.include_router(reading_media_router)
+app.include_router(support_router)
 app.include_router(modules_router)
 app.include_router(optional_engines_router)
 app.include_router(videos_router)

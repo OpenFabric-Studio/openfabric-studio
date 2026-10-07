@@ -6,6 +6,8 @@ import AudiobookPassages from './AudiobookPassages.vue'
 import * as api from '../../api/audiobookWorkflow'
 import type { AudiobookPassagesResponse, AudiobookRepair } from '../../api/contracts'
 import en from '../../locales/en'
+import * as timingApi from '../../api/narrationTiming'
+vi.mock('../../api/narrationTiming', async original => ({ ...await original<typeof import('../../api/narrationTiming')>(), durationGuidance: vi.fn() }))
 vi.mock('../../api/audiobookWorkflow', async original => ({ ...await original<typeof import('../../api/audiobookWorkflow')>(), __v_isRef: false, listPassages: vi.fn(), listPassageRepairs: vi.fn(), createRepair: vi.fn(), getRepair: vi.fn(), acceptRepair: vi.fn(), cancelRepair: vi.fn() }))
 vi.mock('./PassageAsrReview.vue', () => ({ default: { render: () => null } }))
 vi.mock('./PauseAnalysisSettings.vue', () => ({ default: { render: () => null } }))
@@ -13,7 +15,7 @@ const book = 'a'.repeat(32), passage = 'b'.repeat(32)
 const data: AudiobookPassagesResponse = { book_id: book, chapter_index: 0, revision: 3, passages: [{ id: passage, section_index: 0, text: 'Accepted words', profile_id: 'c'.repeat(32), speaker: 'Alice', start_ms: 0, end_ms: 4000, status: 'done', render_identity: 'd'.repeat(64), language: 'en', audio_url: `/api/audiobooks/${book}/passages/${passage}/audio?revision=3` }] }
 const candidate: AudiobookRepair = { id: 'e'.repeat(32), book_id: book, chapter_index: 0, passage_id: passage, revision: 3, status: 'ready', text: 'Accepted words', audio_url: `/api/audiobooks/repairs/${'e'.repeat(32)}/audio`, created_at: 'now', updated_at: 'now' }
 let app: App | undefined
-beforeEach(() => { vi.mocked(api.listPassages).mockResolvedValue(data); vi.mocked(api.listPassageRepairs).mockResolvedValue([]); vi.mocked(api.createRepair).mockResolvedValue(candidate) })
+beforeEach(() => { vi.mocked(timingApi.durationGuidance).mockResolvedValue({ state: 'unavailable', reason: 'model_unverified', target_seconds: 30 }); vi.mocked(api.listPassages).mockResolvedValue(data); vi.mocked(api.listPassageRepairs).mockResolvedValue([]); vi.mocked(api.createRepair).mockResolvedValue(candidate) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.resetAllMocks() })
 async function settle() { for (let i = 0; i < 10; i++) await nextTick() }
 async function mount(bookId = ref(book)) {

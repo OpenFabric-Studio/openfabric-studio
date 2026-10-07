@@ -61,6 +61,20 @@ class NativeRouteAdmissionTests(unittest.IsolatedAsyncioTestCase):
         if response.background:
             await response.background()
         self.assertFalse(resource_admission.native_work_inflight())
+
+    async def test_request_queued_behind_stop_does_not_forward_stale_running_state(self) -> None:
+        state = SimpleNamespace(status=ModelStatus.RUNNING)
+        with patch.object(routes_proxy.manager.state, 'models', {'ace_step': state}), \
+             patch('app.video_jobs.work_busy', return_value=False), \
+             patch.object(routes_proxy, '_proxy_to', new=AsyncMock()) as forward:
+            async with resource_admission.admission_lock:
+                pending = asyncio.create_task(routes_proxy._make_proxy_route('ace_step')(self.request(), 'release_task'))
+                await asyncio.sleep(0)
+                state.status = ModelStatus.STOPPED
+            response = await pending
+        self.assertEqual(response.status_code, 503)
+        forward.assert_not_awaited()
+        self.assertFalse(resource_admission.native_work_inflight())
     async def test_busy_video_blocks_durable_ace_submission_before_upstream(self) -> None:
         with patch('app.video_jobs.work_busy', return_value=True, create=True), patch.object(routes_ace_jobs.ace_jobs, 'submit', AsyncMock()) as submit:
             with self.assertRaises(HTTPException) as caught:

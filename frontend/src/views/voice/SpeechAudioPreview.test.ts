@@ -24,6 +24,16 @@ it('uses accessible native controls without fetching waveform or model data', as
   expect(first?.hasAttribute('controls')).toBe(true)
   expect(first?.getAttribute('preload')).toBe('metadata')
 })
+it('shows actual decoded duration and clears it when the source changes', async () => {
+  const { container, source } = await mount()
+  const first = players(container)[0]
+  if (!first) throw new Error('Missing source audio')
+  Object.defineProperty(first, 'duration', { configurable: true, value: 12.345 })
+  first.dispatchEvent(new Event('loadedmetadata')); await settle()
+  expect(container.textContent).toContain('Saved audio duration: 12.35s')
+  source.value = '/api/replacement/audio'; await settle()
+  expect(container.textContent).not.toContain('12.35')
+})
 it('shares playback ownership and releases only the current player', async () => {
   const { container } = await mount()
   const [first, second] = players(container)

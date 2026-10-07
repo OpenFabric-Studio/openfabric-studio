@@ -1,4 +1,5 @@
 export const speechWorkspaceEn = {
+  audioDuration: 'Saved audio duration: {seconds}s',
   library: 'Speech profile library',
   newProfile: 'New profile',
   search: 'Search speech profiles',

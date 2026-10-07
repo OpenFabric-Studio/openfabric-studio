@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
 from ..config import ALLOW_CONCURRENT_MODELS, MODELS
 from ..contracts import JsonObject
@@ -31,6 +32,7 @@ class OrchestratorManager:
     def __init__(self) -> None:
         self.state = OrchestratorState(models={mid: ModelRuntimeState(mid) for mid in MODELS})
         self._processes: dict[str, list[ManagedProcess]] = {}
+        self._instances: dict[str, str] = {}
         self._lock = asyncio.Lock()
         self._cancel_start: dict[str, asyncio.Event] = {}
         self._stop_requests = 0
@@ -96,6 +98,10 @@ class OrchestratorManager:
             if self.state.models[model_id].status == ModelStatus.RUNNING:
                 self.state.active_model = model_id
                 return
+            # A failed drain retains the old tree. Never replace its registry
+            # with a new run, including a switch back to the same model.
+            if model_id in self._processes:
+                await self._stop_model(model_id)
             current = self.state.active_model
             if not ALLOW_CONCURRENT_MODELS and current is not None and current != model_id:
                 await self._stop_model(current)
@@ -106,6 +112,34 @@ class OrchestratorManager:
         async with self._lock:
             if self.state.active_model is not None:
                 await self._stop_model(self.state.active_model)
+
+    def owned_instance(self, model_id: str) -> str | None:
+        """Return an opaque identity only for a verified, running owned tree."""
+        if model_id not in MODELS or self.state.models[model_id].status != ModelStatus.RUNNING:
+            return None
+        instance = self._instances.get(model_id)
+        processes = self._processes.get(model_id, [])
+        definition = MODELS[model_id]
+        if instance is None or len(processes) != len(definition.processes):
+            return None
+        try:
+            for process, spec in zip(processes, definition.processes):
+                if process.spec != spec:
+                    return None
+                process.require_owned()
+        except RuntimeError:
+            return None
+        return instance
+
+    async def stop_owned(self, model_id: str, instance_id: str) -> None:
+        """Stop one exact resident run; caller holds idle resource admission."""
+        async with self._lock:
+            if self._instances.get(model_id) != instance_id:
+                raise ValueError('engine_changed')
+            if self.owned_instance(model_id) != instance_id:
+                raise ValueError('engine_not_owned')
+            self._cancel_pending_starts()
+            await self._stop_model(model_id)
 
     async def restart_model(self, model_id: str) -> None:
         """Reset an owned model without resurrecting a user's Stop request.
@@ -141,6 +175,8 @@ class OrchestratorManager:
                 await self._stop_model(model_id)
 
     async def _start_model(self, model_id: str) -> None:
+        if model_id in self._processes:
+            raise RuntimeError('Engine shutdown is incomplete')
         definition = MODELS[model_id]
         rs = self.state.models[model_id]
         rs.status = ModelStatus.STARTING
@@ -156,6 +192,7 @@ class OrchestratorManager:
                 started.append(proc)
                 await proc.wait_healthy(cancel)
             self._processes[model_id] = started
+            self._instances[model_id] = uuid.uuid4().hex
             rs.status = ModelStatus.RUNNING
             self.state.active_model = model_id
         except StartCancelled:
@@ -188,6 +225,7 @@ class OrchestratorManager:
                 procs.pop()
         if self._processes.get(model_id) is procs:
             del self._processes[model_id]
+            self._instances.pop(model_id, None)
 
     async def _stop_model(self, model_id: str) -> None:
         rs = self.state.models[model_id]

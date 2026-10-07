@@ -26,6 +26,9 @@ def main() -> int:
     parser.add_argument('--memory-mode',choices=['low_ram','resident'],default='low_ram')
     parser.add_argument('--lora-mode',choices=['fused','unfused'],default='fused')
     parser.add_argument('--adapter',type=Path)
+    parser.add_argument('--audio',type=Path,help='Explicit offline candidate A2V fixture; no character/lip-sync quality claim')
+    parser.add_argument('--temporal-tiles',type=int,choices=range(1,5),default=1)
+    parser.add_argument('--spatial-tiles',type=int,choices=range(1,5),default=1)
     args=parser.parse_args()
     output=args.output_dir
     if output.is_symlink() or output.resolve().is_relative_to(args.engine_dir.resolve()) or output.resolve().is_relative_to(args.cache_dir.resolve()):
@@ -41,14 +44,15 @@ def main() -> int:
     from app.video_candidate import CandidateSettings
     from app.video_engine import VideoEngineError, ProfileId
     profile: ProfileId='ltx23' if args.profile=='ltx23' else 'ltx25'
-    if not args.candidate and (args.memory_mode != 'low_ram' or args.lora_mode != 'fused' or args.adapter is not None):
+    if not args.candidate and (args.memory_mode != 'low_ram' or args.lora_mode != 'fused' or args.adapter is not None or args.audio is not None or args.temporal_tiles != 1 or args.spatial_tiles != 1):
         parser.error('Memory/adapter experiments require --candidate')
     report=inventory(args.engine_dir,args.cache_dir,profile,candidate=args.candidate)
     if args.run:
         width,height=(int(value) for value in args.size.split('x'))
         candidate = CandidateSettings(memory_mode='resident' if args.memory_mode == 'resident' else 'low_ram',
             lora_mode='unfused' if args.lora_mode == 'unfused' else 'fused', width=width, height=height,
-            reference=args.reference, adapter=args.adapter) if args.candidate else None
+            reference=args.reference, adapter=args.adapter, source_audio=args.audio,
+            temporal_tiles=args.temporal_tiles, spatial_tiles=args.spatial_tiles) if args.candidate else None
         try:
             report=asyncio.run(run_case(report,args.engine_dir,args.cache_dir,output,exclusive=args.exclusive_offline,
                 app_port=args.app_port,width=width,height=height,reference=args.reference,candidate_settings=candidate))

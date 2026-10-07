@@ -155,10 +155,21 @@ async function cancel(id: string) {
           <span>{{ job.name }} · {{ t(`videoExperience.trainerStatus.${job.status}`) }}</span>
           <span class="text-text-dim">{{ t('videoExperience.trainerCounts', { photos: job.photo_count, clips: job.clip_count }) }}</span>
           <button v-if="job.status === 'queued' || job.status === 'running'" type="button" :disabled="working" @click="cancel(job.id)">{{ t('video.cancel') }}</button>
-          <button v-else type="button" :disabled="readOnly || project.character_adapter_id === job.id" @click="emit('apply', job.id)">{{ project.character_adapter_id === job.id ? t('videoExperience.trainerUsing') : (job.mock ? t('videoExperience.trainerMockUse') : t('videoExperience.trainerUse')) }}</button>
+          <button v-else-if="job.mock || job.adapter_ready" type="button" :disabled="readOnly || working || project.character_adapter_id === job.id || (!job.mock && project.settings?.engine_pack === 'ltx25')" @click="emit('apply', job.id)">{{ project.character_adapter_id === job.id ? t('videoExperience.trainerUsing') : (job.mock ? t('videoExperience.trainerMockUse') : t('videoExperience.trainerUse')) }}</button>
         </div>
         <p v-if="job.mock" class="text-text-dim">{{ t('videoExperience.trainerMockNote') }}</p>
         <p v-else-if="job.adapter_ready" class="text-text-dim">{{ t('videoExperience.trainerAdapterNote') }} {{ t(job.provenance?.evaluated ? 'videoDialogue.evaluated' : 'videoDialogue.pending') }}</p>
+        <details v-if="job.provenance" class="rounded-lg border border-border p-3">
+          <summary>{{ t(job.provenance.recipe ? 'videoDialogue.effectiveRecipe' : 'videoDialogue.recordedSettings') }}</summary>
+          <div class="mt-2 space-y-2 text-xs text-text-dim">
+            <p>{{ t('videoDialogue.recipeSteps', { steps: job.provenance.settings.steps, rank: job.provenance.settings.rank }) }}</p>
+            <p v-if="job.provenance.recipe">{{ t('videoDialogue.recipeDetails', { width: job.provenance.recipe.width, height: job.provenance.recipe.height, frames: job.provenance.recipe.frames, rate: job.provenance.recipe.frame_rate, learningRate: job.provenance.recipe.learning_rate }) }}</p>
+            <p>{{ t('videoDialogue.recipeBase', { engine: job.provenance.engine_commit.slice(0, 12), base: job.provenance.base_revision.slice(0, 12) }) }}</p>
+            <p>{{ t(job.provenance.recipe ? 'videoDialogue.recipeMemory' : 'videoDialogue.recipeUnknown') }}</p>
+            <p>{{ t('videoDialogue.recipeQuality') }}</p>
+            <p v-if="job.provenance.evaluation_notes">{{ job.provenance.evaluation_notes }}</p>
+          </div>
+        </details>
         <div v-if="job.adapter_ready && job.provenance" class="space-y-2">
           <button type="button" :disabled="readOnly || working" @click="comparison(job)">{{ t('videoDialogue.compare') }}</button>
           <template v-if="job.comparison">
@@ -183,6 +194,7 @@ async function cancel(id: string) {
           <label class="inline-check"><input type="checkbox" :checked="example.role === 'held_out'" @change="example.role = example.role === 'held_out' ? 'training' : 'held_out'">{{ t('videoDialogue.heldOut') }}</label>
         </div>
         <div class="grid grid-cols-2 gap-2"><label>{{ t('videoDialogue.steps') }}<input v-model.number="steps" type="number" min="100" max="3000" /></label><label>{{ t('videoDialogue.rank') }}<input v-model.number="rank" type="number" min="8" max="64" /></label></div>
+        <p class="text-xs text-text-dim">{{ t('videoDialogue.recipeQuality') }}</p>
         <label class="inline-check"><input v-model="reviewed" type="checkbox">{{ t('videoDialogue.datasetReviewed') }}</label>
       </fieldset>
       <label class="inline-check"><input v-model="consent" data-trainer-consent type="checkbox" :disabled="readOnly">{{ t('videoExperience.trainerConsent') }}</label>

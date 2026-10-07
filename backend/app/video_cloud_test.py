@@ -244,3 +244,17 @@ class CloudJobsTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(store.get(self.project.id).shots[0].variants[-1].status,'ready')
             self.assertEqual(calls,before,'a checked local cloud clip must not require the remote service again')
             self.assertEqual(store.get(self.project.id).shots[0].variants[-1].cloud.receipt.state,'completed')
+            # Consent can change between a remote completion and local adoption.
+            variant_id=store.get(self.project.id).shots[0].variants[-1].id
+            render._set_variant(self.project.id,self.shot.id,variant_id,lambda item: setattr(item,'status','running'))
+            def interrupted(saved: store.StoredVideoProject) -> None:
+                if saved.project.job is None:
+                    raise AssertionError('Missing saved render job')
+                saved.project.job.status='running'
+            store.mutate(self.project.id,interrupted,busy_ok=True,bump=False)
+            with patch.object(render,'_publish_checked',side_effect=store.VideoProjectError('consent_required')):
+                self.assertTrue(await video_cloud.recover(self.project.id))
+            recovered=store.get(self.project.id)
+            self.assertEqual(recovered.shots[0].variants[-1].status,'failed')
+            self.assertEqual(recovered.shots[0].variants[-1].error_code,'consent_required')
+            self.assertEqual(calls,before,'blocked adoption must not repeat a paid request')

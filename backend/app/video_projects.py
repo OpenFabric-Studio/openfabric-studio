@@ -31,6 +31,7 @@ from .video_media import tool, probe_media
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
 from .video_process import WorkerIdentity
 from .export_provenance_contracts import ExportProvenance
+from .reading_media_contracts import RetainedAudioIdentity, RetainedAudioVideoRequest
 
 logger = logging.getLogger(__name__)
 _lock = threading.RLock()
@@ -79,6 +80,7 @@ class VideoHistorySnapshot(VideoContract):
     reference_paths: dict[str, str] = Field(default_factory=dict)
     speech_path: str = ""
     published_file: str = ""
+    retained_audio: RetainedAudioIdentity | None = None
 
 
 class StoredVideoProject(VideoContract):
@@ -87,6 +89,7 @@ class StoredVideoProject(VideoContract):
     source: SourceIdentity | None = None
     reference_paths: dict[str, str] = Field(default_factory=dict)
     speech_path: str = ""
+    retained_audio: RetainedAudioIdentity | None = None
     worker: WorkerIdentity | None = None
     published_file: str = ""
     pending_export: PendingExport | None = None
@@ -200,6 +203,83 @@ def file_hash(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+async def create_retained_audio_project(body: RetainedAudioVideoRequest) -> VideoProject:
+    """Copy a reviewed source clip into a draft; never start inference here."""
+    import wave
+    from . import retained_audio, reading_media
+    from .resource_admission import admission_lock, require_setup_idle
+    async with admission_lock:
+        require_setup_idle()
+        source = retained_audio.snapshot(body.source)
+        if source.sha256 != body.source_sha256:
+            raise VideoProjectError('retained_audio_changed')
+        if source.duration_ms > 15000 and body.clip_end_ms is None:
+            raise VideoProjectError('retained_audio_trim_required')
+        project = _picture_project(CreateVideoProjectRequest(name=body.name, duration_sec=2))
+        root = project_dir(project.id)
+        clip_id = uuid.uuid4().hex
+        relative = f'speech/{clip_id}.wav'
+        output = artifact(project.id, relative)
+        try:
+            output.parent.mkdir(parents=True)
+            with wave.open(str(source.path), 'rb') as audio:
+                channels, width, rate = audio.getnchannels(), audio.getsampwidth(), audio.getframerate()
+                if audio.getcomptype() != 'NONE' or width != 2 or not 1 <= channels <= 2 or not 8000 <= rate <= 192000:
+                    raise VideoProjectError('audio_format_mismatch')
+                start = round(body.clip_start_ms * rate / 1000)
+                end = audio.getnframes() if body.clip_end_ms is None else round(body.clip_end_ms * rate / 1000)
+                frames = end - start
+                if start < 0 or end > audio.getnframes() or not rate / 5 <= frames <= rate * 15:
+                    raise VideoProjectError('retained_audio_clip_bounds')
+                audio.setpos(start)
+                pcm = audio.readframes(frames)
+                if len(pcm) != frames * channels * width:
+                    raise VideoProjectError('retained_audio_changed')
+            with wave.open(str(output), 'wb') as selected:
+                selected.setparams((channels, width, rate, 0, 'NONE', 'not compressed'))
+                selected.writeframes(pcm)
+            # Re-resolve ID/hash and consent immediately before publication.
+            current = retained_audio.snapshot(body.source)
+            if current.sha256 != source.sha256:
+                raise VideoProjectError('retained_audio_changed')
+            reading_media.require_consent(current.profile_ids)
+            duration = frames / rate
+            timeline = max(2, math.ceil(duration / 2) * 2)
+            project.duration_sec = timeline
+            lengths = [12, timeline - 12] if timeline > 12 else [timeline]
+            cursor = 0
+            for length in lengths:
+                seconds: VideoSeconds
+                if length == 2: seconds = 2
+                elif length == 4: seconds = 4
+                elif length == 6: seconds = 6
+                elif length == 8: seconds = 8
+                elif length == 10: seconds = 10
+                elif length == 12: seconds = 12
+                else: raise VideoProjectError('bad_length')
+                project.shots.append(VideoProjectShot(id=uuid.uuid4().hex, start_sec=cursor,
+                    seconds=seconds, prompt='A steady portrait with restrained natural motion.', seed=cursor))
+                cursor += length
+            checksum = file_hash(output)
+            project.speech_clip = VideoSpeechClip(id=clip_id, name=body.name, bytes=output.stat().st_size,
+                duration_sec=duration, sha256=checksum, kind='voice',
+                voice_profile_id=current.profile_ids[0] if len(current.profile_ids) == 1 else None)
+            project.export_settings.attach_speech = True
+            project.warnings = ['retained_soundtrack_only']
+            identity = RetainedAudioIdentity(source=body.source, source_sha256=source.sha256,
+                clip_sha256=checksum, clip_start_ms=round(start * 1000 / rate), clip_end_ms=round(end * 1000 / rate),
+                profile_ids=current.profile_ids, components=current.components)
+            document = StoredVideoProject(project=project, speech_path=relative, retained_audio=identity)
+            save(document)
+            return view(document)
+        except (OSError, EOFError, wave.Error) as error:
+            shutil.rmtree(root, ignore_errors=True)
+            raise VideoProjectError('retained_audio_unavailable') from error
+        except BaseException:
+            shutil.rmtree(root, ignore_errors=True)
+            raise
 
 
 def identity(path: Path) -> SourceIdentity:
@@ -549,7 +629,8 @@ def history_snapshot(document: StoredVideoProject) -> VideoHistorySnapshot:
     return VideoHistorySnapshot(project=document.project.model_copy(deep=True),
         source=document.source.model_copy() if document.source is not None else None,
         reference_paths=dict(document.reference_paths), speech_path=document.speech_path,
-        published_file=document.published_file)
+        published_file=document.published_file,
+        retained_audio=document.retained_audio.model_copy(deep=True) if document.retained_audio else None)
 
 
 def _restore_history(project_id: str, body: VideoRevisionRequest, *, backwards: bool) -> VideoProject:
@@ -587,6 +668,7 @@ def _restore_history(project_id: str, body: VideoRevisionRequest, *, backwards: 
         document.source = snapshot.source
         document.reference_paths = dict(snapshot.reference_paths)
         document.speech_path = snapshot.speech_path
+        document.retained_audio = snapshot.retained_audio
         document.published_file = snapshot.published_file
         document.pending_export = None
         document.render_request = None
@@ -751,6 +833,12 @@ def duplicate(project_id: str, body: VideoRevisionRequest) -> VideoProject:
                 dest = artifact(copied.project.id, relative)
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(original, dest)
+                for suffix in ('.original', '.normalization.json'):
+                    companion = original.with_suffix(suffix)
+                    if companion.exists():
+                        if companion.is_symlink() or not companion.resolve().is_relative_to(project_dir(project_id).resolve()):
+                            raise VideoProjectError('invalid_reference')
+                        shutil.copyfile(companion, dest.with_suffix(suffix))
             if copied.speech_path:
                 original = artifact(project_id, copied.speech_path)
                 dest = artifact(copied.project.id, copied.speech_path)
@@ -870,6 +958,8 @@ async def _cleanup_reference(
                 temporary.unlink(missing_ok=True)
             if not published and output is not None:
                 output.unlink(missing_ok=True)
+                output.with_suffix('.normalization.json').unlink(missing_ok=True)
+                output.with_suffix('.original').unlink(missing_ok=True)
         finally:
             await upload.close()
     except Exception as exc:
@@ -919,22 +1009,17 @@ async def _upload_reference(
         ):
             raise VideoProjectError("reference_too_large")
         output.parent.mkdir(parents=True, exist_ok=True)
+        from .image_normalization import normalization_argv
         proc = await spawn_process(
-            tool("ffmpeg"),
-            "-v",
-            "error",
-            "-y",
-            "-i",
-            str(temporary),
-            "-frames:v",
-            "1",
-            str(output),
+            *normalization_argv(temporary, output),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         await communicate_process(proc, 30)
         if proc.returncode != 0:
             raise VideoProjectError("invalid_reference")
+        info = await probe_media(output)
+        temporary.replace(output.with_suffix('.original'))
 
         def change(document: StoredVideoProject) -> None:
             if len(document.project.references) >= 6:
@@ -969,8 +1054,24 @@ def reference_file(project_id: str, reference_id: str) -> Path:
     return path
 
 
+def require_retained_consent(document: StoredVideoProject) -> None:
+    from . import retained_audio, reading_media
+    clip = document.project.speech_clip
+    try:
+        retained_audio.require_video_consent(document.retained_audio, clip.sha256 if clip else None)
+    except reading_media.ReadingMediaError as exc:
+        raise VideoProjectError(exc.code) from exc
+    if document.retained_audio is not None:
+        if clip is None or document.speech_path is None:
+            raise VideoProjectError('retained_audio_changed')
+        path = artifact(document.project.id, document.speech_path)
+        if not path.is_file() or file_hash(path) != clip.sha256:
+            raise VideoProjectError('retained_audio_changed')
+
+
 def speech_file(project_id: str) -> Path:
     document = load(project_id)
+    require_retained_consent(document)
     if not document.speech_path or document.project.speech_clip is None:
         raise VideoProjectError("not_found")
     path = artifact(project_id, document.speech_path)
@@ -1098,6 +1199,7 @@ async def _upload_speech(
             if document.speech_path and document.speech_path != relative:
                 removed.append(document.speech_path)
             document.speech_path = relative
+            document.retained_audio = None
             document.project.speech_clip = VideoSpeechClip(
                 id=speech_id,
                 name=name,
@@ -1133,6 +1235,7 @@ def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
         if document.speech_path:
             removed.append(document.speech_path)
         document.speech_path = ""
+        document.retained_audio = None
         document.project.speech_clip = None
         document.project.export_settings.attach_speech = False
         document.project.warnings = [
@@ -1226,6 +1329,7 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
             if stored.speech_path and stored.speech_path != relative:
                 removed.append(stored.speech_path)
             stored.speech_path = relative
+            stored.retained_audio = None
             stored.project.speech_clip = VideoSpeechClip(
                 id=speech_id,
                 name=f"{profile.name}.wav"[:160],

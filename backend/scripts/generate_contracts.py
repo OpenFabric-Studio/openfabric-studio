@@ -26,8 +26,12 @@ from app.openrouter_contracts import OPENROUTER_CLIENT_MODELS
 from app.cloud_music_contracts import CLOUD_MUSIC_CLIENT_MODELS
 from app.speaker_review_contracts import SPEAKER_REVIEW_CLIENT_MODELS
 from app.export_provenance_contracts import EXPORT_PROVENANCE_CLIENT_MODELS
+from app.reading_media_contracts import READING_MEDIA_CLIENT_MODELS
+from app.support_contracts import SUPPORT_CLIENT_MODELS
 
 ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS, *SPEAKER_REVIEW_CLIENT_MODELS, *EXPORT_PROVENANCE_CLIENT_MODELS]
+ALL_MODELS.extend(READING_MEDIA_CLIENT_MODELS)
+ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)
 
 DEST = Path(__file__).resolve().parents[2] / 'frontend/src/api/generated.ts'
 SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'oneOf', 'discriminator', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}

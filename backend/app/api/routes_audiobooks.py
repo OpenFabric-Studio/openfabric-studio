@@ -33,6 +33,9 @@ from ..audiobook_contracts import (
     SetCastRequest,
     SetChapterTextRequest,
     SetPronunciationsRequest,
+    SetAudiobookPacingRequest,
+    NarrationDurationRequest,
+    NarrationDurationGuidance,
 )
 from ..voice_profile_contracts import CloudSpeechQuote
 from ..job_lifecycle import await_cleanup
@@ -211,6 +214,25 @@ def delete_ebook_draft(draft_id: str) -> None:
     try:
         ebook_import.delete_draft(draft_id)
     except (ebook_import.EbookImportError, audiobooks.AudiobookError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/duration-guidance", response_model=NarrationDurationGuidance)
+def narration_duration_guidance(body: NarrationDurationRequest) -> NarrationDurationGuidance:
+    from ..narration_duration import guidance
+    try:
+        return guidance(body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.put("/{book_id}/pacing", response_model=AudiobookBook)
+async def set_audiobook_pacing(book_id: str, body: SetAudiobookPacingRequest) -> AudiobookBook:
+    try:
+        return await await_cleanup(asyncio.to_thread(audiobooks.set_pacing, book_id, body))
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise
 

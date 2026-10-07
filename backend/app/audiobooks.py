@@ -29,6 +29,7 @@ from .audiobook_contracts import (
     PronunciationEntry,
     AudiobookCloudControlRequest,
     EbookDraft,
+    SetAudiobookPacingRequest,
 )
 from .config import DATA_DIR
 from .atomic_files import document_lock
@@ -119,17 +120,17 @@ def _book_columns(connection: sqlite3.Connection) -> set[str]:
 
 def _ensure_schema(connection: sqlite3.Connection) -> None:
     version = connection.execute("PRAGMA user_version").fetchone()[0]
-    if version == 8:
+    if version == 9:
         return
-    if version not in (0, 1, 2, 3, 4, 5, 6, 7):
+    if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
         raise AudiobookError("audiobook_storage_unavailable", 503)
     connection.execute("BEGIN IMMEDIATE")
     try:
         version = connection.execute("PRAGMA user_version").fetchone()[0]
-        if version == 8:
+        if version == 9:
             connection.commit()
             return
-        if version not in (0, 1, 2, 3, 4, 5, 6, 7):
+        if version not in (0, 1, 2, 3, 4, 5, 6, 7, 8):
             raise AudiobookError("audiobook_storage_unavailable", 503)
         if version == 0:
             connection.execute("""CREATE TABLE IF NOT EXISTS audiobook_books (
@@ -215,7 +216,23 @@ def _ensure_schema(connection: sqlite3.Connection) -> None:
             PRIMARY KEY(job_id,section_index), FOREIGN KEY(job_id) REFERENCES audiobook_jobs(id) ON DELETE CASCADE)""")
         if "cloud_models_json" not in _book_columns(connection):
             connection.execute("ALTER TABLE audiobook_books ADD COLUMN cloud_models_json TEXT NOT NULL DEFAULT '[]'")
-        connection.execute("PRAGMA user_version = 8")
+        for name in ("passage_gap_ms", "speaker_change_gap_ms"):
+            if name not in _book_columns(connection):
+                connection.execute(f"ALTER TABLE audiobook_books ADD COLUMN {name} INTEGER NOT NULL DEFAULT 0 CHECK({name} BETWEEN 0 AND 5000)")
+        if "display_text" not in section_columns:
+            connection.execute("ALTER TABLE audiobook_sections ADD COLUMN display_text TEXT")
+        if "gap_after_ms" not in section_columns:
+            connection.execute("ALTER TABLE audiobook_sections ADD COLUMN gap_after_ms INTEGER CHECK(gap_after_ms IS NULL OR gap_after_ms BETWEEN 0 AND 10000)")
+        if "duration_ms" not in job_columns:
+            connection.execute("ALTER TABLE audiobook_jobs ADD COLUMN duration_ms INTEGER CHECK(duration_ms IS NULL OR duration_ms >= 0)")
+        if "reassemble_only" not in job_columns:
+            connection.execute("ALTER TABLE audiobook_jobs ADD COLUMN reassemble_only INTEGER NOT NULL DEFAULT 0 CHECK(reassemble_only IN (0,1))")
+        connection.execute("""CREATE TABLE IF NOT EXISTS narration_measurements (
+            render_key TEXT NOT NULL, source_hash TEXT NOT NULL, characters INTEGER NOT NULL CHECK(characters>0),
+            duration_ms INTEGER NOT NULL CHECK(duration_ms>0), created_at TEXT NOT NULL,
+            PRIMARY KEY(render_key, source_hash))""")
+        connection.execute("CREATE INDEX IF NOT EXISTS narration_measurement_key ON narration_measurements(render_key,created_at)")
+        connection.execute("PRAGMA user_version = 9")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -260,6 +277,7 @@ def _row_to_book(row: sqlite3.Row) -> AudiobookBook:
         language=str(row["language"] or ""),
         cast=_cast_members(row["cast_json"]),
         cloud_models=_MODEL_IDS.validate_json(str(row["cloud_models_json"])),
+        passage_gap_ms=int(row["passage_gap_ms"]), speaker_change_gap_ms=int(row["speaker_change_gap_ms"]),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -288,6 +306,7 @@ def _row_to_job(row: sqlite3.Row) -> AudiobookJob:
         language_ready=status == "done" and language_ready,
         render_language=str(row["render_language"] or ""), revision=int(row["revision"]),
         chapter_text=str(row["chapter_text"] or ""),
+        duration_ms=int(row["duration_ms"]) if row["duration_ms"] is not None else None,
     )
 
 
@@ -405,6 +424,7 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
         )
         if cloud_prepared:
             connection.execute("UPDATE audiobook_books SET cloud_models_json=? WHERE id=?", (json.dumps(sorted({snapshot.cloud.model for _, planned in cloud_prepared for _, snapshot, _ in planned if snapshot.cloud is not None})), book_id))
+        connection.execute("UPDATE audiobook_books SET passage_gap_ms=?,speaker_change_gap_ms=? WHERE id=?", (body.passage_gap_ms, body.speaker_change_gap_ms, book_id))
         if source_import_id is not None:
             connection.execute("UPDATE audiobook_books SET source_snapshot_json=? WHERE id=?", (source_draft.model_dump_json(), book_id))
         for index, chapter in enumerate(body.chapters):
@@ -428,6 +448,9 @@ def create_book(body: CreateAudiobookRequest, *, source_import_id: str | None = 
             )
             if cloud_prepared:
                 seed_sections(connection, job_id, cloud_prepared[index][1])
+                from .audiobook_narration import plan_display_text
+                for section_index, display in enumerate(plan_display_text(text, body.profile_id, body.cast, body.pronunciations)):
+                    connection.execute("UPDATE audiobook_sections SET display_text=? WHERE job_id=? AND section_index=?", (display, job_id, section_index))
             jobs.append(
                 AudiobookJob(
                     id=job_id,
@@ -599,6 +622,56 @@ def retry_failed(book_id: str, cloud_control: AudiobookCloudControlRequest | Non
     return book
 
 
+def set_pacing(book_id: str, body: SetAudiobookPacingRequest) -> AudiobookBook:
+    """Queue an owned, recoverable composition of accepted PCM, never synthesis.
+
+    Every chapter revision is required because book defaults affect all chapters.
+    Changing pacing invalidates old repair/export snapshots but retains dry takes.
+    """
+    from . import audiobook_narration
+    from .audiobook_workflows import get_passages, passage_audio_path
+    with publication_lock(book_id), _LOCK, closing(_connect()) as connection:
+        _ensure_schema(connection)
+        book = get_book(book_id)
+        jobs = list_jobs(book_id=book_id)
+        expected = {item.chapter_index: item for item in body.chapters}
+        if set(expected) != {job.chapter_index for job in jobs} or any(expected[job.chapter_index].revision != job.revision for job in jobs):
+            raise AudiobookError("chapter_changed", 409)
+        if book.status != "done" or any(job.status != "done" for job in jobs):
+            raise AudiobookError("pacing_requires_completed_book", 409)
+        audiobook_narration._require_current_consent(book_id)
+        requested_gaps: dict[str, int | None] = {}
+        for job in jobs:
+            accepted = get_passages(book_id, job.chapter_index)
+            if not accepted.passages or any(item.status != "done" for item in accepted.passages):
+                raise AudiobookError("passages_unavailable", 409)
+            identifiers = {item.id for item in accepted.passages}
+            for change in expected[job.chapter_index].passages:
+                if change.passage_id not in identifiers:
+                    raise AudiobookError("passage_not_found", 404)
+                requested_gaps[change.passage_id] = change.gap_after_ms
+            for item in accepted.passages:
+                passage_audio_path(book_id, item.id, job.revision)
+        changed = book.passage_gap_ms != body.passage_gap_ms or book.speaker_change_gap_ms != body.speaker_change_gap_ms
+        for passage_id, gap in requested_gaps.items():
+            row = connection.execute("SELECT gap_after_ms FROM audiobook_sections WHERE passage_id=?", (passage_id,)).fetchone()
+            if row is not None and row[0] != gap:
+                changed = True
+        if not changed:
+            return book
+        connection.execute("BEGIN IMMEDIATE")
+        for passage_id, gap in requested_gaps.items():
+            connection.execute("UPDATE audiobook_sections SET gap_after_ms=? WHERE passage_id=?", (gap, passage_id))
+        connection.execute("""UPDATE audiobook_jobs SET status='queued',detail='reassembling_saved_narration',
+            output_path=NULL,duration_ms=NULL,revision=revision+1,reassemble_only=1,updated_at=? WHERE book_id=?""", (_now(), book_id))
+        connection.execute("""UPDATE audiobook_books SET passage_gap_ms=?,speaker_change_gap_ms=?,status='queued',
+            export_path=NULL,mp3_export_path=NULL,m4b_export_path=NULL,export_note='',updated_at=? WHERE id=?""",
+            (body.passage_gap_ms, body.speaker_change_gap_ms, _now(), book_id))
+        connection.commit()
+    _schedule_book(book_id)
+    return get_book(book_id)
+
+
 def _schedule_book(book_id: str) -> None:
     from . import audiobook_narration
     if _sync_worker():
@@ -692,8 +765,9 @@ def set_cast(book_id: str, members: list[CastMember]) -> AudiobookBook:
             """,
             (book_id,),
         )
+        connection.execute("UPDATE audiobook_jobs SET reassemble_only=0,duration_ms=NULL WHERE book_id=? AND status != 'done'", (book_id,))
         connection.commit()
-    return get_book(book_id)
+        return get_book(book_id)
 
 
 def set_chapter_text(book_id: str, chapter_index: int, text: str) -> AudiobookBook:
@@ -725,6 +799,7 @@ def set_chapter_text(book_id: str, chapter_index: int, text: str) -> AudiobookBo
         )
         if job["status"] != "done":
             connection.execute("DELETE FROM audiobook_sections WHERE job_id = ?", (job["id"],))
+            connection.execute("UPDATE audiobook_jobs SET reassemble_only=0,duration_ms=NULL WHERE id=?", (job["id"],))
         connection.commit()
     return get_book(book_id)
 
@@ -759,6 +834,7 @@ def set_pronunciations(book_id: str, entries: list[PronunciationEntry]) -> Audio
             """,
             (book_id,),
         )
+        connection.execute("UPDATE audiobook_jobs SET reassemble_only=0,duration_ms=NULL WHERE book_id=? AND status != 'done'", (book_id,))
         connection.commit()
     return get_book(book_id)
 
@@ -807,7 +883,7 @@ def _regenerate_chapter(book_id: str, chapter_index: int, cloud_control: Audiobo
         connection.execute(
             """
             UPDATE audiobook_jobs
-            SET status = 'queued', detail = ?, output_path = NULL, updated_at = ?, bypass_cache = 1, revision = revision + 1
+            SET status = 'queued', detail = ?, output_path = NULL, duration_ms = NULL, updated_at = ?, bypass_cache = 1, reassemble_only=0, revision = revision + 1
             WHERE id = ?
             """,
             ("Regenerating this chapter.", stamp, job["id"]),
@@ -940,6 +1016,7 @@ def set_languages(book_id: str, language: str, chapters: list[tuple[int, str]]) 
         )
         connection.execute("UPDATE audiobook_jobs SET revision=revision+1 WHERE book_id=?", (book_id,))
         connection.execute("DELETE FROM audiobook_sections WHERE job_id IN (SELECT id FROM audiobook_jobs WHERE book_id=? AND status != 'done')", (book_id,))
+        connection.execute("UPDATE audiobook_jobs SET reassemble_only=0,duration_ms=NULL WHERE book_id=? AND status != 'done'", (book_id,))
         connection.commit()
     return get_book(book_id)
 

@@ -428,6 +428,9 @@ def start_trial(body: SpeechCloneTrialRequest) -> SpeechCloneTrialResponse:
     )
     from .cloud_speech import read_provenance
     provenance = read_provenance(out) if outcome.output_path else None
+    if snapshot is not None and outcome.status == "completed" and outcome.output_path is not None:
+        from .narration_duration import record_measurement
+        record_measurement(snapshot, text, outcome.output_path)
     if outcome.output_path is not None:
         from . import export_provenance
         from .export_provenance_contracts import ProvenanceComponent

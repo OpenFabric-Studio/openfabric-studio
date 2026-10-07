@@ -64,7 +64,11 @@ def patched_sources(engine_dir: Path) -> dict[str, str]:
     """Validate all compatibility dependencies before creating patched source."""
     validated = {relative: _source(engine_dir, relative) for relative in SOURCE_HASHES}
     prefix = 'packages/ltx-pipelines-mlx/src/ltx_pipelines_mlx/'
-    cli = validated[prefix + 'cli.py']
+    return patch_a2v_sources(validated[prefix + 'cli.py'], validated[prefix + 'a2vid_two_stage.py'])
+
+
+def patch_a2v_sources(cli: str, a2v: str) -> dict[str, str]:
+    """Overlay reviewed A2V signatures after the caller validates exact source."""
     start = cli.index('def _cmd_a2v(')
     end = cli.index('\ndef _cmd_retake(', start)
     handler = cli[start:end]
@@ -72,7 +76,6 @@ def patched_sources(engine_dir: Path) -> dict[str, str]:
         '        low_ram_streaming=getattr(args, "low_ram", False),\n',
         '        low_ram_streaming=getattr(args, "low_ram", False),\n        tile_count=_build_tile_count_config(args),\n')
     cli = cli[:start] + handler + cli[end:]
-    a2v = validated[prefix + 'a2vid_two_stage.py']
     a2v = _replace_once(a2v, '        x0_model = X0Model(self.dit)\n', '''        stage1_dit = self.dit
         if self._tile_count is not None:
             from ltx_core_mlx.components.modality_tiling import TiledLTXModel, VideoModalityTiler
@@ -122,7 +125,11 @@ class _CompatibilityFinder(importlib.abc.MetaPathFinder):
 
 def install_compatibility(engine_dir: Path) -> None:
     """Install patches before vendor import, exclusively inside the child process."""
-    sources = patched_sources(engine_dir)
+    install_source_overlay(engine_dir, patched_sources(engine_dir))
+
+
+def install_source_overlay(engine_dir: Path, sources: dict[str, str]) -> None:
+    """Child-only installation; callers must supply hash-validated sources."""
     if any(name in sys.modules for name in sources):
         raise VideoEngineError('engine_incompatible', 'Vendor already imported before compatibility installation')
     sys.meta_path.insert(0, _CompatibilityFinder(engine_dir, sources))

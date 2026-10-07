@@ -10,6 +10,7 @@ import PassageAsrReview from './PassageAsrReview.vue'
 import SpeakerPassageReview from './SpeakerPassageReview.vue'
 import PauseAnalysisSettings from './PauseAnalysisSettings.vue'
 import CloudSpeechCost from './CloudSpeechCost.vue'
+import NarrationDurationBudget from './NarrationDurationBudget.vue'
 import {quoteRepair} from '../../api/cloudSpeech'
 import type { CloudSpeechApproval } from '../../api/contracts'
 const props = withDefaults(defineProps<{ bookId: string; chapterIndex: number; active?: boolean; playbackSeconds?: number; chapterRevision?: number }>(), { active: true, playbackSeconds: 0 })
@@ -172,6 +173,7 @@ onBeforeUnmount(() => { alive = false; generation++; for (const request of contr
           <p class="text-xs text-text-dim">{{ t('audiobookReview.kept') }}</p>
           <div><p class="text-xs text-text-dim">{{ t('audiobookReview.original') }}</p><audio v-if="api.workflowAudioUrl(selected.audio_url, data?.revision)" controls preload="none" :aria-label="t('audiobookReview.original')" :src="api.workflowAudioUrl(selected.audio_url, data?.revision)" class="mt-2 h-10 w-full" /></div>
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.text') }}</span><textarea v-model="text" maxlength="1200" rows="4" :disabled="busy || running || accepting" :aria-label="t('audiobookReview.text')" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
+          <NarrationDurationBudget :profile-id="selected.profile_id" :language="selected.language || 'en'" :text="text" :active="active && expanded" :refresh-key="String(data?.revision)" :passage-source="data ? { book_id: bookId, chapter_index: chapterIndex, passage_id: selected.id, revision: data.revision } : undefined" />
           <CloudSpeechCost :enabled="selected.renderer==='openrouter'" :input-key="JSON.stringify([bookId,chapterIndex,data?.revision,selectedId,text,costNonce])" :load="quoteTake" :active="active&&expanded" :disabled="busy||running||accepting||!text.trim()" @approval="value=>cloudApproval=value" />
           <p v-if="selected.cloud_provenance" class="text-xs text-text-dim">{{t('cloudSpeech.provenance',{model:selected.cloud_provenance.model,receipt:selected.cloud_provenance.receipt_id})}}</p>
           <button type="button" class="min-h-11 rounded-lg border border-accent1/50 px-3 text-sm text-accent1 disabled:opacity-50" :disabled="busy || running || accepting || restoring || !text.trim() || selected.renderer==='openrouter'&&!cloudApproval" @click="freshTake">{{ busy || running ? t('audiobookReview.working') : t('audiobookReview.repair') }}</button>

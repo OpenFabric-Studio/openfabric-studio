@@ -10,9 +10,13 @@ import type { AudiobookBook, AudiobookCreateResponse, AudiobookJob } from '../..
 import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
 import type { EbookDraft } from '../../api/contracts'
 import en from '../../locales/en'
+import * as readingApi from '../../api/readingMedia'
+import * as timingApi from '../../api/narrationTiming'
 import { audiobookWorkspaceEn } from '../../locales/audiobookWorkspace'
 import { ApiError } from '../../api/http'
 
+vi.mock('../../api/readingMedia', async original => ({ ...await original<typeof import('../../api/readingMedia')>(), listReadAlong: vi.fn() }))
+vi.mock('../../api/narrationTiming', async original => ({ ...await original<typeof import('../../api/narrationTiming')>(), durationGuidance: vi.fn() }))
 vi.mock('../../api/audiobooks', async (original) => ({ ...await original<typeof import('../../api/audiobooks')>(),
   __v_isRef: false,
   listAudiobooks: vi.fn(), listAudiobookJobs: vi.fn(), createAudiobook: vi.fn(), retryAudiobook: vi.fn(),
@@ -39,7 +43,7 @@ function deferred<T>() {
   return { promise, resolve, reject }
 }
 beforeEach(() => {
-  vi.useFakeTimers(); vi.resetAllMocks(); activities.length = 0; hidden = ref(false)
+  vi.useFakeTimers(); vi.resetAllMocks(); vi.mocked(readingApi.listReadAlong).mockResolvedValue([]); vi.mocked(timingApi.durationGuidance).mockResolvedValue({ state: 'unavailable', reason: 'model_unverified', target_seconds: 30 }); activities.length = 0; hidden = ref(false)
   vi.mocked(api.listAudiobooks).mockResolvedValue([book()])
   vi.mocked(workflowApi.listBookAuditions).mockResolvedValue([])
   vi.mocked(api.listEbookDrafts).mockResolvedValue([])
@@ -562,4 +566,22 @@ it('does not let a pre-edit poll replace an accepted book mutation', async () =>
   await selectBook(node, second.id); await selectBook(node, first.id)
   expect(field(node, 'Cast name 1').value).toBe('Updated cast')
   expect(oldSignal?.aborted).toBe(true)
+})
+
+it('forecasts the visible included chapter after earlier draft chapters are excluded', async () => {
+  const imported: EbookDraft = { ...ebook, chapters: [
+    { title: 'A', text: 'Excluded front matter.', included: false },
+    { title: 'B', text: 'The visible second chapter.', included: true },
+    { title: 'C', text: 'The visible third chapter.', included: true },
+  ] }
+  vi.mocked(api.listEbookDrafts).mockResolvedValue([{ id: imported.id, title: imported.title, source_filename: imported.source_filename, chapter_count: 3, revision: imported.revision, created_at: imported.created_at, updated_at: imported.updated_at }])
+  vi.mocked(api.getEbookDraft).mockResolvedValue(imported)
+  const node = await mount(); await draft(node)
+  await change(node, 'Saved ebook drafts', imported.id); await click(node, 'Use imported chapters')
+  await change(node, 'Chapter to review', '1'); await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(vi.mocked(timingApi.durationGuidance).mock.calls.at(-1)?.[0].text).toBe('The visible second chapter.')
+  await change(node, 'Chapter to review', '2'); await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(vi.mocked(timingApi.durationGuidance).mock.calls.at(-1)?.[0].text).toBe('The visible third chapter.')
+  await change(node, 'Chapter to review', '0'); await settle()
+  expect(node.querySelector('[data-duration-budget]')).toBeNull()
 })

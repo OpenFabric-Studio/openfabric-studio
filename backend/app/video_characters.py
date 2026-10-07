@@ -19,6 +19,7 @@ from . import voice_profiles
 from .voice_profile_contracts import SpeechVoiceProfile
 from .config import DATA_DIR
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
+from .image_normalization import normalization_argv
 from .video_contracts import VideoCharacter
 from .video_media import probe_media, tool
 from .video_projects import VideoProjectError, atomic_text
@@ -165,14 +166,15 @@ async def create_character(
         ):
             raise VideoProjectError("reference_too_large")
         proc = await spawn_process(
-            tool("ffmpeg"),
-            "-v", "error", "-y", "-i", str(temporary), "-frames:v", "1", str(output),
+            *normalization_argv(temporary, output),
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
         await communicate_process(proc, 30)
         if proc.returncode != 0 or not output.is_file():
             raise VideoProjectError("invalid_reference")
+        info = await probe_media(output)
+        temporary.replace(root / "original.bin")
         stamp = now()
         character = VideoCharacter(
             id=character_id,

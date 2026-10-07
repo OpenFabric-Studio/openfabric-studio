@@ -8,7 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Literal
 
-from .video_contracts import CharacterDatasetArtifact, CharacterDatasetReview, CharacterTrainingProvenance
+from .video_contracts import CharacterDatasetArtifact, CharacterDatasetReview, CharacterTrainingProvenance, CharacterTrainingRecipe
 from .video_engine import ENGINE_COMMIT, model_packs
 
 COMPARISON_PROMPTS = [
@@ -18,7 +18,7 @@ COMPARISON_PROMPTS = [
 ]
 
 
-def build_provenance(root: Path, paths: list[Path], kinds: list[Literal['photo', 'clip']], review: CharacterDatasetReview) -> CharacterTrainingProvenance:
+def build_provenance(root: Path, paths: list[Path], kinds: list[Literal['photo', 'clip']], review: CharacterDatasetReview, *, builtin: bool = False) -> CharacterTrainingProvenance:
     if len(paths) != len(kinds) or {item.upload_index for item in review.items} != set(range(len(paths))):
         raise ValueError('dataset_item_mismatch')
     items = {item.upload_index: item for item in review.items}
@@ -36,10 +36,11 @@ def build_provenance(root: Path, paths: list[Path], kinds: list[Literal['photo',
     if {item.sha256 for item in training} & {item.sha256 for item in held_out}:
         raise ValueError('held_out_overlap')
     dataset = json.dumps([item.model_dump() for item in artifacts], sort_keys=True, separators=(',', ':'))
-    settings = review.settings.model_dump_json()
+    recipe = CharacterTrainingRecipe() if builtin else None
+    settings = json.dumps({'settings': review.settings.model_dump(), 'recipe': recipe.model_dump() if recipe else None}, sort_keys=True, separators=(',', ':'))
     return CharacterTrainingProvenance(engine_commit=ENGINE_COMMIT, base_revision=model_packs()['ltx23'].revision,
         dataset_sha256=hashlib.sha256(dataset.encode()).hexdigest(), settings_sha256=hashlib.sha256(settings.encode()).hexdigest(),
-        settings=review.settings, artifacts=artifacts, comparison_prompts=list(COMPARISON_PROMPTS))
+        settings=review.settings, recipe=recipe, artifacts=artifacts, comparison_prompts=list(COMPARISON_PROMPTS))
 
 
 def dependency_status(command: Path) -> tuple[bool, str]:
