@@ -6,6 +6,8 @@ const { t } = useI18n()
 const open = ref(false)
 const links = [
   { key: 'appLicense', url: 'https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/LICENSE' },
+  { key: 'legacyLicense', url: 'https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/LICENSE-MIT' },
+  { key: 'projectSource', url: 'https://github.com/OpenFabric-Studio/openfabric-studio' },
   { key: 'vendorNotice', url: 'https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/backend/app/fixtures/COPYING.seed-vc' },
   { key: 'projectNotices', url: 'https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/NOTICE' },
   { key: 'upstream', url: 'https://github.com/inikolax/remiqora' },

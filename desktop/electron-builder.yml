@@ -16,6 +16,8 @@ files:
 # The backend runs from real files (Python cannot import from an asar archive). Its own sibling layout is kept:
 # resources/backend and resources/frontend/dist.
 extraResources:
+  - from: resources/licenses
+    to: licenses
   - from: resources/backend
     to: backend
   - from: resources/frontend

@@ -51,11 +51,14 @@ fork's accumulated baseline is not one giant upstream PR. See the
 
 Engine code, model weights, datasets and generated media can have separate terms.
 Keep provenance and license notices for the exact artifacts used; check their
-authoritative license files before distributing them. This repository's MIT
+authoritative license files before distributing them. This repository's AGPL
 license does not license someone else's weights, recordings or output rights.
 
 ## License
 
-Contributions to this repository are licensed under [MIT](LICENSE). Preserve the
-original copyright notice and credit to Nikolay Cherkashin and the upstream
+New contributions to this repository are licensed under [AGPL-3.0-only](LICENSE).
+Inherited MIT material retains its original terms in [LICENSE-MIT](LICENSE-MIT).
+Preserve copyright notices and credit to Nikolay Cherkashin and the upstream
 project; make the maintained-fork identity clear in distributed builds and docs.
+Do not submit third-party material unless its license permits inclusion and its
+provenance and required notices are retained.

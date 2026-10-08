@@ -1,8 +1,23 @@
 OpenFabric Studio
 =================
 
-This is an independent MIT-licensed project maintained under the OpenFabric-Studio
+This is an independent project maintained under the OpenFabric-Studio
 organization. It is not the upstream Remiqora project.
+
+OpenFabric Studio is offered under the GNU Affero General Public License,
+version 3 only (SPDX: AGPL-3.0-only); see LICENSE. Except for material retaining
+its own license as described below, new contributions use these same terms.
+Copyright (c) 2026 OpenFabric Studio contributors.
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, version 3 only. This program is distributed in the hope
+that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See LICENSE
+for the full terms.
+
+Source and build instructions: https://github.com/OpenFabric-Studio/openfabric-studio
+For a binary release, use the source archive for that exact release tag.
 
 Provenance
 ----------
@@ -15,9 +30,13 @@ OpenFabric Studio is derived from:
     Original Remiqora by Nikolay Cherkashin (inikolax)
     MIT License — Copyright (c) 2026 Nikolay Cherkashin (inikolax)
 
-The MIT copyright notice and permission text from the original Remiqora LICENSE
-are preserved in the LICENSE file of this repository. New OpenFabric Studio work
-is also offered under the MIT License.
+The previous MIT copyright notices and full permission text are preserved in
+LICENSE-MIT, including Copyright (c) 2026 Nikolay Cherkashin (inikolax).
+Inherited MIT material retains its original terms within this combined work.
+
+The AGPL transition is dated 2026-10-08. OpenFabric Studio versions through
+commit e72d55f were offered under MIT; that grant remains available for those
+versions. This transition does not withdraw rights already granted under MIT.
 
 Third-party engines and models
 ------------------------------
@@ -34,7 +53,7 @@ Attribution for planned / inspired work
 - Talking / audiobook engine: GPT-SoVITS (MIT) — https://github.com/RVC-Boss/GPT-SoVITS
   Not bundled; optional install via OPENFABRIC_GPT_SOVITS_DIR. OpenFabric never
   auto-downloads pretrained weights. Singing voice cloning remains Seed-VC.
-  Do not use AGPL VoiceStudio code.
+  VoiceStudio code was not copied.
 - Audiobook options (pasted text, TXT, and EPUB import, pronunciation map, per-chapter regenerate, MP3 and chaptered M4B export) were inspired by Pandrator (MIT, https://github.com/lukaszliniewicz/Pandrator). OpenFabric reimplemented them in its own code; Pandrator source is not copied or vendored.
 - macOS ad-hoc signing for Electron downloads (identity "-", hardenedRuntime false, CI codesign verify, Open Anyway docs) follows the pattern from inikolax/remiqora v0.2.2 commit bd8316e / issue #33 (MIT). OpenFabric reimplemented the same electron-builder and workflow checks; Remiqora application code was not vendored for this change.
 - Tagged downloads keep a reusable artist name and an optional album, and YuE generations store the song title apart from style tags. Those ideas follow Remiqora 0.2.2 (MIT, https://github.com/inikolax/remiqora). OpenFabric reimplemented them; Remiqora application code was not copied.

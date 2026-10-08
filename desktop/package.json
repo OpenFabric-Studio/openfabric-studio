@@ -4,7 +4,7 @@
   "private": true,
   "description": "OpenFabric Studio desktop setup and installers (derived from Remiqora under MIT)",
   "author": "OpenFabric Studio contributors",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "main": "src/main.js",
   "engines": {
     "node": ">=22.12.0"

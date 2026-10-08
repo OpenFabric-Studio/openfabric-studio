@@ -14,4 +14,4 @@ Repeated imports reuse the saved profile, including any edits to its name, trans
 
 Source: [CSTR VCTK Corpus, version 0.92](https://datashare.ed.ac.uk/handle/10283/3443), University of Edinburgh, Centre for Speech Technology Research. Junichi Yamagishi, Christophe Veaux and Kirsten MacDonald, 2019. DOI: [10.7488/ds/2645](https://doi.org/10.7488/ds/2645).
 
-The recordings and transcripts are provided under [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), separately from OpenFabric Studio's MIT code license. Preserve attribution when redistributing the source clips. The full source license and per-recording provenance are included in `backend/assets/starter-voices/`.
+The recordings and transcripts are provided under [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/), separately from OpenFabric Studio's AGPL code license. Preserve attribution when redistributing the source clips. The full source license and per-recording provenance are included in `backend/assets/starter-voices/`.

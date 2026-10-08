@@ -5,7 +5,7 @@
 <h1 align="center">OpenFabric Studio</h1>
 <p align="center"><i>Local voice, music, talking audio, and consistent characters</i></p>
 
-**Independent MIT project** under [OpenFabric-Studio](https://github.com/OpenFabric-Studio/openfabric-studio).
+**Independent AGPLv3 project** under [OpenFabric-Studio](https://github.com/OpenFabric-Studio/openfabric-studio).
 
 Derived from [mchosc/remiqora](https://github.com/mchosc/remiqora), itself based on [inikolax/remiqora](https://github.com/inikolax/remiqora) by Nikolay Cherkashin ([inikolax](https://github.com/inikolax)). See [NOTICE](NOTICE) and [LICENSE](LICENSE) for attribution. This repo is **not** a GitHub fork network child of Remiqora; it reuses code and ideas under MIT with credit.
 
@@ -19,7 +19,7 @@ Derived from [mchosc/remiqora](https://github.com/mchosc/remiqora), itself based
 
 <p align="center">
   <img alt="Status" src="https://img.shields.io/badge/status-in%20development-eab308?style=flat-square">
-  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-22c55e?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License: AGPL-3.0-only" src="https://img.shields.io/badge/license-AGPL--3.0--only-22c55e?style=flat-square"></a>
   <img alt="Platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-0f0f14?style=flat-square">
   <img alt="Brand" src="https://img.shields.io/badge/brand-indigo%20%2B%20black-4F46E5?style=flat-square">
 </p>
@@ -34,7 +34,7 @@ Derived from [mchosc/remiqora](https://github.com/mchosc/remiqora), itself based
 | **Music** | Local ACE-Step / YuE2 generation, stems, DAW mixing (heritage from Remiqora). |
 | **Video / characters** | Silent videos and reels. A local character LoRA trains on this Mac when the video engine Python is configured. A locked still is not training. |
 
-Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI) for reusable MIT-compatible ideas — always attributed.
+Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI) for reusable ideas — always attributed. Reusing source requires checking its exact license and preserving its notices.
 
 ---
 
@@ -122,6 +122,12 @@ systems remain unverified. See [OpenRouter setup, privacy and recovery](docs/ope
 
 ## License and liability
 
-Application code: **MIT** — retain Nikolay Cherkashin’s copyright notice and this project’s NOTICE. Generated audio/video and third-party model weights have separate terms; you are responsible for lawful use of voices, likenesses, and media.
+OpenFabric Studio is offered under the **GNU Affero General Public License, version 3 only** (`AGPL-3.0-only`); see [LICENSE](LICENSE). Contributions use the same terms. The program comes without any warranty; you may redistribute and modify it under that license.
+
+Inherited MIT code retains its original terms and copyright notices in [LICENSE-MIT](LICENSE-MIT), including credit to Nikolay Cherkashin. Preserve [NOTICE](NOTICE) and the applicable license notices when redistributing. Versions through commit `e72d55f`, before the 2026-10-08 transition, remain available under MIT.
+
+AGPL permits commercial use. Distributing covered binaries requires providing their Corresponding Source under the license's terms. Modified versions used remotely over a network must prominently offer those users the Corresponding Source of that version at no charge. For official releases, use the exact release tag's source archive, including the build and installation scripts. A link to an unrelated or unmodified upstream version is insufficient for a modified deployment. See [AGPL sections 6 and 13](https://www.gnu.org/licenses/agpl-3.0.html).
+
+Third-party engines, model weights, datasets and recordings retain their own licenses. The application license does not automatically apply to generated audio/video or grant rights to voices, likenesses or source media.
 
 Upstream Remiqora remains the work of its authors; OpenFabric Studio is an independent derivative.

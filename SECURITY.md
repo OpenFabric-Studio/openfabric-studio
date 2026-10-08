@@ -15,4 +15,4 @@ There is no guaranteed response time or security-support SLA.
 ## Scope and deployment notes
 
 - OpenFabric Studio is designed to run **locally**. The launch scripts (`dev.*`, `prod_run.*`) bind the backend to `127.0.0.1`, and the app has **no authentication**. Do not expose its ports to a network or the internet.
-- Vulnerabilities in underlying engines should be reported to their maintainers. If the vulnerable behavior is in this fork's integration, report it here. Include exact engine/model revisions; their licenses and security policies are separate from this repository's MIT license.
+- Vulnerabilities in underlying engines should be reported to their maintainers. If the vulnerable behavior is in this fork's integration, report it here. Include exact engine/model revisions; their licenses and security policies are separate from this repository's AGPL license.
