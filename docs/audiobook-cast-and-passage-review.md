@@ -14,6 +14,21 @@ DOCX imports extract supported paragraphs, headings and tables. Complex content 
 
 Use **Audition cast** to hear a line from each appearing voice, or **Preview scene** for a short scene from the selected chapter. The same pronunciation and render preparation is used for narration; speaker labels are not spoken. Assigned speakers with no lines are listed as skipped. Auditions run sequentially, persist in the library, and can be canceled. Save edits to an existing book before auditioning its saved inputs. Mock speech is explicitly labeled as silent placeholder audio.
 
+## Check cast before synthesis
+
+Before generating, **Check cast** inspects a selected chapter without synthesizing
+audio or calling a provider. It shows each resolved voice and the spoken text,
+including pronunciation substitutions. Warnings identify unmatched labels,
+characters sharing the narrator's voice, unused cast members, missing profiles
+and revoked consent. These are advisory: `Note:` can be a heading, and an unknown
+label still follows the existing rule of being read aloud by the narrator.
+
+Save edits before checking a saved book. Checks use the current chapter revision;
+editing, switching chapters or leaving the panel discards an outstanding or
+displayed result. Saving refreshes chapter text and revisions before another
+check. This reports routing, not voice similarity, engine readiness or model
+quality. Use the existing auditions to listen to the cast.
+
 ## Listen and repair
 
 Open a completed chapter and choose **Review passages**. Enter the chapter playback time to find the passage, listen to its accepted audio, and edit the words for a replacement take. **Generate a fresh take** always bypasses cached speech. Listen to the candidate before choosing **Accept this take**. Generating a candidate does not replace the accepted recording.

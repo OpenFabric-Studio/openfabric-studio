@@ -16,6 +16,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import audiobooks, voice_profiles
 import httpx
 from fastapi import FastAPI
@@ -322,7 +323,7 @@ class EbookImportApiTests(unittest.IsolatedAsyncioTestCase):
         chapters[0]["included"] = False
         edited = await self.client.patch(f"/api/audiobooks/imports/{draft.id}", json={"title": "Reviewed", "chapters": chapters, "revision": 1})
         self.assertEqual(edited.status_code, 200, edited.text)
-        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference", reference_transcript="Reference.")
+        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", notes="Reference", reference_transcript="Reference.")
         with patch.dict(os.environ, {"OPENFABRIC_AUDIOBOOK_SYNC": "1", "OPENFABRIC_SPEECH_CLONE_MOCK": "1"}):
             stale = await self.client.post(f"/api/audiobooks/imports/{draft.id}/create", json={"profile_id": profile.id, "revision": 1})
             self.assertEqual(stale.status_code, 409)
@@ -340,7 +341,7 @@ class EbookImportApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_source_deleted_between_review_read_and_book_insert_cannot_create_book(self) -> None:
         importer = importlib.import_module("app.ebook_import")
         draft = importer.save_draft("original.mobi", mobi_fixture(), importer.extract_epub(epub_fixture()))
-        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", notes="Reference", reference_transcript="Reference.")
+        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", notes="Reference", reference_transcript="Reference.")
         original = voice_profiles.get_profile
 
         def remove_source(identifier: str) -> voice_profiles.VoiceProfile:

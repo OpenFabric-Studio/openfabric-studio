@@ -1,10 +1,15 @@
 """REST API for consent-backed speech voice profiles."""
 from __future__ import annotations
 
+from collections.abc import Callable, Coroutine
 from typing import Annotated
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import FileResponse
+from fastapi.routing import APIRoute
+from starlette.concurrency import run_in_threadpool
+from starlette.responses import Response
+from starlette.types import Message
 
 from .. import speech_starter_voices, voice_profiles
 from ..voice_profile_contracts import (
@@ -17,7 +22,36 @@ from ..voice_profile_contracts import (
 
 from ..module_security import require_local_origin
 
-router = APIRouter(prefix="/api/voice-profiles", tags=["voice profiles"])
+MAX_UPLOAD_REQUEST_BYTES = 33 * 1024 * 1024
+
+
+class _BoundedUploadRoute(APIRoute):
+    def get_route_handler(self) -> Callable[[Request], Coroutine[object, object, Response]]:
+        handler = super().get_route_handler()
+
+        async def bounded(request: Request) -> Response:
+            if request.method in {"GET", "HEAD", "OPTIONS"}:
+                return await handler(request)
+            require_local_origin(request)
+            count = 0
+
+            async def receive() -> Message:
+                nonlocal count
+                message = await request.receive()
+                if message["type"] == "http.request":
+                    body: object = message.get("body", b"")
+                    if isinstance(body, bytes):
+                        count += len(body)
+                    if count > MAX_UPLOAD_REQUEST_BYTES:
+                        raise HTTPException(413, "audio_too_large")
+                return message
+
+            return await handler(Request(request.scope, receive))
+
+        return bounded
+
+
+router = APIRouter(prefix="/api/voice-profiles", tags=["voice profiles"], route_class=_BoundedUploadRoute)
 
 
 def _raise(exc: voice_profiles.VoiceProfileError) -> None:
@@ -42,9 +76,14 @@ async def create_voice_profile(
     reference_transcript: Annotated[str, Form(max_length=2000)] = "",
     reference_language: Annotated[str, Form(min_length=2, max_length=16, pattern=r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2}$")] = "en",
 ) -> SpeechVoiceProfile:
-    raw = await audio.read()
     try:
-        return voice_profiles.create_profile(
+        limit = voice_profiles.MAX_REFERENCE_AUDIO_BYTES
+        if audio.size is not None and audio.size > limit:
+            raise voice_profiles.VoiceProfileError("audio_too_large", 413)
+        raw = await audio.read(limit + 1)
+        if len(raw) > limit:
+            raise voice_profiles.VoiceProfileError("audio_too_large", 413)
+        return await run_in_threadpool(voice_profiles.create_profile,
             name=name,
             consent_confirmed=consent_confirmed,
             audio_bytes=raw,
@@ -110,8 +149,6 @@ def get_voice_profile(profile_id: str) -> SpeechVoiceProfile:
 @router.patch("/{profile_id}", response_model=SpeechVoiceProfile)
 def patch_voice_profile(profile_id: str, body: PatchSpeechVoiceProfileRequest, request: Request) -> SpeechVoiceProfile:
     try:
-        if body.renderer is not None or body.cloud is not None:
-            require_local_origin(request)
         return voice_profiles.patch_profile(profile_id, body)
     except voice_profiles.VoiceProfileError as exc:
         _raise(exc)

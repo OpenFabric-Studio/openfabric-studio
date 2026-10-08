@@ -11,6 +11,7 @@ from unittest.mock import patch
 import httpx
 from fastapi import FastAPI
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import speech_clone, voice_profiles
 from app.api import routes_speech_clone, routes_voice_profiles
 
@@ -34,7 +35,7 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         app.include_router(routes_voice_profiles.router)
         app.include_router(routes_speech_clone.router)
         self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=app), base_url="http://test"
+            transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
         )
 
     async def asyncTearDown(self) -> None:
@@ -49,7 +50,7 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.post(
             "/api/voice-profiles",
             data={"name": name, "consent_confirmed": consent, "notes": "demo", "reference_transcript": "Reference."},
-            files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
+            files={"audio": ("ref.wav", wav_bytes(), "audio/wav")},
         )
 
     async def test_create_list_delete_happy_path(self) -> None:
@@ -84,7 +85,7 @@ class VoiceProfilesApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_explicit_reference_fields_survive_create_and_patch(self) -> None:
         response = await self.client.post("/api/voice-profiles", data={"name": "Reader", "consent_confirmed": "true",
             "notes": "A descriptive note", "reference_transcript": "Spoken reference words.", "reference_language": "ja"},
-            files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")})
+            files={"audio": ("ref.wav", wav_bytes(), "audio/wav")})
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["reference_transcript"], "Spoken reference words.")
         changed = await self.client.patch(f"/api/voice-profiles/{response.json()['id']}",

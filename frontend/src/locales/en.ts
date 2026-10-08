@@ -81,6 +81,7 @@ export default {
     tagline: 'Made with AI. Made by you.',
   },
 voiceProfiles: {
+    audioLimits: 'WAV or FLAC · up to 32 MiB and 120 seconds · at most 8 channels and 192 kHz. A short, clean reference with matching text is preferable.',
     title: 'Speech voice profiles',
     intro: 'Consent-backed reference clips for talking and audiobook cloning (GPT-SoVITS path). Singing voices stay in the workspace below.',
     empty: 'No speech profiles yet.',
@@ -115,6 +116,9 @@ voiceProfiles: {
     err: {
       load: 'Could not load speech profiles.',
       create: 'Could not create the speech profile.',
+      audioTooLarge: 'The reference audio must be 32 MiB or smaller.',
+      invalidAudio: 'Choose a valid, complete WAV or FLAC recording. This file could not be decoded.',
+      audioDecodeLimit: 'Use a reference of at most 120 seconds, 8 channels and 192 kHz.',
       delete: 'Could not delete the speech profile.',
       consent: 'Consent is required to create a speech profile.',
       audio: 'Choose a wav or flac reference clip.',

@@ -10,6 +10,25 @@ Reference recording quality alone does not establish generated voice quality. Au
 
 Repeated imports reuse the saved profile, including any edits to its name, transcript or permission setting. Deleting the profile removes its library copy; the bundled reference remains available to add again. Existing profiles are preserved during the database upgrade.
 
+## Uploading your own reference
+
+In **Voice Clone → Speech → New profile**, upload a complete WAV or FLAC and
+confirm permission to use it. New uploads are limited to 32 MiB, 120 seconds,
+8 channels and 192 kHz; the multipart request is capped at 33 MiB before parsing.
+The backend decodes the recording in bounded chunks and rejects incomplete WAV
+chunks, decoder failures and nonfinite samples before saving a profile. Valid
+source bytes are retained unchanged. Existing profiles are not revalidated or
+rewritten by this change.
+
+FLAC uploads must declare their sample count. Re-export streaming FLAC files
+with an unknown count as WAV or FLAC before uploading.
+
+Prefer a short, clean reference with an exact matching transcript. These storage
+limits do not establish that every accepted recording is suitable for a speech
+engine. The baseline environment includes SoundFile for local validation; no
+speech model or GPU is needed. Mutating profile requests require the existing
+trusted local-origin checks; documented loopback CLI requests remain supported.
+
 ## Attribution
 
 Source: [CSTR VCTK Corpus, version 0.92](https://datashare.ed.ac.uk/handle/10283/3443), University of Edinburgh, Centre for Speech Technology Research. Junichi Yamagishi, Christophe Veaux and Kirsten MacDonald, 2019. DOI: [10.7488/ds/2645](https://doi.org/10.7488/ds/2645).

@@ -298,6 +298,33 @@ export type AudiobookBooksResponse = {
   "books": Array<AudiobookBook>
 }
 
+export type AudiobookCastCheck = {
+  "book_id"?: (string | null)
+  "chapter_index": number
+  "revision"?: (number | null)
+  "turns": Array<AudiobookCastCheckTurn>
+  "warnings": Array<AudiobookCastCheckWarning>
+}
+
+export type AudiobookCastCheckOptions = {
+  "chapter_index"?: number
+  "revision": number
+}
+
+export type AudiobookCastCheckTurn = {
+  "speaker": string
+  "profile_id": string
+  "profile_name"?: (string | null)
+  "text": string
+}
+
+export type AudiobookCastCheckWarning = {
+  "code": "unmatched_label" | "shared_narrator" | "unused_cast" | "profile_missing" | "consent_required"
+  "speaker": string
+  "profile_id": string
+  "line_number"?: (number | null)
+}
+
 export type AudiobookChapterInput = {
   "title"?: string
   "text": string
@@ -573,6 +600,20 @@ export type CreateAudiobookAuditionRequest = {
   "chapter_index"?: number
   "mode"?: "cast" | "scene"
   "max_chars"?: number
+}
+
+export type CreateAudiobookCastCheckRequest = {
+  "cloud_approval"?: (CloudSpeechApproval | null)
+  "title": string
+  "profile_id": string
+  "chapters": Array<AudiobookChapterInput>
+  "author"?: string
+  "pronunciations"?: Array<PronunciationEntry>
+  "language"?: string
+  "cast"?: Array<CastMember>
+  "passage_gap_ms"?: number
+  "speaker_change_gap_ms"?: number
+  "chapter_index"?: number
 }
 
 export type CreateAudiobookFromDraftRequest = {
@@ -13419,6 +13460,266 @@ const schemas = {
     "title": "AudiobookCloudControlRequest",
     "type": "object"
   },
+  "CreateAudiobookCastCheckRequest": {
+    "properties": {
+      "cloud_approval": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CloudSpeechApproval"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "title": {
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Title",
+        "type": "string"
+      },
+      "profile_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "chapters": {
+        "items": {
+          "$ref": "#/$defs/AudiobookChapterInput"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "title": "Chapters",
+        "type": "array"
+      },
+      "author": {
+        "default": "",
+        "maxLength": 200,
+        "title": "Author",
+        "type": "string"
+      },
+      "pronunciations": {
+        "items": {
+          "$ref": "#/$defs/PronunciationEntry"
+        },
+        "maxItems": 100,
+        "title": "Pronunciations",
+        "type": "array"
+      },
+      "language": {
+        "default": "",
+        "maxLength": 35,
+        "title": "Language",
+        "type": "string"
+      },
+      "cast": {
+        "items": {
+          "$ref": "#/$defs/CastMember"
+        },
+        "maxItems": 16,
+        "title": "Cast",
+        "type": "array"
+      },
+      "passage_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Passage Gap Ms",
+        "type": "integer"
+      },
+      "speaker_change_gap_ms": {
+        "default": 0,
+        "maximum": 5000,
+        "minimum": 0,
+        "title": "Speaker Change Gap Ms",
+        "type": "integer"
+      },
+      "chapter_index": {
+        "default": 0,
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "title",
+      "profile_id",
+      "chapters"
+    ],
+    "title": "CreateAudiobookCastCheckRequest",
+    "type": "object"
+  },
+  "AudiobookCastCheckOptions": {
+    "properties": {
+      "chapter_index": {
+        "default": 0,
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "title": "AudiobookCastCheckOptions",
+    "type": "object"
+  },
+  "AudiobookCastCheckTurn": {
+    "properties": {
+      "speaker": {
+        "maxLength": 40,
+        "minLength": 1,
+        "title": "Speaker",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "profile_name": {
+        "anyOf": [
+          {
+            "maxLength": 120,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Profile Name"
+      },
+      "text": {
+        "maxLength": 1200,
+        "minLength": 1,
+        "title": "Text",
+        "type": "string"
+      }
+    },
+    "required": [
+      "speaker",
+      "profile_id",
+      "text"
+    ],
+    "title": "AudiobookCastCheckTurn",
+    "type": "object"
+  },
+  "AudiobookCastCheckWarning": {
+    "properties": {
+      "code": {
+        "enum": [
+          "unmatched_label",
+          "shared_narrator",
+          "unused_cast",
+          "profile_missing",
+          "consent_required"
+        ],
+        "title": "Code",
+        "type": "string"
+      },
+      "speaker": {
+        "maxLength": 40,
+        "title": "Speaker",
+        "type": "string"
+      },
+      "profile_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Profile Id",
+        "type": "string"
+      },
+      "line_number": {
+        "anyOf": [
+          {
+            "maximum": 20000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Line Number"
+      }
+    },
+    "required": [
+      "code",
+      "speaker",
+      "profile_id"
+    ],
+    "title": "AudiobookCastCheckWarning",
+    "type": "object"
+  },
+  "AudiobookCastCheck": {
+    "properties": {
+      "book_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Book Id"
+      },
+      "chapter_index": {
+        "maximum": 99,
+        "minimum": 0,
+        "title": "Chapter Index",
+        "type": "integer"
+      },
+      "revision": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Revision"
+      },
+      "turns": {
+        "items": {
+          "$ref": "#/$defs/AudiobookCastCheckTurn"
+        },
+        "maxItems": 20000,
+        "title": "Turns",
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "$ref": "#/$defs/AudiobookCastCheckWarning"
+        },
+        "maxItems": 20100,
+        "title": "Warnings",
+        "type": "array"
+      }
+    },
+    "required": [
+      "chapter_index",
+      "turns",
+      "warnings"
+    ],
+    "title": "AudiobookCastCheck",
+    "type": "object"
+  },
   "ArtistSettings": {
     "additionalProperties": false,
     "properties": {
@@ -20852,6 +21153,46 @@ function isAudiobookCloudControlRequest(value: unknown): value is AudiobookCloud
 }
 export function parseAudiobookCloudControlRequest(value: unknown): AudiobookCloudControlRequest {
   if (!isAudiobookCloudControlRequest(value)) throw new TypeError("Invalid AudiobookCloudControlRequest response")
+  return value
+}
+
+function isCreateAudiobookCastCheckRequest(value: unknown): value is CreateAudiobookCastCheckRequest {
+  return decodeSchema(schemas.CreateAudiobookCastCheckRequest, value, schemas)
+}
+export function parseCreateAudiobookCastCheckRequest(value: unknown): CreateAudiobookCastCheckRequest {
+  if (!isCreateAudiobookCastCheckRequest(value)) throw new TypeError("Invalid CreateAudiobookCastCheckRequest response")
+  return value
+}
+
+function isAudiobookCastCheckOptions(value: unknown): value is AudiobookCastCheckOptions {
+  return decodeSchema(schemas.AudiobookCastCheckOptions, value, schemas)
+}
+export function parseAudiobookCastCheckOptions(value: unknown): AudiobookCastCheckOptions {
+  if (!isAudiobookCastCheckOptions(value)) throw new TypeError("Invalid AudiobookCastCheckOptions response")
+  return value
+}
+
+function isAudiobookCastCheckTurn(value: unknown): value is AudiobookCastCheckTurn {
+  return decodeSchema(schemas.AudiobookCastCheckTurn, value, schemas)
+}
+export function parseAudiobookCastCheckTurn(value: unknown): AudiobookCastCheckTurn {
+  if (!isAudiobookCastCheckTurn(value)) throw new TypeError("Invalid AudiobookCastCheckTurn response")
+  return value
+}
+
+function isAudiobookCastCheckWarning(value: unknown): value is AudiobookCastCheckWarning {
+  return decodeSchema(schemas.AudiobookCastCheckWarning, value, schemas)
+}
+export function parseAudiobookCastCheckWarning(value: unknown): AudiobookCastCheckWarning {
+  if (!isAudiobookCastCheckWarning(value)) throw new TypeError("Invalid AudiobookCastCheckWarning response")
+  return value
+}
+
+function isAudiobookCastCheck(value: unknown): value is AudiobookCastCheck {
+  return decodeSchema(schemas.AudiobookCastCheck, value, schemas)
+}
+export function parseAudiobookCastCheck(value: unknown): AudiobookCastCheck {
+  if (!isAudiobookCastCheck(value)) throw new TypeError("Invalid AudiobookCastCheck response")
   return value
 }
 

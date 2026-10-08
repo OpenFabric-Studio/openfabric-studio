@@ -4,8 +4,10 @@ import {
   parseCreateAudiobookAuditionRequest, parseAudiobookRepair,
   parseCreateAudiobookRepairRequest, parseAcceptAudiobookRepairRequest,
   parseAudiobookAuditionsResponse, parseAudiobookRepairsResponse,
+  parseCreateAudiobookCastCheckRequest, parseAudiobookCastCheckOptions, parseAudiobookCastCheck,
 } from './contracts'
 import type { AudiobookAuditionOptions, CreateAudiobookAuditionRequest, CreateAudiobookRepairRequest } from './contracts'
+import type { CreateAudiobookCastCheckRequest, AudiobookCastCheckOptions } from './contracts'
 
 function id(value: string): string {
   if (!/^[0-9a-f]{32}$/.test(value)) throw new TypeError('Invalid audiobook workflow identifier')
@@ -20,6 +22,12 @@ function json(body: unknown, signal?: AbortSignal): RequestInit {
 }
 export function listPassages(bookId: string, chapterIndex: number, signal?: AbortSignal) {
   return apiFetch(`${chapterPath(bookId, chapterIndex)}/passages`, { signal }, parseAudiobookPassagesResponse)
+}
+export function checkDraftCast(body: CreateAudiobookCastCheckRequest, signal?: AbortSignal) {
+  return apiFetch('/api/audiobooks/cast-check', json(parseCreateAudiobookCastCheckRequest(body), signal), parseAudiobookCastCheck)
+}
+export function checkBookCast(bookId: string, body: AudiobookCastCheckOptions, signal?: AbortSignal) {
+  return apiFetch(`/api/audiobooks/${id(bookId)}/cast-check`, json(parseAudiobookCastCheckOptions(body), signal), parseAudiobookCastCheck)
 }
 export function auditionDraft(body: CreateAudiobookAuditionRequest, signal?: AbortSignal) {
   return apiFetch('/api/audiobooks/auditions', json(parseCreateAudiobookAuditionRequest(body), signal), parseAudiobookAudition)

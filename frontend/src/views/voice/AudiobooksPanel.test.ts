@@ -8,7 +8,7 @@ import * as profilesApi from '../../api/voiceProfiles'
 import * as workflowApi from '../../api/audiobookWorkflow'
 import type { AudiobookBook, AudiobookCreateResponse, AudiobookJob } from '../../api/audiobooks'
 import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
-import type { EbookDraft } from '../../api/contracts'
+import type { EbookDraft, AudiobookCastCheck } from '../../api/contracts'
 import en from '../../locales/en'
 import * as readingApi from '../../api/readingMedia'
 import * as timingApi from '../../api/narrationTiming'
@@ -24,7 +24,7 @@ vi.mock('../../api/audiobooks', async (original) => ({ ...await original<typeof 
   setAudiobookLanguages: vi.fn(), setAudiobookCast: vi.fn(), setAudiobookChapterText: vi.fn(), setAudiobookPronunciations: vi.fn(), regenerateAudiobookChapter: vi.fn(), uploadAudiobookCover: vi.fn(),
 }))
 vi.mock('../../api/voiceProfiles', async original => ({ ...await original<typeof import('../../api/voiceProfiles')>(), listSpeechVoiceProfiles: vi.fn(), startSpeechCloneTrial: vi.fn() }))
-vi.mock('../../api/audiobookWorkflow', async original => ({ ...await original<typeof import('../../api/audiobookWorkflow')>(), __v_isRef: false, auditionDraft: vi.fn(), getAudition: vi.fn(), listBookAuditions: vi.fn() }))
+vi.mock('../../api/audiobookWorkflow', async original => ({ ...await original<typeof import('../../api/audiobookWorkflow')>(), __v_isRef: false, auditionDraft: vi.fn(), getAudition: vi.fn(), listBookAuditions: vi.fn(), checkBookCast: vi.fn() }))
 
 let app: App | undefined
 let hidden = ref(false)
@@ -58,6 +58,40 @@ async function mount() {
   const container = document.body.appendChild(document.createElement('div'))
   app.mount(container); await settle(); return container
 }
+it('offers a synthesis-free cast check beside saved auditions', async () => {
+  const container = await mount()
+  expect(button(container, 'Check cast').disabled).toBe(false)
+})
+it('invalidates saved cast results and pending checks when local cast edits change', async () => {
+  const saved = { ...book(), cast: [{ name: 'Alice', profile_id: profile.id }] }
+  vi.mocked(api.listAudiobooks).mockResolvedValue([saved])
+  const report: AudiobookCastCheck = { book_id: saved.id, chapter_index: 0, revision: 1,
+    turns: [{ speaker: 'Alice', profile_id: profile.id, profile_name: 'Checked voice', text: 'Inspected words.' }], warnings: [] }
+  vi.mocked(workflowApi.checkBookCast).mockResolvedValueOnce(report)
+  const container = await mount(); await click(container, 'Check cast')
+  expect(container.textContent).toContain('Checked voice')
+  const pending = deferred<AudiobookCastCheck>()
+  vi.mocked(workflowApi.checkBookCast).mockReturnValueOnce(pending.promise)
+  await click(container, 'Check cast')
+  await change(container, 'Cast name 1', 'Bob')
+  pending.resolve(report); await settle()
+  expect(container.textContent).not.toContain('Checked voice')
+  expect(button(container, 'Check cast').disabled).toBe(true)
+})
+it('refreshes saved chapter text and revision before checking after a save', async () => {
+  const saved = book()
+  vi.mocked(api.listAudiobookJobs).mockResolvedValueOnce([{ ...job(saved), chapter_text: 'Old words.', revision: 1 }])
+    .mockResolvedValue([{ ...job(saved), chapter_text: 'New words.', revision: 2 }])
+  vi.mocked(api.setAudiobookChapterText).mockResolvedValue(saved)
+  vi.mocked(workflowApi.checkBookCast).mockResolvedValue({ book_id: saved.id, chapter_index: 0, revision: 2, turns: [], warnings: [] })
+  const container = await mount()
+  await change(container, 'Lines for chapter 1', 'New words.')
+  expect(button(container, 'Check cast').disabled).toBe(true)
+  await click(container, 'Save lines')
+  expect(button(container, 'Check cast').disabled).toBe(false)
+  await click(container, 'Check cast')
+  expect(workflowApi.checkBookCast).toHaveBeenCalledWith(saved.id, { chapter_index: 0, revision: 2 }, expect.any(AbortSignal))
+})
 function button(container: HTMLElement, text: string): HTMLButtonElement {
   const found = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === text || item.getAttribute('aria-label') === text)
   if (!found) throw new Error(`Missing button: ${text}`)

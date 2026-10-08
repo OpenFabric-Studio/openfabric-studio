@@ -14,6 +14,7 @@ from unittest.mock import patch
 import httpx
 from fastapi import FastAPI
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import audiobooks, speech_clone, voice_profiles
 from app.api import routes_audiobooks, routes_voice_profiles
 from app.ebook_import import chapters_from_plain_text
@@ -58,7 +59,7 @@ class AudiobookOptionsApiTests(unittest.IsolatedAsyncioTestCase):
         created = await self.client.post(
             "/api/voice-profiles",
             data={"name": "Reader", "consent_confirmed": "true", "reference_transcript": "Reference."},
-            files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
+            files={"audio": ("ref.wav", wav_bytes(), "audio/wav")},
         )
         self.assertEqual(created.status_code, 200, created.text)
         self.profile_id = created.json()["id"]
@@ -132,7 +133,7 @@ class AudiobookOptionsApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_removed_cast_actor_consent_is_checked_for_retained_chapter_publication(self) -> None:
         actor = await self.client.post("/api/voice-profiles", data={"name": "Alice", "consent_confirmed": "true", "reference_transcript": "Reference."},
-            files={"audio": ("alice.wav", b"RIFF....WAVE", "audio/wav")})
+            files={"audio": ("alice.wav", wav_bytes(), "audio/wav")})
         self.assertEqual(actor.status_code, 200, actor.text)
         actor_id = actor.json()["id"]
         created = await self.client.post("/api/audiobooks", json={

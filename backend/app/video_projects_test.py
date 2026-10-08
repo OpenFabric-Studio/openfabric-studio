@@ -5,6 +5,8 @@ import asyncio, io, os, shutil, subprocess, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.voice_profile_test_fixtures import wav_bytes
+
 
 class VideoProjectTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
@@ -510,7 +512,7 @@ class PictureProjectTests(VideoProjectTests):
         profile = voice_profiles.create_profile(
             name="Ada",
             consent_confirmed=True,
-            audio_bytes=b"RIFF....WAVE",
+            audio_bytes=wav_bytes(),
             filename="ref.wav",
             notes="Reference.",
             reference_transcript="Reference.",
@@ -560,7 +562,7 @@ class PictureProjectTests(VideoProjectTests):
         profile = voice_profiles.create_profile(
             name="Ada",
             consent_confirmed=True,
-            audio_bytes=b"RIFF....WAVE",
+            audio_bytes=wav_bytes(),
             filename="ref.wav",
             notes="Reference.",
             reference_transcript="Reference.",

@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import voice_profiles
 from app.voice_profile_contracts import PatchSpeechVoiceProfileRequest
 
@@ -22,10 +23,10 @@ class CloudProfileTests(unittest.TestCase):
 
     def test_existing_profile_defaults_local_and_retains_recording(self) -> None:
         profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True,
-            audio_bytes=b"reference fixture", filename="ref.wav", reference_transcript="Real words.")
+            audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Real words.")
         self.assertEqual(profile.renderer, "local")
         self.assertIsNone(profile.cloud)
-        self.assertEqual(Path(profile.reference_audio_path).read_bytes(), b"reference fixture")
+        self.assertEqual(Path(profile.reference_audio_path).read_bytes(), wav_bytes())
 
     def test_cloud_preset_needs_neither_recording_nor_fake_transcript(self) -> None:
         from app.voice_profile_contracts import CreateCloudSpeechVoiceProfileRequest
@@ -44,7 +45,7 @@ class CloudProfileTests(unittest.TestCase):
     def test_reference_clone_requires_separate_transfer_permission(self) -> None:
         from app.voice_profile_contracts import CloudSpeechConfiguration
         profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True,
-            audio_bytes=b"reference fixture", filename="ref.wav", reference_transcript="Real words.")
+            audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Real words.")
         body = PatchSpeechVoiceProfileRequest(renderer="openrouter", cloud=CloudSpeechConfiguration(
             model="fish-audio/s2.1-pro", clone_reference=True))
         with patch("app.cloud_speech.validate_configuration"), self.assertRaises(voice_profiles.VoiceProfileError) as caught:
@@ -55,7 +56,7 @@ class CloudProfileTests(unittest.TestCase):
     def test_switching_renderer_preserves_local_reference_and_transcript(self) -> None:
         from app.voice_profile_contracts import CloudSpeechConfiguration
         profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True,
-            audio_bytes=b"reference fixture", filename="ref.wav", reference_transcript="Real words.")
+            audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Real words.")
         with patch("app.cloud_speech.validate_configuration"):
             changed = voice_profiles.patch_profile(profile.id, PatchSpeechVoiceProfileRequest(
                 renderer="openrouter", cloud=CloudSpeechConfiguration(model="openai/gpt-4o-mini-tts", voice="alloy")))
@@ -63,11 +64,11 @@ class CloudProfileTests(unittest.TestCase):
         self.assertEqual(changed.renderer, "openrouter")
         self.assertEqual(restored.renderer, "local")
         self.assertEqual(restored.reference_transcript, "Real words.")
-        self.assertEqual(Path(restored.reference_audio_path).read_bytes(), b"reference fixture")
+        self.assertEqual(Path(restored.reference_audio_path).read_bytes(), wav_bytes())
 
     def test_v2_migration_adds_local_renderer_without_rewriting_existing_columns(self) -> None:
         profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True,
-            audio_bytes=b"reference fixture", filename="ref.wav", notes="Notes", reference_transcript="Real words.")
+            audio_bytes=wav_bytes(), filename="ref.wav", notes="Notes", reference_transcript="Real words.")
         with sqlite3.connect(voice_profiles._db_path()) as connection:
             columns = {str(row[1]) for row in connection.execute("PRAGMA table_info(voice_profiles)")}
             for column in ("renderer", "cloud_json"):
@@ -78,7 +79,7 @@ class CloudProfileTests(unittest.TestCase):
         self.assertEqual(migrated.renderer, "local")
         self.assertEqual(migrated.notes, "Notes")
         self.assertEqual(migrated.reference_transcript, "Real words.")
-        self.assertEqual(Path(migrated.reference_audio_path).read_bytes(), b"reference fixture")
+        self.assertEqual(Path(migrated.reference_audio_path).read_bytes(), wav_bytes())
 
 class CloudSnapshotTests(CloudProfileTests):
     def preset(self):

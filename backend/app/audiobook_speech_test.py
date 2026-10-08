@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import httpx
+from app.voice_profile_test_fixtures import wav_bytes
 from app import speech_clone, voice_profiles, module_jobs
 from app.module_jobs import ModuleSetupError
 
@@ -132,7 +133,7 @@ class SpeechCapabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch.object(voice_profiles, "PROFILES_ROOT", root / "profiles"):
-                profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
+                profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
                 output = root / "out.wav"
                 speech_clone._write_silent_wav(output)
                 with patch.object(speech_clone, "mock_enabled", return_value=False), patch.object(speech_clone, "resolve_engine_root", return_value=root), patch.object(speech_clone, "api_reachable", return_value=True), patch.object(speech_clone, "_synthesize_via_api", return_value=output), patch.object(speech_clone, "record_capability_success") as record:
@@ -148,7 +149,7 @@ class SpeechCapabilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             with patch.object(voice_profiles, "PROFILES_ROOT", root / "profiles"):
-                profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
+                profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
                 output = root / "out.wav"
                 speech_clone._write_silent_wav(output)
                 with patch.object(speech_clone, "mock_enabled", return_value=False), patch.object(speech_clone, "resolve_engine_root", return_value=root), patch.object(speech_clone, "api_reachable", return_value=True), patch.object(speech_clone, "_synthesize_via_api", return_value=output), patch.object(speech_clone, "record_capability_success", side_effect=OSError("injected receipt failure")), self.assertLogs("app.speech_clone", level="ERROR"):

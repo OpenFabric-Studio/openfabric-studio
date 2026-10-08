@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import ValidationError
 from unittest.mock import patch
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app.speech_references import SpeechRenderSnapshot
 
 from app import audiobook_collection, audiobook_narration, audiobooks, narration_pauses, speech_clone, voice_profiles
@@ -67,7 +68,7 @@ class AudiobookResearchTests(unittest.TestCase):
         for item in self.patches:
             item.start()
         self.profile = voice_profiles.create_profile(
-            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
+            name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
         )
         self.calls = 0
         original = speech_clone.synthesize_to_path
