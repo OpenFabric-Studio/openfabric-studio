@@ -82,6 +82,17 @@ async function creationDraft(container: HTMLElement) {
   Object.defineProperty(audio, 'files', { configurable: true, value: [new File(['audio fixture'], 'clip.wav', { type: 'audio/wav' })] })
   audio.dispatchEvent(new Event('change', { bubbles: true })); await settle()
 }
+it.each([
+  ['audio_too_large', '32 MiB'],
+  ['invalid_audio', 'valid, complete WAV or FLAC'],
+  ['audio_decode_limit', '120 seconds'],
+])('explains upload validation error %s without exposing internal details', async (code, message) => {
+  vi.mocked(api.createSpeechVoiceProfile).mockRejectedValue(new ApiError(code, 400))
+  const container = await mount(); await creationDraft(container)
+  field(container, en.voiceProfiles.consentLabel).click(); await settle()
+  await submit(container, 'Create speech profile')
+  expect(container.querySelector('[role=alert]')?.textContent).toContain(message)
+})
 function deferred<T>() {
   let resolve: (value: T) => void = () => { throw new Error('Not initialized') }
   const promise = new Promise<T>(release => { resolve = release })

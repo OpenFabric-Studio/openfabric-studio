@@ -11,9 +11,11 @@ from starlette.responses import Response
 from starlette.types import Message
 
 from .. import audiobook_workflows, audiobooks, ebook_import, voice_profiles, audiobook_cloud
+from .. import audiobook_cast
 from ..audiobook_contracts import (
     AcceptAudiobookRepairRequest,
     AudiobookCloudControlRequest,
+    AudiobookCastCheck, AudiobookCastCheckOptions, CreateAudiobookCastCheckRequest,
     AudiobookAudition,
     AudiobookAuditionOptions,
     AudiobookAuditionsResponse,
@@ -105,6 +107,24 @@ def quote_audiobook(body: CreateAudiobookRequest) -> CloudSpeechQuote:
     try:
         return audiobook_cloud.quote_creation(body)
     except (audiobooks.AudiobookError,voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/cast-check", response_model=AudiobookCastCheck)
+def check_draft_cast(body: CreateAudiobookCastCheckRequest) -> AudiobookCastCheck:
+    try:
+        return audiobook_cast.check_draft(body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
+        _raise(exc)
+        raise
+
+
+@router.post("/{book_id}/cast-check", response_model=AudiobookCastCheck)
+def check_saved_cast(book_id: str, body: AudiobookCastCheckOptions) -> AudiobookCastCheck:
+    try:
+        return audiobook_cast.check_book(book_id, body)
+    except (audiobooks.AudiobookError, voice_profiles.VoiceProfileError) as exc:
         _raise(exc)
         raise
 

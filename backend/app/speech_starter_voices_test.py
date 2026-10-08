@@ -102,7 +102,7 @@ class SpeechStarterVoiceTests(unittest.IsolatedAsyncioTestCase):
         application.include_router(routes_voice_profiles.router)
         application.include_router(routes_speech_clone.router)
         self.client = httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application), base_url="http://test"
+            transport=httpx.ASGITransport(app=application), base_url="http://127.0.0.1"
         )
 
     async def asyncTearDown(self) -> None:
@@ -283,7 +283,7 @@ print(speech_starter_voices.import_starter_voice('vctk-p225').id)
         application = FastAPI()
         application.include_router(routes_voice_profiles.router)
         async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=application, raise_app_exceptions=False), base_url="http://test"
+            transport=httpx.ASGITransport(app=application, raise_app_exceptions=False), base_url="http://127.0.0.1"
         ) as client:
             response = await client.get("/api/voice-profiles")
         self.assertEqual(response.status_code, 503, response.text)
@@ -387,7 +387,14 @@ print(speech_starter_voices.import_starter_voice('vctk-p225').id)
         self.assertEqual(retry.status_code, 200, retry.text)
 
     async def test_interrupted_copy_leaves_no_row_or_partial_profile(self) -> None:
-        with patch.object(Path, "write_bytes", side_effect=OSError("private filesystem details")):
+        original_write = Path.write_bytes
+
+        def interrupted_copy(path: Path, data: bytes) -> int:
+            if path.parent.parent == self.root / "profiles":
+                raise OSError("private filesystem details")
+            return original_write(path, data)
+
+        with patch.object(Path, "write_bytes", new=interrupted_copy):
             response = await self.client.post("/api/voice-profiles/starter-voices/vctk-p225/import")
         self.assertEqual(response.status_code, 503, response.text)
         self.assertEqual(response.json()["detail"], "profile_storage_unavailable")

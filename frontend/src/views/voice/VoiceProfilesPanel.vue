@@ -195,8 +195,11 @@ async function onCreate() {
     createOpen.value = false
     if (selection === selectionGeneration) selectProfile(created.id)
     notice.value = t('voiceProfiles.created')
-  } catch {
-    if (alive && !controller.signal.aborted) error.value = t('voiceProfiles.err.create')
+  } catch (err) {
+    if (alive && !controller.signal.aborted) {
+      const code = err instanceof ApiError ? err.message : ''
+      error.value = t(code === 'audio_too_large' ? 'voiceProfiles.err.audioTooLarge' : code === 'invalid_audio' ? 'voiceProfiles.err.invalidAudio' : code === 'audio_decode_limit' ? 'voiceProfiles.err.audioDecodeLimit' : 'voiceProfiles.err.create')
+    }
   } finally {
     if (alive && createController === controller) { saving.value = false; createController = null }
   }
@@ -341,6 +344,7 @@ onBeforeUnmount(() => {
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.transcript') }}</span><textarea v-model="referenceTranscript" rows="3" maxlength="2000" :aria-label="t('audiobookReview.transcript')" :disabled="saving" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.referenceLanguage') }}</span><input v-model="referenceLanguage" maxlength="16" :aria-label="t('audiobookReview.referenceLanguage')" :disabled="saving" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" /></label>
         <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('voiceProfiles.audioLabel') }}</span><input ref="fileInput" type="file" accept=".wav,.flac,audio/wav,audio/flac" :aria-label="t('voiceProfiles.audioLabel')" :disabled="saving" class="block w-full text-sm text-text-dim file:mr-3 file:rounded-lg file:border-0 file:bg-panel-2 file:px-3 file:py-2 file:text-sm file:text-text focus-visible:outline-2 focus-visible:outline-accent1" @change="onFilePicked" /></label>
+        <p class="text-xs text-text-dim">{{ t('voiceProfiles.audioLimits') }}</p>
         <label class="flex items-start gap-2 text-sm text-text"><input v-model="consent" type="checkbox" :aria-label="t('voiceProfiles.consentLabel')" :disabled="saving" class="mt-1 focus-visible:outline-2 focus-visible:outline-accent1" /><span>{{ t('voiceProfiles.consentLabel') }}</span></label>
         <p v-if="!consent" class="text-xs text-text-dim">{{ t('voiceProfiles.err.consent') }}</p>
         <button type="submit" class="rounded-lg bg-accent1 px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1 disabled:opacity-50" :disabled="saving || !!importingId || !consent">{{ saving ? t('speechWorkspace.createPending') : t('voiceProfiles.create') }}</button>

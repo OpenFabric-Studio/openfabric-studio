@@ -13,7 +13,12 @@ it('opens attributed license sources in a focused dialog and returns focus on Es
   const dialog = document.querySelector('[role=dialog]'); if (!dialog) throw new Error('Missing notices dialog')
   expect(dialog.contains(document.activeElement)).toBe(true)
   const links = [...dialog.querySelectorAll('a')]
-  expect(links).toHaveLength(5); expect(links.every(link => link.rel === 'noopener')).toBe(true)
+  expect(links).toHaveLength(7); expect(links.every(link => link.rel === 'noopener')).toBe(true)
+  expect(node.textContent).toContain('AGPLv3')
+  expect(dialog.textContent).toContain('version 3 only')
+  expect(dialog.textContent).toContain('without any warranty')
+  expect(links.map(link => link.href)).toContain('https://github.com/OpenFabric-Studio/openfabric-studio')
+  expect(links.map(link => link.href)).toContain('https://github.com/OpenFabric-Studio/openfabric-studio/blob/main/LICENSE-MIT')
   expect(links.map(link => link.href)).toContain('https://github.com/inikolax/remiqora')
   expect(links.map(link => link.href)).toContain('https://github.com/mchosc/remiqora')
   dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))

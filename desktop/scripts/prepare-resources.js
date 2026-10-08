@@ -20,6 +20,11 @@ if (!skipFrontendBuild) {
 fs.rmSync(out, { recursive: true, force: true });
 fs.mkdirSync(out, { recursive: true });
 
+fs.mkdirSync(path.join(out, 'licenses'), { recursive: true });
+for (const name of ['LICENSE', 'LICENSE-MIT', 'NOTICE']) {
+  fs.copyFileSync(path.join(root, name), path.join(out, 'licenses', name));
+}
+
 // Top-level backend entries that are local state, not source.
 const LOCAL_ONLY = new Set(['.venv', 'data', 'logs', 'run.bat', 'run.sh']);
 const backendSrc = path.join(root, 'backend');

@@ -347,6 +347,37 @@ class CreateAudiobookAuditionRequest(CreateAudiobookRequest):
     max_chars: int = Field(default=600, ge=40, le=1200)
 
 
+class CreateAudiobookCastCheckRequest(CreateAudiobookRequest):
+    chapter_index: int = Field(default=0, ge=0, le=99)
+
+
+class AudiobookCastCheckOptions(Contract):
+    chapter_index: int = Field(default=0, ge=0, le=99)
+    revision: int = Field(ge=1)
+
+
+class AudiobookCastCheckTurn(Contract):
+    speaker: str = Field(min_length=1, max_length=40)
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    profile_name: str | None = Field(default=None, max_length=120)
+    text: str = Field(min_length=1, max_length=1200)
+
+
+class AudiobookCastCheckWarning(Contract):
+    code: Literal["unmatched_label", "shared_narrator", "unused_cast", "profile_missing", "consent_required"]
+    speaker: str = Field(max_length=40)
+    profile_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    line_number: int | None = Field(default=None, ge=1, le=20_000)
+
+
+class AudiobookCastCheck(Contract):
+    book_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    chapter_index: int = Field(ge=0, le=99)
+    revision: int | None = Field(default=None, ge=1)
+    turns: list[AudiobookCastCheckTurn] = Field(max_length=20_000)
+    warnings: list[AudiobookCastCheckWarning] = Field(max_length=20_100)
+
+
 class AudiobookAuditionClip(Contract):
     renderer: Literal["local","openrouter"] = "local"
     cloud_provenance: CloudSpeechProvenance | None = None
@@ -460,3 +491,5 @@ class AudiobookCloudControlRequest(Contract):
     chapter_index: int | None = Field(default=None, ge=0, le=99)
 
 AUDIOBOOK_CLIENT_MODELS.append(AudiobookCloudControlRequest)
+AUDIOBOOK_CLIENT_MODELS.extend([CreateAudiobookCastCheckRequest, AudiobookCastCheckOptions,
+    AudiobookCastCheckTurn, AudiobookCastCheckWarning, AudiobookCastCheck])

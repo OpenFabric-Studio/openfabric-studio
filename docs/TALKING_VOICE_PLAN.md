@@ -2,7 +2,7 @@
 
 **Priority (Seth):** normal / talking voice clone and audiobooks **first**. Singing stays Seed-VC. Characters / video / LoRA are later.
 
-**License gate:** GPT-SoVITS is **MIT** ([RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)). Do **not** vendor or copy [VoiceStudio](https://github.com/JarodMica/VoiceStudio) (AGPL). UX ideas only from LocalAI (MIT); OpenFabric owns the FastAPI + SQLite store.
+**License gate:** GPT-SoVITS is **MIT** ([RVC-Boss/GPT-SoVITS](https://github.com/RVC-Boss/GPT-SoVITS)); OpenFabric owns the FastAPI + SQLite store. This implementation did not copy VoiceStudio or LocalAI source. Since the 2026-10-08 AGPL transition, any proposed source reuse must be reviewed for exact license compatibility and retain provenance and notices; an AGPL label alone does not clear model weights or other assets.
 
 **Attribution:** keep GPT-SoVITS + LocalAI lines in repo `NOTICE`. Optional install is never auto-bundled with weights.
 
@@ -83,7 +83,7 @@ Chapter limits (v1): ≤20k chars/chapter, ≤100 chapters; queue serially on on
 
 ## Out of scope for this MVP
 
-- VoiceStudio / any AGPL speech stack
+- Additional speech engines, including VoiceStudio
 - Auto-download of GPT-SoVITS pretrained weights in OpenFabric CI or setup
 - Character consistency / image / video / kohya LoRA
 - Cloud TTS APIs

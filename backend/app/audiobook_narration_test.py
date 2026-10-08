@@ -9,6 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app.speech_references import SpeechRenderSnapshot
 
 from app import audiobook_narration, audiobooks, speech_clone, voice_profiles
@@ -24,7 +25,7 @@ class NarrationLifecycleTests(unittest.IsolatedAsyncioTestCase):
                         patch.dict("os.environ", {"OPENFABRIC_AUDIOBOOK_SYNC": "0", "OPENFABRIC_SPEECH_CLONE_MOCK": "1"})]
         for item in self.patches:
             item.start()
-        self.profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
+        self.profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.")
 
     async def asyncTearDown(self) -> None:
         if hasattr(audiobooks, "shutdown"):

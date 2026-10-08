@@ -13,6 +13,7 @@ from unittest.mock import patch
 import httpx
 from fastapi import FastAPI
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import audiobooks, speech_clone, voice_profiles
 from app.speech_references import SpeechRenderSnapshot
 from app.api import routes_audiobooks, routes_voice_profiles
@@ -29,7 +30,7 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
             return original(profile_id=profile_id, text=text, output_path=output_path, prompt_text=prompt_text,
                             prompt_language=prompt_language, text_language=text_language, require_consent=require_consent, snapshot=snapshot)
 
-        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference")
+        profile = voice_profiles.create_profile(name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference")
         with patch.object(speech_clone, "_synthesize_unlocked", side_effect=synthesis):
             response = await self.client.post("/api/audiobooks", json={"title": "Book", "profile_id": profile.id, "chapters": [{"text": "Hello."}]})
             identifier = response.json()["book"]["id"]
@@ -91,7 +92,7 @@ class AudiobooksApiTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.post(
             "/api/voice-profiles",
             data={"name": "Reader", "consent_confirmed": "true", "reference_transcript": "Reference."},
-            files={"audio": ("ref.wav", b"RIFF....WAVE", "audio/wav")},
+            files={"audio": ("ref.wav", wav_bytes(), "audio/wav")},
         )
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["id"]

@@ -1,5 +1,6 @@
 """Line-by-line cast: narrator by default, a saved voice when a line names one."""
 from __future__ import annotations
+from app.voice_profile_test_fixtures import wav_bytes
 
 import os
 import tempfile
@@ -47,10 +48,10 @@ class CastNarrationTests(unittest.TestCase):
         for item in self.patches:
             item.start()
         self.narrator = voice_profiles.create_profile(
-            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
+            name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
         )
         self.alice = voice_profiles.create_profile(
-            name="Alice", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="alice.wav", notes="Reference.", reference_transcript="Reference.",
+            name="Alice", consent_confirmed=True, audio_bytes=wav_bytes(), filename="alice.wav", notes="Reference.", reference_transcript="Reference.",
         )
         self.calls: list[tuple[str, str]] = []
         original = speech_clone.synthesize_to_path

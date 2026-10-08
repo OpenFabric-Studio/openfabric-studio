@@ -105,7 +105,8 @@ jobs:
           - Windows shows a SmartScreen warning ("More info" → "Run anyway"). The macOS app is ad-hoc signed only (no Developer ID), so allow it once via System Settings → Privacy & Security → "Open Anyway".
           - First launch downloads the baseline music engines and models into a folder you choose. Voice and generated-video engines require their separately documented setup.
           - SHA-256 sums of every file are in `SHA256SUMS.txt`.
-          - Derived from Remiqora under MIT — see NOTICE in the repository.
+          - Application license: AGPL-3.0-only. Derived from Remiqora under MIT; inherited copyright and permission notices are preserved in LICENSE-MIT and NOTICE, also included in the installers.
+          - Corresponding Source, including build and installation scripts, is available through this release's Source code (.zip / .tar.gz) downloads for the exact release tag.
 
           Setup instructions, verified environments and known limits belong in the README and reviewed release notes. A successful package build alone does not verify installation or GPU inference.
           NOTES

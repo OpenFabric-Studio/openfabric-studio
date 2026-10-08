@@ -14,6 +14,7 @@ from fastapi import FastAPI, HTTPException
 from starlette.responses import Response
 from starlette.types import Message, Scope
 
+from app.voice_profile_test_fixtures import wav_bytes
 from app import audiobook_collection, audiobooks, voice_profiles
 from app.audiobook_contracts import AudiobookChapterInput, CreateAudiobookRequest
 from app.api.routes_audiobooks import download_audiobook_collection, router
@@ -40,7 +41,7 @@ class CollectionDownloadTests(unittest.IsolatedAsyncioTestCase):
         for item in self.patches:
             item.start()
         profile = voice_profiles.create_profile(
-            name="Reader", consent_confirmed=True, audio_bytes=b"RIFF....WAVE", filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
+            name="Reader", consent_confirmed=True, audio_bytes=wav_bytes(), filename="ref.wav", reference_transcript="Reference.", notes="Reference.",
         )
         self.book_id = audiobooks.create_book(CreateAudiobookRequest(
             title="Field Notes", profile_id=profile.id,

@@ -10,6 +10,7 @@ import type { SpeechVoiceProfile } from '../../api/voiceProfiles'
 import { createPollingLoop } from '../../composables/polling'
 import EbookImportPanel from './EbookImportPanel.vue'
 import CastAuditionPanel from './CastAuditionPanel.vue'
+import CastCheckPanel from './CastCheckPanel.vue'
 import AudiobookPassages from './AudiobookPassages.vue'
 import AudiobookPacingPanel from './AudiobookPacingPanel.vue'
 import NarrationDurationBudget from './NarrationDurationBudget.vue'
@@ -103,6 +104,13 @@ const draftCloudApproval=ref<CloudSpeechApproval|null>(null),controlCloudApprova
 const cloudAction=ref<'resume'|'retry'|'regenerate'>('resume'),cloudChapter=ref(0)
 const draftHasCloud=computed(()=>{const request=auditionDraft.value;return !!request&&[request.profile_id,...(request.cast??[]).map(member=>member.profile_id)].some(id=>profiles.value.find(profile=>profile.id===id)?.renderer==='openrouter')})
 const selectedHasCloud=computed(()=>!!selectedBook.value?.cloud_models?.length||[selectedBook.value?.profile_id,...(selectedBook.value?.cast??[]).map(member=>member.profile_id)].some(id=>profiles.value.find(profile=>profile.id===id)?.renderer==='openrouter'))
+const savedCastCheckKey = computed(() => JSON.stringify([bookCast.value, bookSpeech.value, bookLanguage.value, chapterLanguages.value, chapterTexts.value]))
+const savedCastCheckDirty = computed(() => {
+  const book = selectedBook.value
+  if (!book) return false
+  return JSON.stringify([castMembers(bookCast.value), speechRows(bookSpeech.value), bookLanguage.value.trim(), jobs.value.map(job => [(chapterTexts.value[job.id] ?? job.chapter_text ?? '').trim(), (chapterLanguages.value[job.id] ?? job.language ?? '').trim()])])
+    !== JSON.stringify([book.cast ?? [], book.pronunciations ?? [], book.language ?? '', jobs.value.map(job => [(job.chapter_text ?? '').trim(), job.language ?? ''])])
+})
 const creationQuoteKey=computed(()=>JSON.stringify([auditionDraft.value,profiles.value,draftCostNonce.value]))
 const controlQuoteKey=computed(()=>JSON.stringify([selectedBook.value,jobs.value,profiles.value,cloudAction.value,cloudChapter.value,controlCostNonce.value]))
 function quoteCreation(signal:AbortSignal){const draft=auditionDraft.value;if(!draft)throw new Error('Missing audiobook draft');return cloudApi.quoteBook({...draft,chapters:draft.chapters.map(chapter=>({...chapter,text:chapter.text.trim()}))},signal)}
@@ -471,6 +479,7 @@ async function onSaveCast() {
     if (!context.isCurrent()) return
     bookCast.value = (updated.cast ?? []).map(item => ({ name: item.name, profile_id: item.profile_id }))
     notice.value = t('audiobookWorkspace.castSaved')
+    void loadJobs(book.id)
   } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.invalid_cast_name') }
   finally { context.finish(); if (mounted) savingCast.value = false }
 }
@@ -487,6 +496,7 @@ async function onSaveLines(job: AudiobookJob) {
     if (!context.isCurrent()) return
     chapterTexts.value = { ...chapterTexts.value, [job.id]: textValue }
     notice.value = t('audiobookWorkspace.linesSaved')
+    void loadJobs(book.id)
   } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.emptyChapter') }
   finally { context.finish(); if (mounted) savingLineId.value = '' }
 }
@@ -501,7 +511,7 @@ async function onSaveSpeech() {
     const updated = await audiobooksApi.setAudiobookPronunciations(book.id, speech, context.signal)
     if (!context.isMounted()) return
     upsertBook(updated)
-    if (context.isCurrent()) notice.value = t('audiobookWorkspace.pronunciationsSaved')
+    if (context.isCurrent()) { notice.value = t('audiobookWorkspace.pronunciationsSaved'); void loadJobs(book.id) }
   } catch (err) { if (context.isCurrent()) error.value = safeError(err, 'audiobookWorkspace.errors.pronunciation') }
   finally { context.finish(); if (mounted) savingSpeech.value = false }
 }
@@ -715,6 +725,7 @@ onBeforeUnmount(() => {
           <label v-if="importedDraft?.cast_review_required" class="flex items-start gap-2 rounded-lg border border-status-queued/40 p-3 text-sm text-text"><input v-model="castReviewed" type="checkbox" :aria-label="t('audiobookWorkspace.subtitleCastReview')" class="mt-1"><span>{{ t('audiobookWorkspace.subtitleCastReview') }}</span></label>
           <label class="block space-y-1"><span class="text-xs text-text-dim">{{ t('audiobookReview.outputLanguage') }}</span><input v-model="draftLanguage" maxlength="35" :aria-label="t('audiobookReview.outputLanguage')" placeholder="en" class="min-h-11 w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text"><span class="block text-xs text-text-dim">{{ t('audiobookReview.outputLanguageHint') }}</span></label>
           <CastAuditionPanel :draft="auditionDraft" :cloud="draftHasCloud" :active="active && creating" :disabled="saving || draftSaving || !!importedDraft?.cast_review_required && !castReviewed" @busy="value => previewing = value" />
+          <CastCheckPanel :draft="auditionDraft" :active="active && creating" :disabled="saving || draftSaving" />
           <div class="space-y-2 rounded-lg border border-border bg-panel-2 p-3">
             <p class="text-sm font-medium text-text">{{ t('audiobookWorkspace.pronunciations') }}</p>
             <p class="text-xs text-text-dim">{{ t('audiobookWorkspace.pronunciationHint') }}</p>
@@ -792,6 +803,8 @@ onBeforeUnmount(() => {
         <label v-if="selectedBook.status === 'done' || selectedBook.status === 'failed'" class="flex min-h-11 flex-wrap items-center gap-3 text-sm text-text"><span>{{ t('audiobookWorkspace.cover') }}</span><input type="file" accept="image/png,image/jpeg" :aria-label="t('audiobookWorkspace.cover')" class="text-xs" @change="onCover"></label>
         <p class="text-xs text-text-dim">{{ t('audiobookReview.savedAuditionHint') }}</p>
         <CastAuditionPanel :book-id="selectedBook.id" :cloud="selectedHasCloud" :active="active && !creating" :disabled="selectedBook.status === 'queued' || selectedBook.status === 'running'" :revision="Math.max(1, ...jobs.map(job => job.revision ?? 1))" />
+        <CastCheckPanel :book-id="selectedBook.id" :jobs="jobs" :edit-key="savedCastCheckKey" :active="active && !creating" :disabled="savedCastCheckDirty || loadingJobs || !!jobsError || savingCast || savingSpeech || !!savingLineId || selectedBook.status === 'queued' || selectedBook.status === 'running'" />
+        <p v-if="savedCastCheckDirty" class="text-xs text-text-dim">{{ t('audiobookReview.castCheckSaveEdits') }}</p>
         <AudiobookPacingPanel :book="selectedBook" :jobs="jobs" :active="active && !creating" @updated="pacingUpdated" />
         <details class="rounded-lg border border-border p-3">
           <summary class="cursor-pointer text-sm font-medium text-text focus-visible:outline-2 focus-visible:outline-accent1">{{ t('audiobookReview.bookInputs') }}</summary>

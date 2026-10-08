@@ -25,6 +25,9 @@ test('prepared desktop includes native helper patches at their runtime paths', a
   await fs.mkdir(path.dirname(script), { recursive: true });
   await fs.copyFile(path.join(repo, 'desktop', 'scripts', 'prepare-resources.js'), script);
   await fs.copyFile(path.join(repo, 'desktop', 'manifest.json'), path.join(fixture, 'desktop', 'manifest.json'));
+  for (const name of ['LICENSE', 'LICENSE-MIT', 'NOTICE']) {
+    await fs.copyFile(path.join(repo, name), path.join(fixture, name));
+  }
   await fs.mkdir(path.join(fixture, 'frontend', 'dist'), { recursive: true });
   await fs.writeFile(path.join(fixture, 'frontend', 'dist', 'index.html'), '<html></html>');
   await fs.mkdir(path.join(fixture, 'backend', 'scripts'), { recursive: true });
@@ -64,6 +67,9 @@ async function packagingFixture(t) {
   await fs.mkdir(path.dirname(script), { recursive: true });
   await fs.copyFile(path.join(repo, 'desktop/scripts/prepare-resources.js'), script);
   await fs.copyFile(path.join(repo, 'desktop/manifest.json'), path.join(root, 'desktop/manifest.json'));
+  for (const name of ['LICENSE', 'LICENSE-MIT', 'NOTICE']) {
+    await fs.copyFile(path.join(repo, name), path.join(root, name));
+  }
   await fs.mkdir(path.join(root, 'backend/nested'), { recursive: true });
   await fs.mkdir(path.join(root, 'frontend/dist'), { recursive: true });
   await fs.writeFile(path.join(root, 'frontend/dist/index.html'), '<html></html>');
@@ -73,6 +79,16 @@ async function packagingFixture(t) {
   }
   return { root, run: () => execFileSync(process.execPath, [script, '--skip-frontend-build'], { stdio: 'pipe' }) };
 }
+
+test('prepared desktop preserves application and inherited license notices byte-for-byte', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  run();
+  for (const name of ['LICENSE', 'LICENSE-MIT', 'NOTICE']) {
+    assert.deepEqual(await fs.readFile(path.join(root, 'desktop/resources/licenses', name)), await fs.readFile(path.join(root, name)));
+  }
+  const builder = await fs.readFile(path.join(__dirname, '../electron-builder.yml'), 'utf8');
+  assert.match(builder, /from: resources\/licenses\s+to: licenses/);
+});
 
 test('private environment variants are excluded at every backend depth while examples remain', async (t) => {
   const { root, run } = await packagingFixture(t);

@@ -8,13 +8,16 @@ import json
 import logging
 import re
 import sqlite3
+import tempfile
 import threading
 import uuid
 from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Literal
 
+import numpy as np
+import soundfile as sf
 from pydantic import TypeAdapter, ValidationError
 
 from .config import DATA_DIR
@@ -27,6 +30,13 @@ _STARTER_ID = re.compile(r"^vctk-p[0-9]{3}$")
 _HINT_ADAPTER: TypeAdapter[EngineHintMap] = TypeAdapter(EngineHintMap)
 _LOG = logging.getLogger(__name__)
 
+# References are short clips: bound encoded bytes and decoded work separately.
+MAX_REFERENCE_AUDIO_BYTES = 32 * 1024 * 1024
+MAX_REFERENCE_SECONDS = 120
+MAX_REFERENCE_CHANNELS = 8
+MAX_REFERENCE_SAMPLE_RATE = 192000
+_DECODE_CHUNK_FRAMES = 65536
+
 # Overridable in tests.
 PROFILES_ROOT = DATA_DIR / "voice-profiles"
 
@@ -36,6 +46,123 @@ class VoiceProfileError(Exception):
         super().__init__(code)
         self.code = code
         self.status = status
+
+
+class _SequentialSoundFile(sf.SoundFile):
+    # SoundFile seeks after every read; unknown-length FLAC cannot seek to EOF.
+    def seekable(self) -> bool:
+        return False
+
+
+def _validate_wav_chunks(audio: bytes) -> None:
+    """libsndfile clamps truncated PCM, so verify declared RIFF chunks too."""
+    if len(audio) < 12 or audio[:4] not in (b"RIFF", b"RIFX", b"RF64") or audio[8:12] != b"WAVE":
+        raise ValueError("invalid WAVE header")
+    order: Literal["big", "little"] = "big" if audio[:4] == b"RIFX" else "little"
+    end = int.from_bytes(audio[4:8], order) + 8
+    extended_sizes: dict[bytes, int] = {}
+    if audio[:4] == b"RF64":
+        if len(audio) < 48 or audio[12:16] != b"ds64":
+            raise ValueError("missing RF64 sizes")
+        size = int.from_bytes(audio[16:20], "little")
+        entries = int.from_bytes(audio[44:48], "little")
+        if size < 28 + entries * 12 or 20 + size > len(audio):
+            raise ValueError("truncated RF64 sizes")
+        end = int.from_bytes(audio[20:28], "little") + 8
+        extended_sizes[b"data"] = int.from_bytes(audio[28:36], "little")
+        for position in range(48, 48 + entries * 12, 12):
+            extended_sizes[audio[position:position + 4]] = int.from_bytes(audio[position + 4:position + 12], "little")
+    if end < 12 or end > len(audio):
+        raise ValueError("truncated RIFF")
+    position = 12
+    pcm_alignment = 0
+    while position < end:
+        if position + 8 > end:
+            raise ValueError("truncated chunk header")
+        tag = audio[position:position + 4]
+        size = int.from_bytes(audio[position + 4:position + 8], order)
+        if size == 0xffffffff:
+            if tag not in extended_sizes:
+                raise ValueError("missing RF64 chunk size")
+            size = extended_sizes[tag]
+        start = position + 8
+        stop = start + size
+        if stop > end:
+            raise ValueError("truncated chunk")
+        if tag == b"fmt ":
+            if size < 16:
+                raise ValueError("truncated format")
+            encoding = int.from_bytes(audio[start:start + 2], order)
+            if encoding == 0xfffe and size >= 40:
+                encoding = int.from_bytes(audio[start + 24:start + 26], order)
+            if encoding in (1, 3):
+                pcm_alignment = int.from_bytes(audio[start + 12:start + 14], order)
+                channels = int.from_bytes(audio[start + 2:start + 4], order)
+                bits = int.from_bytes(audio[start + 14:start + 16], order)
+                if channels == 0 or bits == 0 or bits % 8 or pcm_alignment != channels * (bits // 8):
+                    raise ValueError("invalid PCM alignment")
+        if tag == b"data" and pcm_alignment and size % pcm_alignment:
+            raise ValueError("incomplete PCM frame")
+        # Python's wave writer omits the final odd data chunk's padding byte.
+        position = stop + (size % 2 if stop < end else 0)
+
+
+def _validate_reference_audio(audio: bytes, extension: str) -> None:
+    if len(audio) > MAX_REFERENCE_AUDIO_BYTES:
+        raise VoiceProfileError("audio_too_large", 413)
+    try:
+        if extension == "wav":
+            _validate_wav_chunks(audio)
+        with tempfile.TemporaryDirectory(prefix="openfabric-reference-") as temporary:
+            path = Path(temporary) / f"reference.{extension}"
+            path.write_bytes(audio)
+            info = sf.info(path)
+            formats = {"WAV", "WAVEX", "RF64"} if extension == "wav" else {"FLAC"}
+            if info.format not in formats or info.frames <= 0 or info.samplerate <= 0 or info.channels <= 0:
+                raise ValueError("invalid audio metadata")
+            limit = MAX_REFERENCE_SECONDS * info.samplerate
+            if info.channels > MAX_REFERENCE_CHANNELS or info.samplerate > MAX_REFERENCE_SAMPLE_RATE:
+                raise VoiceProfileError("audio_decode_limit")
+            if extension == "flac":
+                if len(audio) < 42 or audio[:4] != b"fLaC" or audio[4] & 0x7f or audio[5:8] != b"\0\0\x22":
+                    raise ValueError("invalid FLAC stream info")
+                packed = int.from_bytes(audio[18:26], "big")
+                declared = packed & ((1 << 36) - 1)
+                # Downstream speech readers allocate from the original frame count.
+                if declared == 0:
+                    raise ValueError("unknown FLAC frame count")
+                if declared > limit:
+                    raise VoiceProfileError("audio_decode_limit")
+                # Ignore the untrusted frame count only in the temporary decoding copy.
+                path.write_bytes(audio[:18] + (packed >> 36 << 36).to_bytes(8, "big") + audio[26:])
+                with _SequentialSoundFile(path) as source:
+                    decoded = 0
+                    while True:
+                        samples = source.read(min(_DECODE_CHUNK_FRAMES, limit - decoded + 1), dtype="float32", always_2d=True)
+                        if samples.shape[1] != info.channels or not np.isfinite(samples).all():
+                            raise ValueError("invalid decoded audio")
+                        decoded += len(samples)
+                        if decoded > limit:
+                            raise VoiceProfileError("audio_decode_limit")
+                        if len(samples) == 0:
+                            break
+                    if decoded != declared:
+                        raise ValueError("incomplete decoded audio")
+            else:
+                if info.frames > limit:
+                    raise VoiceProfileError("audio_decode_limit")
+                for start in range(0, info.frames, _DECODE_CHUNK_FRAMES):
+                    count = min(_DECODE_CHUNK_FRAMES, info.frames - start)
+                    samples, rate = sf.read(path, start=start, frames=count, dtype="float32", always_2d=True)
+                    if (rate != info.samplerate or samples.shape != (count, info.channels)
+                            or not np.isfinite(samples).all()):
+                        raise ValueError("incomplete or invalid decoded audio")
+    except OSError as exc:
+        _LOG.warning("Speech reference validation storage unavailable: %s", exc)
+        raise VoiceProfileError("profile_storage_unavailable", 503) from exc
+    except (RuntimeError, ValueError) as exc:
+        _LOG.warning("Invalid speech reference audio: %s", exc)
+        raise VoiceProfileError("invalid_audio") from exc
 
 
 def profiles_root() -> Path:
@@ -199,6 +326,7 @@ def create_profile(
         raise VoiceProfileError("unsupported_audio_type")
     if starter_voice_id is not None and not _STARTER_ID.fullmatch(starter_voice_id):
         raise VoiceProfileError("invalid_starter_voice_id")
+    _validate_reference_audio(audio_bytes, ext)
 
     directory: Path | None = None
     audio_path: Path | None = None

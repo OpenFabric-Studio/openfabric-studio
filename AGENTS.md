@@ -12,7 +12,7 @@ Act as a senior technical and business partner. Be direct, skeptical, and eviden
 
 ## Maintained fork workflow
 
-- This is `OpenFabric-Studio/openfabric-studio`, a maintained fork of `inikolax/remiqora`. Preserve upstream history, MIT copyright and attribution; clearly label fork changes and experimental releases.
+- This is `OpenFabric-Studio/openfabric-studio`, a maintained fork of `inikolax/remiqora`, offered under AGPL-3.0-only. Preserve upstream history, inherited MIT terms in `LICENSE-MIT`, copyright and attribution in `NOTICE`; clearly label fork changes and experimental releases. New contributions use AGPL-3.0-only; third-party artifacts retain their own terms.
 - `origin` is the fork and `upstream` is the original repository. Check remotes before pushing; use the fork as the push default. Do not push to upstream as part of ordinary fork work.
 - Use focused topic branches from fork `main`. Integrate upstream on reviewed `sync/upstream-…` branches with merge commits; never force-push or rebase shared `main`.
 - Follow [ROADMAP.md](ROADMAP.md) and [fork maintenance](docs/fork-maintenance.md). Prioritize recoverable data, installation and measured quality before additional engines or infrastructure.
