@@ -13,7 +13,7 @@ from .. import video_scenes as scenes
 from ..module_security import require_local_origin
 from ..resource_admission import ResourceBusyError
 from ..video_media import VideoMediaError
-from ..video_scene_contracts import VideoSceneCut, VideoSceneCutRequest, VideoSceneCutsResponse, VideoScenePreview, VideoScenePreviewRequest, VideoSceneReadiness, VideoSceneSource, VideoSceneSourcesResponse
+from ..video_scene_contracts import DeletedVideoSceneCutResponse, VideoSceneCut, VideoSceneCutRequest, VideoSceneCutsResponse, VideoScenePreview, VideoScenePreviewRequest, VideoSceneReadiness, VideoSceneSource, VideoSceneSourcesResponse
 
 
 class SceneRoute(APIRoute):
@@ -104,6 +104,11 @@ def get_cut(source_id: str, cut_id: str) -> VideoSceneCut:
 @router.post('/sources/{source_id}/cuts/{cut_id}/cancel', response_model=VideoSceneCut)
 async def cancel(source_id: str, cut_id: str) -> VideoSceneCut:
     return await scenes.cancel(source_id, cut_id)
+
+
+@router.delete('/sources/{source_id}/cuts/{cut_id}', response_model=DeletedVideoSceneCutResponse)
+async def delete_cut(source_id: str, cut_id: str) -> DeletedVideoSceneCutResponse:
+    return await scenes.delete_cut(source_id, cut_id)
 
 
 @router.get('/sources/{source_id}/cuts/{cut_id}/media')

@@ -43,6 +43,7 @@ from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
 from .api.routes_openrouter import router as openrouter_router
+from .api.routes_clip_host import router as clip_host_router
 from .api.routes_cloud_music import router as cloud_music_router
 from .desktop_runtime import router as desktop_runtime_router
 from .module_security import LocalAccessMiddleware
@@ -51,7 +52,7 @@ from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
-from . import cloud_music, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes
+from . import cloud_music, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes, clip_hosting
 
 
 @asynccontextmanager
@@ -71,6 +72,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yue_jobs.recover()
         await reference_imports.start()
         await video_jobs.recover()
+        await clip_hosting.recover()
         await character_swaps.recover()
         await video_scenes.recover()
         await optional_engines.recover()
@@ -105,9 +107,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                         optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
                     )
                 finally:
-                    # A narration worker can quarantine an encoder while its
-                    # sibling repair registry is already shutting down.
-                    await await_cleanup(audiobook_publish.shutdown())
+                    try:
+                        await await_cleanup(clip_hosting.shutdown())
+                    finally:
+                        # A narration worker can quarantine an encoder while its
+                        # sibling repair registry is already shutting down.
+                        await await_cleanup(audiobook_publish.shutdown())
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
                         logging.getLogger(__name__).error("Job cleanup failed", exc_info=outcome)
@@ -132,6 +137,7 @@ async def invalid_request(_request: Request, exc: RequestValidationError) -> JSO
 app.include_router(orchestrator_router)
 app.include_router(desktop_runtime_router)
 app.include_router(openrouter_router)
+app.include_router(clip_host_router)
 app.include_router(cloud_music_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)

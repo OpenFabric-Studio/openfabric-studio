@@ -1,8 +1,8 @@
 import { apiFetch } from './http'
 import { parseCharacterSwapJob, parseCharacterSwapReadiness, parseCharacterSwapsResponse,
-  parseSubmitCharacterSwapRequest, parseCharacterSwapRevisionRequest } from './contracts'
+  parseSubmitCharacterSwapRequest, parseCharacterSwapRevisionRequest, parseRenameCharacterSwapRequest, parseDeletedCharacterSwapResponse } from './contracts'
 import type { CharacterSwapJob, CharacterSwapReadiness, CharacterSwapsResponse,
-  SubmitCharacterSwapRequest, CharacterSwapRevisionRequest } from './contracts'
+  SubmitCharacterSwapRequest, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, DeletedCharacterSwapResponse } from './contracts'
 
 const path = '/api/videos/character-swaps'
 export const CHARACTER_SWAP_MAX_VIDEO_BYTES = 100 * 1024 * 1024
@@ -16,6 +16,14 @@ export function listCharacterSwaps(signal?: AbortSignal): Promise<CharacterSwaps
 }
 export function getCharacterSwap(id: string, signal?: AbortSignal): Promise<CharacterSwapJob> {
   return apiFetch(jobPath(id), { signal }, parseCharacterSwapJob)
+}
+export function renameCharacterSwap(id: string, body: RenameCharacterSwapRequest, signal?: AbortSignal): Promise<CharacterSwapJob> {
+  return apiFetch(jobPath(id), { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parseRenameCharacterSwapRequest(body)), signal }, parseCharacterSwapJob)
+}
+export function deleteCharacterSwap(id: string, body: CharacterSwapRevisionRequest, signal?: AbortSignal): Promise<DeletedCharacterSwapResponse> {
+  return apiFetch(jobPath(id), { method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parseCharacterSwapRevisionRequest(body)), signal }, parseDeletedCharacterSwapResponse)
 }
 export function prepareCharacterSwap(input: { video: File; image: File; name: string; startSec: number; seconds: number }, signal?: AbortSignal): Promise<CharacterSwapJob> {
   const form = new FormData()

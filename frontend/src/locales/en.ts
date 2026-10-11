@@ -5,6 +5,7 @@ import { videoProcessesEn } from './videoProcesses'
 import { cloudSpeechEn } from './cloudSpeech'
 import { cloudMusicEn } from './cloudMusic'
 import { cloudProvidersEn } from './cloudProviders'
+import { clipHostEn } from './clipHost'
 import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
@@ -42,6 +43,7 @@ export default {
   cloudSpeech: cloudSpeechEn,
   cloudMusic: cloudMusicEn,
   cloudProviders: cloudProvidersEn,
+  clipHost: clipHostEn,
   appNavigation: appNavigationEn,
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,

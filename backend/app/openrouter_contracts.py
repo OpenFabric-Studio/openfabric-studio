@@ -166,6 +166,7 @@ class OpenRouterReceipt(ProviderContract):
     remote_id: str | None = Field(default=None,max_length=160,pattern=r'^[A-Za-z0-9_-]+$')
     actual_cost_usd: Usd | None = None
     error_code: str | None = Field(default=None,max_length=80,pattern=r'^[a-z_]+$')
+    provider_http_status: int | None = Field(default=None,ge=100,le=599,strict=True)
     created_at: str
     updated_at: str
 

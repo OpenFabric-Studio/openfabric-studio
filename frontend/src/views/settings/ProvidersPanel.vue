@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useProvidersStore } from '../../stores/providers'
+import ClipHostPanel from './ClipHostPanel.vue'
 import * as api from '../../api/openrouter'
 import type { OpenRouterCatalog, OpenRouterConnection, OpenRouterReceipt, OpenRouterStatus } from '../../api/generated'
 const props = defineProps<{ active: boolean }>()
@@ -74,6 +75,7 @@ onBeforeUnmount(() => { alive = false; generation++; controller?.abort(); secret
     <div v-if="catalog" class="provider-card"><h3 class="font-semibold text-text">{{ t('cloudProviders.catalog') }}</h3><p class="text-sm text-text-dim">{{ t('cloudProviders.catalogHelp') }}</p><ul class="divide-y divide-border"><li v-for="model in catalog.models" :key="`${model.kind}:${model.id}`" class="flex flex-wrap items-center justify-between gap-2 py-3"><span class="text-sm text-text">{{ model.name }}<span class="ml-2 rounded bg-panel-2 px-2 py-1 text-xs text-text-dim">{{ model.kind }}</span></span><span class="text-xs text-text-dim">{{ model.prices.map(p => `$${p.rate_usd}/${t(`cloudProviders.units.${p.unit}`)}`).join(' · ') }}</span></li></ul></div>
     <p v-if="historyIncomplete" role="alert" class="text-sm text-status-queued">{{ t('cloudProviders.historyIncomplete') }}</p>
     <div v-if="receipts.length" class="provider-card"><h3 class="font-semibold text-text">{{ t('cloudProviders.history') }}</h3><ul class="space-y-3"><li v-for="receipt in receipts" :key="receipt.id" class="rounded-lg border border-border p-3 text-sm text-text-dim"><p class="break-words text-text">{{ receipt.model_id }}</p><p>{{ receipt.state }} · {{ t('cloudProviders.cost') }} ${{ receipt.estimated_usd.toFixed(3) }}<span v-if="receipt.actual_cost_usd != null"> · {{ t('cloudProviders.actual') }} ${{ receipt.actual_cost_usd.toFixed(3) }}</span></p><p v-if="receipt.state === 'submission_unknown'" role="alert" class="mt-2 text-status-queued">{{ t('cloudProviders.unknown') }}</p></li></ul></div>
+    <ClipHostPanel :active="active" />
   </section>
 </template>
 <style scoped>

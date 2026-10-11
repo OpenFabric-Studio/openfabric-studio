@@ -8,17 +8,19 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import patch
 import httpx
 from fastapi import UploadFile
 from PIL import Image
-from app.character_swap_contracts import CharacterSwapJob, CharacterSwapRevisionRequest, SubmitCharacterSwapRequest
+from app.character_swap_contracts import CharacterSwapJob, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, SubmitCharacterSwapRequest
 from app import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, openrouter_credentials as credentials, openrouter_client as client_module
 from app.openrouter_contracts import OpenRouterSettingsRequest, OpenRouterKeyRequest
 from app.openrouter_client import OpenRouterClient
 from app.openrouter_editing_test import image_metadata, video_metadata
+from app.clip_host_contracts import HostedClip, ClipHostStatus
 
 class CharacterSwapRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_video_exposes_character_swap_readiness(self) -> None:
@@ -94,6 +96,25 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         self.image=io.BytesIO()
         Image.new('RGB',(96,64),'blue').save(self.image,format='PNG')
         self.calls: list[str]=[]
+        self.shared: list[str] = []
+        self.released: list[str] = []
+        self.enterContext(patch.object(self.swap.clip_hosting, 'status', return_value=ClipHostStatus(
+            enabled=True, configured=True, binary_available=True)))
+        self.enterContext(patch.object(self.swap.clip_hosting, 'ensure_ready', return_value=None))
+        async def share(receipt_id: str, path: Path, expected_sha256: str) -> HostedClip:
+            from app.video_io import hash_file
+            self.assertEqual(path, self.swap.artifact(self.current_id, 'input.mp4'))
+            self.assertEqual(await hash_file(path), expected_sha256)
+            self.assertEqual(ledger.get(receipt_id).state, 'intent')
+            self.assertEqual(self.swap.get(self.current_id).phase, 'sharing_clip')
+            self.shared.append(receipt_id)
+            return HostedClip(receipt_id=receipt_id, source_sha256=expected_sha256,
+                url='https://approved-clip.trycloudflare.com/clip/'+'a'*64+'.mp4',
+                expires_at=datetime.now(timezone.utc)+timedelta(hours=24))
+        async def release(receipt_id: str) -> None:
+            self.released.append(receipt_id)
+        self.enterContext(patch.object(self.swap.clip_hosting, 'stage_clip', side_effect=share))
+        self.enterContext(patch.object(self.swap.clip_hosting, 'release', side_effect=release))
         self.gate: asyncio.Event | None=None
         self.started=asyncio.Event()
         self.unknown=False
@@ -106,6 +127,11 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
                 if request.url.path.endswith('/images'):
                     frame=self.swap.artifact(self.current_id,'source-frame.png').read_bytes()
                     return httpx.Response(200,json={'data':[{'b64_json':base64.b64encode(frame).decode()}]})
+                from app.contracts import JsonObject
+                from pydantic import TypeAdapter
+                wire = TypeAdapter(JsonObject).validate_json(request.content)
+                self.assertEqual(wire['input_references'], [{'type':'video_url','video_url':{'url':
+                    'https://approved-clip.trycloudflare.com/clip/'+'a'*64+'.mp4'}}])
                 return httpx.Response(200,json={'id':'remote-request-123','status':'completed'})
             if request.url.path.endswith('/content'):
                 return httpx.Response(200,content=self.swap.artifact(self.current_id,'input.mp4').read_bytes(),headers={'content-type':'video/mp4'})
@@ -142,6 +168,104 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         await self.swap.submit(job.id,self.body(job))
         await self.finish()
         return self.swap.get(job.id)
+
+    async def test_cloud_generation_is_unavailable_without_private_clip_hosting(self) -> None:
+        self.assertTrue(settings.status().credential_configured)
+        with patch.object(self.swap.clip_hosting, 'status', return_value=ClipHostStatus()):
+            self.assertFalse(self.swap.readiness().configured)
+            job = await self.prepare()
+            with self.assertRaises(self.swap.CharacterSwapError) as failure:
+                await self.quoted(job)
+        self.assertEqual(failure.exception.code, 'clip_host_missing')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(ledger.list_receipts(), [])
+
+    async def test_only_an_approved_video_step_shares_and_then_releases_the_silent_clip(self) -> None:
+        job = await self.frame()
+        self.assertEqual(self.shared, [])
+        job = await self.quoted(job)
+        self.assertEqual(self.shared, [])
+        self.assertIsNotNone(job.quote)
+        with self.assertRaises(self.swap.CharacterSwapError):
+            await self.swap.submit(job.id, self.body(job, transfers_confirmed=False))
+        self.assertEqual(self.shared, [])
+        await self.swap.submit(job.id, self.body(job))
+        await self.finish()
+        result = self.swap.get(job.id)
+        self.assertEqual(result.status, 'ready')
+        self.assertEqual(self.shared, [result.video_receipt_id])
+        self.assertEqual(self.released, self.shared)
+
+    async def test_sharing_failure_is_not_billed_and_reuses_the_reviewed_frame_with_fresh_approval(self) -> None:
+        from app.clip_hosting import ClipHostError
+        job = await self.quoted(await self.frame())
+        edited = self.swap.artifact(job.id, 'edited-frame.png').read_bytes()
+        with patch.object(self.swap.clip_hosting, 'stage_clip', side_effect=ClipHostError('clip_host_connection_failed')):
+            await self.swap.submit(job.id, self.body(job))
+            await self.finish()
+        failed = self.swap.get(job.id)
+        self.assertEqual(failed.status, 'failed')
+        self.assertEqual(failed.error_code, 'clip_host_connection_failed')
+        self.assertFalse(failed.resume_available)
+        self.assertTrue(failed.requote_available)
+        receipt = ledger.get(failed.video_receipt_id or '')
+        self.assertEqual(receipt.state, 'intent')
+        self.assertNotIn('POST /api/v1/videos', self.calls)
+        self.assertIn(receipt.id, self.released)
+        fresh = await self.quoted(failed)
+        self.assertEqual(self.swap.artifact(job.id, 'edited-frame.png').read_bytes(), edited)
+        self.assertNotEqual(fresh.quote.id if fresh.quote else '', job.quote.id if job.quote else '')
+        self.assertEqual(self.calls.count('POST /api/v1/images'), 1)
+
+    async def test_stop_during_sharing_is_safe_to_requote_and_releases_the_grant(self) -> None:
+        job = await self.quoted(await self.frame())
+        started = asyncio.Event()
+        async def share(receipt_id: str, path: Path, expected_sha256: str) -> HostedClip:
+            started.set()
+            await asyncio.Event().wait()
+            raise AssertionError('cancelled share must not resume')
+        with patch.object(self.swap.clip_hosting, 'stage_clip', side_effect=share):
+            await self.swap.submit(job.id, self.body(job))
+            await asyncio.wait_for(started.wait(), 2)
+            stopping = self.swap.get(job.id)
+            stopped = await self.swap.stop(job.id, CharacterSwapRevisionRequest(revision=stopping.revision))
+        self.assertEqual(stopped.status, 'stopped')
+        self.assertTrue(stopped.requote_available)
+        self.assertFalse(stopped.resume_available)
+        self.assertEqual(ledger.get(stopped.video_receipt_id or '').state, 'intent')
+        self.assertIn(stopped.video_receipt_id, self.released)
+        self.assertNotIn('POST /api/v1/videos', self.calls)
+
+    async def test_unknown_video_submission_keeps_the_share_when_tracking_stops(self) -> None:
+        job = await self.quoted(await self.frame())
+        self.unknown = True
+        await self.swap.submit(job.id, self.body(job))
+        await self.finish()
+        unknown = self.swap.get(job.id)
+        self.assertEqual(unknown.status, 'submission_unknown')
+        self.assertNotIn(unknown.video_receipt_id, self.released)
+        await self.swap.stop(job.id, CharacterSwapRevisionRequest(revision=unknown.revision))
+        self.assertNotIn(unknown.video_receipt_id, self.released)
+
+    async def test_restart_before_the_paid_intent_does_not_share_or_report_unknown_billing(self) -> None:
+        job = await self.quoted(await self.frame())
+        assert job.quote is not None
+        receipt = ledger.prepare('character-video-'+job.id, job.quote)
+        document = self.swap.load(job.id)
+        document.job.video_receipt_id = receipt.id
+        document.job.status = 'submitting'
+        document.job.phase = 'sharing_clip'
+        self.swap.save(document)
+        await self.swap.recover()
+        await self.finish()
+        recovered = self.swap.get(job.id)
+        self.assertEqual(recovered.status, 'stopped')
+        self.assertEqual(recovered.error_code, 'submission_not_sent')
+        self.assertTrue(recovered.requote_available)
+        self.assertFalse(recovered.resume_available)
+        self.assertEqual(ledger.get(receipt.id).state, 'intent')
+        self.assertEqual(self.shared, [])
+        self.assertNotIn('POST /api/v1/videos', self.calls)
 
     async def test_local_preparation_retains_original_full_character_and_silent_input(self) -> None:
         from app.video_media import probe_media
@@ -211,6 +335,12 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         job = CharacterSwapJob.model_validate(response.json())
         self.assertEqual(self.swap.artifact(job.id, 'source.video').read_bytes(), path.read_bytes())
         self.assertTrue(job.has_audio)
+        self.assertFalse(self.calls)
+        retained = self.swap.artifact(job.id, 'source.video').read_bytes()
+        await video_scenes.delete_cut(source.id, cut.id)
+        self.assertEqual(self.swap.artifact(job.id, 'source.video').read_bytes(), retained)
+        self.assertEqual(self.swap.get(job.id).status, 'prepared')
+        self.assertEqual(video_scenes.get_source(source.id), source)
         self.assertFalse(self.calls)
 
     async def test_near_widescreen_scene_is_padded_and_valid_for_both_model_stages(self) -> None:
@@ -465,6 +595,131 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((result.status,result.error_code),('failed','provider_video_expired'))
         self.assertFalse(result.resume_available)
         self.assertEqual(ledger.get(result.video_receipt_id or '').state,'failed')
+
+    async def test_rejected_video_submission_is_failed_without_false_resume(self) -> None:
+        job = await self.quoted(await self.frame())
+        def reject(request: httpx.Request) -> httpx.Response:
+            self.calls.append(request.method + ' ' + request.url.path)
+            return httpx.Response(400, json={'error': {'message': 'private provider details'}})
+        with patch.object(self.client, 'transport', httpx.MockTransport(reject)):
+            await self.swap.submit(job.id, self.body(job))
+            await self.finish()
+        result = self.swap.get(job.id)
+        self.assertEqual((result.status, result.error_code), ('failed', 'provider_request_rejected'))
+        self.assertFalse(result.resume_available)
+        receipt = ledger.get(result.video_receipt_id or '')
+        self.assertEqual((receipt.state, receipt.provider_http_status), ('failed', 400))
+        self.assertEqual(self.calls.count('POST /api/v1/videos'), 1)
+        with self.assertRaises(self.swap.CharacterSwapError) as error:
+            await self.swap.resume(job.id, CharacterSwapRevisionRequest(revision=result.revision))
+        self.assertEqual(error.exception.code, 'resume_unavailable')
+        self.assertEqual(self.calls.count('POST /api/v1/videos'), 1)
+
+    async def test_confirmed_rejection_gets_new_video_quote_without_repeating_frame(self) -> None:
+        job = await self.quoted(await self.frame())
+        edited = self.swap.artifact(job.id, 'edited-frame.png').read_bytes()
+        with patch.object(self.client, 'transport', httpx.MockTransport(lambda request: httpx.Response(400))):
+            await self.swap.submit(job.id, self.body(job))
+            await self.finish()
+        failed = self.swap.get(job.id)
+        self.assertTrue(failed.requote_available)
+        previous = ledger.get(failed.video_receipt_id or '')
+        retained = (ledger.REQUESTS_ROOT / (previous.id + '.json')).read_bytes()
+        before = list(self.calls)
+        fresh = await self.quoted(failed)
+        self.assertEqual((fresh.status, fresh.stage, fresh.error_code), ('prepared', 'video', ''))
+        self.assertFalse(fresh.requote_available)
+        self.assertGreater(fresh.revision, failed.revision)
+        self.assertIsNotNone(fresh.quote)
+        self.assertNotEqual(fresh.quote.id if fresh.quote else '', previous.quote_id)
+        self.assertEqual(self.swap.artifact(job.id, 'edited-frame.png').read_bytes(), edited)
+        self.assertEqual(self.calls, before)
+        await self.swap.recover()
+        self.assertEqual(self.swap.get(job.id).status, 'prepared')
+        self.assertFalse(self.swap.work_busy())
+        with self.assertRaises(self.swap.CharacterSwapError):
+            await self.swap.submit(job.id, self.body(job))
+        await self.swap.submit(job.id, self.body(fresh))
+        await self.finish()
+        ready = self.swap.get(job.id)
+        self.assertEqual(ready.status, 'ready')
+        self.assertNotEqual(ready.video_receipt_id, previous.id)
+        self.assertEqual((ledger.REQUESTS_ROOT / (previous.id + '.json')).read_bytes(), retained)
+        self.assertEqual(self.calls.count('POST /api/v1/images'), 1)
+
+    async def test_requote_refuses_uncertain_foreign_missing_or_accepted_receipts(self) -> None:
+        job = await self.quoted(await self.frame())
+        with patch.object(self.client, 'transport', httpx.MockTransport(lambda request: httpx.Response(400))):
+            await self.swap.submit(job.id, self.body(job))
+            await self.finish()
+        failed = self.swap.load(job.id)
+        receipt = ledger.get(failed.job.video_receipt_id or '')
+        for changes in ({'state': 'submission_unknown'}, {'provider_http_status': None},
+                        {'provider_http_status': 500}, {'remote_id': 'already-accepted'},
+                        {'owner_id': 'foreign-job'}, {'request_fingerprint': 'a' * 64}):
+            with self.subTest(changes=changes):
+                ledger._save(receipt.model_copy(update=changes))
+                self.assertFalse(self.swap.get(job.id).requote_available)
+                with self.assertRaises(self.swap.CharacterSwapError):
+                    await self.quoted(failed.job)
+                self.assertEqual(self.swap.load(job.id).job.status, 'failed')
+        ledger._save(receipt)
+        (ledger.REQUESTS_ROOT / (receipt.id + '.json')).write_text('{broken')
+        self.assertFalse(self.swap.get(job.id).requote_available)
+        with self.assertRaises(self.swap.CharacterSwapError):
+            await self.quoted(failed.job)
+
+    async def test_rejected_video_requote_requires_current_revision_and_intact_frame(self) -> None:
+        job = await self.quoted(await self.frame())
+        with patch.object(self.client, 'transport', httpx.MockTransport(lambda request: httpx.Response(400))):
+            await self.swap.submit(job.id, self.body(job))
+            await self.finish()
+        failed = self.swap.get(job.id)
+        count = len(catalog._QUOTES)
+        with self.assertRaises(self.swap.CharacterSwapError) as stale:
+            await self.quoted(job)
+        self.assertEqual(stale.exception.code, 'revision_conflict')
+        self.swap.artifact(job.id, 'edited-frame.png').write_bytes(b'changed frame')
+        self.assertFalse(self.swap.get(job.id).requote_available)
+        with self.assertRaises(self.swap.CharacterSwapError) as changed:
+            await self.quoted(failed)
+        self.assertEqual(changed.exception.code, 'already_submitted')
+        self.assertEqual(len(catalog._QUOTES), count)
+        self.assertEqual(self.swap.get(job.id).status, 'failed')
+        self.assertEqual(self.calls.count('POST /api/v1/images'), 1)
+
+    async def test_cancel_after_rejected_video_headers_keeps_confirmed_failure(self) -> None:
+        job = await self.quoted(await self.frame())
+        reading = asyncio.Event()
+        class Waiting(httpx.AsyncByteStream):
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                reading.set()
+                await asyncio.Event().wait()
+                yield b'never'
+        with patch.object(self.client, 'transport', httpx.MockTransport(lambda request: httpx.Response(400, stream=Waiting()))):
+            await self.swap.submit(job.id, self.body(job))
+            await asyncio.wait_for(reading.wait(), 5)
+            stopped = await self.swap.stop(job.id, CharacterSwapRevisionRequest(revision=self.swap.get(job.id).revision))
+        self.assertEqual((stopped.status, stopped.error_code), ('failed', 'provider_request_rejected'))
+        self.assertTrue(stopped.requote_available)
+        self.assertFalse(stopped.resume_available)
+        receipt = ledger.get(stopped.video_receipt_id or '')
+        self.assertEqual((receipt.state, receipt.provider_http_status), ('failed', 400))
+        self.assertFalse(self.swap.work_busy())
+
+    async def test_rename_invalidates_quote_and_preserves_reviewed_frame(self) -> None:
+        job = await self.quoted(await self.frame())
+        edited = self.swap.artifact(job.id, 'edited-frame.png').read_bytes()
+        result = await self.swap.rename(job.id, RenameCharacterSwapRequest(revision=job.revision, name='New title'))
+        self.assertEqual((result.name, result.stage, result.revision), ('New title', 'video', job.revision + 1))
+        self.assertIsNone(result.quote)
+        self.assertEqual(result.quote_expires_at, '')
+        self.assertIsNone(result.estimated_usd)
+        self.assertEqual(result.frame_receipt_id, job.frame_receipt_id)
+        self.assertEqual(self.swap.artifact(job.id, 'edited-frame.png').read_bytes(), edited)
+        with self.assertRaises(self.swap.CharacterSwapError) as error:
+            await self.swap.submit(job.id, self.body(job))
+        self.assertEqual(error.exception.code, 'revision_conflict')
 
     async def test_frame_charge_is_blocked_when_video_stage_cannot_run(self) -> None:
         job=await self.prepare()

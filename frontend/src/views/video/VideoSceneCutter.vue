@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as api from '../../api/videoScenes'
 import { CHARACTER_SWAP_MAX_VIDEO_BYTES } from '../../api/characterSwaps'
@@ -8,11 +8,12 @@ import { ApiError } from '../../api/http'
 import { createPollingLoop } from '../../composables/polling'
 import { claimPlayback, releasePlaybackIfCurrent } from '../../composables/audioPlayback'
 import { formatClock } from '../../composables/voicePace'
-const emit = defineEmits<{ useCut: [cut: VideoSceneCut] }>()
+const emit = defineEmits<{ useCut: [cut: VideoSceneCut]; cutDeleted: [cut: VideoSceneCut] }>()
 const { t, te } = useI18n()
 const sources = ref<VideoSceneSource[]>([]), sourceId = ref(''), cuts = ref<VideoSceneCut[]>([])
 const readiness = ref<VideoSceneReadiness | null>(null), preview = ref<VideoScenePreview | null>(null), player = ref<HTMLVideoElement | null>(null)
 const busy = ref(false), error = ref(''), position = ref(0), seekSec = ref(0), inSec = ref(0), outSec = ref(8), name = ref(t('videoScenes.scene'))
+const deleting = ref(false), savedScenes = ref<HTMLElement | null>(null), savedHeading = ref<HTMLElement | null>(null)
 const source = computed(() => sources.value.find(value => value.id === sourceId.value))
 const active = computed(() => cuts.value.some(value => value.status === 'queued' || value.status === 'cutting'))
 const validRange = computed(() => source.value && Number.isFinite(inSec.value) && Number.isFinite(outSec.value) && inSec.value >= 0 && outSec.value > inSec.value && outSec.value <= source.value.duration_sec && outSec.value - inSec.value <= (readiness.value?.max_cut_seconds ?? 600))
@@ -45,6 +46,7 @@ async function load() {
   finally { if (current(token, request)) { busy.value = false; schedule() } }
 }
 async function activate(id: string) {
+  if (deleting.value) return
   invalidate(); stopPlayer(); sourceId.value = id; cuts.value = []; preview.value = null; position.value = 0; seekSec.value = 0; inSec.value = 0; outSec.value = Math.min(8, source.value?.duration_sec ?? 8)
   const token = generation, request = new AbortController(); controller = request; busy.value = true; error.value = ''
   try {
@@ -55,7 +57,7 @@ async function activate(id: string) {
   } catch (value) { if (current(token, request)) error.value = errorText(value) }
   finally { if (current(token, request)) { busy.value = false; schedule() } }
 }
-function selectedSource(event: Event) { const target = event.target; if (target instanceof HTMLSelectElement && sources.value.some(value => value.id === target.value)) void activate(target.value) }
+function selectedSource(event: Event) { const target = event.target; if (!deleting.value && target instanceof HTMLSelectElement && sources.value.some(value => value.id === target.value)) void activate(target.value) }
 async function importSource(video?: File) {
   if (busy.value || !readiness.value?.ffmpeg_ready || !video && !readiness.value.native_picker_available) return
   invalidate(); const token = generation, request = new AbortController(); controller = request; busy.value = true; error.value = ''
@@ -98,7 +100,41 @@ async function cancel(cut: VideoSceneCut) {
   catch (value) { if (current(token, request)) error.value = errorText(value) }
   finally { if (current(token, request)) { busy.value = false; schedule() } }
 }
-function useCut(cut: VideoSceneCut) { if (cut.status === 'ready' && cut.seconds >= 2 && cut.output_url && (cut.bytes ?? 0) <= CHARACTER_SWAP_MAX_VIDEO_BYTES) { stopPlayer(); emit('useCut', cut) } }
+function deleteBlocked(cut: VideoSceneCut) { return cut.status === 'queued' || cut.status === 'cutting' || cut.error_code === 'worker_unresolved' }
+function cutTime(seconds: number) {
+  const milliseconds = Math.round(seconds * 1000), fraction = milliseconds % 1000
+  return formatClock(Math.floor(milliseconds / 1000)) + (fraction ? `.${String(fraction).padStart(3, '0')}` : '')
+}
+async function remove(cut: VideoSceneCut, event: Event) {
+  if (busy.value || deleteBlocked(cut) || sourceId.value !== cut.source_id || !cuts.value.some(value => value.id === cut.id && value.source_id === cut.source_id)) return
+  if (!window.confirm(t('videoScenes.confirmDelete', { name: cut.name, start: cutTime(cut.start_sec), end: cutTime(cut.end_sec) }))) return
+  if (busy.value || sourceId.value !== cut.source_id || !cuts.value.some(value => value.id === cut.id && value.source_id === cut.source_id && !deleteBlocked(value))) return
+  const index = cuts.value.findIndex(value => value.id === cut.id), initiating = event.currentTarget
+  const ownsFocus = initiating instanceof HTMLButtonElement && document.activeElement === initiating
+  invalidate(); const token = generation, request = new AbortController(); controller = request; busy.value = true; deleting.value = true; error.value = ''
+  let accepted = false
+  try {
+    const result = await api.deleteSceneCut(cut.source_id, cut.id, request.signal)
+    if (!current(token, request) || sourceId.value !== cut.source_id) return
+    if (result.source_id !== cut.source_id || result.deleted !== cut.id) throw new ApiError('cut_changed', 409)
+    cuts.value = cuts.value.filter(value => value.id !== cut.id || value.source_id !== cut.source_id)
+    accepted = true; emit('cutDeleted', cut)
+  } catch (value) { if (current(token, request)) error.value = errorText(value) }
+  finally {
+    if (current(token, request)) {
+      busy.value = false; deleting.value = false; schedule()
+      if (ownsFocus) void nextTick(() => {
+        if (!current(token, request) || document.activeElement !== initiating && document.activeElement !== document.body) return
+        if (!accepted) { if (initiating instanceof HTMLElement && initiating.isConnected) initiating.focus(); return }
+        const neighbor = cuts.value[Math.min(index, cuts.value.length - 1)]
+        const row = [...savedScenes.value?.querySelectorAll<HTMLElement>('[data-scene-cut]') ?? []].find(value => value.dataset.sceneCut === neighbor?.id)
+        const target = row?.querySelector<HTMLButtonElement>('[data-scene-delete]:not(:disabled)') ?? row?.querySelector<HTMLButtonElement>('button:not(:disabled)') ?? savedHeading.value
+        target?.focus()
+      })
+    }
+  }
+}
+function useCut(cut: VideoSceneCut) { if (!deleting.value && cut.status === 'ready' && cut.seconds >= 2 && cut.output_url && (cut.bytes ?? 0) <= CHARACTER_SWAP_MAX_VIDEO_BYTES) { stopPlayer(); emit('useCut', cut) } }
 onMounted(() => { void load() })
 onBeforeUnmount(() => { alive = false; invalidate(); stopPlayer() })
 </script>
@@ -107,7 +143,7 @@ onBeforeUnmount(() => { alive = false; invalidate(); stopPlayer() })
     <header><h2 id="scene-cutter-heading" class="text-xl font-semibold">{{ t('videoScenes.title') }}</h2><p class="mt-2 text-sm text-text-dim">{{ t('videoScenes.intro') }}</p></header>
     <div class="scene-card space-y-3">
       <h3 class="font-semibold">{{ t('videoScenes.sourceStep') }}</h3>
-      <label v-if="sources.length">{{ t('videoScenes.source') }}<select data-scene-source :value="sourceId" @change="selectedSource"><option v-for="movie in sources" :key="movie.id" :value="movie.id">{{ movie.name }}</option></select></label><p v-else class="text-sm text-text-dim">{{ t('videoScenes.empty') }}</p>
+      <label v-if="sources.length">{{ t('videoScenes.source') }}<select data-scene-source :value="sourceId" :disabled="deleting" @change="selectedSource"><option v-for="movie in sources" :key="movie.id" :value="movie.id">{{ movie.name }}</option></select></label><p v-else class="text-sm text-text-dim">{{ t('videoScenes.empty') }}</p>
       <button data-scene-pick type="button" :disabled="busy || !readiness?.native_picker_available || !readiness.ffmpeg_ready" @click="importSource()">{{ t('videoScenes.pick') }}</button>
       <p class="text-sm text-text-dim">{{ t('videoScenes.nativeHint') }}</p>
       <p v-if="readiness && !readiness.native_picker_available" class="text-sm text-text-dim">{{ t('videoScenes.nativeUnavailable') }}</p>
@@ -116,7 +152,7 @@ onBeforeUnmount(() => { alive = false; invalidate(); stopPlayer() })
       <button type="button" :disabled="busy" @click="load">{{ t('videoScenes.refresh') }}</button>
     </div>
     <p v-if="readiness && !readiness.ffmpeg_ready" role="status">{{ t('videoScenes.ffmpeg') }}</p>
-    <p v-if="busy" role="status">{{ t('videoScenes.working') }}</p><p v-if="error" role="alert" class="text-status-failed">{{ error }}</p>
+    <p v-if="busy" role="status">{{ t(deleting ? 'videoScenes.deleting' : 'videoScenes.working') }}</p><p v-if="error" role="alert" class="text-status-failed">{{ error }}</p>
     <div v-if="source" class="scene-card space-y-4">
       <h3 class="font-semibold">{{ t('videoScenes.trimStep') }}</h3>
       <p class="text-sm">{{ t('videoScenes.duration', { time: formatClock(source.duration_sec), width: source.width, height: source.height }) }}</p>
@@ -135,12 +171,14 @@ onBeforeUnmount(() => { alive = false; invalidate(); stopPlayer() })
         <button data-scene-create type="submit" class="primary" :disabled="busy || active || !validRange || !name.trim() || !readiness?.ffmpeg_ready">{{ t('videoScenes.create') }}</button>
       </form>
     </div>
-    <section v-if="source" class="space-y-3" :aria-label="t('videoScenes.saved')"><h3 class="font-semibold">{{ t('videoScenes.savedStep') }}</h3><p v-if="!cuts.length" class="text-sm text-text-dim">{{ t('videoScenes.noCuts') }}</p>
-      <ul class="grid gap-4 md:grid-cols-2"><li v-for="cut in cuts" :key="cut.id" class="scene-card space-y-3"><h4 class="break-words font-medium">{{ cut.name }}</h4><p role="status" class="text-sm">{{ t(`videoScenes.status.${cut.status}`) }} · {{ formatClock(cut.start_sec) }}–{{ formatClock(cut.end_sec) }}</p>
+    <section v-if="source" ref="savedScenes" class="space-y-3" :aria-label="t('videoScenes.saved')"><h3 id="scene-cutter-saved-heading" ref="savedHeading" tabindex="-1" class="font-semibold focus-visible:outline-2 focus-visible:outline-accent1">{{ t('videoScenes.savedStep') }}</h3><p v-if="!cuts.length" class="text-sm text-text-dim">{{ t('videoScenes.noCuts') }}</p>
+      <ul class="grid gap-4 md:grid-cols-2"><li v-for="cut in cuts" :key="cut.id" :data-scene-cut="cut.id" class="scene-card space-y-3"><h4 class="break-words font-medium">{{ cut.name }}</h4><p role="status" class="text-sm">{{ t(`videoScenes.status.${cut.status}`) }} · {{ formatClock(cut.start_sec) }}–{{ formatClock(cut.end_sec) }}</p>
         <p v-if="cut.error_code" role="alert" class="text-sm text-status-failed">{{ t(te(`videoScenes.errors.${cut.error_code}`) ? `videoScenes.errors.${cut.error_code}` : 'videoScenes.errors.unknown') }}</p>
         <a v-if="cut.status === 'ready' && cut.output_url" :href="cut.output_url" data-scene-download download class="inline-flex min-h-11 items-center text-text underline">{{ t('videoScenes.download') }}</a>
         <button v-if="cut.status === 'queued' || cut.status === 'cutting'" data-scene-cancel type="button" :disabled="busy" @click="cancel(cut)">{{ t('videoScenes.cancel') }}</button>
-        <button v-if="cut.status === 'ready' && cut.seconds >= 2 && cut.output_url" data-scene-use type="button" :disabled="(cut.bytes ?? 0) > CHARACTER_SWAP_MAX_VIDEO_BYTES" @click="useCut(cut)">{{ t('videoScenes.use') }}</button>
+        <button v-if="cut.status === 'ready' && cut.seconds >= 2 && cut.output_url" data-scene-use type="button" :disabled="deleting || (cut.bytes ?? 0) > CHARACTER_SWAP_MAX_VIDEO_BYTES" @click="useCut(cut)">{{ t('videoScenes.use') }}</button>
+        <button :data-scene-delete="cut.id" type="button" :disabled="busy || deleteBlocked(cut)" :aria-label="t('videoScenes.deleteNamed', { name: cut.name, start: cutTime(cut.start_sec), end: cutTime(cut.end_sec) })" :aria-describedby="deleteBlocked(cut) ? `scene-${cut.id}-delete-hint` : undefined" class="text-status-failed" @click="remove(cut, $event)">{{ t('videoScenes.delete') }}</button>
+        <p v-if="deleteBlocked(cut)" :id="`scene-${cut.id}-delete-hint`" class="text-xs text-text-dim">{{ t(cut.error_code === 'worker_unresolved' ? 'videoScenes.cleanupBeforeDelete' : 'videoScenes.cancelBeforeDelete') }}</p>
         <p v-if="cut.status === 'ready' && (cut.bytes ?? 0) > CHARACTER_SWAP_MAX_VIDEO_BYTES" class="text-xs text-text-dim">{{ t('videoScenes.swapTooLarge') }}</p>
       </li></ul><p class="text-xs text-text-dim">{{ t('videoScenes.swapHint') }}</p>
     </section><p class="text-xs text-text-dim">{{ t('videoScenes.background') }}</p>

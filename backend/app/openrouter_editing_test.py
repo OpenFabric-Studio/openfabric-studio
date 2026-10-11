@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import unittest
@@ -13,6 +15,7 @@ from unittest.mock import patch
 import httpx
 from PIL import Image
 from pydantic import TypeAdapter, ValidationError
+from app.clip_host_contracts import HostedClip
 
 from app import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, openrouter_client as client_module, openrouter_credentials as credentials
 from app.contracts import JsonObject, JsonValue
@@ -53,6 +56,12 @@ def raster() -> bytes:
 
 
 class EditingTests(unittest.IsolatedAsyncioTestCase):
+    def hosted(self, receipt_id: str) -> HostedClip:
+        return HostedClip(receipt_id=receipt_id,
+            source_sha256=hashlib.sha256(base64.b64decode(VIDEO.partition(',')[2])).hexdigest(),
+            url='https://approved-clip.trycloudflare.com/clip/'+'a'*64+'.mp4',
+            expires_at=datetime.now(timezone.utc)+timedelta(hours=24))
+
     async def asyncSetUp(self) -> None:
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.enterContext(patch.dict(os.environ, {'OPENFABRIC_CONFIG': str(self.root/'config.json'),
@@ -255,12 +264,37 @@ class EditingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ledger.get(receipt.id).state, 'submitting')
             self.assertEqual(TypeAdapter(JsonObject).validate_json(request.content), {'model': VIDEO_MODEL,
                 'prompt': body.prompt, 'seed': 7,
-                'input_references': [{'type': 'video_url', 'video_url': {'url': VIDEO}}],
+                'input_references': [{'type': 'video_url', 'video_url': {'url': self.hosted(receipt.id).url}}],
                 'provider': {'options': {'runway': {'parameters': {'keyframes': [{'seconds': 0, 'uri': FRAME}]}}}}})
             return httpx.Response(202, json={'id': 'remote-edit', 'status': 'pending', 'polling_url': '/api/v1/videos/remote-edit'})
-        result = await OpenRouterClient(transport=httpx.MockTransport(serve)).submit_video_edit(receipt.id, body, quote.id)
+        result = await OpenRouterClient(transport=httpx.MockTransport(serve)).submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
         self.assertEqual(result.id, 'remote-edit')
         self.assertEqual(ledger.get(receipt.id).remote_id, 'remote-edit')
+        self.assertEqual(ledger.get(receipt.id).request_fingerprint, catalog.digest(catalog.video_edit_parameters(body)))
+        self.assertNotIn('trycloudflare.com', (self.root/'requests'/f'{receipt.id}.json').read_text())
+
+    async def test_video_host_identity_and_expiry_are_checked_before_a_paid_intent(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        for changed, code in (({'receipt_id': 'b'*32}, 'request_mismatch'),
+                ({'source_sha256': 'b'*64}, 'request_mismatch'),
+                ({'expires_at': datetime.now(timezone.utc)}, 'clip_host_expired')):
+            with self.subTest(code=code, changed=changed):
+                quote = catalog.quote_video_edit(body)
+                receipt = ledger.prepare('video-host-boundary', quote)
+                hosted = HostedClip.model_validate({**self.hosted(receipt.id).model_dump(), **changed})
+                calls: list[str] = []
+                def serve(request: httpx.Request) -> httpx.Response:
+                    calls.append(request.method)
+                    return httpx.Response(202, json={'id': 'should-not-submit'})
+                client = OpenRouterClient(transport=httpx.MockTransport(serve))
+                with self.assertRaises(OpenRouterError) as failure:
+                    await client.submit_video_edit(receipt.id, body, quote.id, hosted=hosted)
+                self.assertEqual(failure.exception.code, code)
+                self.assertEqual(ledger.get(receipt.id).state, 'intent')
+                self.assertEqual(calls, [])
+                self.assertEqual(catalog.validate_quote(quote.id, catalog.video_edit_parameters(body)), quote)
 
     async def test_post_failures_and_cancellation_are_ambiguous_without_replay(self) -> None:
         from app.openrouter_contracts import OpenRouterImageEditRequest
@@ -330,7 +364,7 @@ class EditingTests(unittest.IsolatedAsyncioTestCase):
                     duration=2, width=width, height=height)
                 catalog.quote_video_edit(body)
 
-    async def test_shared_poll_accepts_relative_urls_and_expired_but_rejects_external(self) -> None:
+    async def test_shared_poll_ignores_unused_remote_urls_and_accepts_expired(self) -> None:
         for status in ('completed', 'expired'):
             def serve(request: httpx.Request) -> httpx.Response:
                 return httpx.Response(200, json={'id': 'remote-edit', 'status': status,
@@ -338,6 +372,150 @@ class EditingTests(unittest.IsolatedAsyncioTestCase):
                     'unsigned_urls': ['/api/v1/videos/remote-edit/content?index=0']})
             result = await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-edit')
             self.assertEqual(result.status, status)
+        calls: list[str] = []
+        def unused_metadata(request: httpx.Request) -> httpx.Response:
+            calls.append(str(request.url))
+            return httpx.Response(200, json={'id': 'remote-edit', 'status': 'completed',
+                'polling_url': '//attacker.test/path', 'unsigned_urls': ['https://storage.example.com/video.mp4']})
+        try:
+            result = await OpenRouterClient(transport=httpx.MockTransport(unused_metadata)).poll_video('remote-edit')
+        except OpenRouterError as error:
+            self.fail(f'Unused delivery metadata rejected a valid completed job: {error.code}')
+        self.assertEqual(result.status, 'completed')
+        self.assertEqual(calls, ['https://openrouter.ai/api/v1/videos/remote-edit'])
+
+    async def test_video_external_delivery_metadata_preserves_receipt_and_fixed_download(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        quote = catalog.quote_video_edit(body)
+        receipt = ledger.prepare('video-delivery-metadata', quote)
+        calls: list[tuple[str, str]] = []
+        def serve(request: httpx.Request) -> httpx.Response:
+            calls.append((request.method, str(request.url)))
+            self.assertTrue(request.headers['authorization'].startswith('Bearer '))
+            if request.url.path.endswith('/content'):
+                return httpx.Response(200, content=b'synthetic video', headers={'content-type': 'video/mp4'})
+            return httpx.Response(202 if request.method == 'POST' else 200, json={
+                'id': 'remote-edit', 'status': 'pending' if request.method == 'POST' else 'completed',
+                'polling_url': 'https://untrusted.example/poll',
+                'unsigned_urls': ['https://storage.example.com/video.mp4']})
+        client = OpenRouterClient(transport=httpx.MockTransport(serve))
+        try:
+            remote = await client.submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
+        except OpenRouterError as error:
+            self.fail(f'Unused delivery metadata discarded an accepted job identity: {error.code}')
+        self.assertEqual(ledger.get(receipt.id).state, 'submitted')
+        self.assertEqual(ledger.get(receipt.id).remote_id, remote.id)
+        self.assertEqual((await client.poll_video(remote.id)).status, 'completed')
+        await client.download_video(remote.id, self.root/'download.mp4')
+        self.assertEqual(calls, [('POST', 'https://openrouter.ai/api/v1/videos'),
+            ('GET', 'https://openrouter.ai/api/v1/videos/remote-edit'),
+            ('GET', 'https://openrouter.ai/api/v1/videos/remote-edit/content?index=0')])
+
+    async def test_definitive_post_rejections_retain_status_and_never_replay(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        codes = {400: 'provider_request_rejected', 404: 'provider_request_rejected',
+            405: 'provider_request_rejected', 413: 'provider_request_rejected',
+            415: 'provider_request_rejected', 422: 'provider_request_rejected',
+            401: 'credential_rejected', 402: 'provider_credit_limit',
+            403: 'provider_access_denied', 429: 'provider_rate_limited'}
+        for status, code in codes.items():
+            with self.subTest(status=status):
+                quote = catalog.quote_video_edit(body)
+                receipt = ledger.prepare('video-rejected', quote)
+                calls: list[str] = []
+                def serve(request: httpx.Request) -> httpx.Response:
+                    calls.append(request.method)
+                    return httpx.Response(status, json={'error': {'message': 'private upstream message '+VIDEO}})
+                client = OpenRouterClient(transport=httpx.MockTransport(serve))
+                with self.assertRaises(OpenRouterError) as failure:
+                    await client.submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
+                record = ledger.get(receipt.id)
+                self.assertEqual(record.state, 'failed')
+                self.assertEqual(record.error_code, code)
+                self.assertEqual(record.provider_http_status, status)
+                self.assertEqual(failure.exception.code, code)
+                self.assertEqual(failure.exception.provider_http_status, status)
+                ledger.recover()
+                with self.assertRaises(OpenRouterError):
+                    await client.submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
+                self.assertEqual(calls, ['POST'])
+                self.assertNotIn('private upstream message', (self.root/'requests'/f'{receipt.id}.json').read_text())
+
+    async def test_ambiguous_http_and_malformed_success_retain_status_without_replay(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        for status in (408, 500, 502, 503, 202):
+            with self.subTest(status=status):
+                quote = catalog.quote_video_edit(body)
+                receipt = ledger.prepare('video-unknown', quote)
+                calls: list[str] = []
+                def serve(request: httpx.Request) -> httpx.Response:
+                    calls.append(request.method)
+                    return httpx.Response(status, json={'unexpected': 'private upstream message'})
+                client = OpenRouterClient(transport=httpx.MockTransport(serve))
+                with self.assertRaises(OpenRouterError) as failure:
+                    await client.submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
+                record = ledger.get(receipt.id)
+                self.assertEqual(record.state, 'submission_unknown')
+                self.assertEqual(failure.exception.code, 'submission_unknown')
+                self.assertEqual(record.provider_http_status, status)
+                ledger.recover()
+                with self.assertRaises(OpenRouterError):
+                    await client.submit_video_edit(receipt.id, body, quote.id, hosted=self.hosted(receipt.id))
+                self.assertEqual(calls, ['POST'])
+
+    async def test_historical_unknown_receipt_is_read_without_rewriting_or_inventing_status(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        quote = catalog.quote_video_edit(body)
+        receipt = ledger.prepare('old-unknown', quote)
+        ledger.begin_submit(receipt.id, quote.id, quote.request_fingerprint)
+        ledger.update(receipt.id, state='submission_unknown', error_code='submission_unknown')
+        path = self.root/'requests'/f'{receipt.id}.json'
+        document = TypeAdapter(JsonObject).validate_json(path.read_bytes())
+        document.pop('provider_http_status', None)
+        path.write_text(TypeAdapter(JsonObject).dump_json(document).decode())
+        before = path.read_bytes()
+        ledger.recover()
+        record = ledger.get(receipt.id)
+        self.assertEqual(record.state, 'submission_unknown')
+        self.assertIsNone(record.provider_http_status)
+        self.assertEqual(path.read_bytes(), before)
+
+    async def test_receipt_status_is_strict_bounded_and_cannot_change_a_settled_receipt(self) -> None:
+        from app.openrouter_contracts import OpenRouterReceipt, OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        quote = catalog.quote_video_edit(body)
+        receipt = ledger.prepare('status-boundary', quote)
+        values = receipt.model_dump()
+        self.assertEqual(OpenRouterReceipt.model_validate({**values, 'provider_http_status': 202}).provider_http_status, 202)
+        for status in (99, 600, True, '202', 202.0):
+            with self.subTest(status=status), self.assertRaises(ValidationError):
+                OpenRouterReceipt.model_validate({**values, 'provider_http_status': status})
+        ledger.begin_submit(receipt.id, quote.id, quote.request_fingerprint)
+        ledger.record_http_status(receipt.id, 202)
+        self.assertEqual(ledger.get(receipt.id).state, 'submitting')
+        ledger.update(receipt.id, state='submitted', remote_id='remote-edit')
         with self.assertRaises(OpenRouterError):
-            await OpenRouterClient(transport=httpx.MockTransport(lambda request: httpx.Response(200,
-                json={'id': 'remote-edit', 'status': 'completed', 'polling_url': '//attacker.test/path'}))).poll_video('remote-edit')
+            ledger.record_http_status(receipt.id, 400)
+
+    async def test_crash_after_definitive_headers_recovers_failure_without_replaying(self) -> None:
+        from app.openrouter_contracts import OpenRouterVideoEditRequest
+        body = OpenRouterVideoEditRequest(prompt='Preserve motion', reference_video=VIDEO,
+            reference_image=FRAME, duration=4, width=854, height=480)
+        quote = catalog.quote_video_edit(body)
+        receipt = ledger.prepare('rejected-before-body', quote)
+        ledger.begin_submit(receipt.id, quote.id, quote.request_fingerprint)
+        ledger.record_http_status(receipt.id, 422)
+        ledger.recover()
+        record = ledger.get(receipt.id)
+        self.assertEqual(record.state, 'failed')
+        self.assertEqual(record.error_code, 'provider_request_rejected')
+        self.assertEqual(record.provider_http_status, 422)

@@ -1,9 +1,9 @@
 """Persisted character-swap jobs and app-owned API contracts."""
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import BaseModel, Field, StrictBool, model_validator
+from pydantic import BaseModel, Field, StrictBool, StringConstraints, model_validator
 
 from .openrouter_contracts import OpenRouterQuote
 from .video_contracts import VideoContract, VideoId
@@ -22,6 +22,7 @@ class CharacterSwapJob(VideoContract):
     stage: Literal['frame', 'video'] = 'frame'
     quote: OpenRouterQuote | None = None
     resume_available: bool = False
+    requote_available: bool = False
     frame_receipt_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     video_receipt_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
     phase: str = Field(default='prepared', max_length=64)
@@ -71,6 +72,7 @@ class CharacterSwapReadiness(VideoContract):
     configured: bool
     enabled: bool = False
     credential_configured: bool = False
+    clip_host_configured: bool = False
     ffmpeg_ready: bool
 
 
@@ -85,7 +87,16 @@ class CharacterSwapRevisionRequest(VideoContract):
     revision: int = Field(ge=1, strict=True)
 
 
+class RenameCharacterSwapRequest(CharacterSwapRevisionRequest):
+    name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+
+
+class DeletedCharacterSwapResponse(VideoContract):
+    deleted: VideoId
+
+
 CHARACTER_SWAP_CLIENT_MODELS: list[type[BaseModel]] = [
     CharacterSwapJob, CharacterSwapsResponse, CharacterSwapReadiness,
     SubmitCharacterSwapRequest, CharacterSwapRevisionRequest,
+    RenameCharacterSwapRequest, DeletedCharacterSwapResponse,
 ]

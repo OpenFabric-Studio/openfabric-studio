@@ -10,13 +10,14 @@ import * as tracksApi from '../../api/tracks'
 import * as scenesApi from '../../api/videoScenes'
 import * as swapsApi from '../../api/characterSwaps'
 import type { VideoSceneSource, VideoSceneCut } from '../../api/contracts'
+import { parseCharacterSwapJob } from '../../api/contracts'
 import { videoProjectFixture } from './videoFixtures'
 vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(),
   listLocalEngines: vi.fn().mockResolvedValue({ video_engine: 'ltx', video_preference: 'ltx', note: 'Song videos stay on LTX.', engines: [] }),
 }))
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), listTracks: vi.fn() }))
 vi.mock('../../api/videos', async (original) => ({ ...await original<typeof import('../../api/videos')>(), listVideos: vi.fn(), otherWorkBusy: vi.fn(), listVideoProjects: vi.fn(), videoReadiness: vi.fn() }))
-vi.mock('../../api/videoScenes', async original => ({ ...await original<typeof import('../../api/videoScenes')>(), sceneReadiness: vi.fn(), listSceneSources: vi.fn(), listSceneCuts: vi.fn(), previewSceneSource: vi.fn() }))
+vi.mock('../../api/videoScenes', async original => ({ ...await original<typeof import('../../api/videoScenes')>(), sceneReadiness: vi.fn(), listSceneSources: vi.fn(), listSceneCuts: vi.fn(), previewSceneSource: vi.fn(), deleteSceneCut: vi.fn() }))
 vi.mock('../../api/characterSwaps', async original => ({ ...await original<typeof import('../../api/characterSwaps')>(), characterSwapReadiness: vi.fn(), listCharacterSwaps: vi.fn() }))
 const movie: VideoSceneSource = { id: 'a'.repeat(32), name: 'Movie.avi', origin: 'native', duration_sec: 120, width: 640, height: 480, fps: 24, has_audio: true, bytes: 1000, created_at: 'today' }
 const scene: VideoSceneCut = { id: 'b'.repeat(32), source_id: movie.id, name: 'Selected scene', start_sec: 10, end_sec: 18, seconds: 8, status: 'ready', error_code: '', created_at: 'today', updated_at: 'today', width: 640, height: 480, has_audio: true, output_url: `/api/videos/scenes/sources/${movie.id}/cuts/${'b'.repeat(32)}/media`, output_sha256: '', bytes: 1000 }
@@ -35,7 +36,7 @@ beforeEach(() => {
   vi.mocked(swapsApi.characterSwapReadiness).mockResolvedValue({ configured: false, ffmpeg_ready: true })
   vi.mocked(swapsApi.listCharacterSwaps).mockResolvedValue({ jobs: [] })
 })
-afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
+afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers() })
 async function flush() { for (let i = 0; i < 6; i++) await nextTick() }
 async function mountVideo(url = '/') {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: VideoPage }, { path: '/settings', component: { render: () => h('div') } }] })
@@ -125,6 +126,41 @@ it('hands a completed local cut into replacement and focuses its heading', async
   expect(document.querySelector<HTMLInputElement>('[data-swap-seconds]')?.value).toBe('2')
   expect(document.querySelector('[data-video-workspace-main]')).not.toBeNull()
   expect(document.activeElement?.id).toBe('character-swap-heading')
+})
+it('clears a deleted cut from replacement without deleting prepared swaps', async () => {
+  vi.stubGlobal('confirm', vi.fn(() => true))
+  vi.mocked(scenesApi.deleteSceneCut).mockResolvedValue({ source_id: scene.source_id, deleted: scene.id })
+  const id = 'd'.repeat(32), base = `/api/videos/character-swaps/${id}`
+  const prepared = parseCharacterSwapJob({ id, name: 'Retained prepared swap', status: 'prepared', created_at: 'today', updated_at: 'today', start_sec: 0, seconds: 2, source_name: 'prepared.mp4', image_name: 'character.png', source_duration_sec: 8, width: 640, height: 480, frames: 48, has_audio: true, seed: 42, source_url: `${base}/source`, clip_url: `${base}/clip`, image_url: `${base}/image` })
+  vi.mocked(swapsApi.listCharacterSwaps).mockResolvedValue({ jobs: [prepared] })
+  await mountVideo(); await flush()
+  action('[data-video-process="cut"]').click(); await flush(); await flush()
+  action('[data-scene-use]').click(); await flush(); await flush()
+  expect(document.querySelector('[data-swap-chosen-scene]')?.textContent).toContain(scene.name)
+  action('[data-video-process="cut"]').click(); await flush()
+  action('[data-scene-delete]').click(); await flush(); await flush()
+  expect(document.querySelector('[data-swap-chosen-scene]')).toBeNull()
+  expect(document.querySelector('[data-swap-video]')).not.toBeNull()
+  expect(document.querySelector(`[data-swap-job="${prepared.id}"]`)?.textContent).toContain(prepared.name)
+  expect(document.querySelector(`[src="${prepared.clip_url}"]`)).not.toBeNull()
+})
+it('keeps a chosen cut when a different movie cut with the same ID is deleted', async () => {
+  const otherMovie = { ...movie, id: 'f'.repeat(32), name: 'Other movie' }
+  const otherCut = { ...scene, source_id: otherMovie.id, name: 'Different movie scene', output_url: `/api/videos/scenes/sources/${otherMovie.id}/cuts/${scene.id}/media` }
+  vi.mocked(scenesApi.listSceneSources).mockResolvedValue({ sources: [movie, otherMovie] })
+  vi.mocked(scenesApi.listSceneCuts).mockImplementation(async id => ({ cuts: [id === movie.id ? scene : otherCut] }))
+  vi.mocked(scenesApi.previewSceneSource).mockImplementation(async id => ({ id: 'c'.repeat(32), source_id: id, start_sec: 0, duration_sec: 15, width: 640, height: 480, url: `/api/videos/scenes/sources/${id}/previews/${'c'.repeat(32)}` }))
+  vi.mocked(scenesApi.deleteSceneCut).mockResolvedValue({ source_id: otherMovie.id, deleted: scene.id })
+  vi.stubGlobal('confirm', vi.fn(() => true))
+  await mountVideo(); await flush()
+  action('[data-video-process="cut"]').click(); await flush(); await flush()
+  action('[data-scene-use]').click(); await flush(); await flush()
+  action('[data-video-process="cut"]').click(); await flush()
+  const select = document.querySelector('[data-scene-source]')
+  if (!(select instanceof HTMLSelectElement)) throw new Error('Missing movie selector')
+  select.value = otherMovie.id; select.dispatchEvent(new Event('change', { bubbles: true })); await flush(); await flush()
+  action('[data-scene-delete]').click(); await flush(); await flush()
+  expect(document.querySelector('[data-swap-chosen-scene]')?.textContent).toContain(scene.name)
 })
 it('preserves unfinished cutter and replacement inputs across workflow changes', async () => {
   await mountVideo(); await flush()

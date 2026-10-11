@@ -469,6 +469,7 @@ export type CharacterSwapJob = {
   "stage"?: "frame" | "video"
   "quote"?: (OpenRouterQuote | null)
   "resume_available"?: boolean
+  "requote_available"?: boolean
   "frame_receipt_id"?: (string | null)
   "video_receipt_id"?: (string | null)
   "phase"?: string
@@ -504,6 +505,7 @@ export type CharacterSwapReadiness = {
   "configured": boolean
   "enabled"?: boolean
   "credential_configured"?: boolean
+  "clip_host_configured"?: boolean
   "ffmpeg_ready": boolean
 }
 
@@ -553,6 +555,18 @@ export type ChatterboxRequest = {
   "model"?: "original" | "multilingual"
   "audio_prompt_path"?: (string | null)
   "language_id"?: string
+}
+
+export type ClipHostSettingsRequest = {
+  "enabled"?: boolean
+}
+
+export type ClipHostStatus = {
+  "enabled"?: boolean
+  "configured"?: boolean
+  "binary_available"?: boolean
+  "tunnel_active"?: boolean
+  "active_clips"?: number
 }
 
 export type CloudMusicJob = {
@@ -752,6 +766,15 @@ export type CreateVoiceRequest = {
 
 export type DeleteYueJobResponse = {
   "deleted": boolean
+}
+
+export type DeletedCharacterSwapResponse = {
+  "deleted": string
+}
+
+export type DeletedVideoSceneCutResponse = {
+  "source_id": string
+  "deleted": string
 }
 
 export type DialogueReelSelection = {
@@ -1301,6 +1324,7 @@ export type OpenRouterReceipt = {
   "remote_id"?: (string | null)
   "actual_cost_usd"?: (number | null)
   "error_code"?: (string | null)
+  "provider_http_status"?: (number | null)
   "created_at": string
   "updated_at": string
 }
@@ -1591,6 +1615,11 @@ export type ReferenceTrackPreparationRequest = {
 export type RefreshDialogueCueRequest = {
   "revision": number
   "source": CreateDialogueReelRequest
+}
+
+export type RenameCharacterSwapRequest = {
+  "revision": number
+  "name": string
 }
 
 export type RetainedAudioInfo = {
@@ -5014,6 +5043,20 @@ const schemas = {
         ],
         "default": null,
         "title": "Error Code"
+      },
+      "provider_http_status": {
+        "anyOf": [
+          {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Http Status"
       },
       "created_at": {
         "title": "Created At",
@@ -20188,6 +20231,11 @@ const schemas = {
         "title": "Resume Available",
         "type": "boolean"
       },
+      "requote_available": {
+        "default": false,
+        "title": "Requote Available",
+        "type": "boolean"
+      },
       "frame_receipt_id": {
         "anyOf": [
           {
@@ -20444,6 +20492,11 @@ const schemas = {
         "title": "Credential Configured",
         "type": "boolean"
       },
+      "clip_host_configured": {
+        "default": false,
+        "title": "Clip Host Configured",
+        "type": "boolean"
+      },
       "ffmpeg_ready": {
         "title": "Ffmpeg Ready",
         "type": "boolean"
@@ -20500,6 +20553,43 @@ const schemas = {
       "revision"
     ],
     "title": "CharacterSwapRevisionRequest",
+    "type": "object"
+  },
+  "RenameCharacterSwapRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "name"
+    ],
+    "title": "RenameCharacterSwapRequest",
+    "type": "object"
+  },
+  "DeletedCharacterSwapResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "deleted": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Deleted",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deleted"
+    ],
+    "title": "DeletedCharacterSwapResponse",
     "type": "object"
   },
   "VideoSceneReadiness": {
@@ -20870,6 +20960,72 @@ const schemas = {
       "cuts"
     ],
     "title": "VideoSceneCutsResponse",
+    "type": "object"
+  },
+  "DeletedVideoSceneCutResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "deleted": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Deleted",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_id",
+      "deleted"
+    ],
+    "title": "DeletedVideoSceneCutResponse",
+    "type": "object"
+  },
+  "ClipHostSettingsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      }
+    },
+    "title": "ClipHostSettingsRequest",
+    "type": "object"
+  },
+  "ClipHostStatus": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "configured": {
+        "default": false,
+        "title": "Configured",
+        "type": "boolean"
+      },
+      "binary_available": {
+        "default": false,
+        "title": "Binary Available",
+        "type": "boolean"
+      },
+      "tunnel_active": {
+        "default": false,
+        "title": "Tunnel Active",
+        "type": "boolean"
+      },
+      "active_clips": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Active Clips",
+        "type": "integer"
+      }
+    },
+    "title": "ClipHostStatus",
     "type": "object"
   }
 } as const
@@ -23006,6 +23162,22 @@ export function parseCharacterSwapRevisionRequest(value: unknown): CharacterSwap
   return value
 }
 
+function isRenameCharacterSwapRequest(value: unknown): value is RenameCharacterSwapRequest {
+  return decodeSchema(schemas.RenameCharacterSwapRequest, value, schemas)
+}
+export function parseRenameCharacterSwapRequest(value: unknown): RenameCharacterSwapRequest {
+  if (!isRenameCharacterSwapRequest(value)) throw new TypeError("Invalid RenameCharacterSwapRequest response")
+  return value
+}
+
+function isDeletedCharacterSwapResponse(value: unknown): value is DeletedCharacterSwapResponse {
+  return decodeSchema(schemas.DeletedCharacterSwapResponse, value, schemas)
+}
+export function parseDeletedCharacterSwapResponse(value: unknown): DeletedCharacterSwapResponse {
+  if (!isDeletedCharacterSwapResponse(value)) throw new TypeError("Invalid DeletedCharacterSwapResponse response")
+  return value
+}
+
 function isVideoSceneReadiness(value: unknown): value is VideoSceneReadiness {
   return decodeSchema(schemas.VideoSceneReadiness, value, schemas)
 }
@@ -23067,5 +23239,29 @@ function isVideoSceneCutsResponse(value: unknown): value is VideoSceneCutsRespon
 }
 export function parseVideoSceneCutsResponse(value: unknown): VideoSceneCutsResponse {
   if (!isVideoSceneCutsResponse(value)) throw new TypeError("Invalid VideoSceneCutsResponse response")
+  return value
+}
+
+function isDeletedVideoSceneCutResponse(value: unknown): value is DeletedVideoSceneCutResponse {
+  return decodeSchema(schemas.DeletedVideoSceneCutResponse, value, schemas)
+}
+export function parseDeletedVideoSceneCutResponse(value: unknown): DeletedVideoSceneCutResponse {
+  if (!isDeletedVideoSceneCutResponse(value)) throw new TypeError("Invalid DeletedVideoSceneCutResponse response")
+  return value
+}
+
+function isClipHostSettingsRequest(value: unknown): value is ClipHostSettingsRequest {
+  return decodeSchema(schemas.ClipHostSettingsRequest, value, schemas)
+}
+export function parseClipHostSettingsRequest(value: unknown): ClipHostSettingsRequest {
+  if (!isClipHostSettingsRequest(value)) throw new TypeError("Invalid ClipHostSettingsRequest response")
+  return value
+}
+
+function isClipHostStatus(value: unknown): value is ClipHostStatus {
+  return decodeSchema(schemas.ClipHostStatus, value, schemas)
+}
+export function parseClipHostStatus(value: unknown): ClipHostStatus {
+  if (!isClipHostStatus(value)) throw new TypeError("Invalid ClipHostStatus response")
   return value
 }

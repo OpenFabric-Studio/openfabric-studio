@@ -26,7 +26,7 @@ from .video_io import hash_file
 from .video_media import VideoMediaError, probe_media, tool, validate_media
 from .video_process import WorkerIdentity, WorkerOutputError, read_owned_output, spawn_owned, terminate_verified
 from .video_projects import VideoProjectError
-from .video_scene_contracts import VideoSceneCut, VideoSceneCutRequest, VideoSceneCutsResponse, VideoScenePreview, VideoScenePreviewRequest, VideoSceneReadiness, VideoSceneSource, VideoSceneSourcesResponse
+from .video_scene_contracts import DeletedVideoSceneCutResponse, VideoSceneCut, VideoSceneCutRequest, VideoSceneCutsResponse, VideoScenePreview, VideoScenePreviewRequest, VideoSceneReadiness, VideoSceneSource, VideoSceneSourcesResponse
 
 logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 2*1024**3
@@ -68,6 +68,10 @@ class StoredPreview(VideoContract):
     preview: VideoScenePreview
     sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
     created_at: str
+
+
+class CutDeletionMarker(DeletedVideoSceneCutResponse):
+    kind: Literal['video_scene_cut_deletion'] = 'video_scene_cut_deletion'
 
 
 def now() -> str:
@@ -513,6 +517,55 @@ async def cancel(source_id: str, cut_id: str) -> VideoSceneCut:
     return get_cut(source_id, cut_id)
 
 
+def _cleanup_deleted_cut(source_id: str, path: Path) -> None:
+    if (re.fullmatch(r'\.[0-9a-f]{32}\.deleting', path.name) is None
+            or path.parent != _child(directory(source_id), 'cuts') or path.is_symlink()):
+        raise VideoSceneError('storage_unavailable')
+    marker = _child(path, 'deletion.json')
+    if not marker.exists():
+        # A crash after removing the final marker can leave only an empty directory.
+        path.rmdir()
+        return
+    checked = CutDeletionMarker.model_validate_json(_read(marker))
+    if checked.source_id != source_id or checked.deleted != path.name[1:33]:
+        raise VideoSceneError('storage_unavailable')
+    ownership = _child(path, 'worker.json')
+    if ownership.exists():
+        raise VideoSceneError('worker_unresolved')
+    # Keep the deletion marker until all media is gone so startup can retry cleanup.
+    for child in path.iterdir():
+        if child == marker:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    marker.unlink()
+    path.rmdir()
+
+
+async def delete_cut(source_id: str, cut_id: str) -> DeletedVideoSceneCutResponse:
+    async with admission_lock:
+        require_setup_idle()
+        folder = cut_directory(source_id, cut_id)
+        with document_lock(_child(folder, 'cut.json')):
+            cut = load_cut(source_id, cut_id)
+            if _closing or cut_id in _cuts or cut.status in {'queued', 'cutting'}:
+                raise VideoSceneError('busy')
+            if folder in _unresolved or cut.error_code == 'worker_unresolved' or _child(folder, 'worker.json').exists():
+                raise VideoSceneError('worker_unresolved')
+            tombstone = _child(folder.parent, '.' + cut_id + '.deleting')
+            if tombstone.exists():
+                raise VideoSceneError('storage_unavailable')
+            _write(_child(folder, 'deletion.json'), CutDeletionMarker(source_id=source_id, deleted=cut_id))
+            folder.rename(tombstone)
+        try:
+            _cleanup_deleted_cut(source_id, tombstone)
+        except (OSError, ValueError, VideoSceneError):
+            logger.warning('Deleted scene retained for cleanup: %s/%s', source_id, cut_id)
+        return DeletedVideoSceneCutResponse(source_id=source_id, deleted=cut_id)
+
+
 async def resolve_cut(source_id: str, cut_id: str) -> tuple[Path, VideoSceneCut]:
     cut = get_cut(source_id, cut_id)
     if cut.status != 'ready' or not cut.output_sha256:
@@ -605,6 +658,12 @@ async def _recover_source(source_id: str) -> None:
         if not children.exists():
             continue
         for child in children.iterdir():
+            if kind == 'cuts' and re.fullmatch(r'\.[0-9a-f]{32}\.deleting', child.name):
+                try:
+                    _cleanup_deleted_cut(source_id, child)
+                except (VideoSceneError, OSError, ValueError):
+                    logger.warning('Deleted scene retained for cleanup: %s/%s', source_id, child.name)
+                continue
             if _ID.fullmatch(child.name) is None:
                 continue
             try:

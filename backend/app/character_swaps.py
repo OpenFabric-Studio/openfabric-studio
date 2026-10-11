@@ -17,13 +17,14 @@ from fastapi import UploadFile
 from pydantic import Field, TypeAdapter, ValidationError
 
 from .atomic_files import document_lock, write_object
-from .character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, SubmitCharacterSwapRequest
+from .character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, DeletedCharacterSwapResponse, RenameCharacterSwapRequest, SubmitCharacterSwapRequest
 from .config import DATA_DIR
 from .contracts import JsonObject
-from . import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings
+from . import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, clip_hosting
+from .clip_hosting import ClipHostError
 from .openrouter_client import OpenRouterClient
 from .openrouter_contracts import OpenRouterImageEditRequest, OpenRouterVideoEditRequest, OpenRouterQuoteRequest, OpenRouterReceipt
-from .openrouter_errors import OpenRouterError
+from .openrouter_errors import OpenRouterError, rejection_code
 from .image_normalization import normalization_argv
 from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
 from .resource_admission import admission_lock, require_setup_idle
@@ -47,7 +48,7 @@ _media_lock = asyncio.Lock()
 POLL_INTERVAL = 3.0
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
-_FILES = {'source.video', 'image.original', 'reference.png', 'selected.mp4', 'input.mp4', 'output.mp4', 'delivered.mp4', 'output.pending.mp4', 'job.json', 'worker.json', 'worker-receipt.json', 'normalized.png', 'normalized.normalization.json', 'source-frame.png', 'edited-frame.png', 'frame.pending.png', 'generated-frame.original', 'generated-frame.png', 'generated-frame.normalization.json'}
+_FILES = {'source.video', 'image.original', 'reference.png', 'selected.mp4', 'input.mp4', 'output.mp4', 'delivered.mp4', 'output.pending.mp4', 'job.json', 'worker.json', 'worker-receipt.json', 'normalized.png', 'normalized.normalization.json', 'source-frame.png', 'edited-frame.png', 'frame.pending.png', 'generated-frame.original', 'generated-frame.png', 'generated-frame.normalization.json', 'deletion.json'}
 
 
 class CharacterSwapError(Exception):
@@ -79,6 +80,11 @@ class StoredSwap(VideoContract):
     edited_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
     raw_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
     pending_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
+
+
+class DeletionMarker(VideoContract):
+    id: VideoId
+    kind: Literal['character_swap_deletion'] = 'character_swap_deletion'
 
 
 def now() -> str:
@@ -140,9 +146,14 @@ def get(identifier: str) -> CharacterSwapJob:
     with document_lock(artifact(identifier, 'job.json')):
         document = load(identifier)
         job = document.job
-        job.resume_available = job.provider == 'openrouter' and job.status in {'stopped', 'failed'} and job.error_code not in {'provider_video_failed', 'provider_video_cancelled', 'provider_video_expired', 'request_mismatch'} and bool(
+        rejected_without_remote = job.remote_id is None and job.error_code in {
+            'provider_request_rejected', 'credential_rejected', 'provider_credit_limit', 'provider_access_denied', 'provider_rate_limited'}
+        job.resume_available = job.provider == 'openrouter' and not rejected_without_remote and job.status in {'stopped', 'failed'} and job.error_code not in {'provider_video_failed', 'provider_video_cancelled', 'provider_video_expired', 'request_mismatch'} and bool(
             document.pending_sha256 or document.pending_frame_sha256 or document.raw_frame_sha256
             if job.stage == 'frame' else document.pending_sha256 or job.remote_id or job.video_receipt_id)
+        job.requote_available = _requote_available(document)
+        if job.requote_available:
+            job.resume_available = False
         return job
 
 
@@ -158,6 +169,78 @@ def list_jobs() -> CharacterSwapsResponse:
     return CharacterSwapsResponse(jobs=sorted(jobs, key=lambda job: (job.created_at, job.id), reverse=True)[:1000])
 
 
+def _manageable(identifier: str, revision: int) -> StoredSwap:
+    document = load(identifier)
+    if document.job.revision != revision:
+        raise CharacterSwapError('revision_conflict')
+    if (_closing or identifier in _tasks or identifier in _preparations or identifier in _quotations
+            or identifier in _stopping or document.job.status in {'submitting', 'queued', 'running'}):
+        raise CharacterSwapError('busy')
+    ownership = artifact(identifier, 'worker.json')
+    if identifier in _unresolved or ownership.exists() or ownership.is_symlink() or document.job.error_code == 'worker_unresolved':
+        raise CharacterSwapError('worker_unresolved')
+    return document
+
+
+async def rename(identifier: str, body: RenameCharacterSwapRequest) -> CharacterSwapJob:
+    async with admission_lock:
+        require_setup_idle()
+        with document_lock(artifact(identifier, 'job.json')):
+            document = _manageable(identifier, body.revision)
+            document.job.name = body.name
+            document.job.revision += 1
+            document.job.updated_at = now()
+            document.job.quote = None
+            document.job.quote_expires_at = ''
+            document.job.estimated_usd = None
+            save(document)
+            return get(identifier)
+
+
+def _cleanup_deleted(path: Path) -> None:
+    if (re.fullmatch(r'\.[0-9a-f]{32}\.deleting', path.name) is None
+            or path.parent != root() or path.is_symlink()):
+        raise CharacterSwapError('storage_unavailable')
+    marker = path / 'deletion.json'
+    if marker.is_symlink():
+        raise CharacterSwapError('storage_unavailable')
+    if not marker.exists():
+        # Cleanup can stop between removing the last marker and the empty directory.
+        path.rmdir()
+        return
+    if marker.stat().st_size > 1024 or DeletionMarker.model_validate_json(marker.read_bytes()).id != path.name[1:33]:
+        raise CharacterSwapError('storage_unavailable')
+    if (path / 'worker.json').exists() or (path / 'worker.json').is_symlink():
+        raise CharacterSwapError('worker_unresolved')
+    # Retain the marker until all media is removed so startup can retry partial cleanup.
+    for child in path.iterdir():
+        if child == marker:
+            continue
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink()
+    marker.unlink()
+    path.rmdir()
+
+
+async def delete(identifier: str, body: CharacterSwapRevisionRequest) -> DeletedCharacterSwapResponse:
+    async with admission_lock:
+        require_setup_idle()
+        with document_lock(artifact(identifier, 'job.json')):
+            _manageable(identifier, body.revision)
+            tombstone = root() / ('.' + identifier + '.deleting')
+            if tombstone.exists() or tombstone.is_symlink():
+                raise CharacterSwapError('storage_unavailable')
+            _write(artifact(identifier, 'deletion.json'), DeletionMarker(id=identifier))
+            directory(identifier).rename(tombstone)
+        try:
+            _cleanup_deleted(tombstone)
+        except (OSError, ValueError, CharacterSwapError):
+            logger.exception('Deleted character swap retained for cleanup: %s', identifier)
+        return DeletedCharacterSwapResponse(deleted=identifier)
+
+
 def readiness() -> CharacterSwapReadiness:
     try:
         tool('ffmpeg'); tool('ffprobe')
@@ -165,8 +248,13 @@ def readiness() -> CharacterSwapReadiness:
     except VideoMediaError:
         available = False
     status = settings.status()
-    return CharacterSwapReadiness(configured=status.enabled and status.credential_configured,
-        enabled=status.enabled, credential_configured=status.credential_configured, ffmpeg_ready=available)
+    try:
+        host = clip_hosting.status()
+    except ClipHostError as error:
+        raise CharacterSwapError(error.code) from error
+    return CharacterSwapReadiness(configured=status.enabled and status.credential_configured and host.configured,
+        enabled=status.enabled, credential_configured=status.credential_configured,
+        clip_host_configured=host.configured, ffmpeg_ready=available)
 
 
 async def _command(path: Path, argv: list[str]) -> None:
@@ -356,6 +444,11 @@ def _require_provider() -> None:
         raise CharacterSwapError('provider_disabled')
     if not status.credential_configured:
         raise CharacterSwapError('provider_key_missing')
+    try:
+        if not clip_hosting.status().configured:
+            raise CharacterSwapError('clip_host_missing')
+    except ClipHostError as error:
+        raise CharacterSwapError(error.code) from error
 
 
 def _prepared_size(width: int, height: int) -> tuple[int, int]:
@@ -418,6 +511,25 @@ def _receipt(document: StoredSwap) -> OpenRouterReceipt:
     return record
 
 
+def _requote_available(document: StoredSwap) -> bool:
+    job = document.job
+    if (job.provider != 'openrouter' or job.status not in {'failed', 'stopped'}
+            or job.remote_id is not None
+            or job.stage == 'video' and (not document.edited_frame_sha256 or not job.edited_frame_url)
+            or document.pending_sha256 or document.pending_frame_sha256 or document.raw_frame_sha256 and job.stage == 'frame'
+            or artifact(job.id, 'worker.json').exists()):
+        return False
+    try:
+        receipt = _receipt(document)
+        # A retained intent proves that sharing/validation never reached the paid POST.
+        if receipt.state == 'intent' and receipt.remote_id is None:
+            return True
+        code = rejection_code(receipt.provider_http_status)
+        return job.stage == 'video' and receipt.state == 'failed' and receipt.remote_id is None and code is not None and receipt.error_code == code
+    except (CharacterSwapError, OpenRouterError, OSError, ValueError):
+        return False
+
+
 async def quote(identifier: str, body: CharacterSwapRevisionRequest) -> CharacterSwapJob:
     async with admission_lock:
         require_setup_idle()
@@ -427,7 +539,7 @@ async def quote(identifier: str, body: CharacterSwapRevisionRequest) -> Characte
         job = get(identifier)
         if job.revision != body.revision:
             raise CharacterSwapError('revision_conflict')
-        if job.status != 'prepared':
+        if job.status != 'prepared' and not job.requote_available:
             raise CharacterSwapError('already_submitted')
         if job.provider != 'openrouter':
             raise CharacterSwapError('legacy_provider_readonly')
@@ -441,6 +553,7 @@ async def _quote(identifier: str, revision: int) -> CharacterSwapJob:
     try:
         document = load(identifier)
         await _check_inputs(document)
+        await clip_hosting.ensure_ready()
         request = _request(document)
         await OpenRouterClient().refresh_catalog()
         if document.job.stage == 'frame':
@@ -448,14 +561,18 @@ async def _quote(identifier: str, revision: int) -> CharacterSwapJob:
         result = catalog.quote(_parameters(request))
         with document_lock(artifact(identifier, 'job.json')):
             document = load(identifier)
-            if document.job.revision != revision or document.job.status != 'prepared':
+            if document.job.revision != revision or document.job.status != 'prepared' and not _requote_available(document):
                 raise CharacterSwapError('revision_conflict')
             document.job.quote = result
+            document.job.status = 'prepared'
+            document.job.phase = 'review_frame' if document.job.stage == 'video' else 'prepared'
+            document.job.error_code = ''
+            document.job.requote_available = False
             document.job.revision += 1
             document.job.updated_at = now()
             save(document)
             return document.job
-    except OpenRouterError as error:
+    except (OpenRouterError, ClipHostError) as error:
         raise CharacterSwapError(error.code) from error
 
 
@@ -631,6 +748,9 @@ async def _run(identifier: str, *, submit_request: bool) -> None:
         record = _receipt(document)
         if record.state == 'failed':
             raise CharacterSwapError(record.error_code or 'provider_request_failed')
+        if not submit_request and record.state == 'intent':
+            _change(identifier, status='stopped', phase='stopped', error_code='submission_not_sent')
+            return
         if stage == 'frame' and (document.raw_frame_sha256 or document.pending_frame_sha256):
             await _publish_frame(identifier)
             return
@@ -640,14 +760,18 @@ async def _run(identifier: str, *, submit_request: bool) -> None:
         client = OpenRouterClient()
         if submit_request:
             request = _request(document)
-            _change(identifier, status='submitting', phase='submitting')
+            await clip_hosting.ensure_ready()
             if isinstance(request, OpenRouterImageEditRequest):
+                _change(identifier, status='submitting', phase='submitting')
                 result = await client.submit_image_edit(record.id, request, record.quote_id)
                 _retain_frame(identifier, result.data)
                 _change(identifier, status='running', phase='checking_frame')
                 await _publish_frame(identifier)
                 return
-            remote = await client.submit_video_edit(record.id, request, record.quote_id)
+            _change(identifier, status='submitting', phase='sharing_clip')
+            hosted = await clip_hosting.stage_clip(record.id, artifact(identifier, 'input.mp4'), document.input_sha256)
+            _change(identifier, status='submitting', phase='submitting')
+            remote = await client.submit_video_edit(record.id, request, record.quote_id, hosted=hosted)
             _change(identifier, status='queued', phase='queued', remote_id=remote.id)
             record = ledger.get(record.id)
         remote_id = record.remote_id
@@ -672,9 +796,18 @@ async def _run(identifier: str, *, submit_request: bool) -> None:
         job = get(identifier)
         if job.stage == stage and job.status != 'ready':
             unknown = job.status == 'submitting' and job.phase == 'submitting' and (stage == 'frame' or job.remote_id is None)
-            _change(identifier, status='submission_unknown' if unknown else 'stopped', phase='stopped', error_code='submission_unknown' if unknown else '')
+            rejected = None
+            if unknown:
+                try:
+                    record = _receipt(load(identifier))
+                    if record.state == 'failed' and record.remote_id is None:
+                        rejected = rejection_code(record.provider_http_status)
+                except (CharacterSwapError, OpenRouterError, OSError, ValueError):
+                    pass
+            _change(identifier, status='failed' if rejected else 'submission_unknown' if unknown else 'stopped',
+                    phase='failed' if rejected else 'stopped', error_code=rejected or ('submission_unknown' if unknown else ''))
         raise
-    except (OpenRouterError, CharacterSwapError, VideoMediaError, VideoProjectError) as error:
+    except (OpenRouterError, CharacterSwapError, ClipHostError, VideoMediaError, VideoProjectError) as error:
         _change(identifier, status='submission_unknown' if error.code == 'submission_unknown' else 'failed', phase='failed', error_code=error.code)
     except Exception:
         logger.exception('Character swap failed for %s', identifier)
@@ -683,6 +816,14 @@ async def _run(identifier: str, *, submit_request: bool) -> None:
         _change(identifier, status='submission_unknown' if unknown else 'failed', phase='failed', error_code='submission_unknown' if unknown else 'processing_failed')
     finally:
         document = load(identifier)
+        if stage == 'video' and document.job.video_receipt_id:
+            try:
+                receipt = _receipt(document)
+                if receipt.state in {'intent', 'failed', 'completed'}:
+                    await await_cleanup(clip_hosting.release(receipt.id))
+            except (ClipHostError, CharacterSwapError, OpenRouterError, OSError, ValueError):
+                # Global share ownership survives local job removal and offline cleanup.
+                logger.warning('Character swap clip cleanup retained: %s', identifier)
         if artifact(identifier, 'worker.json').exists():
             _unresolved.add(identifier)
         else:
@@ -704,7 +845,7 @@ async def stop(identifier: str, body: CharacterSwapRevisionRequest) -> Character
         await _recover_worker(directory(identifier))
         _unresolved.discard(identifier)
         job = get(identifier)
-        if job.status not in {'prepared', 'ready', 'submission_unknown', 'stopped'}:
+        if job.status not in {'prepared', 'ready', 'submission_unknown', 'stopped'} and not job.requote_available:
             _change(identifier, status='stopped', phase='stopped', revise=True)
         return get(identifier)
     finally:
@@ -758,6 +899,11 @@ async def recover() -> None:
     if not path.exists():
         return
     for child in path.iterdir():
+        if re.fullmatch(r'\.[0-9a-f]{32}\.deleting', child.name):
+            try:
+                _cleanup_deleted(child)
+            except (OSError, ValueError, CharacterSwapError):
+                logger.exception('Deleted character swap retained for cleanup: %s', child.name)
         if re.fullmatch(r'\.[0-9a-f]{32}\.preparing', child.name):
             if child.is_symlink():
                 logger.error('Escaped character swap preparation retained')

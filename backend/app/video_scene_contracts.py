@@ -98,6 +98,11 @@ class VideoSceneCutsResponse(VideoContract):
     cuts: list[VideoSceneCut]
 
 
+class DeletedVideoSceneCutResponse(VideoContract):
+    source_id: VideoId
+    deleted: VideoId
+
+
 VIDEO_SCENE_CLIENT_MODELS: list[type[BaseModel]] = [VideoSceneReadiness, VideoSceneSource,
     VideoSceneSourcesResponse, VideoScenePreviewRequest, VideoScenePreview, VideoSceneCutRequest,
-    VideoSceneCut, VideoSceneCutsResponse]
+    VideoSceneCut, VideoSceneCutsResponse, DeletedVideoSceneCutResponse]

@@ -38,6 +38,9 @@ function useSceneCut(cut: VideoSceneCut) {
   const token = ++focusGeneration, initiating = document.activeElement
   void nextTick(() => { if (alive && token === focusGeneration && process.value === 'replace' && (document.activeElement === initiating || document.activeElement === document.body)) document.getElementById('character-swap-heading')?.focus() })
 }
+function sceneCutDeleted(cut: VideoSceneCut) {
+  if (chosenScene.value?.id === cut.id && chosenScene.value.source_id === cut.source_id) chosenScene.value = null
+}
 const { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
   selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
   cloudSubmit, cloudResume, detachAdapter, save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot } = useVideoWorkspace()
@@ -302,7 +305,7 @@ onBeforeUnmount(stopSource)
       </button>
     </nav>
     <section id="video-process-cut" role="tabpanel" aria-labelledby="video-process-tab-cut" :hidden="process !== 'cut'" class="video-process-panel">
-      <VideoSceneCutter v-if="visitedProcesses.includes('cut')" @use-cut="useSceneCut" />
+      <VideoSceneCutter v-if="visitedProcesses.includes('cut')" @use-cut="useSceneCut" @cut-deleted="sceneCutDeleted" />
     </section>
     <section id="video-process-replace" role="tabpanel" aria-labelledby="video-process-tab-replace" :hidden="process !== 'replace'" class="video-process-panel">
       <VideoCharacterSwap v-if="visitedProcesses.includes('replace')" :chosen-scene="chosenScene" @clear-scene="chosenScene = null" />

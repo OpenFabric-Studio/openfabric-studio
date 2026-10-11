@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import type { CharacterSwapJob, CharacterSwapReadiness, VideoSceneCut } from '../../api/contracts'
@@ -16,19 +16,26 @@ const jobs = ref<CharacterSwapJob[]>([]), selectedId = ref(''), readiness = ref<
 const name = ref(t('characterSwap.title')), video = ref<File | null>(null), image = ref<File | null>(null)
 const startSec = ref(0), seconds = ref(2), busy = ref(false), preparing = ref(false), loading = ref(false), error = ref('')
 const consent = ref(false), transfers = ref(false), clock = ref(Date.now()), uncertainIds = ref(new Set<string>())
+const renaming = ref(false), renameDraft = ref(''), managing = ref(false)
+const renameField = ref<HTMLInputElement | null>(null), renameButton = ref<HTMLButtonElement | null>(null)
+const managementSection = ref<HTMLElement | null>(null), library = ref<HTMLElement | null>(null), libraryHeading = ref<HTMLElement | null>(null)
 const selected = computed(() => jobs.value.find(job => job.id === selectedId.value))
 const legacy = computed(() => selected.value?.provider === 'fal')
 const stage = computed(() => selected.value?.stage ?? 'frame')
 const swapSteps = ['prepare', 'frame', 'video'] as const
 const currentStep = computed(() => !selected.value || legacy.value ? 'prepare' : stage.value === 'frame' ? 'frame' : 'video')
 const tracking = computed(() => selected.value && !legacy.value && ['submitting', 'queued', 'running'].includes(selected.value.status ?? ''))
+const managementBlocked = computed(() => selected.value && (['submitting', 'queued', 'running'].includes(selected.value.status ?? '') || selected.value.error_code === 'worker_unresolved'))
+const canManage = computed(() => selected.value && !managementBlocked.value && !busy.value && !loading.value)
+const validRename = computed(() => renameDraft.value.trim().length > 0 && renameDraft.value.trim().length <= 120)
+const canStop = computed(() => selected.value && !legacy.value && (tracking.value || selected.value.error_code === 'worker_unresolved'))
 const expired = computed(() => { const expiry = (selected.value?.quote?.expires_at ?? 0) * 1000; return !Number.isFinite(expiry) || expiry <= clock.value })
 const valid = computed(() => name.value.trim().length > 0 && name.value.trim().length <= 120 && (props.chosenScene ? props.chosenScene.status === 'ready' && (props.chosenScene.bytes ?? 0) <= CHARACTER_SWAP_MAX_VIDEO_BYTES && startSec.value + seconds.value <= props.chosenScene.seconds : video.value) && image.value
   && Number.isFinite(startSec.value) && startSec.value >= 0 && startSec.value <= 21600 && Number.isInteger(seconds.value) && seconds.value >= 2 && seconds.value <= 8)
-const canQuote = computed(() => selected.value && !legacy.value && selected.value.status === 'prepared' && !busy.value && !loading.value
-  && readiness.value?.configured && readiness.value.ffmpeg_ready && (stage.value === 'frame' || selected.value.edited_frame_url)
+const canQuote = computed(() => selected.value && !legacy.value && (selected.value.status === 'prepared' || selected.value.requote_available) && !busy.value && !loading.value && !renaming.value
+  && readiness.value?.configured && readiness.value.clip_host_configured && readiness.value.ffmpeg_ready && (stage.value === 'frame' || selected.value.edited_frame_url)
   && !uncertainIds.value.has(submissionKey(selected.value)))
-const canSubmit = computed(() => canQuote.value && selected.value?.quote && selected.value.quote.model_id === selected.value.model_id
+const canSubmit = computed(() => canQuote.value && selected.value?.status === 'prepared' && selected.value.quote && selected.value.quote.model_id === selected.value.model_id
   && selected.value.quote.kind === (stage.value === 'frame' ? 'image' : 'video') && !expired.value && transfers.value && consent.value)
 const canResume = computed(() => selected.value?.resume_available && !legacy.value && selected.value.error_code !== 'worker_unresolved')
 let alive = true, mounted = false, generation = 0, controller: AbortController | undefined
@@ -55,10 +62,13 @@ function saveJob(job: CharacterSwapJob) {
 function actionError(value: unknown) { const key = value instanceof ApiError ? `characterSwap.errors.${value.message}` : ''; return t(key && te(key) ? key : 'characterSwap.errors.unknown') }
 function schedulePoll() { if (alive && tracking.value) loop.start(false) }
 function stopPlayers() { for (const player of players) { player.pause(); releasePlaybackIfCurrent(player) }; players.clear() }
-function selectJob(id: string) { invalidate(); stopPlayers(); selectedId.value = id; busy.value = false; preparing.value = false; loading.value = false; consent.value = false; transfers.value = false; error.value = ''; schedulePoll() }
+function selectJob(id: string) {
+  if (managing.value) return
+  invalidate(); stopPlayers(); selectedId.value = id; busy.value = false; preparing.value = false; loading.value = false; renaming.value = false; consent.value = false; transfers.value = false; error.value = ''; schedulePoll()
+}
 async function load() {
   if (busy.value || loading.value) return
-  invalidate(); const token = generation, request = new AbortController(); controller = request; loading.value = true; error.value = ''; consent.value = false; transfers.value = false
+  invalidate(); const token = generation, request = new AbortController(); controller = request; loading.value = true; renaming.value = false; error.value = ''; consent.value = false; transfers.value = false
   try {
     const [available, saved] = await Promise.all([api.characterSwapReadiness(request.signal), api.listCharacterSwaps(request.signal)])
     if (!current(token, request)) return
@@ -78,7 +88,7 @@ function chooseFile(event: Event, kind: 'video' | 'image') {
   error.value = supported ? '' : t(`characterSwap.errors.invalid_${kind}`)
 }
 async function prepare() {
-  if (busy.value || loading.value || !readiness.value?.ffmpeg_ready || !valid.value || !image.value || !props.chosenScene && !video.value) return
+  if (busy.value || loading.value || renaming.value || !readiness.value?.ffmpeg_ready || !valid.value || !image.value || !props.chosenScene && !video.value) return
   invalidate(); const token = generation, request = new AbortController(); controller = request; busy.value = true; preparing.value = true; error.value = ''
   try {
     const common = { image: image.value, name: name.value.trim(), startSec: startSec.value, seconds: seconds.value }
@@ -92,7 +102,7 @@ async function prepare() {
 async function action(kind: 'quote' | 'submit' | 'resume' | 'stop') {
   const job = selected.value
   if (!job || legacy.value || busy.value || loading.value || kind === 'quote' && !canQuote.value || kind === 'submit' && (!canSubmit.value || !job.quote || job.quote.expires_at * 1000 <= Date.now())
-    || kind === 'resume' && !canResume.value || kind === 'stop' && !tracking.value) return
+    || kind === 'resume' && !canResume.value || kind === 'stop' && !canStop.value) return
   invalidate(); const token = generation, request = new AbortController(); controller = request; busy.value = true; error.value = ''
   if (kind === 'quote') { consent.value = false; transfers.value = false }
   if (kind === 'submit') uncertainIds.value.add(submissionKey(job))
@@ -105,10 +115,70 @@ async function action(kind: 'quote' | 'submit' | 'resume' | 'stop') {
   } catch (value) { if (current(token, request)) error.value = actionError(value) }
   finally { if (current(token, request)) { busy.value = false; schedulePoll() } }
 }
+function beginRename() {
+  if (!canManage.value || !selected.value) return
+  const id = selected.value.id, token = generation
+  renameDraft.value = selected.value.name; renaming.value = true; consent.value = false; transfers.value = false
+  void nextTick(() => { if (alive && token === generation && selectedId.value === id && renaming.value) renameField.value?.focus() })
+}
+function cancelRename() {
+  if (busy.value || loading.value) return
+  const id = selectedId.value, token = generation, initiating = document.activeElement
+  renaming.value = false
+  void nextTick(() => {
+    if (alive && token === generation && selectedId.value === id && (document.activeElement === initiating || document.activeElement === document.body)) renameButton.value?.focus()
+  })
+}
+async function manage(kind: 'rename' | 'delete') {
+  const job = selected.value
+  if (!job || !canManage.value || kind === 'rename' && (!renaming.value || !validRename.value)) return
+  if (kind === 'delete') {
+    const uncertain = job.status === 'submission_unknown' || uncertainIds.value.has(submissionKey(job))
+    const confirmation = t('characterSwap.confirmDelete', { name: job.name }) + (uncertain ? `\n\n${t('characterSwap.deleteUnknown')}` : '')
+    if (!window.confirm(confirmation) || !canManage.value || selected.value?.id !== job.id || selected.value.revision !== job.revision) return
+  }
+  const index = jobs.value.findIndex(value => value.id === job.id), initiating = document.activeElement
+  const ownsFocus = Boolean(initiating && managementSection.value?.contains(initiating))
+  invalidate(); const token = generation, request = new AbortController(); controller = request
+  busy.value = true; managing.value = true; consent.value = false; transfers.value = false; error.value = ''
+  if (kind === 'delete') stopPlayers()
+  let accepted = false
+  try {
+    if (kind === 'rename') {
+      const result = await api.renameCharacterSwap(job.id, { revision: job.revision ?? 1, name: renameDraft.value.trim() }, request.signal)
+      if (!current(token, request)) return
+      if (result.id !== job.id) throw new ApiError('request_mismatch', 409)
+      saveJob(result); renaming.value = false
+    } else {
+      const result = await api.deleteCharacterSwap(job.id, { revision: job.revision ?? 1 }, request.signal)
+      if (!current(token, request)) return
+      if (result.deleted !== job.id) throw new ApiError('request_mismatch', 409)
+      jobs.value = jobs.value.filter(value => value.id !== job.id)
+      selectedId.value = jobs.value[Math.min(index, jobs.value.length - 1)]?.id ?? ''
+      uncertainIds.value.delete(submissionKey(job)); renaming.value = false
+    }
+    accepted = true
+  } catch (value) { if (current(token, request)) error.value = actionError(value) }
+  finally {
+    if (current(token, request)) {
+      busy.value = false; managing.value = false; schedulePoll()
+      if (ownsFocus) void nextTick(() => {
+        if (!current(token, request) || document.activeElement !== initiating && document.activeElement !== document.body) return
+        if (kind === 'delete' && accepted) {
+          const neighbor = [...library.value?.querySelectorAll<HTMLButtonElement>('[data-swap-job]') ?? []].find(value => value.dataset.swapJob === selectedId.value)
+          const target = neighbor ?? libraryHeading.value
+          target?.focus()
+        } else if (kind === 'rename' && accepted) renameButton.value?.focus()
+        else if (initiating instanceof HTMLElement && initiating.isConnected) initiating.focus()
+      })
+    }
+  }
+}
 function playing(event: Event) { if (event.target instanceof HTMLVideoElement) { players.add(event.target); claimPlayback(event.target) } }
 function stopped(event: Event) { if (event.target instanceof HTMLVideoElement) releasePlaybackIfCurrent(event.target) }
+watch(() => Boolean(readiness.value?.configured && readiness.value.clip_host_configured), value => { if (!value) { consent.value = false; transfers.value = false } })
 watch(() => props.chosenScene, () => {
-  invalidate(); stopPlayers(); selectedId.value = ''; busy.value = false; preparing.value = false; loading.value = false; consent.value = false; transfers.value = false; error.value = ''; video.value = null; startSec.value = 0; seconds.value = 2
+  invalidate(); stopPlayers(); selectedId.value = ''; busy.value = false; preparing.value = false; loading.value = false; renaming.value = false; managing.value = false; consent.value = false; transfers.value = false; error.value = ''; video.value = null; startSec.value = 0; seconds.value = 2
   if (mounted && alive) void load()
 }, { immediate: true, flush: 'sync' })
 onMounted(() => { mounted = true; void load(); clockTimer = setInterval(() => { clock.value = Date.now() }, 1000) })
@@ -122,7 +192,7 @@ onBeforeUnmount(() => { alive = false; invalidate(); if (clockTimer) clearInterv
       <li v-for="(item, index) in swapSteps" :key="item" :aria-current="currentStep === item ? 'step' : undefined" class="swap-stage rounded-lg border border-border bg-panel p-4"><p class="text-sm font-semibold">{{ index + 1 }}. {{ t(`characterSwap.steps.${item}.title`) }}</p><p class="mt-1 text-xs text-text-dim">{{ t(`characterSwap.steps.${item}.hint`) }}</p></li>
     </ol>
     <details class="text-sm text-text-dim"><summary class="min-h-11 cursor-pointer py-2">{{ t('characterSwap.qualityDetails') }}</summary><p class="mt-2 leading-relaxed">{{ t('characterSwap.quality') }}</p></details>
-    <div v-if="readiness && !readiness.configured" role="status" class="text-sm"><p>{{ t('characterSwap.setup') }}</p><RouterLink data-swap-setup to="/settings#providers" class="inline-flex min-h-11 items-center text-text underline">{{ t('cloudProviders.setup') }}</RouterLink></div>
+    <div v-if="readiness && (!readiness.configured || !readiness.clip_host_configured)" role="status" class="space-y-2 text-sm"><p v-if="!readiness.configured && (!readiness.enabled || !readiness.credential_configured)">{{ t('characterSwap.setup') }}</p><p v-if="!readiness.clip_host_configured">{{ t('characterSwap.clipHostSetup') }}</p><RouterLink data-swap-setup to="/settings#providers" class="inline-flex min-h-11 items-center text-text underline">{{ t('characterSwap.setupLink') }}</RouterLink></div>
     <p v-if="readiness && !readiness.ffmpeg_ready" role="status" class="text-sm text-status-failed">{{ t('characterSwap.ffmpeg') }}</p>
     <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
     <form class="video-card space-y-4" @submit.prevent="prepare">
@@ -130,7 +200,7 @@ onBeforeUnmount(() => { alive = false; invalidate(); if (clockTimer) clearInterv
       <div v-if="chosenScene" data-swap-chosen-scene class="space-y-2"><p class="font-medium">{{ t('videoScenes.chosenScene') }} · {{ chosenScene.name }} · {{ chosenScene.seconds.toFixed(3) }}s</p><p class="text-sm text-text-dim">{{ t('videoScenes.chosenSceneHint') }}</p><p v-if="(chosenScene.bytes ?? 0) > CHARACTER_SWAP_MAX_VIDEO_BYTES" role="status" class="text-sm text-status-failed">{{ t('videoScenes.swapTooLarge') }}</p><button type="button" @click="emit('clearScene')">{{ t('videoScenes.clearScene') }}</button></div>
       <p class="text-sm text-text-dim">{{ t('characterSwap.prepareHint') }}</p>
       <details class="text-sm text-text-dim"><summary class="min-h-11 cursor-pointer py-2">{{ t('characterSwap.fileDetails') }}</summary><p class="mt-2 leading-relaxed">{{ t('characterSwap.limits') }}</p></details>
-      <fieldset :disabled="busy || loading" class="grid min-w-0 gap-4 sm:grid-cols-2">
+      <fieldset :disabled="busy || loading || renaming" class="grid min-w-0 gap-4 sm:grid-cols-2">
         <label class="sm:col-span-2">{{ t('characterSwap.name') }}<input v-model="name" type="text" maxlength="120" required></label>
         <label v-if="!chosenScene">{{ t('characterSwap.video') }}<input data-swap-video type="file" accept=".avi,.mkv,.mp4,.mov,.webm,video/x-msvideo,video/x-matroska,video/mp4,video/quicktime,video/webm" required @change="chooseFile($event, 'video')"></label>
         <label>{{ t('characterSwap.image') }}<input data-swap-image type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" required @change="chooseFile($event, 'image')"></label>
@@ -138,21 +208,22 @@ onBeforeUnmount(() => { alive = false; invalidate(); if (clockTimer) clearInterv
         <label>{{ t('characterSwap.seconds') }}<input v-model.number="seconds" data-swap-seconds type="number" min="2" max="8" step="1" required></label>
       </fieldset>
       <p class="text-sm text-text-dim">{{ t('characterSwap.local') }}</p>
-      <button data-swap-prepare type="submit" :disabled="!valid || !readiness?.ffmpeg_ready || busy || loading">{{ t('characterSwap.prepare') }}</button>
+      <button data-swap-prepare type="submit" :disabled="!valid || !readiness?.ffmpeg_ready || busy || loading || renaming">{{ t('characterSwap.prepare') }}</button>
       <p v-if="preparing" role="status">{{ t('characterSwap.preparing') }}</p>
     </form>
     <div class="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
-      <aside class="min-w-0 space-y-3" :aria-label="t('characterSwap.library')">
-        <h3 class="font-semibold">{{ t('characterSwap.library') }}</h3>
+      <aside ref="library" class="min-w-0 space-y-3" :aria-label="t('characterSwap.library')">
+        <h3 id="character-swap-library-heading" ref="libraryHeading" tabindex="-1" class="font-semibold focus-visible:outline-2 focus-visible:outline-accent1">{{ t('characterSwap.library') }}</h3>
         <button type="button" :disabled="busy || loading" @click="load">{{ t('characterSwap.refresh') }}</button>
         <p v-if="loading" role="status">{{ t('characterSwap.loading') }}</p>
         <p v-else-if="!jobs.length" class="text-sm text-text-dim">{{ t('characterSwap.empty') }}</p>
-        <ul class="space-y-2"><li v-for="job in jobs" :key="job.id"><button :data-swap-job="job.id" type="button" :aria-pressed="selectedId === job.id" class="w-full text-left" @click="selectJob(job.id)"><span class="block break-words font-medium">{{ job.name }}</span><span class="block text-xs">{{ t(`characterSwap.status.${job.status}`) }}</span></button></li></ul>
+        <ul class="space-y-2"><li v-for="job in jobs" :key="job.id"><button :data-swap-job="job.id" type="button" :disabled="managing" :aria-pressed="selectedId === job.id" class="w-full text-left" @click="selectJob(job.id)"><span class="block break-words font-medium">{{ job.name }}</span><span class="block text-xs">{{ t(`characterSwap.status.${job.status}`) }}</span></button></li></ul>
       </aside>
       <article v-if="selected" class="video-card min-w-0 space-y-4" :aria-label="selected.name">
         <div class="flex flex-wrap items-center justify-between gap-2"><h3 class="break-words font-semibold">{{ selected.name }}</h3><p role="status" class="text-sm">{{ t(`characterSwap.status.${selected.status}`) }}</p></div>
         <p v-if="legacy" role="status" class="text-sm text-text-dim">{{ t('characterSwap.legacy') }}</p>
         <p v-else class="text-sm font-medium">{{ t(stage === 'frame' ? 'characterSwap.frameStep' : 'characterSwap.videoStep') }}</p>
+        <p v-if="selected.phase === 'sharing_clip'" role="status" class="text-sm text-text-dim">{{ t('characterSwap.sharingClip') }}</p>
         <p class="text-sm text-text-dim">{{ t('characterSwap.duration', { seconds: selected.seconds, width: selected.width, height: selected.height }) }}</p>
         <p v-if="selected.error_code" role="alert" class="text-sm text-status-failed">{{ t(te(`characterSwap.errors.${selected.error_code}`) ? `characterSwap.errors.${selected.error_code}` : 'characterSwap.errors.unknown') }}</p>
         <p v-if="!legacy && (selected.status === 'submission_unknown' || uncertainIds.has(submissionKey(selected)) && !busy)" role="alert" class="text-sm text-status-failed">{{ t(selected.status === 'submission_unknown' ? 'characterSwap.unknown' : 'characterSwap.unconfirmed') }} <a href="https://openrouter.ai/activity" target="_blank" rel="noopener noreferrer" class="underline">{{ t('characterSwap.activity') }}</a></p>
@@ -164,6 +235,10 @@ onBeforeUnmount(() => { alive = false; invalidate(); if (clockTimer) clearInterv
           <figure v-if="selected.image_url && (legacy || stage === 'frame')" class="min-w-0 space-y-2"><figcaption class="text-sm font-medium">{{ t('characterSwap.reference') }}</figcaption><img data-swap-reference :src="selected.image_url" :alt="t('characterSwap.reference')" loading="lazy" class="aspect-video w-full rounded-lg bg-panel-2 object-contain"></figure>
         </div>
         <a v-if="selected.source_url" :href="selected.source_url" download class="inline-flex min-h-11 items-center text-sm text-text underline">{{ t('characterSwap.original') }}</a>
+        <div v-if="!legacy && selected.requote_available" class="space-y-2 rounded-lg border border-border p-4">
+          <p class="text-sm text-text-dim">{{ t(stage === 'frame' ? 'characterSwap.requoteFrameHint' : 'characterSwap.requoteVideoHint') }}</p>
+          <button data-swap-requote type="button" :disabled="!canQuote" @click="action('quote')">{{ t(stage === 'frame' ? 'characterSwap.requoteFrame' : 'characterSwap.requoteVideo') }}</button>
+        </div>
         <div v-if="!legacy && selected.status === 'prepared'" data-swap-review class="space-y-3 rounded-lg border border-border p-4">
           <h4 class="font-semibold">{{ t('characterSwap.review') }}</h4>
           <button data-swap-quote type="button" :disabled="!canQuote" @click="action('quote')">{{ t(stage === 'frame' ? 'characterSwap.quoteFrame' : 'characterSwap.quoteVideo') }}</button>
@@ -171,15 +246,27 @@ onBeforeUnmount(() => { alive = false; invalidate(); if (clockTimer) clearInterv
             <p class="font-medium">{{ t('characterSwap.estimate', { cost: selected.quote.estimated_usd.toFixed(3) }) }}</p>
             <p class="text-xs text-text-dim">{{ t('characterSwap.estimateHint') }}</p>
             <p class="text-sm text-text-dim">{{ t(stage === 'frame' ? 'characterSwap.frameTransfers' : 'characterSwap.videoTransfers') }}</p>
-            <label class="inline-check"><input v-model="transfers" type="checkbox" :disabled="busy || expired">{{ t('characterSwap.transferConfirm') }}</label>
-            <label class="inline-check"><input v-model="consent" type="checkbox" :disabled="busy || expired">{{ t('characterSwap.consentConfirm') }}</label>
+            <p v-if="stage === 'video'" class="text-sm text-text-dim">{{ t('characterSwap.clipSharingReview') }}</p>
+            <label class="inline-check"><input v-model="transfers" type="checkbox" :disabled="busy || expired || !readiness?.configured || !readiness.clip_host_configured">{{ t('characterSwap.transferConfirm') }}</label>
+            <label class="inline-check"><input v-model="consent" type="checkbox" :disabled="busy || expired || !readiness?.configured || !readiness.clip_host_configured">{{ t('characterSwap.consentConfirm') }}</label>
             <p v-if="expired" role="status" class="text-sm text-status-failed">{{ t('characterSwap.expired') }}</p>
             <button data-swap-submit type="button" class="primary" :disabled="!canSubmit" @click="action('submit')">{{ t(stage === 'frame' ? 'characterSwap.submitFrame' : 'characterSwap.submitVideo') }}</button>
           </template>
         </div>
         <p v-if="selected.remote_id" class="break-all text-xs text-text-dim">{{ t('characterSwap.remote', { id: selected.remote_id }) }}</p>
         <button v-if="canResume" data-swap-resume type="button" :disabled="busy || loading" @click="action('resume')">{{ t('characterSwap.resume') }}</button>
-        <div v-if="tracking" class="space-y-2"><button data-swap-stop type="button" :disabled="busy || loading" @click="action('stop')">{{ t('characterSwap.stop') }}</button><p class="text-xs text-text-dim">{{ t('characterSwap.stopHint') }}</p></div>
+        <div v-if="canStop" class="space-y-2"><button data-swap-stop type="button" :disabled="busy || loading" @click="action('stop')">{{ t('characterSwap.stop') }}</button><p class="text-xs text-text-dim">{{ t('characterSwap.stopHint') }}</p></div>
+        <section ref="managementSection" class="space-y-3 border-t border-border pt-4" aria-labelledby="character-swap-management-heading">
+          <h4 id="character-swap-management-heading" class="font-semibold">{{ t('characterSwap.manage') }}</h4>
+          <p v-if="managing" role="status" class="text-sm text-text-dim">{{ t('characterSwap.managing') }}</p>
+          <p v-if="managementBlocked" id="character-swap-management-hint" class="text-sm text-text-dim">{{ t('characterSwap.stopBeforeManage') }}</p>
+          <form v-if="renaming" class="space-y-3" @submit.prevent="manage('rename')">
+            <label>{{ t('characterSwap.renameTitle') }}<input ref="renameField" v-model="renameDraft" data-swap-rename-input type="text" maxlength="120" required :disabled="busy || loading"></label>
+            <div class="flex flex-wrap gap-2"><button data-swap-rename-save type="submit" :disabled="!canManage || !validRename">{{ t('characterSwap.saveName') }}</button><button data-swap-rename-cancel type="button" :disabled="busy || loading" @click="cancelRename">{{ t('common.cancel') }}</button></div>
+          </form>
+          <div v-else class="flex flex-wrap gap-2"><button ref="renameButton" data-swap-rename type="button" :disabled="!canManage" :aria-label="t('characterSwap.renameNamed', { name: selected.name })" :aria-describedby="managementBlocked ? 'character-swap-management-hint' : undefined" @click="beginRename">{{ t('characterSwap.rename') }}</button><button data-swap-delete type="button" :disabled="!canManage" :aria-label="t('characterSwap.deleteNamed', { name: selected.name })" :aria-describedby="managementBlocked ? 'character-swap-management-hint' : undefined" class="text-status-failed" @click="manage('delete')">{{ t('characterSwap.delete') }}</button></div>
+          <p class="text-xs text-text-dim">{{ t('characterSwap.manageHint') }}</p>
+        </section>
       </article>
     </div>
     <p class="text-xs text-text-dim">{{ t('characterSwap.background') }}</p>

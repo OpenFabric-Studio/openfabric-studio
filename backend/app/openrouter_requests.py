@@ -11,7 +11,7 @@ from .atomic_files import document_lock, write_object
 from .config import DATA_DIR
 from .contracts import JsonObject
 from .openrouter_contracts import OpenRouterQuote, OpenRouterReceipt
-from .openrouter_errors import OpenRouterError
+from .openrouter_errors import OpenRouterError, rejection_code
 from . import openrouter_catalog as catalog
 
 REQUESTS_ROOT = DATA_DIR/'providers'/'openrouter-requests'
@@ -68,7 +68,15 @@ def begin_submit(identifier: str, quote_id: str, request_fingerprint: str) -> Op
         _save(changed)
         return changed
 
-def update(identifier: str, *, state: Literal['submission_unknown','submitted','completed','failed','canceled_tracking'], remote_id: str | None=None, actual_cost_usd: float | None=None, error_code: str | None=None) -> OpenRouterReceipt:
+def record_http_status(identifier: str, status: int) -> None:
+    """Retain response headers before body parsing, without changing ownership/state."""
+    with document_lock(_path(identifier)):
+        record=get(identifier)
+        if record.state!='submitting': raise OpenRouterError('request_state_conflict',409)
+        changed=OpenRouterReceipt.model_validate({**record.model_dump(),'provider_http_status':status})
+        _save(changed)
+
+def update(identifier: str, *, state: Literal['submission_unknown','submitted','completed','failed','canceled_tracking'], remote_id: str | None=None, actual_cost_usd: float | None=None, error_code: str | None=None, provider_http_status: int | None=None) -> OpenRouterReceipt:
     with document_lock(_path(identifier)):
         record=get(identifier)
         if record.state=='intent' or record.state in {'failed','completed'} and state!=record.state:
@@ -76,7 +84,8 @@ def update(identifier: str, *, state: Literal['submission_unknown','submitted','
         if remote_id is not None and record.remote_id is not None and remote_id!=record.remote_id:
             raise OpenRouterError('request_remote_identity_conflict',409)
         changed=OpenRouterReceipt.model_validate({**record.model_dump(),'state':state,'remote_id':remote_id if remote_id is not None else record.remote_id,
-            'actual_cost_usd':actual_cost_usd if actual_cost_usd is not None else record.actual_cost_usd,'error_code':error_code,'updated_at':now()})
+            'actual_cost_usd':actual_cost_usd if actual_cost_usd is not None else record.actual_cost_usd,'error_code':error_code,
+            'provider_http_status':provider_http_status if provider_http_status is not None else record.provider_http_status,'updated_at':now()})
         _save(changed)
         return changed
 
@@ -103,7 +112,8 @@ def recover() -> None:
     try:
         for record in _records():
             if record.state=='submitting':
-                try: update(record.id,state='submission_unknown',error_code='submission_unknown')
+                code=rejection_code(record.provider_http_status)
+                try: update(record.id,state='failed' if code is not None else 'submission_unknown',error_code=code or 'submission_unknown')
                 except OpenRouterError:
                     _HISTORY_UNAVAILABLE=True
                     _LOG.warning('An OpenRouter receipt could not be reconciled; no retry is authorized')
