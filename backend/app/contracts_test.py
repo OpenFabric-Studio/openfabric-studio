@@ -17,7 +17,7 @@ class ContractHttpTests(unittest.IsolatedAsyncioTestCase):
         self.patches = [patch.object(db, '_db', None), patch.object(db, 'DATA_DIR', root), patch.object(db, 'DB_PATH', root/'catalog.db'), patch.object(db, 'FILES_DIR', root/'files'), patch.object(db, 'VIDEOS_DIR', root/'videos'), patch.object(voice_build, 'VOICES_DIR', root/'voices')]
         for item in self.patches: item.start()
         self.connection = db.get_db()
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test')
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1')
 
     async def asyncTearDown(self):
         await self.client.aclose()

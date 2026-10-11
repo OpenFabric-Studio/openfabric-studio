@@ -701,7 +701,8 @@ class DataRootTests(unittest.TestCase):
                     os.environ["OPENFABRIC_CONFIG"] = previous
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
-                ["tracks", "voices", "videos", "audiobooks", "speechProfiles", "speechTrials", "models", "logs", "database"],
+                ["tracks", "voices", "videos", "videoProjects", "videoCharacters", "videoCharacterTraining", "videoCharacterTrainer", "providers",
+                 "audiobooks", "speechProfiles", "speechTrials", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:

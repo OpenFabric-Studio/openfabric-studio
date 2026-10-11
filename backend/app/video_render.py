@@ -1637,6 +1637,13 @@ def variant_file(
 
 
 async def recover() -> None:
+    try:
+        store.projects_root()
+    except (store.VideoProjectError, OSError):
+        _unverified.add("unsafe_storage_root")
+        logger.exception("Video project storage root is unavailable; retained for explicit recovery")
+        return
+    _unverified.discard("unsafe_storage_root")
     from .video_dialogue import recover as recover_dialogue
     await recover_dialogue()
     for project in store.list_projects():

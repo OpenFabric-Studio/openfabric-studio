@@ -798,6 +798,8 @@ def engine_binary() -> Path:
 
 def videos_root() -> Path:
     root = DATA_DIR / "videos"
+    if DATA_DIR.is_symlink() or root.is_symlink() or root.resolve().parent != DATA_DIR.resolve():
+        raise VideoJobError("not_found")
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -807,7 +809,7 @@ def _video_dir(video_id: str) -> Path:
         raise VideoJobError("not_found")
     root = videos_root().resolve()
     path = root / video_id
-    if not path.resolve().is_relative_to(root):
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise VideoJobError("not_found")
     return path
 
@@ -967,10 +969,10 @@ def _read_meta(path: Path) -> dict | None:
 
 def reconcile_interrupted(root: Path, live_id: str | None) -> None:
     """A restart kills the generator. A queued or running file is no longer running."""
-    if not root.is_dir():
+    if root.is_symlink() or not root.is_dir():
         return
     for path in root.iterdir():
-        if not path.is_dir() or not _ID.fullmatch(path.name):
+        if path.is_symlink() or not path.is_dir() or not _ID.fullmatch(path.name) or not path.resolve().is_relative_to(root.resolve()):
             continue
         if live_id and path.name == live_id:
             continue
@@ -996,7 +998,11 @@ def list_videos() -> list[dict]:
     for path in root.iterdir():
         if not path.is_dir() or not _ID.fullmatch(path.name):
             continue
-        meta = _read_meta(path)
+        try:
+            directory = _video_dir(path.name)
+        except VideoJobError:
+            continue
+        meta = _read_meta(directory)
         if meta is None:
             continue
         found.append(public_view(meta))
@@ -1849,7 +1855,14 @@ async def recover() -> None:
     """Startup recovery owns process reconciliation; GET requests never write."""
     from .video_render import recover as recover_projects
 
-    root = videos_root()
+    try:
+        root = videos_root()
+    except (VideoJobError, OSError):
+        _unverified.add("unsafe_storage_root")
+        logger.exception("Video storage root is unavailable; retained for explicit recovery")
+        await recover_projects()
+        return
+    _unverified.discard("unsafe_storage_root")
     for path in root.iterdir():
         if not _ID.fullmatch(path.name) or not path.is_dir():
             continue

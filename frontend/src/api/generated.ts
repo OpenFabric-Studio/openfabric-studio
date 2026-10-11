@@ -461,6 +461,66 @@ export type CharacterDatasetReview = {
   "settings"?: CharacterTrainingSettings
 }
 
+export type CharacterSwapJob = {
+  "id": string
+  "revision"?: number
+  "name": string
+  "status"?: "prepared" | "submitting" | "submission_unknown" | "queued" | "running" | "ready" | "failed" | "stopped"
+  "stage"?: "frame" | "video"
+  "quote"?: (OpenRouterQuote | null)
+  "resume_available"?: boolean
+  "requote_available"?: boolean
+  "frame_receipt_id"?: (string | null)
+  "video_receipt_id"?: (string | null)
+  "phase"?: string
+  "error_code"?: string
+  "created_at": string
+  "updated_at": string
+  "start_sec": number
+  "seconds": number
+  "source_name": string
+  "image_name": string
+  "source_duration_sec": number
+  "width": number
+  "height": number
+  "frames": number
+  "has_audio": boolean
+  "estimated_usd"?: (number | null)
+  "quote_expires_at"?: string
+  "seed": number
+  "source_url": string
+  "clip_url": string
+  "image_url": string
+  "output_url"?: string
+  "output_sha256"?: string
+  "remote_id"?: (string | null)
+  "provider"?: "openrouter" | "fal"
+  "model_id"?: "bytedance-seed/seedream-4.5" | "runway/aleph-2" | "fal-ai/wan/v2.2-14b/animate/replace"
+  "price_checked_at"?: string
+  "source_frame_url"?: string
+  "edited_frame_url"?: string
+  "filmstrip_url"?: string
+  "prompt"?: string
+  "review_fingerprint"?: string
+  "preparation_reviewed"?: boolean
+}
+
+export type CharacterSwapReadiness = {
+  "configured": boolean
+  "enabled"?: boolean
+  "credential_configured"?: boolean
+  "clip_host_configured"?: boolean
+  "ffmpeg_ready": boolean
+}
+
+export type CharacterSwapRevisionRequest = {
+  "revision": number
+}
+
+export type CharacterSwapsResponse = {
+  "jobs": Array<CharacterSwapJob>
+}
+
 export type CharacterTrainingProvenance = {
   "engine_commit": string
   "base_revision": string
@@ -499,6 +559,18 @@ export type ChatterboxRequest = {
   "model"?: "original" | "multilingual"
   "audio_prompt_path"?: (string | null)
   "language_id"?: string
+}
+
+export type ClipHostSettingsRequest = {
+  "enabled"?: boolean
+}
+
+export type ClipHostStatus = {
+  "enabled"?: boolean
+  "configured"?: boolean
+  "binary_available"?: boolean
+  "tunnel_active"?: boolean
+  "active_clips"?: number
 }
 
 export type CloudMusicJob = {
@@ -700,6 +772,15 @@ export type DeleteYueJobResponse = {
   "deleted": boolean
 }
 
+export type DeletedCharacterSwapResponse = {
+  "deleted": string
+}
+
+export type DeletedVideoSceneCutResponse = {
+  "source_id": string
+  "deleted": string
+}
+
 export type DialogueReelSelection = {
   "passage_id": string
   "clip_start_ms"?: number
@@ -893,7 +974,7 @@ export type KokoroRequest = {
 
 export type LibraryFolderInfo = {
   "path": string
-  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database"
+  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers"
 }
 
 export type LibraryPickResponse = {
@@ -1169,7 +1250,7 @@ export type OpenRouterKeyRequest = {
 export type OpenRouterModel = {
   "id": string
   "name": string
-  "kind": "video" | "speech" | "music"
+  "kind": "video" | "speech" | "music" | "image"
   "fingerprint": string
   "prices": Array<OpenRouterPrice>
   "supported_durations"?: Array<number>
@@ -1179,6 +1260,8 @@ export type OpenRouterModel = {
   "supported_frame_images"?: Array<"first_frame" | "last_frame">
   "supports_generate_audio"?: boolean
   "supports_seed"?: boolean
+  "supports_image_editing"?: boolean
+  "supports_video_editing"?: boolean
   "supports_voice_cloning"?: boolean
   "supported_voices"?: Array<string>
   "input_character_limit"?: number
@@ -1197,23 +1280,25 @@ export type OpenRouterPrice = {
   "source": "live_catalog" | "published_model_page"
   "resolution"?: (string | null)
   "generate_audio"?: (boolean | null)
+  "minimum_usd"?: number
 }
 
 export type OpenRouterQuote = {
   "id": string
-  "kind": "video" | "speech" | "music"
+  "kind": "video" | "speech" | "music" | "image"
   "model_id": string
   "model_fingerprint": string
   "request_fingerprint": string
   "estimated_usd": number
   "expires_at": number
   "ceiling_is_estimate"?: true
-  "transfers": Array<"prompt" | "text" | "reference_image" | "reference_audio">
+  "transfers": Array<"prompt" | "text" | "reference_image" | "reference_audio" | "source_frame" | "reference_video">
   "warnings"?: Array<string>
 }
 
 export type OpenRouterQuoteRequest = {
-  "kind": "video" | "speech" | "music"
+  "kind": "video" | "speech" | "music" | "image"
+  "workflow"?: "generate" | "image_edit" | "video_edit"
   "model_id": string
   "text"?: string
   "duration_seconds"?: (number | null)
@@ -1226,12 +1311,14 @@ export type OpenRouterQuoteRequest = {
   "reference_bytes"?: number
   "reference_sha256"?: (string | null)
   "reference_transcript"?: (string | null)
+  "source_bytes"?: number
+  "source_sha256"?: (string | null)
 }
 
 export type OpenRouterReceipt = {
   "id": string
   "owner_id": string
-  "kind": "video" | "speech" | "music"
+  "kind": "video" | "speech" | "music" | "image"
   "model_id": string
   "model_fingerprint": string
   "request_fingerprint": string
@@ -1241,6 +1328,7 @@ export type OpenRouterReceipt = {
   "remote_id"?: (string | null)
   "actual_cost_usd"?: (number | null)
   "error_code"?: (string | null)
+  "provider_http_status"?: (number | null)
   "created_at": string
   "updated_at": string
 }
@@ -1533,6 +1621,11 @@ export type RefreshDialogueCueRequest = {
   "source": CreateDialogueReelRequest
 }
 
+export type RenameCharacterSwapRequest = {
+  "revision": number
+  "name": string
+}
+
 export type RetainedAudioInfo = {
   "source": RetainedAudioSource
   "duration_ms": number
@@ -1559,6 +1652,11 @@ export type ReviewCharacterAdapterRequest = {
   "comparison_id": string
   "notes": string
   "reviewed": boolean
+}
+
+export type ReviewCharacterSwapRequest = {
+  "revision": number
+  "review_fingerprint": string
 }
 
 export type RvcRequest = {
@@ -1812,6 +1910,13 @@ export type StemsStatusResponse = {
 export type StopEngineRequest = {
   "engine_id": "ace_step" | "yue2"
   "instance_id": string
+}
+
+export type SubmitCharacterSwapRequest = {
+  "revision": number
+  "quote_id": string
+  "transfers_confirmed"?: boolean
+  "consent_confirmed"?: boolean
 }
 
 export type SubtitleSourceCue = {
@@ -2251,6 +2356,75 @@ export type VideoRenderRequest = {
 
 export type VideoRevisionRequest = {
   "revision": number
+}
+
+export type VideoSceneCut = {
+  "id": string
+  "source_id": string
+  "name": string
+  "start_sec": number
+  "end_sec": number
+  "seconds": number
+  "status"?: "queued" | "cutting" | "ready" | "failed" | "cancelled"
+  "error_code"?: string
+  "created_at": string
+  "updated_at": string
+  "width": number
+  "height": number
+  "has_audio": boolean
+  "output_url"?: string
+  "output_sha256"?: string
+  "bytes"?: number
+}
+
+export type VideoSceneCutRequest = {
+  "name": string
+  "start_sec": number
+  "end_sec": number
+}
+
+export type VideoSceneCutsResponse = {
+  "cuts": Array<VideoSceneCut>
+}
+
+export type VideoScenePreview = {
+  "id": string
+  "source_id": string
+  "start_sec": number
+  "duration_sec": number
+  "width": number
+  "height": number
+  "url": string
+}
+
+export type VideoScenePreviewRequest = {
+  "start_sec": number
+}
+
+export type VideoSceneReadiness = {
+  "ffmpeg_ready": boolean
+  "native_picker_available": boolean
+  "max_upload_bytes"?: 2147483648
+  "max_native_bytes"?: 8589934592
+  "max_cut_seconds"?: 600
+  "preview_seconds"?: 15
+}
+
+export type VideoSceneSource = {
+  "id": string
+  "name": string
+  "origin": "native" | "upload"
+  "duration_sec": number
+  "width": number
+  "height": number
+  "fps": number
+  "has_audio": boolean
+  "bytes": number
+  "created_at": string
+}
+
+export type VideoSceneSourcesResponse = {
+  "sources": Array<VideoSceneSource>
 }
 
 export type VideoShot = {
@@ -4792,7 +4966,8 @@ const schemas = {
         "enum": [
           "video",
           "speech",
-          "music"
+          "music",
+          "image"
         ],
         "title": "Kind",
         "type": "string"
@@ -4877,6 +5052,20 @@ const schemas = {
         ],
         "default": null,
         "title": "Error Code"
+      },
+      "provider_http_status": {
+        "anyOf": [
+          {
+            "maximum": 599,
+            "minimum": 100,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Provider Http Status"
       },
       "created_at": {
         "title": "Created At",
@@ -6846,7 +7035,8 @@ const schemas = {
         "enum": [
           "video",
           "speech",
-          "music"
+          "music",
+          "image"
         ],
         "title": "Kind",
         "type": "string"
@@ -6889,7 +7079,9 @@ const schemas = {
             "prompt",
             "text",
             "reference_image",
-            "reference_audio"
+            "reference_audio",
+            "source_frame",
+            "reference_video"
           ],
           "type": "string"
         },
@@ -10554,7 +10746,12 @@ const schemas = {
           "speechTrials",
           "models",
           "logs",
-          "database"
+          "database",
+          "videoProjects",
+          "videoCharacters",
+          "videoCharacterTraining",
+          "videoCharacterTrainer",
+          "providers"
         ],
         "title": "Key",
         "type": "string"
@@ -18108,7 +18305,8 @@ const schemas = {
         "enum": [
           "video",
           "speech",
-          "music"
+          "music",
+          "image"
         ],
         "title": "Kind",
         "type": "string"
@@ -18179,6 +18377,16 @@ const schemas = {
       "supports_seed": {
         "default": false,
         "title": "Supports Seed",
+        "type": "boolean"
+      },
+      "supports_image_editing": {
+        "default": false,
+        "title": "Supports Image Editing",
+        "type": "boolean"
+      },
+      "supports_video_editing": {
+        "default": false,
+        "title": "Supports Video Editing",
         "type": "boolean"
       },
       "supports_voice_cloning": {
@@ -18271,6 +18479,13 @@ const schemas = {
         ],
         "default": null,
         "title": "Generate Audio"
+      },
+      "minimum_usd": {
+        "default": 0,
+        "maximum": 1000000,
+        "minimum": 0,
+        "title": "Minimum Usd",
+        "type": "number"
       }
     },
     "required": [
@@ -18322,9 +18537,20 @@ const schemas = {
         "enum": [
           "video",
           "speech",
-          "music"
+          "music",
+          "image"
         ],
         "title": "Kind",
+        "type": "string"
+      },
+      "workflow": {
+        "default": "generate",
+        "enum": [
+          "generate",
+          "image_edit",
+          "video_edit"
+        ],
+        "title": "Workflow",
         "type": "string"
       },
       "model_id": {
@@ -18456,6 +18682,26 @@ const schemas = {
         ],
         "default": null,
         "title": "Reference Transcript"
+      },
+      "source_bytes": {
+        "default": 0,
+        "maximum": 20971520,
+        "minimum": 0,
+        "title": "Source Bytes",
+        "type": "integer"
+      },
+      "source_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Source Sha256"
       }
     },
     "required": [
@@ -19932,6 +20178,907 @@ const schemas = {
       "backend_connection"
     ],
     "title": "SupportReport",
+    "type": "object"
+  },
+  "CharacterSwapJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "revision": {
+        "default": 1,
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "status": {
+        "default": "prepared",
+        "enum": [
+          "prepared",
+          "submitting",
+          "submission_unknown",
+          "queued",
+          "running",
+          "ready",
+          "failed",
+          "stopped"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "stage": {
+        "default": "frame",
+        "enum": [
+          "frame",
+          "video"
+        ],
+        "title": "Stage",
+        "type": "string"
+      },
+      "quote": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/OpenRouterQuote"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null
+      },
+      "resume_available": {
+        "default": false,
+        "title": "Resume Available",
+        "type": "boolean"
+      },
+      "requote_available": {
+        "default": false,
+        "title": "Requote Available",
+        "type": "boolean"
+      },
+      "frame_receipt_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Frame Receipt Id"
+      },
+      "video_receipt_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Video Receipt Id"
+      },
+      "phase": {
+        "default": "prepared",
+        "maxLength": 64,
+        "title": "Phase",
+        "type": "string"
+      },
+      "error_code": {
+        "default": "",
+        "maxLength": 80,
+        "title": "Error Code",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      },
+      "start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "title": "Start Sec",
+        "type": "number"
+      },
+      "seconds": {
+        "maximum": 8,
+        "minimum": 2,
+        "title": "Seconds",
+        "type": "integer"
+      },
+      "source_name": {
+        "maxLength": 255,
+        "title": "Source Name",
+        "type": "string"
+      },
+      "image_name": {
+        "maxLength": 255,
+        "title": "Image Name",
+        "type": "string"
+      },
+      "source_duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "title": "Source Duration Sec",
+        "type": "number"
+      },
+      "width": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Height",
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 192,
+        "minimum": 48,
+        "title": "Frames",
+        "type": "integer"
+      },
+      "has_audio": {
+        "title": "Has Audio",
+        "type": "boolean"
+      },
+      "estimated_usd": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Estimated Usd"
+      },
+      "quote_expires_at": {
+        "default": "",
+        "title": "Quote Expires At",
+        "type": "string"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "title": "Seed",
+        "type": "integer"
+      },
+      "source_url": {
+        "pattern": "^/api/videos/character-swaps/[0-9a-f]{32}/source$",
+        "title": "Source Url",
+        "type": "string"
+      },
+      "clip_url": {
+        "pattern": "^/api/videos/character-swaps/[0-9a-f]{32}/clip$",
+        "title": "Clip Url",
+        "type": "string"
+      },
+      "image_url": {
+        "pattern": "^/api/videos/character-swaps/[0-9a-f]{32}/image$",
+        "title": "Image Url",
+        "type": "string"
+      },
+      "output_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/output)?$",
+        "title": "Output Url",
+        "type": "string"
+      },
+      "output_sha256": {
+        "default": "",
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "title": "Output Sha256",
+        "type": "string"
+      },
+      "remote_id": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_-]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Remote Id"
+      },
+      "provider": {
+        "default": "openrouter",
+        "enum": [
+          "openrouter",
+          "fal"
+        ],
+        "title": "Provider",
+        "type": "string"
+      },
+      "model_id": {
+        "default": "bytedance-seed/seedream-4.5",
+        "enum": [
+          "bytedance-seed/seedream-4.5",
+          "runway/aleph-2",
+          "fal-ai/wan/v2.2-14b/animate/replace"
+        ],
+        "title": "Model Id",
+        "type": "string"
+      },
+      "price_checked_at": {
+        "default": "",
+        "maxLength": 32,
+        "title": "Price Checked At",
+        "type": "string"
+      },
+      "source_frame_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/frame-original)?$",
+        "title": "Source Frame Url",
+        "type": "string"
+      },
+      "edited_frame_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/frame-edited)?$",
+        "title": "Edited Frame Url",
+        "type": "string"
+      },
+      "filmstrip_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/filmstrip)?$",
+        "title": "Filmstrip Url",
+        "type": "string"
+      },
+      "prompt": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Prompt",
+        "type": "string"
+      },
+      "review_fingerprint": {
+        "default": "",
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "title": "Review Fingerprint",
+        "type": "string"
+      },
+      "preparation_reviewed": {
+        "default": false,
+        "title": "Preparation Reviewed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "created_at",
+      "updated_at",
+      "start_sec",
+      "seconds",
+      "source_name",
+      "image_name",
+      "source_duration_sec",
+      "width",
+      "height",
+      "frames",
+      "has_audio",
+      "seed",
+      "source_url",
+      "clip_url",
+      "image_url"
+    ],
+    "title": "CharacterSwapJob",
+    "type": "object"
+  },
+  "CharacterSwapsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/CharacterSwapJob"
+        },
+        "title": "Jobs",
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "title": "CharacterSwapsResponse",
+    "type": "object"
+  },
+  "CharacterSwapReadiness": {
+    "additionalProperties": false,
+    "properties": {
+      "configured": {
+        "title": "Configured",
+        "type": "boolean"
+      },
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "credential_configured": {
+        "default": false,
+        "title": "Credential Configured",
+        "type": "boolean"
+      },
+      "clip_host_configured": {
+        "default": false,
+        "title": "Clip Host Configured",
+        "type": "boolean"
+      },
+      "ffmpeg_ready": {
+        "title": "Ffmpeg Ready",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "configured",
+      "ffmpeg_ready"
+    ],
+    "title": "CharacterSwapReadiness",
+    "type": "object"
+  },
+  "SubmitCharacterSwapRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "quote_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Quote Id",
+        "type": "string"
+      },
+      "transfers_confirmed": {
+        "default": false,
+        "title": "Transfers Confirmed",
+        "type": "boolean"
+      },
+      "consent_confirmed": {
+        "default": false,
+        "title": "Consent Confirmed",
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision",
+      "quote_id"
+    ],
+    "title": "SubmitCharacterSwapRequest",
+    "type": "object"
+  },
+  "CharacterSwapRevisionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "title": "CharacterSwapRevisionRequest",
+    "type": "object"
+  },
+  "ReviewCharacterSwapRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "review_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Review Fingerprint",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "review_fingerprint"
+    ],
+    "title": "ReviewCharacterSwapRequest",
+    "type": "object"
+  },
+  "RenameCharacterSwapRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "name"
+    ],
+    "title": "RenameCharacterSwapRequest",
+    "type": "object"
+  },
+  "DeletedCharacterSwapResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "deleted": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Deleted",
+        "type": "string"
+      }
+    },
+    "required": [
+      "deleted"
+    ],
+    "title": "DeletedCharacterSwapResponse",
+    "type": "object"
+  },
+  "VideoSceneReadiness": {
+    "additionalProperties": false,
+    "properties": {
+      "ffmpeg_ready": {
+        "title": "Ffmpeg Ready",
+        "type": "boolean"
+      },
+      "native_picker_available": {
+        "title": "Native Picker Available",
+        "type": "boolean"
+      },
+      "max_upload_bytes": {
+        "const": 2147483648,
+        "default": 2147483648,
+        "title": "Max Upload Bytes",
+        "type": "integer"
+      },
+      "max_native_bytes": {
+        "const": 8589934592,
+        "default": 8589934592,
+        "title": "Max Native Bytes",
+        "type": "integer"
+      },
+      "max_cut_seconds": {
+        "const": 600,
+        "default": 600,
+        "title": "Max Cut Seconds",
+        "type": "integer"
+      },
+      "preview_seconds": {
+        "const": 15,
+        "default": 15,
+        "title": "Preview Seconds",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "ffmpeg_ready",
+      "native_picker_available"
+    ],
+    "title": "VideoSceneReadiness",
+    "type": "object"
+  },
+  "VideoSceneSource": {
+    "additionalProperties": false,
+    "description": "Visible dimensions include sample aspect ratio and quarter-turn rotation.",
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 255,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "origin": {
+        "enum": [
+          "native",
+          "upload"
+        ],
+        "title": "Origin",
+        "type": "string"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "title": "Duration Sec",
+        "type": "number"
+      },
+      "width": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Height",
+        "type": "integer"
+      },
+      "fps": {
+        "maximum": 120,
+        "minimum": 1,
+        "title": "Fps",
+        "type": "number"
+      },
+      "has_audio": {
+        "title": "Has Audio",
+        "type": "boolean"
+      },
+      "bytes": {
+        "exclusiveMinimum": 0,
+        "maximum": 8589934592,
+        "title": "Bytes",
+        "type": "integer"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "origin",
+      "duration_sec",
+      "width",
+      "height",
+      "fps",
+      "has_audio",
+      "bytes",
+      "created_at"
+    ],
+    "title": "VideoSceneSource",
+    "type": "object"
+  },
+  "VideoSceneSourcesResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/VideoSceneSource"
+        },
+        "title": "Sources",
+        "type": "array"
+      }
+    },
+    "required": [
+      "sources"
+    ],
+    "title": "VideoSceneSourcesResponse",
+    "type": "object"
+  },
+  "VideoScenePreviewRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "title": "Start Sec",
+        "type": "number"
+      }
+    },
+    "required": [
+      "start_sec"
+    ],
+    "title": "VideoScenePreviewRequest",
+    "type": "object"
+  },
+  "VideoScenePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "title": "Start Sec",
+        "type": "number"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 15,
+        "title": "Duration Sec",
+        "type": "number"
+      },
+      "width": {
+        "maximum": 960,
+        "minimum": 2,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "maximum": 960,
+        "minimum": 2,
+        "title": "Height",
+        "type": "integer"
+      },
+      "url": {
+        "pattern": "^/api/videos/scenes/sources/[0-9a-f]{32}/previews/[0-9a-f]{32}$",
+        "title": "Url",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "source_id",
+      "start_sec",
+      "duration_sec",
+      "width",
+      "height",
+      "url"
+    ],
+    "title": "VideoScenePreview",
+    "type": "object"
+  },
+  "VideoSceneCutRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "title": "Start Sec",
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "title": "End Sec",
+        "type": "number"
+      }
+    },
+    "required": [
+      "name",
+      "start_sec",
+      "end_sec"
+    ],
+    "title": "VideoSceneCutRequest",
+    "type": "object"
+  },
+  "VideoSceneCut": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Id",
+        "type": "string"
+      },
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "title": "Name",
+        "type": "string"
+      },
+      "start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "title": "Start Sec",
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "title": "End Sec",
+        "type": "number"
+      },
+      "seconds": {
+        "exclusiveMinimum": 0,
+        "maximum": 600,
+        "title": "Seconds",
+        "type": "number"
+      },
+      "status": {
+        "default": "queued",
+        "enum": [
+          "queued",
+          "cutting",
+          "ready",
+          "failed",
+          "cancelled"
+        ],
+        "title": "Status",
+        "type": "string"
+      },
+      "error_code": {
+        "default": "",
+        "maxLength": 80,
+        "title": "Error Code",
+        "type": "string"
+      },
+      "created_at": {
+        "title": "Created At",
+        "type": "string"
+      },
+      "updated_at": {
+        "title": "Updated At",
+        "type": "string"
+      },
+      "width": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Width",
+        "type": "integer"
+      },
+      "height": {
+        "maximum": 4096,
+        "minimum": 2,
+        "title": "Height",
+        "type": "integer"
+      },
+      "has_audio": {
+        "title": "Has Audio",
+        "type": "boolean"
+      },
+      "output_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/scenes/sources/[0-9a-f]{32}/cuts/[0-9a-f]{32}/media)?$",
+        "title": "Output Url",
+        "type": "string"
+      },
+      "output_sha256": {
+        "default": "",
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "title": "Output Sha256",
+        "type": "string"
+      },
+      "bytes": {
+        "default": 0,
+        "maximum": 2147483648,
+        "minimum": 0,
+        "title": "Bytes",
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "source_id",
+      "name",
+      "start_sec",
+      "end_sec",
+      "seconds",
+      "created_at",
+      "updated_at",
+      "width",
+      "height",
+      "has_audio"
+    ],
+    "title": "VideoSceneCut",
+    "type": "object"
+  },
+  "VideoSceneCutsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "cuts": {
+        "items": {
+          "$ref": "#/$defs/VideoSceneCut"
+        },
+        "title": "Cuts",
+        "type": "array"
+      }
+    },
+    "required": [
+      "cuts"
+    ],
+    "title": "VideoSceneCutsResponse",
+    "type": "object"
+  },
+  "DeletedVideoSceneCutResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "source_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Source Id",
+        "type": "string"
+      },
+      "deleted": {
+        "pattern": "^[0-9a-f]{32}$",
+        "title": "Deleted",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_id",
+      "deleted"
+    ],
+    "title": "DeletedVideoSceneCutResponse",
+    "type": "object"
+  },
+  "ClipHostSettingsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      }
+    },
+    "title": "ClipHostSettingsRequest",
+    "type": "object"
+  },
+  "ClipHostStatus": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "default": false,
+        "title": "Enabled",
+        "type": "boolean"
+      },
+      "configured": {
+        "default": false,
+        "title": "Configured",
+        "type": "boolean"
+      },
+      "binary_available": {
+        "default": false,
+        "title": "Binary Available",
+        "type": "boolean"
+      },
+      "tunnel_active": {
+        "default": false,
+        "title": "Tunnel Active",
+        "type": "boolean"
+      },
+      "active_clips": {
+        "default": 0,
+        "minimum": 0,
+        "title": "Active Clips",
+        "type": "integer"
+      }
+    },
+    "title": "ClipHostStatus",
     "type": "object"
   }
 } as const
@@ -22025,5 +23172,157 @@ function isSupportReport(value: unknown): value is SupportReport {
 }
 export function parseSupportReport(value: unknown): SupportReport {
   if (!isSupportReport(value)) throw new TypeError("Invalid SupportReport response")
+  return value
+}
+
+function isCharacterSwapJob(value: unknown): value is CharacterSwapJob {
+  return decodeSchema(schemas.CharacterSwapJob, value, schemas)
+}
+export function parseCharacterSwapJob(value: unknown): CharacterSwapJob {
+  if (!isCharacterSwapJob(value)) throw new TypeError("Invalid CharacterSwapJob response")
+  return value
+}
+
+function isCharacterSwapsResponse(value: unknown): value is CharacterSwapsResponse {
+  return decodeSchema(schemas.CharacterSwapsResponse, value, schemas)
+}
+export function parseCharacterSwapsResponse(value: unknown): CharacterSwapsResponse {
+  if (!isCharacterSwapsResponse(value)) throw new TypeError("Invalid CharacterSwapsResponse response")
+  return value
+}
+
+function isCharacterSwapReadiness(value: unknown): value is CharacterSwapReadiness {
+  return decodeSchema(schemas.CharacterSwapReadiness, value, schemas)
+}
+export function parseCharacterSwapReadiness(value: unknown): CharacterSwapReadiness {
+  if (!isCharacterSwapReadiness(value)) throw new TypeError("Invalid CharacterSwapReadiness response")
+  return value
+}
+
+function isSubmitCharacterSwapRequest(value: unknown): value is SubmitCharacterSwapRequest {
+  return decodeSchema(schemas.SubmitCharacterSwapRequest, value, schemas)
+}
+export function parseSubmitCharacterSwapRequest(value: unknown): SubmitCharacterSwapRequest {
+  if (!isSubmitCharacterSwapRequest(value)) throw new TypeError("Invalid SubmitCharacterSwapRequest response")
+  return value
+}
+
+function isCharacterSwapRevisionRequest(value: unknown): value is CharacterSwapRevisionRequest {
+  return decodeSchema(schemas.CharacterSwapRevisionRequest, value, schemas)
+}
+export function parseCharacterSwapRevisionRequest(value: unknown): CharacterSwapRevisionRequest {
+  if (!isCharacterSwapRevisionRequest(value)) throw new TypeError("Invalid CharacterSwapRevisionRequest response")
+  return value
+}
+
+function isReviewCharacterSwapRequest(value: unknown): value is ReviewCharacterSwapRequest {
+  return decodeSchema(schemas.ReviewCharacterSwapRequest, value, schemas)
+}
+export function parseReviewCharacterSwapRequest(value: unknown): ReviewCharacterSwapRequest {
+  if (!isReviewCharacterSwapRequest(value)) throw new TypeError("Invalid ReviewCharacterSwapRequest response")
+  return value
+}
+
+function isRenameCharacterSwapRequest(value: unknown): value is RenameCharacterSwapRequest {
+  return decodeSchema(schemas.RenameCharacterSwapRequest, value, schemas)
+}
+export function parseRenameCharacterSwapRequest(value: unknown): RenameCharacterSwapRequest {
+  if (!isRenameCharacterSwapRequest(value)) throw new TypeError("Invalid RenameCharacterSwapRequest response")
+  return value
+}
+
+function isDeletedCharacterSwapResponse(value: unknown): value is DeletedCharacterSwapResponse {
+  return decodeSchema(schemas.DeletedCharacterSwapResponse, value, schemas)
+}
+export function parseDeletedCharacterSwapResponse(value: unknown): DeletedCharacterSwapResponse {
+  if (!isDeletedCharacterSwapResponse(value)) throw new TypeError("Invalid DeletedCharacterSwapResponse response")
+  return value
+}
+
+function isVideoSceneReadiness(value: unknown): value is VideoSceneReadiness {
+  return decodeSchema(schemas.VideoSceneReadiness, value, schemas)
+}
+export function parseVideoSceneReadiness(value: unknown): VideoSceneReadiness {
+  if (!isVideoSceneReadiness(value)) throw new TypeError("Invalid VideoSceneReadiness response")
+  return value
+}
+
+function isVideoSceneSource(value: unknown): value is VideoSceneSource {
+  return decodeSchema(schemas.VideoSceneSource, value, schemas)
+}
+export function parseVideoSceneSource(value: unknown): VideoSceneSource {
+  if (!isVideoSceneSource(value)) throw new TypeError("Invalid VideoSceneSource response")
+  return value
+}
+
+function isVideoSceneSourcesResponse(value: unknown): value is VideoSceneSourcesResponse {
+  return decodeSchema(schemas.VideoSceneSourcesResponse, value, schemas)
+}
+export function parseVideoSceneSourcesResponse(value: unknown): VideoSceneSourcesResponse {
+  if (!isVideoSceneSourcesResponse(value)) throw new TypeError("Invalid VideoSceneSourcesResponse response")
+  return value
+}
+
+function isVideoScenePreviewRequest(value: unknown): value is VideoScenePreviewRequest {
+  return decodeSchema(schemas.VideoScenePreviewRequest, value, schemas)
+}
+export function parseVideoScenePreviewRequest(value: unknown): VideoScenePreviewRequest {
+  if (!isVideoScenePreviewRequest(value)) throw new TypeError("Invalid VideoScenePreviewRequest response")
+  return value
+}
+
+function isVideoScenePreview(value: unknown): value is VideoScenePreview {
+  return decodeSchema(schemas.VideoScenePreview, value, schemas)
+}
+export function parseVideoScenePreview(value: unknown): VideoScenePreview {
+  if (!isVideoScenePreview(value)) throw new TypeError("Invalid VideoScenePreview response")
+  return value
+}
+
+function isVideoSceneCutRequest(value: unknown): value is VideoSceneCutRequest {
+  return decodeSchema(schemas.VideoSceneCutRequest, value, schemas)
+}
+export function parseVideoSceneCutRequest(value: unknown): VideoSceneCutRequest {
+  if (!isVideoSceneCutRequest(value)) throw new TypeError("Invalid VideoSceneCutRequest response")
+  return value
+}
+
+function isVideoSceneCut(value: unknown): value is VideoSceneCut {
+  return decodeSchema(schemas.VideoSceneCut, value, schemas)
+}
+export function parseVideoSceneCut(value: unknown): VideoSceneCut {
+  if (!isVideoSceneCut(value)) throw new TypeError("Invalid VideoSceneCut response")
+  return value
+}
+
+function isVideoSceneCutsResponse(value: unknown): value is VideoSceneCutsResponse {
+  return decodeSchema(schemas.VideoSceneCutsResponse, value, schemas)
+}
+export function parseVideoSceneCutsResponse(value: unknown): VideoSceneCutsResponse {
+  if (!isVideoSceneCutsResponse(value)) throw new TypeError("Invalid VideoSceneCutsResponse response")
+  return value
+}
+
+function isDeletedVideoSceneCutResponse(value: unknown): value is DeletedVideoSceneCutResponse {
+  return decodeSchema(schemas.DeletedVideoSceneCutResponse, value, schemas)
+}
+export function parseDeletedVideoSceneCutResponse(value: unknown): DeletedVideoSceneCutResponse {
+  if (!isDeletedVideoSceneCutResponse(value)) throw new TypeError("Invalid DeletedVideoSceneCutResponse response")
+  return value
+}
+
+function isClipHostSettingsRequest(value: unknown): value is ClipHostSettingsRequest {
+  return decodeSchema(schemas.ClipHostSettingsRequest, value, schemas)
+}
+export function parseClipHostSettingsRequest(value: unknown): ClipHostSettingsRequest {
+  if (!isClipHostSettingsRequest(value)) throw new TypeError("Invalid ClipHostSettingsRequest response")
+  return value
+}
+
+function isClipHostStatus(value: unknown): value is ClipHostStatus {
+  return decodeSchema(schemas.ClipHostStatus, value, schemas)
+}
+export function parseClipHostStatus(value: unknown): ClipHostStatus {
+  if (!isClipHostStatus(value)) throw new TypeError("Invalid ClipHostStatus response")
   return value
 }

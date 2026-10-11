@@ -28,6 +28,8 @@ from .api.routes_stem_exports import router as stem_exports_router
 from .api.routes_references import router as references_router
 from .api.routes_tracks import router as tracks_router
 from .api.routes_videos import router as videos_router
+from .api.routes_character_swaps import router as character_swaps_router
+from .api.routes_video_scenes import router as video_scenes_router
 from .api.routes_voices import router as voices_router
 from .api.routes_voice_trials import router as voice_trials_router
 from .api.routes_voice_profiles import router as voice_profiles_router
@@ -41,14 +43,16 @@ from .api.routes_modules import router as modules_router
 from .api.routes_optional_engines import router as optional_engines_router
 from .api.routes_yue2_upload import router as yue2_upload_router
 from .api.routes_openrouter import router as openrouter_router
+from .api.routes_clip_host import router as clip_host_router
 from .api.routes_cloud_music import router as cloud_music_router
 from .desktop_runtime import router as desktop_runtime_router
+from .module_security import LocalAccessMiddleware
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
 from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
-from . import cloud_music, openrouter_client, speaker_review, reading_media
+from . import cloud_music, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes, clip_hosting
 
 
 @asynccontextmanager
@@ -68,6 +72,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yue_jobs.recover()
         await reference_imports.start()
         await video_jobs.recover()
+        await clip_hosting.recover()
+        await character_swaps.recover()
+        await video_scenes.recover()
         await optional_engines.recover()
         await video_character_training.recover()
         await video_character_comparison.recover()
@@ -94,15 +101,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             try:
                 try:
                     outcomes = await asyncio.gather(
-                        cloud_music.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(),
+                        cloud_music.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(), character_swaps.shutdown(), video_scenes.shutdown(),
                         stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
                         audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), speaker_review.shutdown(), reading_media.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
                         optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
                     )
                 finally:
-                    # A narration worker can quarantine an encoder while its
-                    # sibling repair registry is already shutting down.
-                    await await_cleanup(audiobook_publish.shutdown())
+                    try:
+                        await await_cleanup(clip_hosting.shutdown())
+                    finally:
+                        # A narration worker can quarantine an encoder while its
+                        # sibling repair registry is already shutting down.
+                        await await_cleanup(audiobook_publish.shutdown())
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
                         logging.getLogger(__name__).error("Job cleanup failed", exc_info=outcome)
@@ -114,6 +124,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="OpenFabric Studio", lifespan=lifespan)
+app.add_middleware(LocalAccessMiddleware)
 
 
 @app.exception_handler(RequestValidationError)
@@ -126,6 +137,7 @@ async def invalid_request(_request: Request, exc: RequestValidationError) -> JSO
 app.include_router(orchestrator_router)
 app.include_router(desktop_runtime_router)
 app.include_router(openrouter_router)
+app.include_router(clip_host_router)
 app.include_router(cloud_music_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)
@@ -152,6 +164,8 @@ app.include_router(reading_media_router)
 app.include_router(support_router)
 app.include_router(modules_router)
 app.include_router(optional_engines_router)
+app.include_router(character_swaps_router)
+app.include_router(video_scenes_router)
 app.include_router(videos_router)
 # Registered before proxy_router's catch-all so this exact path wins.
 app.include_router(yue2_upload_router)

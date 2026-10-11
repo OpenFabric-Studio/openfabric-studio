@@ -9,7 +9,7 @@ import { getSharedAudioCtx } from '../../composables/audioPlayback'
 import { decodeStem, defaultMasterSettings, defaultChannelSettings } from '../../audio/mixerEngine'
 import type { ChannelSettings } from '../../audio/mixerEngine'
 import { clipDuration, stretchFactor } from '../../audio/timelineTypes'
-import type { Clip } from '../../audio/timelineTypes'
+import type { Clip, TimelineProject } from '../../audio/timelineTypes'
 import { encodeWav } from '../../audio/wavEncoder'
 import { createPollingLoop } from '../../composables/polling'
 import { createAudioExport, getAudioExport } from '../../api/audioExports'
@@ -464,13 +464,14 @@ async function doExport(): Promise<void> {
   const token = ++exportGeneration
   const currentLoad = loadToken
   const project = store.project
+  const session = store.session
   const name = store.projectName
   const projectId = store.projectId
   const format = exportFormat.value
   const duration = store.totalDuration
   const snapshot = parseTimelineProject(project)
   const sourceBuffers = new Map(buffers.value)
-  const isCurrent = () => !unmounted && token === exportGeneration && currentLoad === loadToken && store.project === project
+  const isCurrent = () => !unmounted && token === exportGeneration && currentLoad === loadToken && store.session === session
   exporting.value = true
   exportError.value = null
   exportedOk.value = false
@@ -538,9 +539,13 @@ async function load(): Promise<void> {
       // not play); do not treat it as the project this URL asked for.
       if (store.error) return
     }
-    const decoded = await engine.decodeAll(store.project)
+    const project = store.project
+    const decoded = await engine.decodeAll(project)
     if (token !== loadToken) return
     buffers.value = decoded
+    const targetBuffers = buffers.value
+    await prepareWarpedBuffers(project, targetBuffers, () => token === loadToken && store.project === project && targetBuffers === buffers.value)
+    if (token !== loadToken) return
     engine.ensureGraph(store.project.lanes.map((lane) => lane.id))
     engine.applySettings(store.project)
   } catch (e) {
@@ -638,10 +643,31 @@ watch(
 )
 
 let projectWatchGeneration = 0
+async function prepareWarpedBuffers(project: TimelineProject, targetBuffers: Map<string, AudioBuffer>, isCurrent: () => boolean): Promise<void> {
+  for (const lane of project.lanes) {
+    for (const clip of lane.clips) {
+      if (!isCurrent()) return
+      if (!clip.warpEnabled || !clip.originalBpm || !clip.sourceUrl) continue
+      const bpm = project.bpm || 120
+      if (clip.originalBpm === bpm) continue
+      const key = `${clip.sourceUrl}_warp_${clip.originalBpm}_${bpm}`
+      const baseBuffer = targetBuffers.get(clip.sourceUrl)
+      if (!baseBuffer || targetBuffers.has(key)) continue
+      try {
+        const stretched = await timeStretchBuffer(baseBuffer, bpm / clip.originalBpm)
+        if (!isCurrent()) return
+        targetBuffers.set(key, stretched)
+      } catch (error) {
+        if (isCurrent()) console.error('Stretch failed', error)
+      }
+    }
+  }
+}
 watch(
-  () => store.project,
+  [() => store.project, loadingAudio],
   async () => {
     const generation = ++projectWatchGeneration
+    if (loadingAudio.value) return
     const currentLoad = loadToken
     const project = store.project
     const targetBuffers = buffers.value
@@ -659,28 +685,9 @@ watch(
             targetBuffers.set(clip.sourceUrl, buf)
           } catch {}
         }
-        
-        if (clip.warpEnabled && clip.originalBpm) {
-          const bpm = project.bpm || 120
-          if (clip.originalBpm !== bpm) {
-            const key = `${clip.sourceUrl}_warp_${clip.originalBpm}_${bpm}`
-            if (!targetBuffers.has(key)) {
-              const baseBuf = targetBuffers.get(clip.sourceUrl)
-              if (baseBuf) {
-                try {
-                  const tempoFactor = bpm / clip.originalBpm
-                  const stretched = await timeStretchBuffer(baseBuf, tempoFactor)
-                  if (generation !== projectWatchGeneration || currentLoad !== loadToken || targetBuffers !== buffers.value) return
-                  targetBuffers.set(key, stretched)
-                } catch (e) {
-                  console.error('Stretch failed', e)
-                }
-              }
-            }
-          }
-        }
       }
     }
+    await prepareWarpedBuffers(project, targetBuffers, () => generation === projectWatchGeneration && currentLoad === loadToken && targetBuffers === buffers.value)
   },
   { deep: true },
 )

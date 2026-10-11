@@ -19,6 +19,18 @@ from app.orchestrator.process import ManagedProcess
 
 
 class WindowsJobTests(unittest.TestCase):
+    def test_listener_membership_uses_the_retained_kernel_job_handle(self) -> None:
+        from app.orchestrator.windows_job import WindowsJob
+        api = Mock()
+        api.contains_process.return_value = True
+        job = WindowsJob('Local\\OpenFabricNative_' + 'a' * 32, api, 42)
+        membership = getattr(job, 'contains_process', None)
+        self.assertTrue(callable(membership), 'Listener membership must be checked by the retained job')
+        self.assertTrue(membership(123))
+        api.contains_process.assert_called_once_with(42, 123)
+        job.close()
+        self.assertFalse(membership(123))
+
     def test_parent_pipe_eof_terminates_the_owned_job(self) -> None:
         from app.orchestrator.windows_supervisor import _watch_parent
         job = Mock()

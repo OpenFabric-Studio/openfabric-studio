@@ -32,7 +32,7 @@ class SpaTests(unittest.IsolatedAsyncioTestCase):
                 with patch.object(config, "FRONTEND_DIST_DIR", dist):
                     importlib.reload(main)
                 async with httpx.AsyncClient(
-                    transport=httpx.ASGITransport(app=main.app), base_url="http://test",
+                    transport=httpx.ASGITransport(app=main.app), base_url="http://127.0.0.1",
                 ) as client:
                     self.assertEqual((await client.get("/asset.js")).text, "asset")
                     self.assertEqual((await client.get("/editor/1")).text, "spa")

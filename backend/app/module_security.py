@@ -5,6 +5,8 @@ import os
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 
 def _loopback_origin(value: str) -> str | None:
@@ -20,12 +22,22 @@ def _loopback_origin(value: str) -> str | None:
         return None
 
 
+def require_local_host(request: Request) -> str:
+    """A redirected DNS name must never become the local app's trusted host."""
+    if len(request.headers.getlist('host')) != 1:
+        raise HTTPException(403, detail='setup_origin_forbidden')
+    own = _loopback_origin(f'{request.url.scheme}://{request.headers.get("host", "")}')
+    if own is None:
+        raise HTTPException(403, detail='setup_origin_forbidden')
+    return own
+
+
 def require_local_origin(request: Request) -> None:
     """No DNS-rebinding hosts, null origins, wildcard ports or cross-site forms."""
-    own = _loopback_origin(f'{request.url.scheme}://{request.headers.get("host", "")}')
+    own = require_local_host(request)
     origin = request.headers.get('origin')
     site = request.headers.get('sec-fetch-site', '').lower()
-    if own is None or site == 'cross-site':
+    if len(request.headers.getlist('origin')) > 1 or site == 'cross-site':
         raise HTTPException(403, detail='setup_origin_forbidden')
     if origin is None:
         if site or request.headers.get('sec-fetch-mode'):
@@ -39,3 +51,23 @@ def require_local_origin(request: Request) -> None:
             allowed.add(candidate)
     if normalized is None or normalized not in allowed:
         raise HTTPException(403, detail='setup_origin_forbidden')
+
+
+class LocalAccessMiddleware:
+    """Check every route before uploads are read, without creating child tasks."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope['type'] == 'http':
+            request = Request(scope)
+            try:
+                require_local_host(request)
+                if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
+                    require_local_origin(request)
+            except HTTPException:
+                response = JSONResponse({'detail': 'setup_origin_forbidden'}, status_code=403)
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)

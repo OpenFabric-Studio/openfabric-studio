@@ -14,7 +14,17 @@ The backend persists intent before the single paid POST and the remote job ID be
 
 **Stop tracking** cancels and drains local network/media work. No remote cancellation endpoint or refund guarantee is claimed. Explicitly stopped jobs are not automatically resumed at startup. A stopped known provider job can be followed again using its persisted ID. Receipt provenance retains the model, remote ID, requested/native/final durations, output hash and estimated/provider-reported costs; final cost may be absent.
 
-Video is not eligible for zero data retention, and supported seeds do not guarantee deterministic output. Initial catalog curation includes Veo 3.1 and Veo 3.1 Fast; availability, durations, geometry, references and prices are validated against the fresh provider catalog rather than assumed from those names.
+Video is not eligible for zero data retention, and supported seeds do not guarantee deterministic output. Storyboard generation includes Veo 3.1 and Veo 3.1 Fast; edit-only Aleph is excluded from that selector; availability, durations, geometry, references and prices are validated against the fresh provider catalog rather than assumed from those names.
+
+## Character replacement
+
+**Video → Replace a character** uses the same OpenRouter setup with two separately quoted and approved operations: Seedream 4.5 edits the source frame using the character reference, then Aleph 2 applies the reviewed frame to the selected silent video. Frame completion stops for review; it never purchases video generation automatically. Saved inactive jobs can be renamed or deleted locally; billing receipts survive deletion. See [the character-swap workflow](video-studio.md#character-swap-on-a-provided-video) for limits, transfer details, costs and recovery. No fal key or direct provider account is used.
+
+**HTTPS input sharing:** OpenRouter video references require HTTPS; its [Files API](https://openrouter.ai/docs/guides/features/files-api) cannot host the clip. Enable **Temporary clip sharing** in provider settings and install `cloudflared` (`brew install cloudflared` on macOS). After the separate video approval, a clip-only Cloudflare Quick Tunnel shares the selected silent clip from your Mac. No storage bucket or additional AI credentials are used. Keep the Mac awake and app running: app exit/restart ends the old URL, and it cannot be repaired for an already-submitted request. [Quick Tunnels](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/) have no uptime guarantee. A successful mocked flow is still not proof of live video generation or visual quality.
+
+Valid response delivery URLs are advisory and ignored; downloads use the authenticated OpenRouter content endpoint. New paid receipts retain HTTP status codes so definite request rejections are distinguished from uncertain outcomes. Previously unknown receipts lack that evidence and are not reclassified or resubmitted.
+
+Character swaps with a definitively rejected video request, or a sharing failure before the paid request began, can request a fresh estimate using the saved clip and edited frame. This makes no paid submission. The previous receipt remains intact, and another paid attempt needs new approval. Backend diagnostics retain bounded, redacted rejection details; raw provider text and sharing tokens are not exposed through the app API. A received HTTP 400 can precede an accepted generation record; lack of a video in generation history does not establish a local-only failure.
 
 ## Verification boundary
 

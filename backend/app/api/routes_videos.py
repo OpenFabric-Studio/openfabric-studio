@@ -44,7 +44,10 @@ def _raise(exc: VideoJobError) -> NoReturn:
 
 @router.get("", response_model=VideosResponse)
 def get_videos() -> VideosResponse:
-    return VideosResponse.model_validate({"videos": list_videos()})
+    try:
+        return VideosResponse.model_validate({"videos": list_videos()})
+    except VideoJobError as exc:
+        _raise(exc)
 
 
 @router.get("/activity", response_model=VideoActivityResponse)
@@ -163,7 +166,10 @@ async def create_dialogue_reel(body: CreateDialogueReelRequest) -> VideoProject:
 
 @router.get("/projects", response_model=VideoProjectsResponse)
 def list_projects() -> VideoProjectsResponse:
-    return VideoProjectsResponse(projects=projects.list_projects())
+    try:
+        return VideoProjectsResponse(projects=projects.list_projects())
+    except projects.VideoProjectError as exc:
+        _project_error(exc)
 
 
 @router.post("/projects", response_model=VideoProject)

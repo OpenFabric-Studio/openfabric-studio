@@ -313,6 +313,8 @@ class LibraryFolderInfo(Contract):
     key: Literal[
         "tracks", "voices", "videos", "audiobooks", "speechProfiles",
         "speechTrials", "models", "logs", "database",
+        "videoProjects", "videoCharacters", "videoCharacterTraining",
+        "videoCharacterTrainer", "providers",
     ]
 
 

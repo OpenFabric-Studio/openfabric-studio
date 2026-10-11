@@ -215,7 +215,7 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
     async def test_local_api_rejects_non_object_params_without_calling_engine(self):
         from app.main import app
         with patch.object(ace_jobs, 'submit') as upstream:
-            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1') as client:
                 response = await client.post('/api/ace-jobs', data={'params': '[]'})
                 self.assertEqual(response.status_code, 422)
                 upstream.assert_not_called()

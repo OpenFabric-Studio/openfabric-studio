@@ -13,7 +13,7 @@ const models=ref<OpenRouterModel[]>([]),busy=ref(false),error=ref('')
 const cloud=computed(()=>draft.value.provider_config?.provider==='openrouter')
 const model=computed(()=>{const config=draft.value.provider_config;return config?.provider==='openrouter' ? models.value.find(item=>item.id===config.model_id) : undefined})
 function compatibleSizes(item: OpenRouterModel): string[]{return (item.supported_sizes ?? []).filter(size=>{if(props.project.preset!=='reel')return true;const [width,height]=size.split('x').map(Number);return width!==undefined && height!==undefined && width*16===height*9})}
-const available=computed(()=>models.value.filter(item=>compatibleSizes(item).length>0))
+const available=computed(()=>models.value.filter(item=>!item.supports_video_editing && compatibleSizes(item).length>0))
 let alive=true,generation=0,controller:AbortController | undefined
 async function load(refresh=false,select=false){if(busy.value || props.readOnly)return;const token=++generation,request=new AbortController();controller=request;busy.value=true;error.value=''
   try{const result=await (refresh ? provider.refreshProviderCatalog(request.signal) : provider.getProviderCatalog(request.signal));if(!alive || token!==generation || request.signal.aborted)return;models.value=(result.models ?? []).filter(item=>item.kind==='video');if(select){const item=available.value[0];if(item)chooseModel(item.id);else error.value=t('videoCloud.noModels')}}

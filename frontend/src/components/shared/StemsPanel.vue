@@ -109,18 +109,23 @@ function download(name: string, url: string) {
 }
 
 async function openInEditor() {
-  if (!stemUrls.value) return
+  if (!stemUrls.value || openingEditor.value || !alive) return
+  const context = beginAction(), session = generation
+  const title = props.title, urls = { ...stemUrls.value }
   openingEditor.value = true
   error.value = null
   try {
     const lanes: TimelineLane[] = []
     for (const name of STEM_ORDER) {
-      if (stemUrls.value[name]) {
-        const buffer = await decodeStem(stemUrls.value[name])
+      const url = urls[name]
+      if (url) {
+        if (!context.isCurrent()) return
+        const buffer = await decodeStem(url)
+        if (!context.isCurrent()) return
         const clip: Clip = {
           id: crypto.randomUUID(),
-          sourceUrl: stemUrls.value[name],
-          sourceLabel: `${props.title} — ${STEM_LABELS.value[name]}`,
+          sourceUrl: url,
+          sourceLabel: `${title} — ${STEM_LABELS.value[name]}`,
           timelineStart: 0,
           trimStart: 0,
           trimEnd: buffer.duration,
@@ -142,12 +147,13 @@ async function openInEditor() {
       bpm: 120,
       snapEnabled: false,
     }
-    const created = await projectsApi.createProject(props.title, project)
-    await router.push(`/editor/${created.id}`)
+    if (!context.isCurrent()) return
+    const created = await projectsApi.createProject(title, project)
+    if (context.isCurrent()) await router.push(`/editor/${created.id}`)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    if (context.isCurrent()) error.value = e instanceof Error ? e.message : String(e)
   } finally {
-    openingEditor.value = false
+    if (alive && session === generation) openingEditor.value = false
   }
 }
 

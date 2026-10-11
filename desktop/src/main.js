@@ -27,6 +27,8 @@ let ctx = null;
 let server = null;
 let setupAbort = null;
 let setupTask = null;
+let launchTask = null;
+let launchAbort = null;
 let quitting = false;
 let savedPort = null;
 
@@ -77,26 +79,43 @@ function showSetup(query = {}) {
 }
 
 /** Starts the backend, then swaps the window over to the real app. */
-async function launch() {
-  if (quitting || setupAbort) return;
-  if (!(await isSetupComplete(ctx, { ignoreSkipped: true }))) return showSetup();
-  if (server) { server.removeAllListeners('exit'); await server.stop(); }
-  send({ type: 'starting' });
-  server = new BackendServer(ctx);
-  server.on('exit', (code) => {
-    if (quitting) return;
-    showSetup({ state: 'crashed', message: `The backend stopped (exit code ${code}).` });
-  });
-  try {
-    const url = await server.start({ preferredPort: savedPort });
-    if (server.port !== savedPort) {
-      savedPort = server.port;
-      await updateConfig(app.getPath('userData'), { port: savedPort });
+function launch() {
+  if (quitting || setupAbort) return Promise.resolve();
+  if (launchTask) return launchTask;
+  const controller = new AbortController();
+  launchAbort = controller;
+  const context = { ...ctx, signal: controller.signal };
+  const stopped = () => quitting || controller.signal.aborted;
+  const task = (async () => {
+    let ownedServer = null;
+    try {
+      const complete = await isSetupComplete(context, { ignoreSkipped: true });
+      if (stopped()) return;
+      if (!complete) return showSetup();
+      if (server) { server.removeAllListeners('exit'); await server.stop(); }
+      if (stopped()) return;
+      send({ type: 'starting' });
+      ownedServer = new BackendServer(context);
+      server = ownedServer;
+      ownedServer.on('exit', (code) => {
+        if (stopped() || server !== ownedServer) return;
+        showSetup({ state: 'crashed', message: `The backend stopped (exit code ${code}).` });
+      });
+      const url = await ownedServer.start({ preferredPort: savedPort });
+      if (stopped() || server !== ownedServer) return;
+      if (ownedServer.port !== savedPort) {
+        savedPort = ownedServer.port;
+        await updateConfig(app.getPath('userData'), { port: savedPort });
+      }
+      if (!stopped() && server === ownedServer && win && !win.isDestroyed()) await win.loadURL(versionedDocumentUrl(url, app.getVersion()));
+    } catch (err) {
+      if (!stopped() && (!ownedServer || server === ownedServer) && win && !win.isDestroyed()) await showSetup({ state: 'crashed', message: err.message });
+    } finally {
+      if (launchTask === task) { launchTask = null; launchAbort = null; }
     }
-    if (!quitting && win && !win.isDestroyed()) await win.loadURL(versionedDocumentUrl(url, app.getVersion()));
-  } catch (err) {
-    if (!quitting && win && !win.isDestroyed()) await showSetup({ state: 'crashed', message: err.message });
-  }
+  })();
+  launchTask = task;
+  return task;
 }
 
 async function startSetup() {
@@ -151,7 +170,7 @@ function registerIpc() {
     return ['remiqora', 'openfabric', 'openfabricstudio', 'openfabric-studio'].includes(path.basename(picked).toLowerCase().replace(/[\s_]/g, '')) ? picked : path.join(picked, 'OpenFabricStudio');
   });
   handleSetup('setup:set-root', async (_e, dir) => {
-    if (setupAbort || server?.child) return { ok: false, message: 'Stop setup and the backend before selecting another folder.' };
+    if (setupAbort || launchTask || server?.child) return { ok: false, message: 'Stop setup and the backend before selecting another folder.' };
     try {
       await ensureWritableDir(dir);
     } catch (err) {
@@ -176,6 +195,7 @@ function registerIpc() {
 
 async function boot() {
   const config = await loadConfig(app.getPath('userData'));
+  if (quitting) return;
   savedPort = config.port || null;
   ctx = buildContext(config.dataRoot || defaultDataRoot());
   registerIpc();
@@ -184,7 +204,7 @@ async function boot() {
     : null);
   createWindow();
   // A saved data root means the user already went through the first run; go straight in when nothing is missing.
-  if (config.dataRoot && (await isSetupComplete(ctx, { ignoreSkipped: true }))) await launch();
+  if (config.dataRoot) await launch();
   else await showSetup();
 }
 
@@ -204,9 +224,16 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     if (quitting) return;
     quitting = true;
-    if (setupTask || server) {
+    if (setupTask || launchTask || server) {
       event.preventDefault();
-      drainApplication({ setupAbort, setupTask, server }).catch(error => console.error('Shutdown failed:', error.message)).finally(() => app.quit());
+      launchAbort?.abort(new Error('quit'));
+      const pendingLaunch = launchTask;
+      drainApplication({ setupAbort, setupTask, server })
+        .catch(error => console.error('Shutdown failed:', error.message))
+        .finally(async () => {
+          if (pendingLaunch) await Promise.allSettled([pendingLaunch]);
+          app.quit();
+        });
     }
   });
 }

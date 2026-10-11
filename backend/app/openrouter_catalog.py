@@ -14,12 +14,12 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from .atomic_files import document_lock, write_object
 from .config import DATA_DIR
 from .contracts import JsonObject
-from .openrouter_contracts import (MediaKind, OpenRouterCatalog, OpenRouterModel, OpenRouterPrice, OpenRouterQuote, OpenRouterQuoteRequest, OpenRouterSpeechRequest, OpenRouterVideoRequest, OpenRouterMusicRequest)
+from .openrouter_contracts import (MediaKind, OpenRouterCatalog, OpenRouterModel, OpenRouterPrice, OpenRouterQuote, OpenRouterQuoteRequest, OpenRouterSpeechRequest, OpenRouterVideoRequest, OpenRouterMusicRequest, OpenRouterImageEditRequest, OpenRouterVideoEditRequest)
 from .openrouter_errors import OpenRouterError
 from . import openrouter_settings as settings
 
 CATALOG_PATH = DATA_DIR/'providers'/'openrouter-catalog.json'
-_VIDEO = {'google/veo-3.1','google/veo-3.1-fast'}
+_VIDEO = {'google/veo-3.1','google/veo-3.1-fast','runway/aleph-2'}
 _SPEECH = {'hexgrad/kokoro-82m','mistralai/voxtral-mini-tts-2603','fish-audio/s2.1-pro'}
 # Published model pages explicitly price per song, while token fields are zero.
 _MUSIC = {'google/lyria-3-clip-preview':0.04,'google/lyria-3-pro-preview':0.08}
@@ -32,11 +32,12 @@ class _Wire(BaseModel):
 class _Video(_Wire):
     id: str = Field(max_length=200)
     name: str = Field(max_length=160)
-    supported_durations: list[int] = Field(max_length=60)
-    supported_resolutions: list[str] = Field(max_length=20)
+    supported_durations: list[int] | None = Field(max_length=60)
+    supported_resolutions: list[str] | None = Field(max_length=20)
     supported_aspect_ratios: list[str] = Field(max_length=20)
-    supported_sizes: list[str] = Field(max_length=40)
-    supported_frame_images: list[Literal['first_frame','last_frame']] = Field(default_factory=list,max_length=2)
+    supported_sizes: list[str] | None = Field(max_length=40)
+    supported_frame_images: list[Literal['first_frame','last_frame']] | None = Field(default_factory=list,max_length=2)
+    allowed_passthrough_parameters: list[str] = Field(default_factory=list,max_length=80)
     generate_audio: bool | None = None
     seed: bool | None = None
     pricing_skus: dict[str,str] = Field(max_length=32)
@@ -57,6 +58,30 @@ class _EndpointData(_Wire):
     endpoints: list[_Endpoint] = Field(max_length=64)
 class _Endpoints(_Wire):
     data: _EndpointData
+
+class _ImageCapability(_Wire):
+    type: Literal['enum','range','boolean']
+    values: list[str] = Field(default_factory=list,max_length=40)
+    min: int | None = None
+    max: int | None = None
+class _ImageParameters(_Wire):
+    resolution: _ImageCapability
+    aspect_ratio: _ImageCapability
+    n: _ImageCapability
+    input_references: _ImageCapability
+    seed: _ImageCapability | None = None
+class _ImagePrice(_Wire):
+    billable: Literal['output_image','input_image','input_reference']
+    unit: Literal['image','megapixel','token']
+    cost_usd: float = Field(ge=0,le=1000000)
+    variant: str | None = Field(default=None,max_length=40)
+class _ImageEndpoint(_Wire):
+    provider_slug: str = Field(min_length=1,max_length=160)
+    supported_parameters: _ImageParameters
+    pricing: list[_ImagePrice] = Field(min_length=1,max_length=16)
+class _ImageEndpoints(_Wire):
+    id: Literal['bytedance-seed/seedream-4.5']
+    endpoints: list[_ImageEndpoint] = Field(min_length=1,max_length=32)
 
 
 def now() -> str:
@@ -87,11 +112,24 @@ def normalize_video(value: object) -> list[OpenRouterModel]:
         if row.get('id') not in _VIDEO:
             continue
         wire = _Video.model_validate(row)
+        if any(re.fullmatch(r'[1-9][0-9]{0,3}:[1-9][0-9]{0,3}',ratio) is None for ratio in wire.supported_aspect_ratios):
+            raise ValueError('catalog_invalid')
+        if wire.id=='runway/aleph-2':
+            if 'keyframes' not in wire.allowed_passthrough_parameters or wire.generate_audio is not False:
+                raise ValueError('catalog_invalid')
+            rate=_rate(wire.pricing_skus['cents_per_second_output'])/100
+            minimum=_rate(wire.pricing_skus['minimum_cents_per_generation'])/100
+            result.append(_fingerprint(OpenRouterModel(id=wire.id,name=wire.name,kind='video',fingerprint='0'*64,
+                prices=[OpenRouterPrice(unit='second',rate_usd=rate,minimum_usd=minimum,source='live_catalog')],
+                supported_durations=[seconds for seconds in range(2,31) if wire.supported_durations is None or seconds in wire.supported_durations],
+                supported_aspect_ratios=wire.supported_aspect_ratios,supports_seed=wire.seed is True,supports_video_editing=True,
+                warnings=['native_video_edit_limits','reviewed_source_frame_required'])))
+            continue
+        if wire.supported_durations is None or wire.supported_sizes is None or wire.supported_resolutions is None:
+            raise ValueError('catalog_invalid')
         if any(type(duration) is not int or not 1<=duration<=60 for duration in wire.supported_durations) or not wire.supported_durations or not wire.supported_sizes:
             raise ValueError('catalog_invalid')
         if any(re.fullmatch(r'[1-9][0-9]{1,4}x[1-9][0-9]{1,4}',size) is None for size in wire.supported_sizes):
-            raise ValueError('catalog_invalid')
-        if any(re.fullmatch(r'[1-9][0-9]{0,3}:[1-9][0-9]{0,3}',ratio) is None for ratio in wire.supported_aspect_ratios):
             raise ValueError('catalog_invalid')
         prices: list[OpenRouterPrice] = []
         for sku, raw in wire.pricing_skus.items():
@@ -103,8 +141,23 @@ def normalize_video(value: object) -> list[OpenRouterModel]:
             raise ValueError('catalog_price_unknown')
         result.append(_fingerprint(OpenRouterModel(id=wire.id,name=wire.name,kind='video',fingerprint='0'*64,prices=prices,
             supported_durations=wire.supported_durations,supported_resolutions=wire.supported_resolutions,supported_aspect_ratios=wire.supported_aspect_ratios,
-            supported_sizes=wire.supported_sizes,supported_frame_images=wire.supported_frame_images,supports_generate_audio=wire.generate_audio is True,supports_seed=wire.seed is True)))
+            supported_sizes=wire.supported_sizes,supported_frame_images=wire.supported_frame_images or [],supports_generate_audio=wire.generate_audio is True,supports_seed=wire.seed is True)))
     return result
+
+def normalize_image_edit(value: object) -> OpenRouterModel:
+    wire=_ImageEndpoints.model_validate(value)
+    endpoints=[endpoint for endpoint in wire.endpoints if endpoint.provider_slug=='seed']
+    if len(endpoints)!=1: raise ValueError('catalog_invalid')
+    endpoint=endpoints[0]; parameters=endpoint.supported_parameters
+    if parameters.resolution.type!='enum' or '2K' not in parameters.resolution.values or parameters.aspect_ratio.type!='enum' or parameters.n.type!='range' or parameters.n.min is None or parameters.n.min>1 or parameters.n.max is None or parameters.n.max<1 or parameters.input_references.type!='range' or parameters.input_references.min is None or parameters.input_references.min>2 or parameters.input_references.max is None or parameters.input_references.max<2:
+        raise ValueError('catalog_invalid')
+    prices=[price for price in endpoint.pricing if price.billable=='output_image' and price.unit=='image' and price.variant is None]
+    if len(prices)!=1 or any(price.billable!='output_image' and price.cost_usd!=0 or price.billable=='output_image' and price not in prices for price in endpoint.pricing):
+        raise ValueError('catalog_price_unknown')
+    return _fingerprint(OpenRouterModel(id=wire.id,name='Seedream 4.5',kind='image',fingerprint='0'*64,
+        prices=[OpenRouterPrice(unit='request',rate_usd=prices[0].cost_usd,source='live_catalog')],
+        supported_resolutions=['2K'],supported_aspect_ratios=parameters.aspect_ratio.values,
+        supports_seed=parameters.seed is not None and parameters.seed.type=='boolean',supports_image_editing=True))
 
 def normalize_audio(value: object, kind: Literal['speech','music']) -> list[OpenRouterModel]:
     result: list[OpenRouterModel] = []
@@ -159,9 +212,10 @@ def require_model(model_id: str, kind: MediaKind) -> OpenRouterModel:
     if model is None: raise OpenRouterError('model_unavailable',409)
     return model
 
-def reference(value: str | None, kind: Literal['image','audio']) -> bytes:
+def reference(value: str | None, kind: Literal['image','audio','video']) -> bytes:
     if value is None: return b''
-    matched=re.fullmatch(r'data:(image/(?:png|jpeg|webp)|audio/(?:wav|mpeg|mp3|flac));base64,([A-Za-z0-9+/=]+)',value)
+    if len(value)>21*1024*1024: raise OpenRouterError('reference_too_large',422)
+    matched=re.fullmatch(r'data:(image/(?:png|jpeg|webp)|audio/(?:wav|mpeg|mp3|flac)|video/mp4);base64,([A-Za-z0-9+/=]+)',value)
     if matched is None or not matched[1].startswith(kind+'/'): raise OpenRouterError('reference_invalid',422)
     try: data=base64.b64decode(matched[2],validate=True)
     except binascii.Error as error: raise OpenRouterError('reference_invalid',422) from error
@@ -171,6 +225,19 @@ def reference(value: str | None, kind: Literal['image','audio']) -> bytes:
 def video_parameters(body: OpenRouterVideoRequest) -> OpenRouterQuoteRequest:
     data=reference(body.reference_image,'image')
     return OpenRouterQuoteRequest(kind='video',model_id=body.model,text=body.prompt,duration_seconds=body.duration,size=body.size,resolution=body.resolution,aspect_ratio=body.aspect_ratio,generate_audio=body.generate_audio,seed=body.seed,reference_bytes=len(data),reference_sha256=hashlib.sha256(data).hexdigest() if data else None)
+
+def image_parameters(body: OpenRouterImageEditRequest) -> OpenRouterQuoteRequest:
+    source=reference(body.source_frame,'image'); image=reference(body.reference_image,'image')
+    return OpenRouterQuoteRequest(kind='image',workflow='image_edit',model_id=body.model,text=body.prompt,
+        resolution='2K',aspect_ratio=body.aspect_ratio,seed=body.seed,source_bytes=len(source),
+        source_sha256=hashlib.sha256(source).hexdigest(),reference_bytes=len(image),reference_sha256=hashlib.sha256(image).hexdigest())
+
+def video_edit_parameters(body: OpenRouterVideoEditRequest) -> OpenRouterQuoteRequest:
+    source=reference(body.reference_video,'video'); image=reference(body.reference_image,'image')
+    return OpenRouterQuoteRequest(kind='video',workflow='video_edit',model_id=body.model,text=body.prompt,
+        duration_seconds=body.duration,size=f'{body.width}x{body.height}',seed=body.seed,
+        source_bytes=len(source),source_sha256=hashlib.sha256(source).hexdigest(),
+        reference_bytes=len(image),reference_sha256=hashlib.sha256(image).hexdigest())
 
 def speech_parameters(body: OpenRouterSpeechRequest) -> OpenRouterQuoteRequest:
     data=reference(body.reference_audio,'audio')
@@ -182,8 +249,30 @@ def music_parameters(body: OpenRouterMusicRequest) -> OpenRouterQuoteRequest:
 def _estimate(body: OpenRouterQuoteRequest) -> OpenRouterQuote:
     model=require_model(body.model_id,body.kind)
     if not body.text.strip() or len(body.text)>model.input_character_limit: raise OpenRouterError('input_too_large',422)
-    transfers: list[Literal['prompt','text','reference_image','reference_audio']]=['text' if body.kind=='speech' else 'prompt']
-    if body.kind=='video':
+    transfers: list[Literal['prompt','text','reference_image','reference_audio','source_frame','reference_video']]=['text' if body.kind=='speech' else 'prompt']
+    if body.workflow!='generate':
+        if not body.source_bytes or not body.reference_bytes or body.voice is not None or body.reference_transcript is not None or body.generate_audio:
+            raise OpenRouterError('edit_parameters_unsupported',422)
+        if body.seed is not None and not model.supports_seed: raise OpenRouterError('edit_parameters_unsupported',422)
+        if body.workflow=='image_edit':
+            if body.kind!='image' or not model.supports_image_editing or body.resolution!='2K' or body.aspect_ratio not in model.supported_aspect_ratios or body.duration_seconds is not None or body.size is not None:
+                raise OpenRouterError('edit_parameters_unsupported',422)
+            prices=[price for price in model.prices if price.unit=='request']
+            estimate=max((price.rate_usd for price in prices),default=-1)
+            transfers.extend(['source_frame','reference_image'])
+        else:
+            if body.kind!='video' or not model.supports_video_editing or body.duration_seconds not in model.supported_durations or body.duration_seconds is None or not 2<=body.duration_seconds<=8 or body.size is None or body.resolution is not None or body.aspect_ratio is not None:
+                raise OpenRouterError('edit_parameters_unsupported',422)
+            width,height=(int(item) for item in body.size.split('x'))
+            if min(width,height)<480 or min(width,height)>1080 or max(width,height)>1920 or width*height>1920*1080 or width%2 or height%2 or not any(abs(width/height-int(ratio.split(':')[0])/int(ratio.split(':')[1]))<0.002 for ratio in model.supported_aspect_ratios):
+                raise OpenRouterError('edit_parameters_unsupported',422)
+            prices=[price for price in model.prices if price.unit=='second']
+            estimate=max((max(price.minimum_usd,price.rate_usd*body.duration_seconds) for price in prices),default=-1)
+            transfers.extend(['reference_video','reference_image'])
+        if estimate<0: raise OpenRouterError('catalog_price_unknown',409)
+    elif body.kind=='image' or body.source_bytes or model.supports_video_editing:
+        raise OpenRouterError('edit_workflow_required',422)
+    elif body.kind=='video':
         if body.duration_seconds not in model.supported_durations or body.size not in model.supported_sizes or body.resolution is not None and body.resolution not in model.supported_resolutions or body.aspect_ratio is not None and body.aspect_ratio not in model.supported_aspect_ratios:
             raise OpenRouterError('video_parameters_unsupported',422)
         if body.generate_audio and not model.supports_generate_audio or body.seed is not None and not model.supports_seed: raise OpenRouterError('video_parameters_unsupported',422)
@@ -242,6 +331,11 @@ def validate_quote(identifier: str, body: OpenRouterQuoteRequest) -> OpenRouterQ
     return result
 
 def quote_video(body: OpenRouterVideoRequest) -> OpenRouterQuote: return quote(video_parameters(body))
+def quote_image_edit(body: OpenRouterImageEditRequest) -> OpenRouterQuote: return quote(image_parameters(body))
+def quote_video_edit(body: OpenRouterVideoEditRequest) -> OpenRouterQuote: return quote(video_edit_parameters(body))
+def estimate_video_edit(body: OpenRouterVideoEditRequest) -> OpenRouterQuote:
+    """Check the second paid stage before buying its frame; grant no admission."""
+    return _estimate(video_edit_parameters(body))
 def quote_speech(body: OpenRouterSpeechRequest) -> OpenRouterQuote: return quote(speech_parameters(body))
 def estimate_speech(body: OpenRouterSpeechRequest) -> OpenRouterQuote:
     """Capability-checked cost preview; it grants no paid submit admission."""

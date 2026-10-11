@@ -1,7 +1,11 @@
 import { videoCloudEn, videoCloudErrorsEn } from './videoCloud'
+import { characterSwapEn } from './characterSwap'
+import { videoScenesEn } from './videoScenes'
+import { videoProcessesEn } from './videoProcesses'
 import { cloudSpeechEn } from './cloudSpeech'
 import { cloudMusicEn } from './cloudMusic'
 import { cloudProvidersEn } from './cloudProviders'
+import { clipHostEn } from './clipHost'
 import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
@@ -28,6 +32,9 @@ import { upstreamWorkspaceEn } from './upstreamWorkspace'
 import { readingMediaEn } from './readingMedia'
 import { supportWorkspaceEn } from './supportWorkspace'
 export default {
+  characterSwap: characterSwapEn,
+  videoScenes: videoScenesEn,
+  videoProcesses: videoProcessesEn,
   readingMedia: readingMediaEn,
   supportWorkspace: supportWorkspaceEn,
   speakerReview: speakerReviewEn,
@@ -36,6 +43,7 @@ export default {
   cloudSpeech: cloudSpeechEn,
   cloudMusic: cloudMusicEn,
   cloudProviders: cloudProvidersEn,
+  clipHost: clipHostEn,
   appNavigation: appNavigationEn,
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,
@@ -557,6 +565,11 @@ voiceProfiles: {
     audiobooks: 'imported books, saved chapters and narrated audio',
     speechProfiles: 'speech narrators and their reference recordings',
     speechTrials: 'speech previews',
+    videoProjects: 'video storyboards, references, previews and exports',
+    videoCharacters: 'saved characters and their reference images',
+    videoCharacterTraining: 'character training inputs and local adapters',
+    videoCharacterTrainer: 'local character trainer configuration',
+    providers: 'provider settings, model catalogs and request history',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',
@@ -568,6 +581,8 @@ voiceProfiles: {
       nested: 'Pick a folder that is not inside the current data folder, and does not contain it.',
       not_writable: 'OpenFabric Studio cannot write to that folder.',
       invalid_metadata: 'The catalog or voice metadata is damaged. The original data has been preserved.',
+      invalid_config: 'The saved configuration is damaged. Its original contents have been preserved for recovery.',
+      config_unreadable: 'The saved configuration cannot be read. Check its permissions; the original file has been preserved.',
       migration_incomplete: 'The folder move could not be completed. Recovery records have been preserved.',
       insufficient_space: 'The destination folder needs more free space.',
       destination_not_empty: 'That folder already has part of a OpenFabric Studio data folder. Pick a different folder.',

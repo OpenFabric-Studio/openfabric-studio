@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import AsyncIterator
 from pathlib import Path
 from unittest.mock import patch
 import httpx
@@ -13,6 +14,7 @@ from pydantic import ValidationError
 from app import openrouter_catalog as catalog, openrouter_settings as settings, openrouter_requests as ledger, openrouter_client as client_module
 from app.openrouter_client import OpenRouterClient, OpenRouterError
 from app.openrouter_contracts import OpenRouterMusicRequest, OpenRouterVideoRequest, OpenRouterSpeechRequest, OpenRouterSettingsRequest, OpenRouterKeyRequest
+from app.contracts import JsonObject
 
 VIDEO={'data':[{'id':'google/veo-3.1-fast','name':'Veo Fast','supported_durations':[4,6,8], 'supported_sizes':['1280x720'],'supported_resolutions':['720p'],'supported_aspect_ratios':['16:9'], 'supported_frame_images':['first_frame'],'generate_audio':True,'seed':True,'pricing_skus':{'duration_seconds_without_audio':'0.10','duration_seconds_without_audio_720p':'0.08'}}]}
 AUDIO={'data':[{'id':'hexgrad/kokoro-82m','name':'Kokoro','architecture':{'output_modalities':['speech']},'supported_voices':['af_heart'],'pricing':{'prompt':'0.000001'}}]}
@@ -58,15 +60,18 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenRouterError) as failure: await client.complete_music(receipt.id,body,quote.id)
         self.assertEqual(failure.exception.code,'submission_unknown'); self.assertEqual(ledger.get(receipt.id).state,'submission_unknown')
 
-    async def test_video_id_durable_before_poll_and_hostile_content_urls_rejected(self) -> None:
+    async def test_video_id_durable_before_poll_and_unused_content_urls_not_followed(self) -> None:
+        calls: list[str]=[]
         def serve(request: httpx.Request) -> httpx.Response:
+            calls.append(str(request.url))
             if request.method=='POST': return httpx.Response(202,json={'id':'remote-1','status':'pending','polling_url':'https://openrouter.ai/api/v1/videos/remote-1'})
             self.assertEqual(ledger.get(receipt.id).remote_id,'remote-1')
             return httpx.Response(200,json={'id':'remote-1','status':'completed','unsigned_urls':['https://attacker.test/download']})
         body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='Sunrise',duration=4,size='1280x720'); quote=catalog.quote_video(body); receipt=ledger.prepare('video-job',quote)
         client=OpenRouterClient(transport=httpx.MockTransport(serve)); result=await client.submit_video(receipt.id,body,quote.id)
         self.assertEqual(ledger.get(receipt.id).state,'submitted')
-        with self.assertRaises(OpenRouterError): await client.poll_video(result.id)
+        self.assertEqual((await client.poll_video(result.id)).status,'completed')
+        self.assertEqual(calls,['https://openrouter.ai/api/v1/videos','https://openrouter.ai/api/v1/videos/remote-1'])
 
     async def test_speech_mp3_presets_do_not_send_invented_references(self) -> None:
         def serve(request: httpx.Request) -> httpx.Response:
@@ -206,3 +211,201 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(OpenRouterError):
             await OpenRouterClient(transport=httpx.MockTransport(failed)).complete_music(receipt.id,body,quote.id)
         self.assertEqual(ledger.get(receipt.id).state,'submission_unknown')
+
+    async def test_rejection_logs_only_redacted_typed_details(self) -> None:
+        body=OpenRouterMusicRequest(model='google/lyria-3-clip-preview',prompt='private actor role')
+        quote=catalog.quote_music(body); receipt=ledger.prepare('diagnostic-job',quote)
+        ledger.begin_submit(receipt.id,quote.id,quote.request_fingerprint)
+        key='sk-or-v1-'+'x'*48
+        payload: JsonObject={'model':'runway/aleph-2','prompt':body.prompt,
+            'input_references':[{'type':'video_url','video_url':{'url':'data:video/mp4;base64,Y2xpcA=='}}],
+            'provider':{'only':['runway'],'options':{'runway':{'parameters':{'keyframes':[{'uri':'data:image/png;base64,ZnJhbWU='}]}}}}}
+        message=('Unsupported geometry: private actor role runway/aleph-2 video_url runway '
+            'data:video/mp4;base64,Y2xpcA== data:image/png;base64,ZnJhbWU= '
+            +key+' Bearer unknown-credential sk-unknown-secret https://private.test/path '
+            'http://other.test/secret www.private.test/path\n\x1b\x00\u202e')
+        posts: list[str]=[]
+        def reject(request: httpx.Request) -> httpx.Response:
+            posts.append(request.method)
+            return httpx.Response(400,json={'error':{'message':message,'code':'bad_geometry'},
+                'metadata':{'private':'never log arbitrary error metadata'}})
+        with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+            with self.assertRaises(OpenRouterError) as failure:
+                await OpenRouterClient(transport=httpx.MockTransport(reject))._json_request(
+                    'POST','/videos',payload=payload,receipt_id=receipt.id)
+        diagnostic=' '.join(record.getMessage() for record in logged.records)
+        self.assertIn('Unsupported geometry',diagnostic)
+        self.assertIn('bad_geometry',diagnostic)
+        for private in (body.prompt,'runway/aleph-2','video_url','runway','Y2xpcA==','ZnJhbWU=',
+                key,'unknown-credential','sk-unknown-secret','private.test','other.test','never log arbitrary',
+                '\n','\x1b','\x00','\u202e'):
+            self.assertNotIn(private,diagnostic)
+        self.assertEqual(failure.exception.code,'provider_request_rejected')
+        self.assertEqual(failure.exception.provider_http_status,400)
+        self.assertEqual(str(failure.exception),'provider_request_rejected')
+        self.assertEqual(posts,['POST'])
+
+    async def test_rejection_message_is_bounded_after_redaction(self) -> None:
+        body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='secret-marker '+'q'*1200,duration=4,size='1280x720')
+        quote=catalog.quote_video(body); receipt=ledger.prepare('bounded-diagnostic',quote)
+        response=httpx.Response(400,json={'error':{'message':'Unsupported geometry '+body.prompt+'x'*5000,'code':400}})
+        with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+            with self.assertRaises(OpenRouterError):
+                await OpenRouterClient(transport=httpx.MockTransport(lambda request:response)).submit_video(receipt.id,body,quote.id)
+        self.assertLessEqual(len(logged.records[0].getMessage()),1250)
+        self.assertIn('Unsupported geometry',logged.records[0].getMessage())
+        self.assertNotIn('secret-marker',str(logged.output))
+        self.assertNotIn('q'*50,str(logged.output))
+        self.assertEqual(ledger.get(receipt.id).state,'failed')
+
+    async def test_short_payload_values_cannot_hide_urls_from_redaction(self) -> None:
+        body=OpenRouterMusicRequest(model='google/lyria-3-clip-preview',prompt='data')
+        quote=catalog.quote_music(body); receipt=ledger.prepare('short-diagnostic',quote)
+        ledger.begin_submit(receipt.id,quote.id,quote.request_fingerprint)
+        payload: JsonObject={'prompt':body.prompt,'parts':['https','sk','Bearer']}
+        message='Unsupported geometry data:image/png;base64,cHJpdmF0ZQ== https://private.test/secret sk-private-secret Bearer private-token'
+        with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+            with self.assertRaises(OpenRouterError):
+                await OpenRouterClient(transport=httpx.MockTransport(lambda request:httpx.Response(400,json={'error':{'message':message}})))._json_request(
+                    'POST','/videos',payload=payload,receipt_id=receipt.id)
+        diagnostic=' '.join(record.getMessage() for record in logged.records)
+        for private in ('cHJpdmF0ZQ==','private.test','private-secret','private-token'):
+            self.assertNotIn(private,diagnostic)
+
+    async def test_json_escaped_prompt_echoes_are_redacted(self) -> None:
+        prompt='private-marker first line\nsecond line café'
+        for ensure_ascii in (True,False):
+            with self.subTest(ensure_ascii=ensure_ascii):
+                body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt=prompt,duration=4,size='1280x720')
+                quote=catalog.quote_video(body); receipt=ledger.prepare('escaped-diagnostic-'+str(ensure_ascii),quote)
+                key='sk-or-v1-'+'x'*48
+                message='Unsupported geometry '+json.dumps({'prompt':prompt,'credential':key},ensure_ascii=ensure_ascii)
+                response=httpx.Response(400,json={'error':{'message':message,'code':'bad_geometry'}})
+                with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+                    with self.assertRaises(OpenRouterError):
+                        await OpenRouterClient(transport=httpx.MockTransport(lambda request:response)).submit_video(receipt.id,body,quote.id)
+                diagnostic=' '.join(record.getMessage() for record in logged.records)
+                self.assertIn('Unsupported geometry',diagnostic)
+                for private in ('private-marker','first line','second line','café','caf\\u00e9',key):
+                    self.assertNotIn(private,diagnostic)
+                self.assertEqual(ledger.get(receipt.id).state,'failed')
+
+    async def test_url_filter_does_not_break_complete_private_prompt_redaction(self) -> None:
+        prompt='private-marker see https://private.test/path then\nsecond line café'
+        body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt=prompt,duration=4,size='1280x720')
+        quote=catalog.quote_video(body); receipt=ledger.prepare('url-in-private-prompt',quote)
+        message='Unsupported geometry '+json.dumps({'prompt':prompt})
+        with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+            with self.assertRaises(OpenRouterError):
+                await OpenRouterClient(transport=httpx.MockTransport(lambda request:httpx.Response(400,json={'error':{'message':message}}))).submit_video(receipt.id,body,quote.id)
+        diagnostic=' '.join(record.getMessage() for record in logged.records)
+        for private in ('private-marker','second line','café','caf\\u00e9','private.test'):
+            self.assertNotIn(private,diagnostic)
+
+    async def test_invalid_rejection_bodies_do_not_change_definite_http_failure(self) -> None:
+        bodies=(b'',b'private malformed body',b'{"error":{"message":"private truncated body"',
+            b'[]',b'{"error":{"message":12,"code":true}}',
+            json.dumps({'error':{'message':'private oversized body '+'x'*17000}}).encode())
+        for index,wire in enumerate(bodies):
+            with self.subTest(index=index):
+                body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='Scene',duration=4,size='1280x720')
+                quote=catalog.quote_video(body); receipt=ledger.prepare('invalid-diagnostic-'+str(index),quote)
+                posts: list[str]=[]
+                def reject(request: httpx.Request) -> httpx.Response:
+                    posts.append(request.method); return httpx.Response(400,content=wire)
+                with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+                    with self.assertRaises(OpenRouterError) as failure:
+                        await OpenRouterClient(transport=httpx.MockTransport(reject)).submit_video(receipt.id,body,quote.id)
+                self.assertNotIn('private',str(logged.output))
+                self.assertEqual(failure.exception.code,'provider_request_rejected')
+                self.assertEqual(ledger.get(receipt.id).state,'failed')
+                self.assertEqual(ledger.get(receipt.id).provider_http_status,400)
+                self.assertEqual(posts,['POST'])
+
+    async def test_rejection_read_is_bounded_and_stream_is_closed(self) -> None:
+        class Oversized(httpx.AsyncByteStream):
+            read_bytes=0
+            closed=False
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                for _ in range(100000):
+                    self.read_bytes+=1
+                    yield b'x'
+            async def aclose(self) -> None: self.closed=True
+        stream=Oversized()
+        body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='Scene',duration=4,size='1280x720')
+        quote=catalog.quote_video(body); receipt=ledger.prepare('oversized-diagnostic',quote)
+        with self.assertRaises(OpenRouterError):
+            await OpenRouterClient(transport=httpx.MockTransport(lambda request:httpx.Response(400,stream=stream))).submit_video(receipt.id,body,quote.id)
+        self.assertGreater(stream.read_bytes,0)
+        self.assertLessEqual(stream.read_bytes,16385)
+        self.assertTrue(stream.closed)
+        self.assertEqual(ledger.get(receipt.id).state,'failed')
+
+    async def test_rejection_read_failure_retains_received_http_status(self) -> None:
+        class Broken(httpx.AsyncByteStream):
+            read=False
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                self.read=True
+                yield b'{"error":'
+                raise httpx.ReadTimeout('private read failure')
+        stream=Broken()
+        body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='Scene',duration=4,size='1280x720')
+        quote=catalog.quote_video(body); receipt=ledger.prepare('broken-diagnostic',quote)
+        with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+            with self.assertRaises(OpenRouterError) as failure:
+                await OpenRouterClient(transport=httpx.MockTransport(lambda request:httpx.Response(400,stream=stream))).submit_video(receipt.id,body,quote.id)
+        self.assertTrue(stream.read)
+        self.assertNotIn('private read failure',str(logged.output))
+        self.assertEqual(failure.exception.code,'provider_request_rejected')
+        self.assertEqual(failure.exception.provider_http_status,400)
+        self.assertEqual(ledger.get(receipt.id).state,'failed')
+
+    async def test_cancelled_rejection_read_retains_definite_failure(self) -> None:
+        started=asyncio.Event()
+        class Waiting(httpx.AsyncByteStream):
+            closed=False
+            async def __aiter__(self) -> AsyncIterator[bytes]:
+                started.set()
+                await asyncio.Event().wait()
+                yield b'never'
+            async def aclose(self) -> None: self.closed=True
+        stream=Waiting()
+        body=OpenRouterVideoRequest(model='google/veo-3.1-fast',prompt='Scene',duration=4,size='1280x720')
+        quote=catalog.quote_video(body); receipt=ledger.prepare('cancelled-diagnostic',quote)
+        task=asyncio.create_task(OpenRouterClient(transport=httpx.MockTransport(lambda request:httpx.Response(400,stream=stream))).submit_video(receipt.id,body,quote.id))
+        waiter=asyncio.create_task(started.wait())
+        try:
+            await asyncio.wait({task,waiter},timeout=1,return_when=asyncio.FIRST_COMPLETED)
+            if task.done(): await asyncio.gather(task,return_exceptions=True)
+            self.assertTrue(started.is_set(),'A rejection body must be inspected before returning')
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError): await task
+            self.assertEqual(ledger.get(receipt.id).state,'failed')
+            self.assertEqual(ledger.get(receipt.id).provider_http_status,400)
+            self.assertEqual(ledger.get(receipt.id).error_code,'provider_request_rejected')
+            self.assertTrue(stream.closed)
+            self.assertFalse(client_module.work_busy())
+        finally:
+            task.cancel(); waiter.cancel()
+            await asyncio.gather(task,waiter,return_exceptions=True)
+
+    async def test_speech_and_music_http_rejections_use_redacted_diagnostics(self) -> None:
+        for kind in ('speech','music'):
+            with self.subTest(kind=kind):
+                def reject(request: httpx.Request) -> httpx.Response:
+                    return httpx.Response(400,json={'error':{'message':'Unsupported voice private words','code':'bad_voice'}})
+                client=OpenRouterClient(transport=httpx.MockTransport(reject))
+                with self.assertLogs('app.openrouter_client',level='WARNING') as logged:
+                    with self.assertRaises(OpenRouterError) as failure:
+                        if kind=='speech':
+                            speech=OpenRouterSpeechRequest(model='hexgrad/kokoro-82m',input='private words',voice='af_heart')
+                            quote=catalog.quote_speech(speech); receipt=ledger.prepare(kind,quote)
+                            await client.speech(receipt.id,speech,quote.id)
+                        else:
+                            music=OpenRouterMusicRequest(model='google/lyria-3-clip-preview',prompt='private words')
+                            quote=catalog.quote_music(music); receipt=ledger.prepare(kind,quote)
+                            await client.complete_music(receipt.id,music,quote.id)
+                self.assertIn('Unsupported voice',str(logged.output))
+                self.assertNotIn('private words',str(logged.output))
+                self.assertEqual(failure.exception.code,'provider_request_rejected')
+                self.assertEqual(ledger.get(receipt.id).state,'failed')

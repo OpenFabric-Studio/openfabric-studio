@@ -186,11 +186,11 @@ async def _run(project_id: str, shot_id: str, variant_id: str, *, request: OpenR
             remote=await client.poll_video(receipt.remote_id)
         else: raise store.VideoProjectError('cloud_submission_unknown')
         async with asyncio.timeout(3600):
-            while remote.status not in {'completed','failed','cancelled'}:
+            while remote.status not in {'completed','failed','cancelled','expired'}:
                 render._job_phase(project_id,'cloud_polling',variant_id,int(remote.progress or 0),100)
                 # The first GET follows durable remote ID publication; no POST is retried.
                 remote=await client.poll_video(remote.id)
-                if remote.status not in {'completed','failed','cancelled'}: await asyncio.sleep(POLL_INTERVAL)
+                if remote.status not in {'completed','failed','cancelled','expired'}: await asyncio.sleep(POLL_INTERVAL)
         if remote.status!='completed':
             receipt=ledger.update(receipt.id,state='failed',actual_cost_usd=remote.actual_cost_usd,error_code='provider_video_failed')
             _sync(project_id,shot_id,variant_id,receipt)

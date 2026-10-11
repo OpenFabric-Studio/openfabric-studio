@@ -6,6 +6,7 @@ import uuid
 
 from ..config import ALLOW_CONCURRENT_MODELS, MODELS
 from ..contracts import JsonObject
+from ..job_lifecycle import await_cleanup
 from .process import ManagedProcess, StartCancelled
 from .state import ModelRuntimeState, ModelStatus, OrchestratorState
 
@@ -102,9 +103,10 @@ class OrchestratorManager:
             # with a new run, including a switch back to the same model.
             if model_id in self._processes:
                 await self._stop_model(model_id)
-            current = self.state.active_model
-            if not ALLOW_CONCURRENT_MODELS and current is not None and current != model_id:
-                await self._stop_model(current)
+            if not ALLOW_CONCURRENT_MODELS:
+                for current in tuple(self._processes):
+                    if current != model_id:
+                        await self._stop_model(current)
             await self._start_model(model_id)
 
     async def stop_active(self) -> None:
@@ -182,6 +184,8 @@ class OrchestratorManager:
         rs.status = ModelStatus.STARTING
         rs.error_message = None
         started: list[ManagedProcess] = []
+        # Ownership begins at spawn, including partial/failed startup trees.
+        self._processes[model_id] = started
         cancel = self._cancel_start[model_id] = asyncio.Event()
         try:
             for spec in definition.processes:
@@ -191,23 +195,22 @@ class OrchestratorManager:
                 proc.start()
                 started.append(proc)
                 await proc.wait_healthy(cancel)
-            self._processes[model_id] = started
             self._instances[model_id] = uuid.uuid4().hex
             rs.status = ModelStatus.RUNNING
             self.state.active_model = model_id
-        except StartCancelled:
-            logger.info("start of model %s cancelled", model_id)
-            rs.status = ModelStatus.STOPPING
-            for proc in reversed(started):
-                await proc.stop()
-            rs.status = ModelStatus.STOPPED
-            raise
-        except Exception as exc:  # noqa: BLE001 - any startup failure must surface to the UI
-            logger.exception("failed to start model %s", model_id)
-            for proc in reversed(started):
-                await proc.stop()
-            rs.status = ModelStatus.ERROR
-            rs.error_message = str(exc)
+        except BaseException as exc:
+            cancelled = isinstance(exc, (StartCancelled, asyncio.CancelledError))
+            if cancelled:
+                logger.info("start of model %s cancelled", model_id)
+            else:
+                logger.exception("failed to start model %s", model_id)
+                rs.error_message = str(exc)
+            async def drain_start() -> None:
+                rs.status = ModelStatus.STOPPING
+                await self._stop_processes(model_id)
+                rs.status = ModelStatus.STOPPED if cancelled else ModelStatus.ERROR
+            # A second cancellation must not discard an unverified live tree.
+            await await_cleanup(drain_start())
             raise
         finally:
             self._cancel_start.pop(model_id, None)

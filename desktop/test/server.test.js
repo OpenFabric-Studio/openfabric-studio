@@ -29,6 +29,8 @@ async function serverFixture(t, { delayMs = 0 } = {}) {
   await fs.mkdir(path.dirname(L.backendPython), { recursive: true });
   await fs.writeFile(L.backendPython, `#!${process.execPath}
 const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
 const workersIndex = process.argv.indexOf('--workers');
 const workers = workersIndex < 0 ? Number(process.env.WEB_CONCURRENCY || 1) : Number(process.argv[workersIndex + 1]);
@@ -38,6 +40,18 @@ process.on('SIGTERM', () => server ? server.close(() => process.exit(0)) : proce
 setTimeout(() => {
   server = http.createServer((request, response) => {
     response.setHeader('content-type', 'application/json');
+    if (request.url === '/api/orchestrator/stop') {
+      fs.writeFileSync(path.join(process.cwd(), 'stop-request.json'), JSON.stringify({
+        origin: request.headers.origin || null,
+        mode: request.headers['sec-fetch-mode'] || null,
+        expectedOrigin: 'http://' + request.headers.host,
+      }));
+      if (request.headers.origin !== 'http://' + request.headers.host) {
+        response.statusCode = 403;
+        response.end('{"detail":"setup_origin_forbidden"}');
+        return;
+      }
+    }
     response.end(request.url === '/api/desktop/ready'
       ? JSON.stringify({ service: 'openfabric-studio', nonce: process.env.OPENFABRIC_DESKTOP_STARTUP_NONCE, pid: process.pid + (workers > 1 || reload ? 1 : 0) }) : '{}');
   });
@@ -49,6 +63,16 @@ setTimeout(() => {
   t.after(() => server.stop());
   return server;
 }
+
+test('the owned pre-shutdown stop request carries a matching Origin despite Node fetch metadata', { skip: process.platform === 'win32' }, async (t) => {
+  const server = await serverFixture(t);
+  const url = await server.start({ timeoutMs: 5000 });
+  await server.stop();
+  const request = JSON.parse(await fs.readFile(path.join(server.ctx.resources.backend, 'stop-request.json'), 'utf8'));
+  assert.equal(request.mode, 'cors', 'Exercise actual Node fetch rather than a header-free HTTP mock');
+  assert.equal(request.origin, new URL(url).origin);
+  assert.equal(request.origin, request.expectedOrigin);
+});
 
 test('backend restart retains its origin and uses a fresh startup identity', { skip: process.platform === 'win32' }, async (t) => {
   const server = await serverFixture(t);
