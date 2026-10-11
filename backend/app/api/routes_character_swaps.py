@@ -9,7 +9,7 @@ from fastapi.routing import APIRoute
 from starlette.types import Message
 
 from .. import character_swaps as swaps
-from ..character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, DeletedCharacterSwapResponse, RenameCharacterSwapRequest, SubmitCharacterSwapRequest
+from ..character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, DeletedCharacterSwapResponse, RenameCharacterSwapRequest, ReviewCharacterSwapRequest, SubmitCharacterSwapRequest
 from ..resource_admission import ResourceBusyError
 from ..video_media import VideoMediaError
 from ..module_security import require_local_origin
@@ -47,7 +47,7 @@ router = APIRouter(prefix='/api/videos/character-swaps', tags=['videos'], route_
 
 def _raise(error: swaps.CharacterSwapError | VideoMediaError | VideoSceneError | ResourceBusyError | OSError | ValueError) -> NoReturn:
     code = error.code if isinstance(error, (swaps.CharacterSwapError, VideoMediaError, VideoSceneError, ResourceBusyError)) else 'storage_unavailable'
-    status = 404 if code == 'not_found' else 503 if code == 'storage_unavailable' else 409 if code in {'busy', 'revision_conflict', 'already_submitted', 'module_setup_busy', 'cut_not_ready', 'cut_changed', 'source_changed', 'worker_unresolved'} else 400
+    status = 404 if code == 'not_found' else 503 if code == 'storage_unavailable' else 409 if code in {'busy', 'revision_conflict', 'already_submitted', 'module_setup_busy', 'cut_not_ready', 'cut_changed', 'source_changed', 'worker_unresolved', 'review_mismatch', 'preparation_review_required'} else 400
     raise HTTPException(status_code=status, detail=code) from error
 
 
@@ -108,6 +108,14 @@ async def quote(identifier: str, body: CharacterSwapRevisionRequest) -> Characte
         _raise(error)
 
 
+@router.post('/{identifier}/review', response_model=CharacterSwapJob)
+async def review(identifier: str, body: ReviewCharacterSwapRequest) -> CharacterSwapJob:
+    try:
+        return await swaps.review(identifier, body)
+    except (swaps.CharacterSwapError, ResourceBusyError, OSError, ValueError) as error:
+        _raise(error)
+
+
 @router.patch('/{identifier}', response_model=CharacterSwapJob)
 async def rename(identifier: str, body: RenameCharacterSwapRequest) -> CharacterSwapJob:
     try:
@@ -150,7 +158,7 @@ async def stop(identifier: str, body: CharacterSwapRevisionRequest) -> Character
 
 @router.get('/{identifier}/{kind}')
 def media(identifier: str, kind: str) -> FileResponse:
-    names = {'source': 'source.video', 'clip': 'selected.mp4', 'image': 'reference.png', 'output': 'output.mp4', 'frame-original': 'source-frame.png', 'frame-edited': 'edited-frame.png'}
+    names = {'source': 'source.video', 'clip': 'selected.mp4', 'image': 'reference.png', 'output': 'output.mp4', 'frame-original': 'source-frame.png', 'frame-edited': 'edited-frame.png', 'filmstrip': 'filmstrip.png'}
     try:
         name = names.get(kind)
         if name is None:

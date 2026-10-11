@@ -15,9 +15,10 @@ from uuid import uuid4
 
 from fastapi import UploadFile
 from pydantic import Field, TypeAdapter, ValidationError
+from PIL import Image
 
 from .atomic_files import document_lock, write_object
-from .character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, DeletedCharacterSwapResponse, RenameCharacterSwapRequest, SubmitCharacterSwapRequest
+from .character_swap_contracts import CharacterSwapJob, CharacterSwapReadiness, CharacterSwapRevisionRequest, CharacterSwapsResponse, DeletedCharacterSwapResponse, RenameCharacterSwapRequest, ReviewCharacterSwapRequest, SubmitCharacterSwapRequest
 from .config import DATA_DIR
 from .contracts import JsonObject
 from . import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, clip_hosting
@@ -48,7 +49,9 @@ _media_lock = asyncio.Lock()
 POLL_INTERVAL = 3.0
 MAX_VIDEO_BYTES = 100 * 1024 * 1024
 MAX_IMAGE_BYTES = 15 * 1024 * 1024
-_FILES = {'source.video', 'image.original', 'reference.png', 'selected.mp4', 'input.mp4', 'output.mp4', 'delivered.mp4', 'output.pending.mp4', 'job.json', 'worker.json', 'worker-receipt.json', 'normalized.png', 'normalized.normalization.json', 'source-frame.png', 'edited-frame.png', 'frame.pending.png', 'generated-frame.original', 'generated-frame.png', 'generated-frame.normalization.json', 'deletion.json'}
+_FILES = {'source.video', 'image.original', 'reference.png', 'selected.mp4', 'input.mp4', 'output.mp4', 'delivered.mp4', 'output.pending.mp4', 'job.json', 'worker.json', 'worker-receipt.json', 'normalized.png', 'normalized.normalization.json', 'source-frame.png', 'edited-frame.png', 'frame.pending.png', 'generated-frame.original', 'generated-frame.png', 'generated-frame.normalization.json', 'deletion.json', 'filmstrip.png'}
+_FRAME_PROMPT = 'Edit image 1: replace its sole person with the full character from image 2. Preserve the original pose, framing, lighting, and background.'
+_VIDEO_PROMPT = 'Replace the sole person throughout the video with the character shown in the edited first frame. Preserve the original movement, camera, lighting, and background.'
 
 
 class CharacterSwapError(Exception):
@@ -80,6 +83,8 @@ class StoredSwap(VideoContract):
     edited_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
     raw_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
     pending_frame_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
+    filmstrip_sha256: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
+    reviewed_fingerprint: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
 
 
 class DeletionMarker(VideoContract):
@@ -146,6 +151,9 @@ def get(identifier: str) -> CharacterSwapJob:
     with document_lock(artifact(identifier, 'job.json')):
         document = load(identifier)
         job = document.job
+        job.prompt = _prompt(job.stage) if job.provider == 'openrouter' else ''
+        job.review_fingerprint = _review_fingerprint(document) if job.provider == 'openrouter' else ''
+        job.preparation_reviewed = bool(job.review_fingerprint and document.reviewed_fingerprint == job.review_fingerprint)
         rejected_without_remote = job.remote_id is None and job.error_code in {
             'provider_request_rejected', 'credential_rejected', 'provider_credit_limit', 'provider_access_denied', 'provider_rate_limited'}
         job.resume_available = job.provider == 'openrouter' and not rejected_without_remote and job.status in {'stopped', 'failed'} and job.error_code not in {'provider_video_failed', 'provider_video_cancelled', 'provider_video_expired', 'request_mismatch'} and bool(
@@ -390,6 +398,13 @@ async def _prepare(identifier: str, staging: Path, video: UploadFile, image: Upl
             if min(reference.width, reference.height) < 14 or max(reference.width, reference.height) / min(reference.width, reference.height) > 16:
                 raise CharacterSwapError('invalid_media')
             await _command(staging, [ffmpeg, '-v', 'error', '-i', str(staging / 'input.mp4'), '-frames:v', '1', str(staging / 'source-frame.png')])
+            await _command(staging, [ffmpeg, '-v', 'error', '-i', str(staging / 'input.mp4'),
+                '-vf', f'fps=5/{settings.seconds},scale=160:90:force_original_aspect_ratio=decrease,pad=160:90:(ow-iw)/2:(oh-ih)/2,tile=5x1:nb_frames=5',
+                '-frames:v', '1', str(staging / 'filmstrip.png')])
+            with Image.open(staging / 'filmstrip.png') as strip:
+                strip.load()
+                if strip.size != (800, 90):
+                    raise CharacterSwapError('invalid_media')
             _aspect(selected.width, selected.height)
             base = f'/api/videos/character-swaps/{identifier}'
             timestamp = now()
@@ -398,14 +413,15 @@ async def _prepare(identifier: str, staging: Path, video: UploadFile, image: Upl
                 source_duration_sec=info.video_duration, width=selected.width, height=selected.height,
                 frames=settings.seconds * 24, has_audio=selected.audio_duration > 0,
                 seed=settings.seed, source_frame_url=base + '/frame-original',
-                source_url=base + '/source', clip_url=base + '/clip', image_url=base + '/image')
+                source_url=base + '/source', clip_url=base + '/clip', image_url=base + '/image', filmstrip_url=base + '/filmstrip')
             document = StoredSwap(job=job, source_sha256=await hash_file(staging / 'source.video'),
                 image_sha256=await hash_file(staging / 'reference.png'), selected_sha256=await hash_file(staging / 'selected.mp4'),
-                input_sha256=await hash_file(staging / 'input.mp4'), source_frame_sha256=await hash_file(staging / 'source-frame.png'))
+                input_sha256=await hash_file(staging / 'input.mp4'), source_frame_sha256=await hash_file(staging / 'source-frame.png'),
+                filmstrip_sha256=await hash_file(staging / 'filmstrip.png'))
             _write(staging / 'job.json', document)
             staging.rename(directory(identifier))
             published = True
-            return job
+            return get(identifier)
     finally:
         if not published:
             # Failed process drains retain ownership and files for recovery.
@@ -473,12 +489,47 @@ def _uri(identifier: str, name: str, media_type: str) -> str:
     return f'data:{media_type};base64,' + base64.b64encode(path.read_bytes()).decode('ascii')
 
 
+def _prompt(stage: Literal['frame', 'video']) -> str:
+    return _FRAME_PROMPT if stage == 'frame' else _VIDEO_PROMPT
+
+
+def _review_fingerprint(document: StoredSwap) -> str:
+    job = document.job
+    # Bind review to content and the exact stage prompt, independently of price refreshes.
+    values = (document.source_sha256, document.image_sha256, document.selected_sha256,
+        document.input_sha256, document.source_frame_sha256, document.filmstrip_sha256,
+        document.edited_frame_sha256, job.stage, job.model_id, str(job.width), str(job.height),
+        str(job.start_sec), str(job.seconds), str(job.frames), str(job.has_audio), str(job.seed), _prompt(job.stage))
+    return hashlib.sha256('\n'.join(values).encode('utf-8')).hexdigest()
+
+
+async def review(identifier: str, body: ReviewCharacterSwapRequest) -> CharacterSwapJob:
+    async with admission_lock:
+        require_setup_idle()
+        with document_lock(artifact(identifier, 'job.json')):
+            document = _manageable(identifier, body.revision)
+            if document.job.provider != 'openrouter':
+                raise CharacterSwapError('legacy_provider_readonly')
+            if document.job.status != 'prepared' and not _requote_available(document):
+                raise CharacterSwapError('already_submitted')
+        await _check_inputs(document)
+        with document_lock(artifact(identifier, 'job.json')):
+            document = _manageable(identifier, body.revision)
+            if body.review_fingerprint != _review_fingerprint(document):
+                raise CharacterSwapError('review_mismatch')
+            document.reviewed_fingerprint = body.review_fingerprint
+            document.job.revision += 1
+            document.job.updated_at = now()
+            save(document)
+            return get(identifier)
+
+
 def _request(document: StoredSwap) -> OpenRouterImageEditRequest | OpenRouterVideoEditRequest:
     job = document.job
     if job.provider != 'openrouter':
         raise CharacterSwapError('legacy_provider_readonly')
     if job.stage == 'frame':
-        return OpenRouterImageEditRequest(prompt='Edit image 1: replace its sole person with the full character from image 2. Preserve the original pose, framing, lighting, and background.',
+        return OpenRouterImageEditRequest(prompt=_prompt('frame'),
             source_frame=_uri(job.id, 'source-frame.png', 'image/png'), reference_image=_uri(job.id, 'reference.png', 'image/png'),
             aspect_ratio=_aspect(job.width, job.height), seed=job.seed)
     if not document.edited_frame_sha256:
@@ -488,7 +539,7 @@ def _request(document: StoredSwap) -> OpenRouterImageEditRequest | OpenRouterVid
 
 def _video_request(document: StoredSwap, frame_name: str) -> OpenRouterVideoEditRequest:
     job = document.job
-    return OpenRouterVideoEditRequest(prompt='Replace the sole person throughout the video with the character shown in the edited first frame. Preserve the original movement, camera, lighting, and background.',
+    return OpenRouterVideoEditRequest(prompt=_prompt('video'),
         reference_video=_uri(job.id, 'input.mp4', 'video/mp4'), reference_image=_uri(job.id, frame_name, 'image/png'),
         duration=job.seconds, width=job.width, height=job.height, seed=job.seed)
 
@@ -571,7 +622,7 @@ async def _quote(identifier: str, revision: int) -> CharacterSwapJob:
             document.job.revision += 1
             document.job.updated_at = now()
             save(document)
-            return document.job
+            return get(identifier)
     except (OpenRouterError, ClipHostError) as error:
         raise CharacterSwapError(error.code) from error
 
@@ -594,6 +645,8 @@ async def submit(identifier: str, body: SubmitCharacterSwapRequest) -> Character
                     raise CharacterSwapError('revision_conflict')
                 if job.status != 'prepared':
                     raise CharacterSwapError('already_submitted')
+                if document.reviewed_fingerprint != _review_fingerprint(document):
+                    raise CharacterSwapError('preparation_review_required')
                 request = _request(document)
                 if job.quote is None or job.quote.id != body.quote_id:
                     raise CharacterSwapError('quote_mismatch')
@@ -614,12 +667,14 @@ async def submit(identifier: str, body: SubmitCharacterSwapRequest) -> Character
         raise CharacterSwapError(error.code) from error
 
 
-async def _check_inputs(document: StoredSwap) -> None:
+async def _check_inputs(document: StoredSwap, *, check_review_artifacts: bool = True) -> None:
     pairs = [('source.video', document.source_sha256), ('reference.png', document.image_sha256),
                            ('selected.mp4', document.selected_sha256), ('input.mp4', document.input_sha256)]
     if document.job.provider == 'openrouter':
         pairs.append(('source-frame.png', document.source_frame_sha256))
         if document.job.stage == 'video': pairs.append(('edited-frame.png', document.edited_frame_sha256))
+    if check_review_artifacts and document.filmstrip_sha256:
+        pairs.append(('filmstrip.png', document.filmstrip_sha256))
     try:
         for name, expected in pairs:
             if await hash_file(artifact(document.job.id, name)) != expected:
@@ -744,7 +799,7 @@ async def _run(identifier: str, *, submit_request: bool) -> None:
     stage = load(identifier).job.stage
     try:
         document = load(identifier)
-        await _check_inputs(document)
+        await _check_inputs(document, check_review_artifacts=submit_request)
         record = _receipt(document)
         if record.state == 'failed':
             raise CharacterSwapError(record.error_code or 'provider_request_failed')

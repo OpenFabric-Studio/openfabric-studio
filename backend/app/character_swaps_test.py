@@ -15,7 +15,7 @@ from unittest.mock import patch
 import httpx
 from fastapi import UploadFile
 from PIL import Image
-from app.character_swap_contracts import CharacterSwapJob, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, SubmitCharacterSwapRequest
+from app.character_swap_contracts import CharacterSwapJob, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, ReviewCharacterSwapRequest, SubmitCharacterSwapRequest
 from app import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, openrouter_credentials as credentials, openrouter_client as client_module
 from app.openrouter_contracts import OpenRouterSettingsRequest, OpenRouterKeyRequest
 from app.openrouter_client import OpenRouterClient
@@ -35,7 +35,8 @@ class CharacterSwapRouteTests(unittest.IsolatedAsyncioTestCase):
     async def test_cross_origin_scene_handoff_and_paid_submission_are_rejected(self) -> None:
         from app.main import app
         from app import character_swaps
-        with patch.object(character_swaps, 'create_from_scene') as prepare, patch.object(character_swaps, 'submit') as submit:
+        with patch.object(character_swaps, 'create_from_scene') as prepare, patch.object(character_swaps, 'submit') as submit, \
+                patch.object(character_swaps, 'review') as review:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:9000') as client:
                 response = await client.post('/api/videos/character-swaps/from-scene',
                     headers={'Origin': 'https://outside.example'}, data={'scene_id': 'a'*32, 'cut_id': 'b'*32},
@@ -45,8 +46,12 @@ class CharacterSwapRouteTests(unittest.IsolatedAsyncioTestCase):
                     headers={'Origin': 'https://outside.example'}, json={'revision': 1, 'quote_id': 'b'*32,
                         'transfers_confirmed': True, 'consent_confirmed': True})
                 self.assertEqual(response.status_code, 403)
+                response = await client.post('/api/videos/character-swaps/'+'a'*32+'/review',
+                    headers={'Origin': 'https://outside.example'}, json={'revision': 1, 'review_fingerprint': 'b'*64})
+                self.assertEqual(response.status_code, 403)
         prepare.assert_not_called()
         submit.assert_not_called()
+        review.assert_not_called()
 
     async def test_multipart_overflow_is_rejected_before_handoff_and_closes_partial_spool(self) -> None:
         from app.main import app
@@ -152,7 +157,13 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         self.current_id=job.id
         return job
 
-    async def quoted(self, job: CharacterSwapJob) -> CharacterSwapJob:
+    async def reviewed(self, job: CharacterSwapJob) -> CharacterSwapJob:
+        return await self.swap.review(job.id, ReviewCharacterSwapRequest(
+            revision=job.revision, review_fingerprint=self.swap.get(job.id).review_fingerprint))
+
+    async def quoted(self, job: CharacterSwapJob, *, reviewed: bool = True) -> CharacterSwapJob:
+        if reviewed and job.provider == 'openrouter' and not job.preparation_reviewed:
+            job = await self.reviewed(job)
         return await self.swap.quote(job.id,CharacterSwapRevisionRequest(revision=job.revision))
 
     def body(self, job: CharacterSwapJob, **changes: bool) -> SubmitCharacterSwapRequest:
@@ -168,6 +179,156 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         await self.swap.submit(job.id,self.body(job))
         await self.finish()
         return self.swap.get(job.id)
+
+    async def test_paid_submission_requires_saved_input_review(self) -> None:
+        job = await self.quoted(await self.prepare(), reviewed=False)
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.swap.submit(job.id, self.body(job))
+        self.assertEqual(failure.exception.code, 'preparation_review_required')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.shared, [])
+        self.assertEqual(ledger.list_receipts(), [])
+
+    async def test_preparation_retains_five_changing_frames_and_exact_prompt(self) -> None:
+        job = await self.prepare()
+        response = job.model_dump()
+        self.assertEqual(response.get('filmstrip_url'), f'/api/videos/character-swaps/{job.id}/filmstrip')
+        with Image.open(self.swap.directory(job.id) / 'filmstrip.png') as strip:
+            self.assertEqual(strip.size, (800, 90))
+            self.assertNotEqual(strip.crop((0, 0, 160, 90)).tobytes(), strip.crop((640, 0, 800, 90)).tobytes())
+        self.assertEqual(response.get('prompt'), self.swap._request(self.swap.load(job.id)).prompt)
+        self.assertFalse(response.get('preparation_reviewed'))
+
+    async def test_local_review_route_is_available_without_provider_setup(self) -> None:
+        from app.main import app
+        job = await self.prepare()
+        settings.save(OpenRouterSettingsRequest(enabled=False))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1') as client:
+            response = await client.post(f'/api/videos/character-swaps/{job.id}/review',
+                json={'revision': job.revision, 'review_fingerprint': job.review_fingerprint})
+            strip = await client.get(job.filmstrip_url)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()['preparation_reviewed'])
+        self.assertEqual((strip.status_code, strip.headers['content-type']), (200, 'image/png'))
+        self.assertEqual(strip.headers['cache-control'], 'no-store')
+        self.assertEqual(self.calls, [])
+
+    async def test_saved_input_review_survives_restart_and_price_refresh(self) -> None:
+        job = await self.reviewed(await self.prepare())
+        self.assertTrue(job.preparation_reviewed)
+        self.assertEqual(self.swap.load(job.id).reviewed_fingerprint, job.review_fingerprint)
+        await self.swap.shutdown()
+        await self.swap.recover()
+        restored = self.swap.get(job.id)
+        self.assertTrue(restored.preparation_reviewed)
+        quoted = await self.quoted(restored, reviewed=False)
+        self.assertTrue(quoted.preparation_reviewed)
+        self.assertEqual(quoted.review_fingerprint, job.review_fingerprint)
+        self.assertEqual(self.calls, [])
+
+    async def test_review_rejects_wrong_fingerprint_and_stale_revision(self) -> None:
+        job = await self.prepare()
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.swap.review(job.id, ReviewCharacterSwapRequest(revision=job.revision, review_fingerprint='f'*64))
+        self.assertEqual(failure.exception.code, 'review_mismatch')
+        self.assertFalse(self.swap.get(job.id).preparation_reviewed)
+        accepted = await self.reviewed(job)
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.reviewed(job)
+        self.assertEqual(failure.exception.code, 'revision_conflict')
+        self.assertEqual(self.swap.get(job.id).revision, accepted.revision)
+
+    async def test_prompt_change_invalidates_saved_review_before_spending(self) -> None:
+        job = await self.quoted(await self.prepare())
+        with patch.object(self.swap, '_FRAME_PROMPT', self.swap._FRAME_PROMPT + ' Keep the hat.'):
+            latest = self.swap.get(job.id)
+            self.assertFalse(latest.preparation_reviewed)
+            self.assertNotEqual(latest.review_fingerprint, job.review_fingerprint)
+            self.assertEqual(latest.prompt, self.swap._request(self.swap.load(job.id)).prompt)
+            with self.assertRaises(self.swap.CharacterSwapError) as failure:
+                await self.swap.review(job.id, ReviewCharacterSwapRequest(revision=job.revision,
+                    review_fingerprint=job.review_fingerprint))
+            self.assertEqual(failure.exception.code, 'review_mismatch')
+            with self.assertRaises(self.swap.CharacterSwapError) as failure:
+                await self.swap.submit(job.id, self.body(job))
+            self.assertEqual(failure.exception.code, 'preparation_review_required')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(ledger.list_receipts(), [])
+
+    async def test_video_stage_requires_review_of_its_edited_frame_and_prompt(self) -> None:
+        job = await self.frame()
+        self.assertFalse(job.preparation_reviewed)
+        self.assertEqual(job.prompt, self.swap._request(self.swap.load(job.id)).prompt)
+        job = await self.quoted(job, reviewed=False)
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.swap.submit(job.id, self.body(job))
+        self.assertEqual(failure.exception.code, 'preparation_review_required')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.shared, [])
+
+    async def test_changed_filmstrip_blocks_review_and_paid_submission(self) -> None:
+        job = await self.quoted(await self.prepare())
+        self.swap.artifact(job.id, 'filmstrip.png').write_bytes(b'changed preview')
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.reviewed(job)
+        self.assertEqual(failure.exception.code, 'source_changed')
+        with self.assertRaises(self.swap.CharacterSwapError) as failure:
+            await self.swap.submit(job.id, self.body(job))
+        self.assertEqual(failure.exception.code, 'source_changed')
+        self.assertEqual(self.calls, [])
+        self.assertEqual(ledger.list_receipts(), [])
+
+    async def test_interrupted_review_write_preserves_previous_metadata(self) -> None:
+        job = await self.prepare()
+        path = self.swap.artifact(job.id, 'job.json')
+        before = path.read_bytes()
+        with patch('app.atomic_files.os.replace', side_effect=OSError('simulated interrupted write')):
+            with self.assertRaises(OSError):
+                await self.reviewed(job)
+        self.assertEqual(path.read_bytes(), before)
+        self.assertFalse(self.swap.get(job.id).preparation_reviewed)
+        self.assertEqual(list(path.parent.glob('.job.json.*.tmp')), [])
+
+    async def test_competing_reviews_only_accept_one_current_revision(self) -> None:
+        job = await self.prepare()
+        # Contention binds an asyncio lock to this test's isolated event loop.
+        with patch.object(self.swap, 'admission_lock', asyncio.Lock()):
+            results = await asyncio.gather(self.reviewed(job), self.reviewed(job), return_exceptions=True)
+        self.assertEqual(sum(isinstance(result, CharacterSwapJob) for result in results), 1)
+        errors = [result for result in results if isinstance(result, self.swap.CharacterSwapError)]
+        self.assertEqual([error.code for error in errors], ['revision_conflict'])
+        self.assertEqual(self.swap.get(job.id).revision, job.revision + 1)
+
+    async def test_saved_job_without_new_review_fields_remains_reviewable(self) -> None:
+        from app.atomic_files import read_object, write_object
+        job = await self.prepare()
+        path = self.swap.artifact(job.id, 'job.json')
+        document = read_object(path)
+        metadata = document['job']
+        assert isinstance(metadata, dict)
+        for field in ('filmstrip_url', 'prompt', 'review_fingerprint', 'preparation_reviewed'):
+            metadata.pop(field, None)
+        document.pop('filmstrip_sha256')
+        document.pop('reviewed_fingerprint')
+        write_object(path, document)
+        self.swap.artifact(job.id, 'filmstrip.png').unlink()
+        restored = self.swap.get(job.id)
+        self.assertFalse(restored.preparation_reviewed)
+        self.assertEqual(restored.filmstrip_url, '')
+        reviewed = await self.reviewed(restored)
+        self.assertTrue(reviewed.preparation_reviewed)
+        self.assertTrue(self.swap.artifact(job.id, 'source.video').is_file())
+
+    async def test_http_submission_cannot_bypass_saved_input_review(self) -> None:
+        from app.main import app
+        job = await self.quoted(await self.prepare(), reviewed=False)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1') as client:
+            response = await client.post(f'/api/videos/character-swaps/{job.id}/submit', json=self.body(job).model_dump())
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json(), {'detail': 'preparation_review_required'})
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.shared, [])
+        self.assertEqual(ledger.list_receipts(), [])
 
     async def test_cloud_generation_is_unavailable_without_private_clip_hosting(self) -> None:
         self.assertTrue(settings.status().credential_configured)
@@ -497,6 +658,32 @@ class CharacterSwapTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.swap.get(job.id).status,'ready')
         self.assertTrue(self.calls)
         self.assertFalse(any(call.startswith('POST') for call in self.calls))
+
+    async def test_missing_or_changed_diagnostic_strip_does_not_abandon_paid_video(self) -> None:
+        for damage in ('missing', 'changed'):
+            with self.subTest(damage=damage):
+                job = await self.quoted(await self.frame())
+                assert job.quote is not None
+                receipt = ledger.prepare('character-video-'+job.id, job.quote)
+                ledger.begin_submit(receipt.id, receipt.quote_id, receipt.request_fingerprint)
+                ledger.update(receipt.id, state='submitted', remote_id='remote-request-123')
+                document = self.swap.load(job.id)
+                document.job.video_receipt_id = receipt.id
+                document.job.status = 'submission_unknown'
+                self.swap.save(document)
+                strip = self.swap.artifact(job.id, 'filmstrip.png')
+                if damage == 'missing':
+                    strip.unlink()
+                else:
+                    strip.write_bytes(b'changed diagnostic')
+                self.calls.clear()
+                await self.swap.recover()
+                await self.finish()
+                result = self.swap.get(job.id)
+                self.assertEqual(result.status, 'ready', result.error_code)
+                self.assertTrue(self.calls)
+                self.assertTrue(all(call.startswith('GET') for call in self.calls))
+                self.assertEqual(self.shared, [])
 
     async def test_receipt_from_different_job_cannot_be_followed(self) -> None:
         job=await self.quoted(await self.frame())

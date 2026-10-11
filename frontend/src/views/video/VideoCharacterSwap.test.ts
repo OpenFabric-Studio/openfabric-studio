@@ -11,7 +11,7 @@ import VideoCharacterSwap from './VideoCharacterSwap.vue'
 
 vi.mock('../../api/characterSwaps', () => ({
   CHARACTER_SWAP_MAX_VIDEO_BYTES: 100 * 1024 * 1024, characterSwapReadiness: vi.fn(), listCharacterSwaps: vi.fn(), prepareCharacterSwap: vi.fn(), prepareCharacterSwapFromScene: vi.fn(),
-  getCharacterSwap: vi.fn(), quoteCharacterSwap: vi.fn(), submitCharacterSwap: vi.fn(), resumeCharacterSwap: vi.fn(), stopCharacterSwap: vi.fn(),
+  getCharacterSwap: vi.fn(), quoteCharacterSwap: vi.fn(), reviewCharacterSwap: vi.fn(), submitCharacterSwap: vi.fn(), resumeCharacterSwap: vi.fn(), stopCharacterSwap: vi.fn(),
   renameCharacterSwap: vi.fn(), deleteCharacterSwap: vi.fn(),
 }))
 let app: App | undefined
@@ -25,6 +25,8 @@ function job(status: CharacterSwapJob['status'] = 'prepared', id = 'a'.repeat(32
     image_url: `/api/videos/character-swaps/${id}/image`, output_url: '', output_sha256: '', remote_id: null,
     provider: 'openrouter', model_id: stage === 'frame' ? 'bytedance-seed/seedream-4.5' : 'runway/aleph-2', price_checked_at: '2026-10-11',
     stage, quote: null, source_frame_url: `/api/videos/character-swaps/${id}/frame-original`,
+    filmstrip_url: '', prompt: stage === 'frame' ? 'Exact backend frame prompt.' : 'Exact backend video prompt.',
+    review_fingerprint: (stage === 'frame' ? '7' : '8').repeat(64), preparation_reviewed: true,
     edited_frame_url: stage === 'video' ? `/api/videos/character-swaps/${id}/frame-edited` : '',
     frame_receipt_id: stage === 'video' ? 'f'.repeat(32) : null, video_receipt_id: null, resume_available: false }
 }
@@ -36,7 +38,7 @@ function quotedJob(value = job()): CharacterSwapJob {
 }
 it('rejects external preview and download links at the client boundary', () => {
   expect(parseCharacterSwapJob(job()).id).toBe(job().id)
-  for (const field of ['source_url', 'clip_url', 'image_url', 'output_url', 'source_frame_url', 'edited_frame_url']) {
+  for (const field of ['source_url', 'clip_url', 'image_url', 'output_url', 'source_frame_url', 'edited_frame_url', 'filmstrip_url']) {
     expect(() => parseCharacterSwapJob({ ...job(), [field]: 'https://external.example/media' })).toThrow()
   }
 })
@@ -78,6 +80,166 @@ beforeEach(() => {
   vi.mocked(api.submitCharacterSwap).mockResolvedValue({ ...job('queued'), remote_id: 'remote-1' })
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+it('keeps paid submission blocked before saved input review even after cost and rights approval', async () => {
+  const existing = quotedJob({ ...job(), preparation_reviewed: false })
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.quoteCharacterSwap).mockResolvedValue(existing)
+  await mount(); confirm(); await settle()
+  expect(button('[data-swap-submit]').disabled).toBe(true)
+  button('[data-swap-submit]').click(); await settle()
+  expect(api.submitCharacterSwap).not.toHaveBeenCalled()
+  expect(button('[data-swap-quote]').disabled).toBe(false)
+  button('[data-swap-quote]').click(); await settle()
+  expect(api.quoteCharacterSwap).toHaveBeenCalledExactlyOnceWith(existing.id, { revision: 1 }, expect.any(AbortSignal))
+  expect(api.reviewCharacterSwap).not.toHaveBeenCalled()
+})
+it('saves local input review with its revision and fingerprint and resets paid approvals', async () => {
+  const existing = { ...quotedJob(), revision: 4, preparation_reviewed: false }
+  const reviewed = { ...existing, revision: 5, preparation_reviewed: true }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.reviewCharacterSwap).mockResolvedValue(reviewed)
+  await mount(); confirm(); await settle()
+  button('[data-swap-input-review-confirm]').click(); button('[data-swap-input-review-confirm]').click(); await settle()
+  expect(api.reviewCharacterSwap).toHaveBeenCalledExactlyOnceWith(existing.id,
+    { revision: 4, review_fingerprint: existing.review_fingerprint }, expect.any(AbortSignal))
+  expect(document.querySelector('[data-swap-input-reviewed]')?.textContent).toContain('reviewed for this step')
+  expect(document.querySelector('[data-swap-input-review-confirm]')).toBeNull()
+  expect(button('[data-swap-submit]').disabled).toBe(true)
+  expect([...document.querySelectorAll<HTMLInputElement>('[data-swap-review] input[type=checkbox]')].every(box => !box.checked)).toBe(true)
+  expect(api.quoteCharacterSwap).not.toHaveBeenCalled()
+  confirm(); await settle(); button('[data-swap-submit]').click(); await settle()
+  expect(api.submitCharacterSwap).toHaveBeenCalledExactlyOnceWith(existing.id,
+    { revision: 5, quote_id: existing.quote?.id, transfers_confirmed: true, consent_confirmed: true }, expect.any(AbortSignal))
+})
+it('allows local input review without provider, clip-sharing or FFmpeg readiness', async () => {
+  const existing = { ...job(), preparation_reviewed: false }
+  vi.mocked(api.characterSwapReadiness).mockResolvedValue({ configured: false, clip_host_configured: false, ffmpeg_ready: false })
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.reviewCharacterSwap).mockResolvedValue({ ...existing, revision: 2, preparation_reviewed: true })
+  await mount()
+  expect(button('[data-swap-input-review-confirm]').disabled).toBe(false)
+  button('[data-swap-input-review-confirm]').click(); await settle()
+  expect(api.reviewCharacterSwap).toHaveBeenCalledTimes(1)
+  expect(api.quoteCharacterSwap).not.toHaveBeenCalled()
+  expect(api.submitCharacterSwap).not.toHaveBeenCalled()
+})
+it('shows the sampled strip with full-playback guidance and the exact read-only backend prompt', async () => {
+  const existing = { ...job(), preparation_reviewed: false, filmstrip_url: `/api/videos/character-swaps/${job().id}/filmstrip`, prompt: 'Keep this exact <script>backend text</script>\nwith its line break.' }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  await mount()
+  const strip = document.querySelector('[data-swap-filmstrip]')
+  expect(strip?.getAttribute('src')).toBe(existing.filmstrip_url)
+  expect(strip?.getAttribute('alt')).toContain('Five sampled frames')
+  const description = document.getElementById(strip?.getAttribute('aria-describedby') ?? '')
+  expect(description?.textContent).toContain('Play the entire selected clip')
+  expect(description?.textContent).toContain('does not screen every frame')
+  expect(document.querySelector('[data-swap-prompt]')?.textContent).toBe(existing.prompt)
+  expect(document.querySelector('[data-swap-prompt] script')).toBeNull()
+  expect(document.querySelector('[data-swap-prompt] textarea, [data-swap-prompt] input')).toBeNull()
+})
+it('keeps earlier saved inputs playable and reviewable when no sampled strip exists', async () => {
+  const existing = { ...job(), filmstrip_url: '', preparation_reviewed: false }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  await mount()
+  expect(document.querySelector('[data-swap-filmstrip]')).toBeNull()
+  expect(document.querySelector('video')?.controls).toBe(true)
+  expect(document.querySelector('video')?.getAttribute('src')).toBe(existing.clip_url)
+  expect(button('[data-swap-input-review-confirm]').disabled).toBe(false)
+  expect(document.querySelector('[data-swap-input-review]')?.textContent).toContain('Play the entire selected clip')
+})
+it('does not invent a prompt for an earlier record without a backend prompt', async () => {
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [{ ...job(), prompt: '' }] })
+  await mount()
+  expect(document.querySelector('[data-swap-prompt]')).toBeNull()
+})
+it('retains saved input acceptance after remount while requiring fresh paid approvals', async () => {
+  const existing = { ...quotedJob(), preparation_reviewed: false }
+  const reviewed = { ...existing, revision: 2, preparation_reviewed: true }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.reviewCharacterSwap).mockResolvedValue(reviewed)
+  await mount(); button('[data-swap-input-review-confirm]').click(); await settle()
+  app?.unmount(); app = undefined; document.body.replaceChildren()
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [reviewed] })
+  await mount()
+  expect(document.querySelector('[data-swap-input-reviewed]')).not.toBeNull()
+  expect(button('[data-swap-submit]').disabled).toBe(true)
+  confirm(); await settle()
+  expect(button('[data-swap-submit]').disabled).toBe(false)
+  expect(api.reviewCharacterSwap).toHaveBeenCalledTimes(1)
+})
+it.each(['fingerprint', 'renaming'] as const)('blocks local input review without the current %s', async restriction => {
+  const existing = { ...job(), preparation_reviewed: false, review_fingerprint: restriction === 'fingerprint' ? '' : job().review_fingerprint }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  await mount()
+  if (restriction === 'renaming') { button('[data-swap-rename]').click(); await settle() }
+  expect(button('[data-swap-input-review-confirm]').disabled).toBe(true)
+  button('[data-swap-input-review-confirm]').click(); await settle()
+  expect(api.reviewCharacterSwap).not.toHaveBeenCalled()
+})
+it.each(['failed', 'running', 'submission_unknown'] as const)('does not offer input review for an ineligible %s job', async status => {
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [{ ...job(status), preparation_reviewed: false }] })
+  await mount()
+  expect(document.querySelector('[data-swap-input-review-confirm]')).toBeNull()
+  expect(api.reviewCharacterSwap).not.toHaveBeenCalled()
+})
+it('allows review of a backend-authorized new attempt before its free estimate', async () => {
+  const existing = { ...job('failed', 'a'.repeat(32), 'video'), preparation_reviewed: false, requote_available: true }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.reviewCharacterSwap).mockResolvedValue({ ...existing, revision: 2, preparation_reviewed: true })
+  await mount(); button('[data-swap-input-review-confirm]').click(); await settle()
+  expect(api.reviewCharacterSwap).toHaveBeenCalledWith(existing.id,
+    { revision: 1, review_fingerprint: existing.review_fingerprint }, expect.any(AbortSignal))
+  expect(button('[data-swap-requote]').disabled).toBe(false)
+  expect(api.quoteCharacterSwap).not.toHaveBeenCalled()
+})
+it.each(['selection', 'unmount', 'scene change'] as const)('discards late input acceptance after %s', async teardown => {
+  const existing = { ...job(), preparation_reviewed: false }, other = { ...job('prepared', 'b'.repeat(32)), preparation_reviewed: false }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing, other] })
+  let finish: (value: CharacterSwapJob) => void = () => { throw new Error('Uninitialized') }
+  vi.mocked(api.reviewCharacterSwap).mockReturnValue(new Promise(resolve => { finish = resolve }))
+  const scene = await mount(); button('[data-swap-input-review-confirm]').click(); await settle()
+  expect(button('[data-swap-input-review-confirm]').disabled).toBe(true)
+  const signal = vi.mocked(api.reviewCharacterSwap).mock.calls[0]?.[2]
+  if (teardown === 'selection') { button(`[data-swap-job="${other.id}"]`).click(); await settle() }
+  else if (teardown === 'scene change') { scene.value = selectedCut(); await settle() }
+  else { app?.unmount(); app = undefined }
+  finish({ ...existing, revision: 2, preparation_reviewed: true }); await settle(); await vi.advanceTimersByTimeAsync(6000)
+  expect(signal?.aborted).toBe(true)
+  expect(document.querySelector('[data-swap-input-reviewed]')).toBeNull()
+  expect(api.getCharacterSwap).not.toHaveBeenCalled()
+  if (teardown === 'selection') expect(document.querySelector('video')?.getAttribute('src')).toBe(other.clip_url)
+  if (teardown === 'unmount') expect(vi.getTimerCount()).toBe(0)
+})
+it('requires fresh local review when the edited frame changes the video-stage inputs', async () => {
+  const existing = quotedJob()
+  const edited = { ...job('prepared', 'a'.repeat(32), 'video'), revision: 2, preparation_reviewed: false }
+  vi.mocked(api.listCharacterSwaps).mockResolvedValue({ jobs: [existing] })
+  vi.mocked(api.getCharacterSwap).mockResolvedValue(edited)
+  vi.mocked(api.quoteCharacterSwap).mockResolvedValue(quotedJob(edited))
+  await mount(); confirm(); await settle(); button('[data-swap-submit]').click(); await settle()
+  await vi.advanceTimersByTimeAsync(4000); await settle()
+  expect(document.querySelector('[data-swap-input-reviewed]')).toBeNull()
+  expect(document.querySelector('[data-swap-prompt]')?.textContent).toBe(edited.prompt)
+  expect(button('[data-swap-input-review-confirm]').disabled).toBe(false)
+  button('[data-swap-quote]').click(); await settle(); confirm(); await settle()
+  expect(button('[data-swap-submit]').disabled).toBe(true)
+  button('[data-swap-submit]').click(); await settle()
+  expect(api.submitCharacterSwap).toHaveBeenCalledTimes(1)
+})
+it('posts and validates the revision-bound local review at the API boundary', async () => {
+  const actual = await vi.importActual<typeof import('../../api/characterSwaps')>('../../api/characterSwaps')
+  expect(typeof actual.reviewCharacterSwap).toBe('function')
+  const response = { ...job(), revision: 2 }
+  const fetchReview = vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(response), { status: 200 }))
+  vi.stubGlobal('fetch', fetchReview)
+  const signal = new AbortController().signal, body = { revision: 1, review_fingerprint: '7'.repeat(64) }
+  expect(await actual.reviewCharacterSwap(job().id, body, signal)).toEqual(response)
+  expect(fetchReview).toHaveBeenCalledExactlyOnceWith(`/api/videos/character-swaps/${job().id}/review`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal })
+  expect(() => actual.reviewCharacterSwap(job().id, { ...body, review_fingerprint: 'bad' }, signal)).toThrow()
+  expect(fetchReview).toHaveBeenCalledTimes(1)
+})
 
 it('loads saved previews and requires an explicit quote plus separate approvals before one paid frame submission', async () => {
   await mount()

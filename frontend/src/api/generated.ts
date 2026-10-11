@@ -499,6 +499,10 @@ export type CharacterSwapJob = {
   "price_checked_at"?: string
   "source_frame_url"?: string
   "edited_frame_url"?: string
+  "filmstrip_url"?: string
+  "prompt"?: string
+  "review_fingerprint"?: string
+  "preparation_reviewed"?: boolean
 }
 
 export type CharacterSwapReadiness = {
@@ -1648,6 +1652,11 @@ export type ReviewCharacterAdapterRequest = {
   "comparison_id": string
   "notes": string
   "reviewed": boolean
+}
+
+export type ReviewCharacterSwapRequest = {
+  "revision": number
+  "review_fingerprint": string
 }
 
 export type RvcRequest = {
@@ -20434,6 +20443,29 @@ const schemas = {
         "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/frame-edited)?$",
         "title": "Edited Frame Url",
         "type": "string"
+      },
+      "filmstrip_url": {
+        "default": "",
+        "pattern": "^(?:/api/videos/character-swaps/[0-9a-f]{32}/filmstrip)?$",
+        "title": "Filmstrip Url",
+        "type": "string"
+      },
+      "prompt": {
+        "default": "",
+        "maxLength": 2000,
+        "title": "Prompt",
+        "type": "string"
+      },
+      "review_fingerprint": {
+        "default": "",
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "title": "Review Fingerprint",
+        "type": "string"
+      },
+      "preparation_reviewed": {
+        "default": false,
+        "title": "Preparation Reviewed",
+        "type": "boolean"
       }
     },
     "required": [
@@ -20553,6 +20585,27 @@ const schemas = {
       "revision"
     ],
     "title": "CharacterSwapRevisionRequest",
+    "type": "object"
+  },
+  "ReviewCharacterSwapRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "minimum": 1,
+        "title": "Revision",
+        "type": "integer"
+      },
+      "review_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "title": "Review Fingerprint",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "review_fingerprint"
+    ],
+    "title": "ReviewCharacterSwapRequest",
     "type": "object"
   },
   "RenameCharacterSwapRequest": {
@@ -23159,6 +23212,14 @@ function isCharacterSwapRevisionRequest(value: unknown): value is CharacterSwapR
 }
 export function parseCharacterSwapRevisionRequest(value: unknown): CharacterSwapRevisionRequest {
   if (!isCharacterSwapRevisionRequest(value)) throw new TypeError("Invalid CharacterSwapRevisionRequest response")
+  return value
+}
+
+function isReviewCharacterSwapRequest(value: unknown): value is ReviewCharacterSwapRequest {
+  return decodeSchema(schemas.ReviewCharacterSwapRequest, value, schemas)
+}
+export function parseReviewCharacterSwapRequest(value: unknown): ReviewCharacterSwapRequest {
+  if (!isReviewCharacterSwapRequest(value)) throw new TypeError("Invalid ReviewCharacterSwapRequest response")
   return value
 }
 

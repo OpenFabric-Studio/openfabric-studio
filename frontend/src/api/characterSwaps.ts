@@ -1,8 +1,8 @@
 import { apiFetch } from './http'
 import { parseCharacterSwapJob, parseCharacterSwapReadiness, parseCharacterSwapsResponse,
-  parseSubmitCharacterSwapRequest, parseCharacterSwapRevisionRequest, parseRenameCharacterSwapRequest, parseDeletedCharacterSwapResponse } from './contracts'
+  parseSubmitCharacterSwapRequest, parseReviewCharacterSwapRequest, parseCharacterSwapRevisionRequest, parseRenameCharacterSwapRequest, parseDeletedCharacterSwapResponse } from './contracts'
 import type { CharacterSwapJob, CharacterSwapReadiness, CharacterSwapsResponse,
-  SubmitCharacterSwapRequest, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, DeletedCharacterSwapResponse } from './contracts'
+  SubmitCharacterSwapRequest, ReviewCharacterSwapRequest, CharacterSwapRevisionRequest, RenameCharacterSwapRequest, DeletedCharacterSwapResponse } from './contracts'
 
 const path = '/api/videos/character-swaps'
 export const CHARACTER_SWAP_MAX_VIDEO_BYTES = 100 * 1024 * 1024
@@ -52,6 +52,10 @@ export function submitCharacterSwap(id: string, body: SubmitCharacterSwapRequest
 export function quoteCharacterSwap(id: string, body: CharacterSwapRevisionRequest, signal?: AbortSignal): Promise<CharacterSwapJob> {
   return apiFetch(`${jobPath(id)}/quote`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(parseCharacterSwapRevisionRequest(body)), signal }, parseCharacterSwapJob)
+}
+export function reviewCharacterSwap(id: string, body: ReviewCharacterSwapRequest, signal?: AbortSignal): Promise<CharacterSwapJob> {
+  return apiFetch(`${jobPath(id)}/review`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(parseReviewCharacterSwapRequest(body)), signal }, parseCharacterSwapJob)
 }
 export function resumeCharacterSwap(id: string, body: CharacterSwapRevisionRequest, signal?: AbortSignal): Promise<CharacterSwapJob> {
   return apiFetch(`${jobPath(id)}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' },

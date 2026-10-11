@@ -52,6 +52,10 @@ class CharacterSwapJob(VideoContract):
     price_checked_at: str = Field(default='', max_length=32)
     source_frame_url: str = Field(default='', pattern=r'^(?:/api/videos/character-swaps/[0-9a-f]{32}/frame-original)?$')
     edited_frame_url: str = Field(default='', pattern=r'^(?:/api/videos/character-swaps/[0-9a-f]{32}/frame-edited)?$')
+    filmstrip_url: str = Field(default='', pattern=r'^(?:/api/videos/character-swaps/[0-9a-f]{32}/filmstrip)?$')
+    prompt: str = Field(default='', max_length=2000)
+    review_fingerprint: str = Field(default='', pattern=r'^(?:[0-9a-f]{64})?$')
+    preparation_reviewed: bool = False
 
     @model_validator(mode='after')
     def own_media(self) -> Self:
@@ -59,7 +63,8 @@ class CharacterSwapJob(VideoContract):
         if (self.source_url != base + '/source' or self.clip_url != base + '/clip'
                 or self.image_url != base + '/image' or self.output_url not in ('', base + '/output')
                 or self.source_frame_url not in ('', base + '/frame-original')
-                or self.edited_frame_url not in ('', base + '/frame-edited')):
+                or self.edited_frame_url not in ('', base + '/frame-edited')
+                or self.filmstrip_url not in ('', base + '/filmstrip')):
             raise ValueError('media_path_mismatch')
         return self
 
@@ -87,6 +92,10 @@ class CharacterSwapRevisionRequest(VideoContract):
     revision: int = Field(ge=1, strict=True)
 
 
+class ReviewCharacterSwapRequest(CharacterSwapRevisionRequest):
+    review_fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
 class RenameCharacterSwapRequest(CharacterSwapRevisionRequest):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
 
@@ -98,5 +107,5 @@ class DeletedCharacterSwapResponse(VideoContract):
 CHARACTER_SWAP_CLIENT_MODELS: list[type[BaseModel]] = [
     CharacterSwapJob, CharacterSwapsResponse, CharacterSwapReadiness,
     SubmitCharacterSwapRequest, CharacterSwapRevisionRequest,
-    RenameCharacterSwapRequest, DeletedCharacterSwapResponse,
+    ReviewCharacterSwapRequest, RenameCharacterSwapRequest, DeletedCharacterSwapResponse,
 ]
