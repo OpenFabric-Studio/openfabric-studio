@@ -24,6 +24,8 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
                                (main.module_jobs, 'recover')]:
             self.enterContext(patch.object(module, method, new=AsyncMock()))
         recovery = self.enterContext(patch.object(main.audiobook_publish, 'start', new=AsyncMock()))
+        scene_recovery = self.enterContext(patch.object(main.video_scenes, 'recover', new=AsyncMock()))
+        scene_drain = self.enterContext(patch.object(main.video_scenes, 'shutdown', new=AsyncMock()))
         stopped = asyncio.Event()
         async def start_narration() -> None:
             recovery.assert_awaited_once()
@@ -47,8 +49,10 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
                                (main.manager, 'stop_all')]:
             self.enterContext(patch.object(module, method, new=AsyncMock()))
         async with main.lifespan(main.app):
-            pass
+            scene_recovery.assert_awaited_once()
+            scene_drain.assert_not_awaited()
         drain.assert_awaited_once()
+        scene_drain.assert_awaited_once()
 
     async def test_recovery_failure_drains_already_recovered_workers(self) -> None:
         entered = asyncio.Event()
@@ -90,6 +94,7 @@ class AppLifespanTests(unittest.IsolatedAsyncioTestCase):
             (main.ace_jobs, 'shutdown'), (main.voice_build, 'shutdown'),
             (main.audio_exports, 'shutdown_exports'), (main.voice_comparisons, 'shutdown'),
             (main.video_jobs, 'shutdown'), (main.stems, 'shutdown'),
+            (main.video_scenes, 'shutdown'),
             (main.midi, 'shutdown'), (main.tagging, 'shutdown'),
             (main.reference_imports, 'shutdown'), (main.native_yue, 'shutdown'),
             (main.audiobooks, 'shutdown'), (main.ebook_import, 'shutdown'), (main.module_jobs, 'shutdown'), (main.speech_clone, 'shutdown'),

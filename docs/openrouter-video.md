@@ -14,7 +14,11 @@ The backend persists intent before the single paid POST and the remote job ID be
 
 **Stop tracking** cancels and drains local network/media work. No remote cancellation endpoint or refund guarantee is claimed. Explicitly stopped jobs are not automatically resumed at startup. A stopped known provider job can be followed again using its persisted ID. Receipt provenance retains the model, remote ID, requested/native/final durations, output hash and estimated/provider-reported costs; final cost may be absent.
 
-Video is not eligible for zero data retention, and supported seeds do not guarantee deterministic output. Initial catalog curation includes Veo 3.1 and Veo 3.1 Fast; availability, durations, geometry, references and prices are validated against the fresh provider catalog rather than assumed from those names.
+Video is not eligible for zero data retention, and supported seeds do not guarantee deterministic output. Storyboard generation includes Veo 3.1 and Veo 3.1 Fast; edit-only Aleph is excluded from that selector; availability, durations, geometry, references and prices are validated against the fresh provider catalog rather than assumed from those names.
+
+## Character replacement
+
+**Video → Character swap** uses the same OpenRouter setup with two separately quoted and approved operations: Seedream 4.5 edits the source frame using the character reference, then Aleph 2 applies the reviewed frame to the selected silent video. Frame completion stops for review; it never purchases video generation automatically. See [the character-swap workflow](video-studio.md#character-swap-on-a-provided-video) for limits, transfer details, costs and recovery. No fal key or direct provider account is used.
 
 ## Verification boundary
 

@@ -9,16 +9,46 @@ import sys
 import uuid
 from pathlib import Path
 from typing import IO
-from typing import Optional
+from typing import Literal, Optional
+from urllib.parse import urlsplit
 
 import httpx
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from ..config import LOG_DIR, LOG_TAIL_LINES, ProcessSpec
+from ..job_lifecycle import await_cleanup
+from .listener import listener_pids
 from .windows_job import WindowsJob
 from .windows_supervisor import supervisor_command as windows_command
 from .posix_supervisor import read_receipt, supervisor_command as posix_command
 
 IS_WINDOWS = sys.platform == "win32"
+
+
+class _ACEHealthData(BaseModel):
+    model_config = ConfigDict(strict=True)
+    status: Literal['ok']
+    service: Literal['ACE-Step API']
+    version: str = Field(min_length=1, max_length=64)
+
+
+class _ACEHealth(BaseModel):
+    model_config = ConfigDict(strict=True)
+    data: _ACEHealthData
+    code: Literal[200]
+    error: None
+
+
+class _CppHealth(BaseModel):
+    model_config = ConfigDict(strict=True)
+    status: Literal['ok']
+    backend: str = Field(min_length=1, max_length=64)
+    models: int = Field(ge=0)
+    ui: bool
+    ui_management: bool
+
+
+_HEALTH = TypeAdapter[_ACEHealth | _CppHealth](_ACEHealth | _CppHealth)
 
 
 class StartCancelled(Exception):
@@ -123,7 +153,13 @@ class ManagedProcess:
     async def wait_healthy(self, cancel: Optional[asyncio.Event] = None) -> None:
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self.spec.startup_timeout
-        async with httpx.AsyncClient(timeout=3.0) as client:
+        port = 0
+        if self.spec.health_url:
+            parsed = urlsplit(self.spec.health_url)
+            if parsed.scheme != 'http' or parsed.hostname != '127.0.0.1' or parsed.username is not None or parsed.password is not None or parsed.path != '/health' or parsed.query or parsed.fragment:
+                raise RuntimeError('Native health URL must be a local health endpoint')
+            port = parsed.port or 80
+        async with httpx.AsyncClient(timeout=3.0, trust_env=False, follow_redirects=False) as client:
             while True:
                 if cancel is not None and cancel.is_set():
                     raise StartCancelled(f"start of '{self.spec.name}' was cancelled")
@@ -135,25 +171,53 @@ class ManagedProcess:
                     )
                 if self.spec.health_url:
                     try:
-                        resp = await client.get(self.spec.health_url)
-                        if resp.status_code < 500:
-                            return
-                    except httpx.HTTPError:
+                        before = await self._owned_listeners(port)
+                        if before:
+                            async with client.stream('GET', self.spec.health_url) as response:
+                                if response.status_code == 200:
+                                    body = bytearray()
+                                    async for chunk in response.aiter_bytes():
+                                        body.extend(chunk)
+                                        if len(body) > 65536:
+                                            raise ValueError('Native health response exceeded its limit')
+                                    _HEALTH.validate_json(bytes(body))
+                                    after = await self._owned_listeners(port)
+                                    if before == after and (cancel is None or not cancel.is_set()):
+                                        return
+                    except (httpx.HTTPError, ValidationError, ValueError):
                         pass
                 else:
                     return
-                if loop.time() > deadline:
+                if loop.time() >= deadline:
                     raise TimeoutError(
                         f"process '{self.spec.name}' did not become healthy within "
                         f"{self.spec.startup_timeout:.0f}s.\n{tail_log(self.spec.name)}"
                     )
+                delay = min(1.0, max(0.0, deadline - loop.time()))
                 if cancel is None:
-                    await asyncio.sleep(1.0)
+                    await asyncio.sleep(delay)
                 else:
                     try:
-                        await asyncio.wait_for(cancel.wait(), 1.0)
+                        await asyncio.wait_for(cancel.wait(), delay)
                     except asyncio.TimeoutError:
                         pass
+
+    async def _owned_listeners(self, port: int) -> frozenset[int]:
+        pids = await listener_pids(port)
+        if not pids:
+            return pids
+        self.require_owned()
+        for pid in pids:
+            if IS_WINDOWS:
+                job = self._windows_job
+                owned = job is not None and await await_cleanup(asyncio.to_thread(job.contains_process, pid))
+            elif sys.platform != 'win32':
+                owned = self._proc is not None and os.getpgid(pid) == self._proc.pid
+            else:
+                owned = False
+            if not owned:
+                raise RuntimeError('Native health listener is not owned by this run')
+        return pids
 
     async def wait_stopped(self, timeout: float) -> bool:
         loop = asyncio.get_event_loop()

@@ -52,7 +52,7 @@ function button(text: string): HTMLButtonElement {
 }
 it('shows the numbered project progression and an audio source player', async () => {
   await mount()
-  expect(document.querySelectorAll('[role=tab]')).toHaveLength(5)
+  expect(document.querySelectorAll('[id^=video-step-][role=tab]')).toHaveLength(5)
   expect(document.body.textContent).toContain('Storyboard')
   expect(document.querySelector('audio')?.getAttribute('src')).toBe('/api/tracks/1/audio')
 })
@@ -134,9 +134,9 @@ it('keeps user-moved focus when another project finishes loading', async () => {
 it('keeps later stages unavailable until a new project exists', async () => {
   vi.mocked(api.listVideoProjects).mockResolvedValueOnce({ projects: [] })
   await mount()
-  for (const tab of document.querySelectorAll<HTMLButtonElement>('[role=tab]')) expect(tab.disabled).toBe(tab.id !== 'video-step-song')
-  button('1 Song').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await flush()
-  expect(button('1 Song').getAttribute('aria-selected')).toBe('true')
+  for (const tab of document.querySelectorAll<HTMLButtonElement>('[id^=video-step-][role=tab]')) expect(tab.disabled).toBe(tab.id !== 'video-step-song')
+  button('1 Source').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); await flush()
+  expect(button('1 Source').getAttribute('aria-selected')).toBe('true')
   expect(document.querySelector('[data-new-video-project]')).not.toBeNull()
 })
 
@@ -225,7 +225,7 @@ it('keeps the library available with an empty message after deleting its last pr
   document.querySelector<HTMLButtonElement>('[data-delete-project]')?.click(); await flush()
   expect(document.querySelector('[data-video-project-library]')).not.toBeNull()
   expect(document.body.textContent).toContain('No saved video projects yet')
-  expect(document.querySelector('[role=tab][aria-selected=true]')?.textContent).toContain('Song')
+  expect(document.querySelector('[id^=video-step-][role=tab][aria-selected=true]')?.textContent).toContain('Source')
   expect(document.querySelector('[data-testid=video-global-status]')?.textContent).toContain('Start from a song, a silent video, or a reel')
   expect([...document.querySelectorAll('[role=tab]')].some(tab => tab.textContent?.includes('✓'))).toBe(false)
 })

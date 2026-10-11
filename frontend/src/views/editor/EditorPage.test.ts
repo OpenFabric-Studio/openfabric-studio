@@ -15,11 +15,15 @@ import * as exportsApi from '../../api/audioExports'
 import * as versionsApi from '../../api/audioVersions'
 import * as settingsApi from '../../api/audioSettings'
 import { audioSettingsResponse } from '../settings/settingsTestFixtures'
+import * as projectsApi from '../../api/projects'
+import { timeStretchBuffer } from '../../audio/timeStretchEngine'
+import type { TimelineProject } from '../../audio/timelineTypes'
 
 const audioClock = vi.hoisted(() => ({ currentTime: 0 }))
 const engine = vi.hoisted(() => ({
   ensureGraph: vi.fn(), applySettings: vi.fn(), decodeAll: vi.fn(async () => new Map<string, AudioBuffer>()),
-  play: vi.fn(async (): Promise<number | null> => 0.05), queuePass: vi.fn(), stop: vi.fn(), teardown: vi.fn(), render: vi.fn(),
+  play: vi.fn(async (_project: TimelineProject, _buffers: Map<string, AudioBuffer>, _from: number, _until?: number): Promise<number | null> => 0.05), queuePass: vi.fn(), stop: vi.fn(), teardown: vi.fn(),
+  render: vi.fn<(project: TimelineProject, buffers: Map<string, AudioBuffer>, duration: number) => Promise<AudioBuffer>>(),
   getLaneLevel: vi.fn(() => ({ peak: 0, clipping: false, peakL: 0, peakR: 0 })),
   getMasterLevel: vi.fn(() => ({ peak: 0, clipping: false, peakL: 0, peakR: 0 })),
 }))
@@ -31,6 +35,7 @@ vi.mock('../../audio/bpmDetector', () => ({ detectBpm: vi.fn(async () => 120) })
 vi.mock('../../api/audioExports', () => ({ createAudioExport: vi.fn(), getAudioExport: vi.fn() }))
 vi.mock('../../api/audioVersions', () => ({ listAudioVersions: vi.fn() }))
 vi.mock('../../api/audioSettings', () => ({ getAudioSettings: vi.fn() }))
+vi.mock('../../audio/timeStretchEngine', () => ({ timeStretchBuffer: vi.fn() }))
 
 let app: App | undefined
 const frames = new Map<number, FrameRequestCallback>()
@@ -38,6 +43,7 @@ beforeEach(() => {
   frames.clear()
   audioClock.currentTime = 0
   engine.play.mockImplementation(async () => audioClock.currentTime + 0.05)
+  engine.decodeAll.mockResolvedValue(new Map())
   vi.stubGlobal('AudioBuffer', TestAudioBuffer)
   vi.mocked(detectBpm).mockResolvedValue(120)
   vi.mocked(settingsApi.getAudioSettings).mockResolvedValue(audioSettingsResponse())
@@ -331,6 +337,48 @@ function deferred<T>() {
   const promise = new Promise<T>((release, fail) => { resolve = release; reject = fail })
   return { promise, resolve, reject }
 }
+
+it('retains loaded warp buffers for playback and export when base decoding finishes before stretching', async () => {
+  const base = new AudioBuffer({ numberOfChannels: 1, length: 80000, sampleRate: 8000 })
+  const warped = new AudioBuffer({ numberOfChannels: 1, length: 40000, sampleRate: 8000 })
+  const decoding = deferred<Map<string, AudioBuffer>>(), stretching = deferred<AudioBuffer>()
+  vi.mocked(decodeStem).mockResolvedValue(base)
+  vi.mocked(timeStretchBuffer).mockReturnValue(stretching.promise)
+  const { store, router, container } = await mountEditor()
+  const saved = projectsApi.parseTimelineProject(store.project)
+  saved.lanes[0]?.clips.push({ id: 'warped', sourceUrl: '/audio.wav', sourceLabel: 'Warped', timelineStart: 0, trimStart: 0, trimEnd: 10, warpEnabled: true, originalBpm: 60 })
+  vi.spyOn(projectsApi, 'getProject').mockResolvedValue({ id: 1, name: 'Warped project', data: saved, created_at: 'now', updated_at: 'now' })
+  engine.decodeAll.mockReturnValueOnce(decoding.promise)
+  await router.push('/editor/1'); await settlePlayback(); await settlePlayback()
+  decoding.resolve(new Map([['/audio.wav', base]])); await settlePlayback(); await settlePlayback()
+  expect(timeStretchBuffer).toHaveBeenCalledWith(base, 2)
+  stretching.resolve(warped); for (let index = 0; index < 12; index++) await nextTick()
+  transportButton(container).click(); await settlePlayback()
+  expect(engine.play.mock.calls.at(-1)?.[1].get('/audio.wav_warp_60_120')?.duration).toBe(5)
+  engine.render.mockResolvedValue(warped)
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const exportAction = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(exportAction instanceof HTMLButtonElement)) throw new Error('Missing export')
+  exportAction.click(); for (let index = 0; index < 20; index++) await nextTick()
+  expect(engine.render.mock.calls.at(-1)?.[1].get('/audio.wav_warp_60_120')?.duration).toBe(5)
+})
+
+it.each(['undo', 'redo'] as const)('completes an owned export after %s restores the same editor session', async change => {
+  const render = deferred<AudioBuffer>(); engine.render.mockReturnValue(render.promise)
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, container } = await mountEditor()
+  store.setBpm(90)
+  if (change === 'redo') store.undo()
+  const exportAction = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(exportAction instanceof HTMLButtonElement)) throw new Error('Missing export action')
+  exportAction.click(); await settlePlayback()
+  store[change](); await settlePlayback()
+  render.resolve(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  for (let index = 0; index < 20; index++) await nextTick()
+  expect(exportsApi.createAudioExport).toHaveBeenCalledOnce()
+  expect(download).toHaveBeenCalledOnce()
+  expect(exportAction.disabled).toBe(false)
+})
 
 async function pickLibraryTrack(container: HTMLElement): Promise<void> {
   vi.spyOn(tracksApi, 'listTracks').mockResolvedValue([{ id: 1, short_id: 1, title: 'Picked track', created_at: 'now', model: 'upload', lyrics: '', seed: null, duration_ms: null, wall_ms: null, params: {}, filename: 'song.wav', audio_url: '/api/tracks/1/audio', abc_url: null, stems: null, midi: null }])

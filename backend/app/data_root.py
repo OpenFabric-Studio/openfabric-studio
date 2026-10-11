@@ -9,6 +9,7 @@ stay there.
 from __future__ import annotations
 
 import errno
+import hashlib
 import json
 import logging
 import os
@@ -25,10 +26,13 @@ from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
-LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm")
-LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials")
+LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm", "video_character_trainer.json")
+LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials",
+                "video_projects", "video_characters", "video_character_training", "providers")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
-_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'))
+_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'),
+                   Path('videos'), Path('video_projects'), Path('video_characters'), Path('video_character_training'),
+                   Path('providers'), Path('video_character_trainer.json'))
 _DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -41,6 +45,11 @@ _LAYOUT = (
     ("files", "tracks"),
     ("voices", "voices"),
     ("videos", "videos"),
+    ("video_projects", "videoProjects"),
+    ("video_characters", "videoCharacters"),
+    ("video_character_training", "videoCharacterTraining"),
+    ("video_character_trainer.json", "videoCharacterTrainer"),
+    ("providers", "providers"),
     ("audiobooks", "audiobooks"),
     ("voice-profiles", "speechProfiles"),
     ("speech-clone-trials", "speechTrials"),
@@ -73,13 +82,21 @@ def config_path() -> Path:
 
 def read_config() -> dict[str, JsonValue]:
     path = config_path()
-    if not path.is_file():
-        return {}
     try:
         data = _json_value(json.loads(path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, DataDirError):
+    except FileNotFoundError:
+        if path.is_symlink():
+            raise DataDirError("config_unreadable")
         return {}
-    return data if isinstance(data, dict) else {}
+    except OSError as exc:
+        raise DataDirError("config_unreadable") from exc
+    except (UnicodeError, json.JSONDecodeError, DataDirError) as exc:
+        raise DataDirError("invalid_config") from exc
+    if not isinstance(data, dict):
+        raise DataDirError("invalid_config")
+    if any(key in data and _saved_path(data[key]) is None for key in ('data_dir', 'active_data_dir')):
+        raise DataDirError("invalid_config")
+    return data
 
 
 def _atomic_text(path: Path, text: str) -> None:
@@ -111,8 +128,8 @@ def configured_data_dir() -> Path | None:
 
 
 def has_library(path: Path) -> bool:
-    return any((path / database).is_file() for database in _DATABASES) or any(
-        (path / folder).is_dir() for folder in ('files', 'voices', 'audiobooks', 'voice-profiles', 'speech-clone-trials')
+    return any((path / name).is_file() for name in LIBRARY_FILES if name not in {'aicollector.db-wal', 'aicollector.db-shm'}) or any(
+        (path / folder).is_dir() for folder in LIBRARY_DIRS if folder not in {'models', 'logs'}
     )
 
 
@@ -284,6 +301,10 @@ def _rewrite_yaml_paths(text: str, src: Path, dest: Path) -> str:
 
 
 def _metadata_files(root: Path) -> list[Path]:
+    if root.is_symlink():
+        raise DataDirError('invalid_metadata')
+    if root.is_file():
+        return [root] if root.suffix.lower() in _TEXT_SUFFIXES and root.stat().st_size <= 5_000_000 else []
     if not root.is_dir():
         return []
     result: list[Path] = []
@@ -313,6 +334,147 @@ def rewrite_text_prefixes(root: Path, src: Path, dest: Path) -> None:
                                 for line in text.splitlines(keepends=True))
         if rewritten != text:
             _atomic_text(path, rewritten)
+
+
+@dataclass(frozen=True)
+class _SourceRebase:
+    metadata: Path
+    address: tuple[str | int, ...]
+    relative_source: Path
+    digest: str
+    size_key: Literal['size', 'bytes']
+
+
+def _source_stamp(info: os.stat_result, size_key: Literal['size', 'bytes']) -> dict[str, JsonValue]:
+    return {size_key: info.st_size, 'device': info.st_dev, 'inode': info.st_ino,
+            'mtime_ns': info.st_mtime_ns, 'ctime_ns': info.st_ctime_ns}
+
+
+def _source_digest(path: Path) -> tuple[str, os.stat_result]:
+    before = path.stat()
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+            digest.update(chunk)
+    after = path.stat()
+    if _source_stamp(before, 'size') != _source_stamp(after, 'size'):
+        raise DataDirError('invalid_metadata')
+    return digest.hexdigest(), after
+
+
+def _verified_source_digest(path: Path, verified: dict[Path, tuple[str, os.stat_result]]) -> tuple[str, os.stat_result]:
+    previous = verified.get(path)
+    if previous is not None and _source_stamp(previous[1], 'size') == _source_stamp(path.stat(), 'size'):
+        return previous
+    result = _source_digest(path)
+    verified[path] = result
+    return result
+
+
+def _capture_source(src: Path, metadata: Path, address: tuple[str | int, ...], path: Path,
+                    stamp: JsonValue, size_key: Literal['size', 'bytes'], expected_digest: str | None,
+                    verified: dict[Path, tuple[str, os.stat_result]]) -> _SourceRebase | None:
+    # External references and already changed sources retain their old identity.
+    # A move must not silently authorize a replacement or a redirected symlink.
+    if not isinstance(stamp, dict) or not path.is_absolute() or path.resolve() != path or not path.is_relative_to(src.resolve()):
+        return None
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    expected = _source_stamp(info, size_key)
+    if any(type(stamp.get(key)) is not int or stamp.get(key) != value for key, value in expected.items()):
+        return None
+    digest, hashed = _verified_source_digest(path, verified)
+    if expected != _source_stamp(hashed, size_key):
+        return None
+    if expected_digest is not None and expected_digest != digest:
+        return None
+    return _SourceRebase(metadata.relative_to(src), address, path.relative_to(src.resolve()), digest, size_key)
+
+
+def _project_sources(src: Path, metadata: Path, value: JsonValue,
+                     verified: dict[Path, tuple[str, os.stat_result]],
+                     address: tuple[str | int, ...] = ()) -> list[_SourceRebase]:
+    found: list[_SourceRebase] = []
+    if isinstance(value, dict):
+        path, digest = value.get('path'), value.get('sha256')
+        if isinstance(path, str) and isinstance(digest, str):
+            source = _capture_source(src, metadata, address, Path(path), value, 'size', digest, verified)
+            if source is not None:
+                found.append(source)
+        for key, child in value.items():
+            found.extend(_project_sources(src, metadata, child, verified, (*address, key)))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(_project_sources(src, metadata, child, verified, (*address, index)))
+    return found
+
+
+def _capture_video_sources(src: Path) -> list[_SourceRebase]:
+    sources: list[_SourceRebase] = []
+    verified: dict[Path, tuple[str, os.stat_result]] = {}
+    for metadata in _metadata_files(src / 'video_projects'):
+        if metadata.name == 'project.json':
+            sources.extend(_project_sources(src, metadata, _metadata_json(metadata), verified))
+    for metadata in _metadata_files(src / 'videos' / 'scenes'):
+        if metadata.name != 'source.json' or len(metadata.relative_to(src / 'videos' / 'scenes').parts) != 2:
+            continue
+        value = _metadata_json(metadata)
+        if not isinstance(value, dict) or not isinstance(value.get('source'), dict):
+            continue
+        description = value['source']
+        if not isinstance(description, dict):
+            continue
+        origin, raw = description.get('origin'), value.get('path')
+        if origin == 'upload' and raw == 'source.video':
+            path = metadata.parent / 'source.video'
+        elif origin == 'native' and isinstance(raw, str):
+            path = Path(raw)
+        else:
+            continue
+        captured = _capture_source(src, metadata, ('signature',), path, value.get('signature'), 'bytes', None, verified)
+        if captured is not None:
+            sources.append(captured)
+    return sources
+
+
+def _metadata_json(path: Path) -> JsonValue:
+    try:
+        return _json_value(json.loads(path.read_text(encoding='utf-8')))
+    except (json.JSONDecodeError, UnicodeError) as exc:
+        raise DataDirError('invalid_metadata') from exc
+
+
+def _identity_node(value: JsonValue, address: tuple[str | int, ...]) -> dict[str, JsonValue]:
+    for key in address:
+        if isinstance(key, str) and isinstance(value, dict):
+            value = value.get(key)
+        elif isinstance(key, int) and isinstance(value, list) and 0 <= key < len(value):
+            value = value[key]
+        else:
+            raise DataDirError('invalid_metadata')
+    if not isinstance(value, dict):
+        raise DataDirError('invalid_metadata')
+    return value
+
+
+def _rebase_video_sources(dest: Path, sources: list[_SourceRebase]) -> None:
+    documents: dict[Path, JsonValue] = {}
+    verified: dict[Path, tuple[str, os.stat_result]] = {}
+    for source in sources:
+        path = dest / source.relative_source
+        if path.is_symlink() or path.resolve() != path or not path.resolve().is_relative_to(dest.resolve()):
+            raise DataDirError('invalid_metadata')
+        digest, info = _verified_source_digest(path, verified)
+        if digest != source.digest:
+            raise DataDirError('invalid_metadata')
+        metadata = dest / source.metadata
+        if metadata not in documents:
+            documents[metadata] = _metadata_json(metadata)
+        _identity_node(documents[metadata], source.address).update(_source_stamp(info, source.size_key))
+    for path, value in documents.items():
+        _atomic_text(path, json.dumps(value, indent=2, ensure_ascii=False))
 
 
 @dataclass(frozen=True)
@@ -542,6 +704,7 @@ def migrate_library(src: Path, dest: Path) -> None:
                     target = backups / metadata.relative_to(src)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     shutil.copy2(metadata, target)
+            sources = _capture_video_sources(src)
             # Closing SQLite may checkpoint and remove its sidecars.
             names = tuple(name for name in names if (src / name).exists() or (src / name).is_symlink())
             migration = _Migration(src.resolve(), dest.resolve(), names, "moving", token)
@@ -567,6 +730,7 @@ def migrate_library(src: Path, dest: Path) -> None:
                 rewrite_library_paths(_database_path(dest, relative), src, dest)
             for metadata_root in _METADATA_ROOTS:
                 rewrite_text_prefixes(dest / metadata_root, src, dest)
+            _rebase_video_sources(dest, sources)
             completed = _Migration(migration.src, migration.dest, names, "complete", token)
             _write_journal(completed)
         except Exception as exc:

@@ -29,9 +29,12 @@ class AsrReviewTests(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(qa.shutdown)
 
     async def settle(self, identifier: str) -> None:
+        task = qa._TASKS.get(identifier)
         async with asyncio.timeout(5):
             while qa.get(identifier).state in {"queued", "running"}:
                 await asyncio.sleep(0.01)
+            if task is not None:
+                await asyncio.shield(task)
 
     async def create(self):
         return await qa.create("a" * 32, 0, "b" * 32, AsrReviewRequest(revision=1, render_identity="c" * 64))

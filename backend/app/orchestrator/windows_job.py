@@ -23,6 +23,7 @@ class JobApi(Protocol):
     def set_kill_on_close(self, handle: int) -> None: ...
     def assign_current(self, handle: int) -> None: ...
     def active_processes(self, handle: int) -> int: ...
+    def contains_process(self, handle: int, pid: int) -> bool: ...
     def terminate(self, handle: int, code: int) -> None: ...
     def close(self, handle: int) -> None: ...
 
@@ -77,6 +78,8 @@ class CtypesJobApi:
         self._assign: Callable[[int, int], object] = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p)(('AssignProcessToJobObject', kernel))
         self._current: Callable[[], object] = ctypes.WINFUNCTYPE(ctypes.c_void_p)(('GetCurrentProcess', kernel))
         self._query: Callable[[int, int, object, int, None], object] = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)(('QueryInformationJobObject', kernel))
+        self._open_process: Callable[[int, int, int], object] = ctypes.WINFUNCTYPE(ctypes.c_void_p, ctypes.c_uint32, ctypes.c_int32, ctypes.c_uint32)(('OpenProcess', kernel))
+        self._in_job: Callable[[int, int, object], object] = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)(('IsProcessInJob', kernel))
         self._terminate: Callable[[int, int], object] = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint32)(('TerminateJobObject', kernel))
         self._close: Callable[[int], object] = ctypes.WINFUNCTYPE(ctypes.c_int32, ctypes.c_void_p)(('CloseHandle', kernel))
 
@@ -112,6 +115,17 @@ class CtypesJobApi:
 
     def terminate(self, handle: int, code: int) -> None:
         checked_success(self._terminate(handle, code))
+
+    def contains_process(self, handle: int, pid: int) -> bool:
+        process = checked_handle(self._open_process(0x1000, 0, pid))
+        try:
+            result = ctypes.c_int32()
+            checked_success(self._in_job(process, handle, ctypes.byref(result)))
+            if result.value not in (0, 1):
+                raise OSError('Invalid Windows job membership')
+            return result.value == 1
+        finally:
+            self.close(process)
 
     def close(self, handle: int) -> None:
         checked_success(self._close(handle))
@@ -161,6 +175,12 @@ class WindowsJob:
         with self._lock:
             if self._handle is not None:
                 self._api.terminate(self._handle, code)
+
+    def contains_process(self, pid: int) -> bool:
+        if type(pid) is not int or not 0 < pid <= 0xFFFFFFFF:
+            raise ValueError('Invalid native listener PID')
+        with self._lock:
+            return False if self._handle is None else self._api.contains_process(self._handle, pid)
 
     def close(self) -> None:
         with self._lock:

@@ -96,6 +96,8 @@ Startup accepts the backend only after a bounded readiness response matches its 
 
 `npm test` uses Node’s test runner and an offline Python 3 harness for downloader/setup/lifecycle behavior. Set `PYTHON_BIN` if Python is not available as `python3` (`python` on Windows). Linux script tests use fake tools and are skipped on Windows. Tests use temporary configuration/data/engine paths and do not download GPU weights. Follow [AGENTS.md](../AGENTS.md) and the isolated full checks in [fork maintenance](../docs/fork-maintenance.md).
 
+The npm override pins `global-agent` to 4.1.3 only beneath `@electron/get`. The older downloader chain brought in vulnerable `sprintf-js` through its logger; global-agent 4 removes that chain while retaining the CommonJS `bootstrap` API the downloader calls. The proxy regression exercises the builder's actual downloader with local proxy and `NO_PROXY` servers. Keep electron-builder at its reviewed version; remove the override when its downloader dependency adopts the corrected chain, after repeating the proxy test and dependency audit. Installer creation and HTTPS proxy behavior still need platform release checks.
+
 [test/e2e/full.js](test/e2e/full.js) is a legacy Windows/NVIDIA full-install/generation harness. It assumes the old all-model first run and needs adaptation to the module wizard before use. Do not treat it as current platform evidence. Unsigned-install behavior, clean installation, copied-library migration and GPU generation remain release checks, not claims made by CPU CI.
 
 ## Known gaps

@@ -6,6 +6,7 @@ import binascii
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -14,16 +15,19 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from typing import Literal
 import httpx
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from . import openrouter_catalog as catalog, openrouter_requests as ledger, openrouter_settings as settings, openrouter_credentials as credentials
 from .contracts import JsonObject
 from .job_lifecycle import await_cleanup
-from .openrouter_contracts import OpenRouterCatalog, OpenRouterConnection, OpenRouterMusicRequest, OpenRouterQuoteRequest, OpenRouterSpeechRequest, OpenRouterVideoRequest, OpenRouterVideoJob, Usd
+from .openrouter_contracts import OpenRouterCatalog, OpenRouterConnection, OpenRouterModel, OpenRouterMusicRequest, OpenRouterQuoteRequest, OpenRouterSpeechRequest, OpenRouterVideoRequest, OpenRouterVideoJob, OpenRouterImageEditRequest, OpenRouterVideoEditRequest, Usd
 from .openrouter_errors import OpenRouterError
 
 _ORIGIN = 'https://openrouter.ai'
 _BASE = _ORIGIN+'/api/v1'
 _JSON_LIMIT = 4*1024*1024
+_IMAGE_LIMIT = 32*1024*1024
+_IMAGE_JSON_LIMIT = 44*1024*1024
 _AUDIO_LIMIT = 64*1024*1024
 _VIDEO_LIMIT = 512*1024*1024
 _SSE_LIMIT = 192*1024*1024
@@ -45,13 +49,21 @@ class VideoDownload:
     bytes: int
     sha256: str
 
+@dataclass(frozen=True)
+class ImageResult:
+    data: bytes
+    media_type: Literal['image/png','image/jpeg','image/webp']
+    generation_id: str | None = None
+    actual_cost_usd: float | None = None
+
 class _Wire(BaseModel):
     model_config=ConfigDict(extra='ignore',allow_inf_nan=False)
 class _Usage(_Wire):
+    model_config=ConfigDict(extra='ignore',strict=True,allow_inf_nan=False)
     cost: Usd | None = None
 class _Remote(_Wire):
     id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,160}$')
-    status: Literal['pending','queued','in_progress','processing','completed','failed','cancelled']
+    status: Literal['pending','queued','in_progress','processing','completed','failed','cancelled','expired']
     polling_url: str | None = Field(default=None,max_length=2000)
     unsigned_urls: list[str] = Field(default_factory=list,max_length=4)
     progress: float | None = Field(default=None,ge=0,le=100)
@@ -63,6 +75,13 @@ class _KeyData(_Wire):
     is_free_tier: bool = False
 class _Key(_Wire):
     data: _KeyData
+class _ImageData(_Wire):
+    model_config=ConfigDict(extra='ignore',strict=True,allow_inf_nan=False)
+    b64_json: str = Field(min_length=1,max_length=4*((_IMAGE_LIMIT+2)//3))
+    media_type: Literal['image/png','image/jpeg','image/webp'] | None = None
+class _ImageResponse(_Wire):
+    data: list[_ImageData] = Field(min_length=1,max_length=1)
+    usage: _Usage | None = None
 class _AudioDelta(_Wire):
     data: str = Field(default='',max_length=2*1024*1024)
     transcript: str = Field(default='',max_length=16000)
@@ -86,12 +105,12 @@ def _remote_id(value: str) -> str:
 def _remote(value: JsonObject) -> OpenRouterVideoJob:
     try:
         wire=_Remote.model_validate(value)
-        if wire.polling_url not in (None,f'{_BASE}/videos/{wire.id}'):
+        if wire.polling_url not in (None,f'{_BASE}/videos/{wire.id}',f'/api/v1/videos/{wire.id}'):
             raise ValueError()
         for index,url in enumerate(wire.unsigned_urls):
-            if url not in (f'{_BASE}/videos/{wire.id}/content?index={index}',f'{_BASE}/videos/{wire.id}/content' if index==0 else ''):
+            if url not in (f'{_BASE}/videos/{wire.id}/content?index={index}',f'/api/v1/videos/{wire.id}/content?index={index}',f'{_BASE}/videos/{wire.id}/content' if index==0 else '',f'/api/v1/videos/{wire.id}/content' if index==0 else ''):
                 raise ValueError()
-        status: Literal['pending','queued','processing','completed','failed','cancelled']
+        status: Literal['pending','queued','processing','completed','failed','cancelled','expired']
         status='processing' if wire.status=='in_progress' else wire.status
         return OpenRouterVideoJob(id=wire.id,status=status,progress=wire.progress,actual_cost_usd=wire.usage.cost if wire.usage else None)
     except (ValidationError,ValueError) as error: raise OpenRouterError('provider_response_invalid') from error
@@ -125,11 +144,11 @@ class OpenRouterClient:
             finally:
                 with _REGISTRY_LOCK: _ACTIVE.discard(task)
 
-    async def _json_request(self, method: str, path: str, *, payload: JsonObject | None=None, authenticated: bool=True) -> JsonObject:
+    async def _json_request(self, method: str, path: str, *, payload: JsonObject | None=None, authenticated: bool=True, limit: int | None=None) -> JsonObject:
         try:
             async with asyncio.timeout(180), self._session(authenticated=authenticated) as client, client.stream(method,_BASE+path,json=payload) as response:
                 if not 200<=response.status_code<300: raise _http_error(response.status_code)
-                data=await self._read(response,_JSON_LIMIT)
+                data=await self._read(response,_JSON_LIMIT if limit is None else limit)
                 return _json.validate_json(data)
         except OpenRouterError: raise
         except (httpx.HTTPError,TimeoutError) as error: raise OpenRouterError('provider_unavailable') from error
@@ -153,11 +172,17 @@ class OpenRouterClient:
             video=catalog.normalize_video(await self._json_request('GET','/videos/models',authenticated=False))
             speech=catalog.normalize_audio(await self._json_request('GET','/models?output_modalities=speech',authenticated=False),'speech')
             music=catalog.normalize_audio(await self._json_request('GET','/models?output_modalities=audio',authenticated=False),'music')
+            images: list[OpenRouterModel]=[]
+            try:
+                images.append(catalog.normalize_image_edit(await self._json_request('GET','/images/models/bytedance-seed/seedream-4.5/endpoints',authenticated=False)))
+            except (OpenRouterError,ValueError):
+                # Missing optional editing metadata must not disable other models.
+                pass
             reviewed=[]
             for model in speech:
                 endpoints=await self._json_request('GET',f'/models/{model.id}/endpoints',authenticated=False)
                 reviewed.append(catalog.apply_endpoints(model,endpoints))
-            return catalog.publish([*video,*reviewed,*music])
+            return catalog.publish([*video,*reviewed,*music,*images])
         except (ValidationError,ValueError,KeyError) as error: raise OpenRouterError('catalog_invalid') from error
 
     def _begin(self, receipt_id: str, quote_id: str, body: OpenRouterQuoteRequest, before_submit: Callable[[], None] | None = None) -> None:
@@ -189,6 +214,49 @@ class OpenRouterClient:
         payload=_json.validate_json(body.model_dump_json(exclude={'reference_image'},exclude_none=True))
         if body.reference_image:
             payload['frame_images']=[{'type':'image_url','image_url':{'url':body.reference_image},'frame_type':'first_frame'}]
+        try:
+            result=_remote(await self._json_request('POST','/videos',payload=payload))
+            ledger.update(receipt_id,state='submitted',remote_id=result.id,actual_cost_usd=result.actual_cost_usd)
+            return result
+        except asyncio.CancelledError as error:
+            self._failed(receipt_id,error)
+            raise
+        except (OpenRouterError,OSError,ValueError) as error: raise self._failed(receipt_id,error) from error
+
+    async def submit_image_edit(self, receipt_id: str, body: OpenRouterImageEditRequest, quote_id: str) -> ImageResult:
+        self._begin(receipt_id,quote_id,catalog.image_parameters(body))
+        payload: JsonObject={'model':body.model,'prompt':body.prompt,'n':1,'resolution':'2K',
+            'aspect_ratio':body.aspect_ratio,'seed':body.seed,'provider':{'only':['seed'],'allow_fallbacks':False},
+            'input_references':[{'type':'image_url','image_url':{'url':body.source_frame}},
+                {'type':'image_url','image_url':{'url':body.reference_image}}]}
+        try:
+            wire=_ImageResponse.model_validate(await self._json_request('POST','/images',payload=payload,limit=_IMAGE_JSON_LIMIT))
+            data=base64.b64decode(wire.data[0].b64_json,validate=True)
+            if not data or len(data)>_IMAGE_LIMIT: raise OpenRouterError('provider_output_too_large')
+            with Image.open(io.BytesIO(data)) as image:
+                if image.width*image.height>16777216: raise OpenRouterError('provider_output_too_large')
+                media_type: Literal['image/png','image/jpeg','image/webp']
+                if image.format=='PNG': media_type='image/png'
+                elif image.format=='JPEG': media_type='image/jpeg'
+                elif image.format=='WEBP': media_type='image/webp'
+                else: raise OpenRouterError('provider_response_invalid')
+                image.verify()
+            if wire.data[0].media_type not in (None,media_type): raise OpenRouterError('provider_response_invalid')
+            cost=wire.usage.cost if wire.usage is not None else None
+            ledger.update(receipt_id,state='completed',actual_cost_usd=cost)
+            return ImageResult(data=data,media_type=media_type,actual_cost_usd=cost)
+        except asyncio.CancelledError as error:
+            self._failed(receipt_id,error)
+            raise
+        except (OpenRouterError,OSError,ValueError,SyntaxError,Image.DecompressionBombError) as error:
+            raise self._failed(receipt_id,error) from error
+
+    async def submit_video_edit(self, receipt_id: str, body: OpenRouterVideoEditRequest, quote_id: str) -> OpenRouterVideoJob:
+        self._begin(receipt_id,quote_id,catalog.video_edit_parameters(body))
+        payload: JsonObject={'model':body.model,'prompt':body.prompt,
+            'input_references':[{'type':'video_url','video_url':{'url':body.reference_video}}],
+            'provider':{'options':{'runway':{'parameters':{'keyframes':[{'seconds':0,'uri':body.reference_image}]}}}}}
+        if body.seed is not None: payload['seed']=body.seed
         try:
             result=_remote(await self._json_request('POST','/videos',payload=payload))
             ledger.update(receipt_id,state='submitted',remote_id=result.id,actual_cost_usd=result.actual_cost_usd)

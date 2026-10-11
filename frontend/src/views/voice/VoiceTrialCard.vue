@@ -13,7 +13,12 @@ const emit = defineEmits<{ rated: [comparison: VoiceComparisonResponse] }>()
 const { t } = useI18n()
 const capture = useVoiceSession(() => props.voiceId)
 const fields = ['identity', 'pitch', 'intelligibility', 'artifacts'] as const
-const rating = ref({ identity: '', pitch: '', intelligibility: '', artifacts: '', notes: '' })
+function ratingDraft(saved?: VoiceTrialRating | null) {
+  return { identity: saved ? String(saved.identity) : '', pitch: saved ? String(saved.pitch) : '', intelligibility: saved ? String(saved.intelligibility) : '', artifacts: saved ? String(saved.artifacts) : '', notes: saved?.notes ?? '' }
+}
+const rating = ref(ratingDraft()), savedRating = ref(ratingDraft())
+const dirty = computed(() => fields.some(field => rating.value[field] !== savedRating.value[field]) || rating.value.notes !== savedRating.value.notes)
+function hydrate(saved?: VoiceTrialRating | null) { savedRating.value = ratingDraft(saved); rating.value = { ...savedRating.value } }
 const saving = ref(false)
 const error = ref('')
 const modelLabel = computed(() => {
@@ -28,9 +33,8 @@ const referenceLabel = computed(() => {
   if (reference) return `${reference.source_filename} · ${reference.start_sec.toFixed(1)}–${reference.end_sec.toFixed(1)} ${t('common.secondsUnit')}`
   return t('voiceClone.compare.archivedReference', { id: shortVoiceId(props.trial.reference_id) })
 })
-watch(() => props.trial.rating, (saved) => {
-  if (!saved) return
-  rating.value = { identity: String(saved.identity), pitch: String(saved.pitch), intelligibility: String(saved.intelligibility), artifacts: String(saved.artifacts), notes: saved.notes ?? '' }
+watch(() => [props.comparisonId, props.trial.id, props.trial.rating] as const, ([comparisonId, trialId, saved], previous) => {
+  if (!previous || comparisonId !== previous[0] || trialId !== previous[1] || !dirty.value) hydrate(saved)
 }, { immediate: true })
 const canSave = computed(() => !saving.value && fields.every((field) => ['1', '2', '3', '4', '5'].includes(rating.value[field])))
 async function save() {
@@ -43,7 +47,11 @@ async function save() {
   error.value = ''
   try {
     const response = await rateVoiceTrial(session.id, comparisonId, trialId, request, session.signal)
-    if (session.isCurrent() && props.trial.id === trialId && props.comparisonId === comparisonId) emit('rated', response)
+    if (session.isCurrent() && props.trial.id === trialId && props.comparisonId === comparisonId && response.id === comparisonId && response.voice_id === session.id) {
+      const saved = response.trials.find(trial => trial.id === trialId)?.rating
+      if (saved) hydrate(saved)
+      emit('rated', response)
+    }
   } catch (cause) {
     if (session.isCurrent()) error.value = voiceErrorText(cause instanceof ApiError ? cause.message : 'unknown')
   } finally {

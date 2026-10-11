@@ -164,7 +164,9 @@ class BackendServer extends EventEmitter {
     this.stopTask = (async () => {
       if (this.url && child.exitCode === null && child.signalCode === null) {
         try {
-          await fetch(`${this.url}api/orchestrator/stop`, { method: 'POST', signal: AbortSignal.timeout(30000) });
+          await fetch(`${this.url}api/orchestrator/stop`, {
+            method: 'POST', headers: { Origin: new URL(this.url).origin }, signal: AbortSignal.timeout(30000),
+          });
         } catch { /* the backend may already be gone */ }
       }
       // FastAPI lifespan drains model/job registries after SIGTERM.

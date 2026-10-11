@@ -3,7 +3,7 @@ import LoudnessControls from '../../components/shared/LoudnessControls.vue'
 import AudioQualityReport from '../../components/shared/AudioQualityReport.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useVideoWorkspace } from './useVideoWorkspace'
 import SpeechAudioPreview from '../voice/SpeechAudioPreview.vue'
 import VideoPreviewPlayer from './VideoPreviewPlayer.vue'
@@ -14,16 +14,30 @@ import VideoDialoguePanel from './VideoDialoguePanel.vue'
 import VideoSoundtrackPanel from './VideoSoundtrackPanel.vue'
 import VideoCharacterPanel from './VideoCharacterPanel.vue'
 import VideoCharacterTrainer from './VideoCharacterTrainer.vue'
+import VideoCharacterSwap from './VideoCharacterSwap.vue'
+import VideoSceneCutter from './VideoSceneCutter.vue'
 import LocalEnginePanel from '../voice/LocalEnginePanel.vue'
 import { videoWorkspaceSteps, videoClipLengths, videoMediaUrl, changeShotLength, splitShot, duplicateShot, moveShot, newVideoId, frameTime, shotProblem, characterLockIssue, type VideoWorkspaceStep, type VideoClipLength } from './videoWorkspace'
 import { videoErrorText, videoRequestError, deleteVideo, isVideoActive } from '../../api/videos'
-import type { VideoProjectJob, VideoMarker } from '../../api/contracts'
+import type { VideoProjectJob, VideoMarker, VideoSceneCut } from '../../api/contracts'
 import { formatClock } from '../../composables/voicePace'
 import { claimPlayback, releasePlaybackIfCurrent } from '../../composables/audioPlayback'
 import { notePhasePace, phaseRemaining, type VideoPhasePace } from './videoJobTiming'
 
 const { t } = useI18n()
-const route = useRoute()
+const route = useRoute(), router = useRouter()
+const videoProcesses = ['create', 'cut', 'replace'] as const
+type VideoProcess = typeof videoProcesses[number]
+function processFromQuery(value: unknown): VideoProcess { return videoProcesses.find(item => item === value) ?? 'create' }
+const process = ref<VideoProcess>(processFromQuery(route.query.workflow))
+const visitedProcesses = ref<VideoProcess[]>([process.value])
+const chosenScene = ref<VideoSceneCut | null>(null)
+function useSceneCut(cut: VideoSceneCut) {
+  if (cut.status !== 'ready' || cut.seconds < 2 || !cut.output_url) return
+  chosenScene.value = cut; chooseProcess('replace')
+  const token = ++focusGeneration, initiating = document.activeElement
+  void nextTick(() => { if (alive && token === focusGeneration && process.value === 'replace' && (document.activeElement === initiating || document.activeElement === document.body)) document.getElementById('character-swap-heading')?.focus() })
+}
 const { tracks, projects, legacyVideos, project, draft, step, selectedShotId, selectedPreviewIds, variantsPerShot, trackId,
   selectedTrack, selectedShot, savedShot, loading, acting, saving, dirty, error, saveError, serverBusy, readiness, now, undoStack, active, readOnly, problem, coverageEnd, approvalCount,
   cloudSubmit, cloudResume, detachAdapter, save, selectProject, removeProject, reloadProject, createProject, preview, render, analyze, approve, resume, cancel, duplicate, exportVideo, upload, uploadSpeech, clearSpeech, speakLine, applyCharacter, applyTrainedCharacter, editShots, undo, redo, refreshCue, addShot } = useVideoWorkspace()
@@ -166,6 +180,7 @@ function cancelNewProject() {
   void focusPanel()
 }
 async function openProject(id: string) {
+  chooseProcess('create')
   const token = ++focusGeneration, initiating = document.activeElement
   await selectProject(id)
   if (!alive || project.value?.id !== id) return
@@ -235,6 +250,34 @@ function jobDetail(job: VideoProjectJob) { return [job.phase || t(`videoWorkspac
 watch([search, statusFilter], () => { page.value = 1 })
 watch(generatedMode, (generated) => { if (!generated && variantsPerShot.value > 2) variantsPerShot.value = 2 })
 function stopSource() { playbackGeneration++; if (audio.value) { audio.value.pause(); releasePlaybackIfCurrent(audio.value) } }
+function setProcess(value: VideoProcess) {
+  if (value === process.value) return
+  const previousPanel = document.getElementById(`video-process-${process.value}`)
+  const focused = document.activeElement
+  playbackGeneration++
+  auditionEnd.value = null
+  for (const player of previousPanel?.querySelectorAll<HTMLMediaElement>('audio,video') ?? []) {
+    player.pause(); releasePlaybackIfCurrent(player)
+  }
+  process.value = value
+  if (!visitedProcesses.value.includes(value)) visitedProcesses.value.push(value)
+  const token = ++focusGeneration
+  if (focused && previousPanel?.contains(focused)) void nextTick(() => {
+    if (alive && token === focusGeneration && (document.activeElement === focused || document.activeElement === document.body)) document.getElementById(`video-process-tab-${value}`)?.focus()
+  })
+}
+function chooseProcess(value: VideoProcess) {
+  setProcess(value)
+  if (route.query.workflow !== value) void router.push({ query: { ...route.query, workflow: value } })
+}
+function processKey(event: KeyboardEvent, index: number) {
+  const target = event.key === 'Home' ? 0 : event.key === 'End' ? 2 : event.key === 'ArrowRight' ? (index + 1) % 3 : event.key === 'ArrowLeft' ? (index + 2) % 3 : null
+  if (target === null) return
+  event.preventDefault()
+  const next = videoProcesses[target]
+  if (next) { chooseProcess(next); document.getElementById(`video-process-tab-${next}`)?.focus() }
+}
+watch(() => route.query.workflow, value => setProcess(processFromQuery(value)))
 watch(showNewProject, (visible) => {
   if (!visible) return
   stopSource()
@@ -249,8 +292,23 @@ onBeforeUnmount(stopSource)
 <template>
   <div class="video-workspace min-w-0 space-y-6">
     <header class="flex flex-wrap items-start justify-between gap-3">
-      <div><h1 class="text-2xl font-semibold text-text">{{ t('videoWorkspace.title') }}</h1><p class="mt-2 max-w-2xl text-sm leading-relaxed text-text-dim">{{ t('videoExperience.intro') }}</p></div>
+      <div><h1 class="text-2xl font-semibold text-text">{{ t('videoWorkspace.title') }}</h1><p class="mt-2 max-w-3xl text-sm leading-relaxed text-text-dim">{{ t('videoProcesses.intro') }}</p></div>
     </header>
+    <nav role="tablist" :aria-label="t('videoProcesses.navigation')" class="video-process-nav">
+      <button v-for="(item, index) in videoProcesses" :id="`video-process-tab-${item}`" :key="item" :data-video-process="item" type="button" role="tab" :aria-selected="process === item" :aria-controls="`video-process-${item}`" :tabindex="process === item ? 0 : -1" class="video-process-tab" @click="chooseProcess(item)" @keydown="processKey($event, index)">
+        <span class="block text-base font-semibold">{{ t(`videoProcesses.${item}.title`) }}</span>
+        <span class="mt-1 block text-sm text-text-dim">{{ t(`videoProcesses.${item}.hint`) }}</span>
+        <span class="mt-3 block text-xs font-medium text-text-dim">{{ t(`videoProcesses.${item}.scope`) }}</span>
+      </button>
+    </nav>
+    <section id="video-process-cut" role="tabpanel" aria-labelledby="video-process-tab-cut" :hidden="process !== 'cut'" class="video-process-panel">
+      <VideoSceneCutter v-if="visitedProcesses.includes('cut')" @use-cut="useSceneCut" />
+    </section>
+    <section id="video-process-replace" role="tabpanel" aria-labelledby="video-process-tab-replace" :hidden="process !== 'replace'" class="video-process-panel">
+      <VideoCharacterSwap v-if="visitedProcesses.includes('replace')" :chosen-scene="chosenScene" @clear-scene="chosenScene = null" />
+    </section>
+    <section id="video-process-create" role="tabpanel" aria-labelledby="video-process-tab-create" :hidden="process !== 'create'" class="video-process-panel space-y-5">
+    <p class="max-w-3xl text-sm leading-relaxed text-text-dim">{{ t('videoExperience.intro') }}</p>
     <div class="video-project-layout">
       <aside class="min-w-0 space-y-3" :aria-label="t('videoExperience.projects')">
         <button type="button" class="primary w-full" :aria-label="t('videoExperience.newProject')" :disabled="acting || saving || loading" @click="startNewProject">+ {{ t('videoExperience.newProject') }}</button>
@@ -263,8 +321,8 @@ onBeforeUnmount(stopSource)
     <div data-testid="video-global-status" class="video-step-status sticky z-10 space-y-3 rounded-xl border border-border bg-panel p-4 shadow-sm">
       <div class="flex min-w-0 flex-wrap items-center justify-between gap-2"><div class="min-w-0"><p class="text-xs text-text-dim">{{ t('videoExperience.currentProject') }}</p><p class="mt-1 break-words font-semibold text-text">{{ project?.name || t('videoWorkspace.noProject') }}</p></div><span class="text-xs text-text-dim">{{ t('videoExperience.stageCount', { current: videoWorkspaceSteps.indexOf(step) + 1 }) }}</span></div>
       <nav role="tablist" :aria-label="t('videoWorkspace.steps')" class="video-stage-nav">
-        <button v-for="(item, index) in videoWorkspaceSteps" :id="`video-step-${item}`" :key="item" role="tab" :aria-label="`${index + 1} ${t(`videoWorkspace.${item}`)}`" :aria-controls="`video-panel-${item}`" :aria-selected="step === item" :tabindex="step === item ? 0 : -1" :disabled="showNewProject && item !== 'song'"
-          class="video-stage" @click="changeStep(item)" @keydown="stepKey($event, index)"><span class="video-stage-number" aria-hidden="true">{{ stepDone(item) ? '✓' : index + 1 }}</span><span class="min-w-0 text-left"><span class="block text-sm font-medium">{{ t(`videoWorkspace.${item}`) }}</span><span class="mt-0.5 block text-xs opacity-80">{{ t(`videoExperience.stageHints.${item}`) }}</span></span></button>
+        <button v-for="(item, index) in videoWorkspaceSteps" :id="`video-step-${item}`" :key="item" role="tab" :aria-label="`${index + 1} ${t(item === 'song' ? 'videoProcesses.sourceStep' : `videoWorkspace.${item}`)}`" :aria-controls="`video-panel-${item}`" :aria-selected="step === item" :tabindex="step === item ? 0 : -1" :disabled="showNewProject && item !== 'song'"
+          class="video-stage" @click="changeStep(item)" @keydown="stepKey($event, index)"><span class="video-stage-number" aria-hidden="true">{{ stepDone(item) ? '✓' : index + 1 }}</span><span class="min-w-0 text-left"><span class="block text-sm font-medium">{{ t(item === 'song' ? 'videoProcesses.sourceStep' : `videoWorkspace.${item}`) }}</span><span class="mt-0.5 block text-xs opacity-80">{{ t(`videoExperience.stageHints.${item}`) }}</span></span></button>
       </nav>
       <div class="flex flex-wrap items-center justify-between gap-2 text-sm">
         <div><span role="status">{{ t(`videoWorkspace.status.${statusText}`) }}<span v-if="project?.job"> · {{ jobDetail(project.job) }}</span></span>
@@ -290,10 +348,10 @@ onBeforeUnmount(stopSource)
       <p v-if="audioError" role="alert" class="text-status-failed">{{ audioError }}</p>
     </div>
     <section :id="`video-panel-${step}`" role="tabpanel" :aria-labelledby="`video-step-${step}`" tabindex="0" class="min-w-0 space-y-4">
-      <div><h2 id="video-panel-heading" ref="panelHeading" tabindex="-1" class="text-xl font-semibold text-text">{{ t(step === 'song' && !showNewProject ? 'videoExperience.savedSongGoal' : `videoWorkspace.${step}Goal`) }}</h2><p v-if="step !== 'direction'" class="mt-2 text-sm text-text-dim">{{ t(`videoExperience.stageDescriptions.${step}`) }}</p></div>
+      <div><h2 id="video-panel-heading" ref="panelHeading" tabindex="-1" class="text-xl font-semibold text-text">{{ t(step === 'song' ? (showNewProject ? 'videoProcesses.startTitle' : 'videoProcesses.savedSourceTitle') : `videoWorkspace.${step}Goal`) }}</h2><p v-if="step !== 'direction'" class="mt-2 text-sm text-text-dim">{{ t(`videoExperience.stageDescriptions.${step}`) }}</p></div>
       <template v-if="step === 'song'">
         <div v-if="showNewProject" data-new-video-project class="video-card space-y-4">
-          <div><h3 class="font-semibold">{{ t('videoExperience.chooseSong') }}</h3><p class="mt-2 text-sm leading-relaxed text-text-dim">{{ t('videoExperience.newIntro') }}</p></div>
+          <div><h3 class="font-semibold">{{ t('videoProcesses.startKind') }}</h3><p class="mt-2 text-sm leading-relaxed text-text-dim">{{ t('videoExperience.newIntro') }}</p></div>
           <div role="group" :aria-label="t('videoExperience.newProject')" class="flex flex-wrap gap-2">
             <button type="button" :aria-pressed="startKind === 'song'" @click="startKind = 'song'">{{ t('videoExperience.startSong') }}</button>
             <button type="button" :aria-pressed="startKind === 'silent'" @click="startKind = 'silent'">{{ t('videoExperience.startSilent') }}</button>
@@ -326,8 +384,12 @@ onBeforeUnmount(stopSource)
         <VideoDirectionPanel v-model="draft" :project="project" :readiness="readiness" :read-only="readOnly" :can-analyze="canAnalyze" @analyze="analyze" @continue="changeStep('storyboard', true)" @upload="upload" @detach-adapter="detachAdapter" @duplicate="duplicate" />
         <VideoDialoguePanel v-if="project.dialogue_cues?.length" :project="project" :read-only="readOnly" @refresh="refreshCue" />
         <VideoSoundtrackPanel v-if="pictureProject && !project.dialogue_cues?.length" :project="project" :draft="draft" :read-only="readOnly" @upload="uploadSpeech" @clear="clearSpeech" @speak="speakLine" />
-        <VideoCharacterPanel v-if="pictureProject" :project="project" :read-only="readOnly" @apply="applyCharacter" />
-        <VideoCharacterTrainer v-if="pictureProject && !cloudMode" :project="project" :read-only="readOnly" @apply="applyTrainedCharacter" />
+        <details v-if="pictureProject" data-video-character-tools class="video-card video-secondary">
+          <summary class="font-semibold">{{ t('videoProcesses.characterTools') }}</summary>
+          <p class="mt-2 text-sm leading-relaxed text-text-dim">{{ t('videoProcesses.characterToolsHint') }}</p>
+          <div class="mt-4 space-y-5"><VideoCharacterPanel :project="project" :read-only="readOnly" @apply="applyCharacter" />
+          <VideoCharacterTrainer v-if="!cloudMode" :project="project" :read-only="readOnly" @apply="applyTrainedCharacter" /></div>
+        </details>
       </template>
       <template v-else-if="draft && project && step === 'storyboard'">
 
@@ -407,10 +469,16 @@ onBeforeUnmount(stopSource)
       </div>
     </div>
     <details v-if="legacyVideos.length" class="rounded-xl bg-panel p-4"><summary>{{ t('videoWorkspace.previousVideos') }} ({{ legacyVideos.length }})</summary><div class="mt-4 grid gap-3 sm:grid-cols-2"><label>{{ t('videoWorkspace.search') }}<input v-model="search" type="search"></label><label>{{ t('videoWorkspace.filter') }}<select v-model="statusFilter"><option value="all">{{ t('videoWorkspace.all') }}</option><option v-for="status in ['ready', 'failed', 'cancelled', 'running', 'queued']" :key="status" :value="status">{{ t(`videoWorkspace.status.${status}`) }}</option></select></label></div><ul class="mt-4 grid gap-4 md:grid-cols-2"><li v-for="row in visibleVideos" :key="row.id" class="rounded-lg bg-panel-2 p-3 space-y-2"><strong>{{ row.title }}</strong> · {{ t(`videoWorkspace.status.${row.status}`) }}<VideoPreviewPlayer v-if="row.status === 'ready' && row.file_url" :src="row.file_url" :label="row.title" /><p v-if="row.error_code" class="text-status-failed">{{ videoErrorText(row.error_code) }}</p><div class="flex gap-2"><a v-if="row.file_url" :href="row.file_url" download>{{ t('common.download') }}</a><button :disabled="isVideoActive(row.status)" @click="removeLegacy(row.id)">{{ t('video.delete') }}</button></div></li></ul><div class="mt-3 flex justify-between"><button :disabled="page <= 1" @click="page--">{{ t('videoWorkspace.previous') }}</button><span>{{ page }} / {{ Math.max(1, Math.ceil(filteredVideos.length / 10)) }}</span><button :disabled="page * 10 >= filteredVideos.length" @click="page++">{{ t('videoWorkspace.next') }}</button></div></details>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.video-process-nav { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.video-workspace button.video-process-tab { min-width: 0; min-height: 112px; border: 1px solid var(--color-border); padding: 16px; background: var(--color-panel); color: var(--color-text); text-align: left; }
+.video-workspace button.video-process-tab[aria-selected=true] { border-color: var(--color-accent2); background: color-mix(in srgb, var(--color-accent1) 12%, var(--color-panel)); box-shadow: inset 0 3px var(--color-accent2); color: var(--color-text); }
+.video-process-panel { min-width: 0; }
+.video-process-panel[hidden] { display: none; }
 .video-project-layout { display: grid; gap: 24px; min-width: 0; }
 .video-library-summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; cursor: pointer; border: 1px solid var(--color-border); border-radius: 10px; padding: 10px 14px; background: var(--color-panel); font-size: 14px; font-weight: 600; }
 .video-stage-nav { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; }
@@ -434,5 +502,5 @@ onBeforeUnmount(stopSource)
 .video-workspace label.inline-check { flex-direction: row; align-items: center; min-height: 44px; }
 .video-workspace input[type=checkbox] { width: 18px; height: 18px; }
 @media (min-width: 1280px) { .video-project-layout { grid-template-columns: 244px minmax(0, 1fr); align-items: start; } .video-library-summary { display: none; } }
-@media (max-width: 540px) { .video-card { padding: 16px; } .video-step-status { position: static; } }
+@media (max-width: 540px) { .video-process-nav { grid-template-columns: minmax(0, 1fr); gap: 8px; } .video-workspace button.video-process-tab { min-height: 44px; padding: 12px 16px; } .video-card { padding: 16px; } .video-step-status { position: static; } }
 </style>

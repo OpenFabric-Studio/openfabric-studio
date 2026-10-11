@@ -10,7 +10,8 @@ const props=defineProps<{project: VideoProject;shotId: string;readOnly: boolean;
 const emit=defineEmits<{submit:[projectId: string,body: VideoCloudSubmitRequest];save:[]}>()
 const {t}=useI18n()
 const models=ref<OpenRouterModel[]>([]),status=ref<OpenRouterStatus | null>(null),nativeDuration=ref(0),offer=ref<VideoCloudQuoteResponse | null>(null)
-const transfer=ref(false),trim=ref(false),busy=ref(false),error=ref(''),clock=ref(Date.now())
+const transfer=ref(false),trim=ref(false),quoteBusy=ref(false),catalogBusy=ref(false),error=ref(''),clock=ref(Date.now())
+const busy=computed(()=>quoteBusy.value || catalogBusy.value)
 const shot=computed(()=>props.project.shots?.find(item=>item.id===props.shotId))
 const model=computed(()=>{const config=props.project.provider_config;return config?.provider==='openrouter' ? models.value.find(item=>item.id===config.model_id) : undefined})
 const durations=computed(()=>(model.value?.supported_durations ?? []).filter(value=>value>=(shot.value?.seconds ?? 4)))
@@ -18,30 +19,30 @@ const unsupportedReference=computed(()=>Boolean(shot.value && resolvedStillId(pr
 const supportedSize=computed(()=>props.project.provider_config?.provider==='openrouter' && model.value?.supported_sizes?.includes(props.project.provider_config.size))
 const ready=computed(()=>supportedSize.value && !unsupportedReference.value && status.value?.enabled && status.value?.credential_configured && model.value && durations.value.includes(nativeDuration.value))
 const expired=computed(()=>Boolean(offer.value && offer.value.quote.expires_at*1000<=clock.value))
-let alive=true,generation=0,controller:AbortController | undefined,timer:ReturnType<typeof setInterval> | undefined
-function invalidate(){generation++;controller?.abort();controller=undefined;offer.value=null;transfer.value=false;trim.value=false;busy.value=false;error.value=''}
+let alive=true,generation=0,controller:AbortController | undefined,catalogController:AbortController | undefined,timer:ReturnType<typeof setInterval> | undefined
+function invalidate(){generation++;controller?.abort();controller=undefined;offer.value=null;transfer.value=false;trim.value=false;quoteBusy.value=false;error.value=''}
 watch([()=>props.project.id,()=>props.project.revision,()=>props.shotId,()=>JSON.stringify(props.project.provider_config),()=>props.dirty,nativeDuration],invalidate,{flush:'sync'})
 watch(durations,value=>{if(!value.includes(nativeDuration.value))nativeDuration.value=value[0] ?? 0},{immediate:true})
-async function load(){const token=generation,request=new AbortController();controller=request;busy.value=true
+async function load(){const request=new AbortController();catalogController=request;catalogBusy.value=true
   try{const [catalog,value]=await Promise.all([provider.getProviderCatalog(request.signal),provider.getProviderStatus(request.signal)])
-    if(alive && token===generation && !request.signal.aborted){models.value=(catalog.models ?? []).filter(item=>item.kind==='video');status.value=value}}
-  catch{if(alive && token===generation)error.value=t('videoCloud.loadFailed')}
-  finally{if(alive && token===generation)busy.value=false}
+    if(alive && catalogController===request && !request.signal.aborted){models.value=(catalog.models ?? []).filter(item=>item.kind==='video');status.value=value}}
+  catch{if(alive && catalogController===request && !request.signal.aborted)error.value=t('videoCloud.loadFailed')}
+  finally{if(alive && catalogController===request){catalogBusy.value=false;catalogController=undefined}}
 }
 async function review(){if(!ready.value || props.dirty || props.readOnly || busy.value || !shot.value)return
-  const token=++generation,request=new AbortController();controller=request;busy.value=true;error.value='';offer.value=null;transfer.value=false;trim.value=false
+  const token=++generation,request=new AbortController();controller=request;quoteBusy.value=true;error.value='';offer.value=null;transfer.value=false;trim.value=false
   const body={revision:props.project.revision,shot_id:props.shotId,remote_duration_sec:nativeDuration.value},id=props.project.id
   try{const result=await quoteCloudVideo(id,body,request.signal)
     if(alive && token===generation && !request.signal.aborted && result.project_id===id && result.revision===body.revision && result.shot_id===body.shot_id && result.remote_duration_sec===body.remote_duration_sec)offer.value=result}
   catch{if(alive && token===generation)error.value=t('videoCloud.actionFailed')}
-  finally{if(alive && token===generation)busy.value=false}
+  finally{if(alive && token===generation)quoteBusy.value=false}
 }
 function submit(){const current=offer.value;if(!current || expired.value || !transfer.value || current.trim_required && !trim.value || props.dirty || props.readOnly || busy.value)return
   offer.value=null;transfer.value=false;trim.value=false
   emit('submit',current.project_id,{revision:current.revision,shot_id:current.shot_id,remote_duration_sec:current.remote_duration_sec,quote_id:current.quote.id,transfers_confirmed:true,trim_confirmed:current.trim_required})
 }
 onMounted(()=>{void load();timer=setInterval(()=>{clock.value=Date.now()},1000)})
-onBeforeUnmount(()=>{alive=false;invalidate();if(timer)clearInterval(timer)})
+onBeforeUnmount(()=>{alive=false;invalidate();catalogController?.abort();if(timer)clearInterval(timer)})
 </script>
 <template>
   <section class="video-card space-y-4" :aria-busy="busy">

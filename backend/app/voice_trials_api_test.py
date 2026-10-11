@@ -23,7 +23,7 @@ class VoiceTrialsHttpTests(unittest.IsolatedAsyncioTestCase):
         voice_build.write_meta(self.voice, voice_build.new_voice_meta(self.voice_id, "Singer"))
         self.context = patch.object(voice_build, "VOICES_DIR", self.root)
         self.context.start()
-        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+        self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1")
 
     async def asyncTearDown(self) -> None:
         await self.client.aclose()

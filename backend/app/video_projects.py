@@ -105,7 +105,10 @@ def now() -> str:
 
 
 def projects_root() -> Path:
-    return DATA_DIR / "video_projects"
+    root = DATA_DIR / "video_projects"
+    if DATA_DIR.is_symlink() or root.is_symlink() or root.resolve().parent != DATA_DIR.resolve():
+        raise VideoProjectError("not_found")
+    return root
 
 
 def project_dir(project_id: str) -> Path:
@@ -113,7 +116,7 @@ def project_dir(project_id: str) -> Path:
         raise VideoProjectError("not_found")
     root = projects_root().resolve()
     path = root / project_id
-    if not path.resolve().is_relative_to(root):
+    if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise VideoProjectError("not_found")
     return path
 

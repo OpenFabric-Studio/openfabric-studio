@@ -8,6 +8,7 @@ import * as api from '../../api/videos'
 import * as provider from '../../api/openrouter'
 import { videoProjectFixture } from './videoFixtures'
 import VideoCloudPanel from './VideoCloudPanel.vue'
+import en from '../../locales/en'
 vi.mock('../../api/videos', async original => ({ ...await original<typeof import('../../api/videos')>(), quoteCloudVideo: vi.fn() }))
 vi.mock('../../api/openrouter', () => ({ getProviderCatalog: vi.fn(), getProviderStatus: vi.fn() }))
 let app: App | undefined
@@ -25,7 +26,7 @@ afterEach(() => { app?.unmount();app=undefined;document.body.replaceChildren() }
 async function mount() {
   const project=ref<VideoProject>({...videoProjectFixture('a'.repeat(32)),provider_config:{provider:'openrouter',model_id:'google/veo-3.1-fast',size:'1280x720'},shots:[{id:shotId,start_sec:0,seconds:2,prompt:'A scene'}]})
   const submit=vi.fn()
-  app=createApp({render:()=>h(VideoCloudPanel,{project:project.value,shotId,readOnly:false,dirty:false,onSubmit:submit})}).use(createI18n({legacy:false,locale:'en',messages:{en:{}}}))
+  app=createApp({render:()=>h(VideoCloudPanel,{project:project.value,shotId,readOnly:false,dirty:false,onSubmit:submit})}).use(createI18n({legacy:false,locale:'en',messages:{en}}))
   app.use(createRouter({history:createMemoryHistory(),routes:[{path:'/',component:{render:()=>h('div')}},{path:'/settings',component:{render:()=>h('div')}}]}));app.mount(document.body.appendChild(document.createElement('div')));await settle()
   return {project,submit}
 }
@@ -50,4 +51,30 @@ it('aborts and discards a late quote when the same project revision changes',asy
   expect(signal?.aborted).toBe(true)
   expect(document.querySelector('[data-cloud-submit]')).toBeNull()
   expect(submit).not.toHaveBeenCalled()
+})
+it('finishes its independent catalog load after project and quote inputs change',async()=>{
+  let release:(value:Awaited<ReturnType<typeof provider.getProviderCatalog>>)=>void=()=>{throw new Error('Uninitialized')}
+  const catalog=await provider.getProviderCatalog()
+  vi.mocked(provider.getProviderCatalog).mockClear().mockReturnValue(new Promise(resolve=>{release=resolve}))
+  const {project}=await mount()
+  const signal=vi.mocked(provider.getProviderCatalog).mock.calls[0]?.[0]
+  project.value={...project.value,id:'f'.repeat(32),revision:2};await settle()
+  release(catalog);await settle()
+  expect(signal?.aborted).toBe(false)
+  expect(provider.getProviderCatalog).toHaveBeenCalledOnce()
+  expect(action('[data-cloud-quote]').disabled).toBe(false)
+  action('[data-cloud-quote]').click();await settle()
+  expect(api.quoteCloudVideo).toHaveBeenCalledWith('f'.repeat(32),{revision:2,shot_id:shotId,remote_duration_sec:4},expect.any(AbortSignal))
+})
+it('aborts its catalog load on teardown and ignores a late response',async()=>{
+  let release:(value:Awaited<ReturnType<typeof provider.getProviderCatalog>>)=>void=()=>{throw new Error('Uninitialized')}
+  const catalog=await provider.getProviderCatalog()
+  vi.mocked(provider.getProviderCatalog).mockClear().mockReturnValue(new Promise(resolve=>{release=resolve}))
+  await mount()
+  const signal=vi.mocked(provider.getProviderCatalog).mock.calls[0]?.[0]
+  app?.unmount();app=undefined
+  expect(signal?.aborted).toBe(true)
+  release(catalog);await settle()
+  expect(document.querySelector('[data-cloud-quote]')).toBeNull()
+  expect(api.quoteCloudVideo).not.toHaveBeenCalled()
 })

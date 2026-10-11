@@ -10,10 +10,12 @@ from fastapi import APIRouter, HTTPException
 from ..config import ACE_STEP_DIR, DATA_DIR, IS_MACOS, SEED_VC_DIR
 from ..data_root import (
     DataDirError,
+    JsonValue,
     _is_inside,
     library_status,
     parse_chosen_folder,
     place_seed_models,
+    read_config,
     save_data_dir,
     validate_data_dir,
 )
@@ -47,7 +49,7 @@ def _blocked() -> list[Path]:
     return [ACE_STEP_DIR, SEED_VC_DIR, _REPO_ROOT / "external"]
 
 
-def _status() -> dict:
+def _status() -> dict[str, JsonValue]:
     status = library_status(DATA_DIR)
     status["can_pick"] = IS_MACOS
     return status
@@ -57,13 +59,17 @@ _PICK_SCRIPT = 'POSIX path of (choose folder with prompt "Choose the OpenFabric 
 
 
 @router.get("/library", response_model=LibraryStatusResponse)
-def get_library():
-    place_seed_models(DATA_DIR, SEED_VC_DIR)
-    return _status()
+def get_library() -> dict[str, JsonValue]:
+    try:
+        status = _status()
+        place_seed_models(DATA_DIR, SEED_VC_DIR)
+        return status
+    except DataDirError as exc:
+        raise HTTPException(status_code=503, detail=exc.code) from exc
 
 
 @router.post("/library/pick", response_model=LibraryPickResponse)
-def pick_library():
+def pick_library() -> dict[str, str]:
     """Open the Mac folder dialog. The browser cannot return a full folder path."""
     if sys.platform != "darwin":
         raise HTTPException(status_code=400, detail="picker")
@@ -89,16 +95,18 @@ def pick_library():
 
 
 @router.put("/library", response_model=LibraryStatusResponse)
-def put_library(body: LibraryRequest):
+def put_library(body: LibraryRequest) -> dict[str, JsonValue]:
     current = DATA_DIR.resolve()
     candidate = Path((body.data_dir or "").strip()).expanduser()
     try:
+        read_config()
         if candidate.is_absolute() and candidate.resolve() != current and (
             _is_inside(candidate, current) or _is_inside(current, candidate)
         ):
             raise DataDirError("nested")
         path = validate_data_dir(body.data_dir, _blocked())
+        save_data_dir(path, DATA_DIR)
+        return _status()
     except DataDirError as exc:
-        raise HTTPException(status_code=400, detail=exc.code) from exc
-    save_data_dir(path, DATA_DIR)
-    return _status()
+        status = 503 if exc.code in {'invalid_config', 'config_unreadable'} else 400
+        raise HTTPException(status_code=status, detail=exc.code) from exc
