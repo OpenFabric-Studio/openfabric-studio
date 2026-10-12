@@ -48,6 +48,10 @@ or commercial use.
 
 Attribution for planned / inspired work
 ---------------------------------------
+- Local calendar date presets and pending-warp playback/export handling follow
+  reliability ideas from Remiqora (MIT): commit b4d4afe and PR #47 by ringo380
+  (https://github.com/inikolax/remiqora). OpenFabric reimplemented them using its
+  existing editor, session guards and tests; no upstream source was copied.
 - Voice-profile UX pattern inspired by LocalAI (MIT) — https://github.com/mudler/LocalAI
   OpenFabric implements its own FastAPI + SQLite voice-profile store; LocalAI code is not copied.
 - Talking / audiobook engine: GPT-SoVITS (MIT) — https://github.com/RVC-Boss/GPT-SoVITS

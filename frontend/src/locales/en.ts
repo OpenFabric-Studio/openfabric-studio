@@ -1080,6 +1080,7 @@ voiceProfiles: {
     addTrack: '+ Track',
     master: 'Master',
     exporting: 'Exporting…',
+    exportStretchFailed: 'Could not prepare warped audio. Retry the export.',
     export: 'Export',
     exportedAsNewTrack: 'Exported as a new track.',
     sourceMissing: 'Source file missing',

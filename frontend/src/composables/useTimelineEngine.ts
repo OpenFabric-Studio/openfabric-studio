@@ -21,7 +21,7 @@ import {
   scheduleTimeline,
 } from '../audio/timelineEngine'
 import type { ScheduledClip, TimelineGraph, TimelinePlaybackHandle } from '../audio/timelineEngine'
-import { stretchFactor as clipStretchFactor } from '../audio/timelineTypes'
+import { clipBuffer, stretchFactor as clipStretchFactor } from '../audio/timelineTypes'
 import type { TimelineProject } from '../audio/timelineTypes'
 
 export function useTimelineEngine() {
@@ -90,10 +90,6 @@ export function useTimelineEngine() {
         if (clip.muted) continue
         if (anySolo && !clip.solo) continue
 
-        // Same formula the UI draws with (originalBpm / projectBpm). The engine
-        // multiplies source-domain trim offsets by this to address the stretched buffer.
-        const stretchFactor = clipStretchFactor(clip, project.bpm)
-        
         if (clip.type === 'midi') {
           laneClips.push({
             laneIndex,
@@ -104,20 +100,13 @@ export function useTimelineEngine() {
             trimEnd: clip.trimEnd,
             fadeInDuration: clip.fadeInDuration,
             fadeOutDuration: clip.fadeOutDuration,
-            stretchFactor,
+            stretchFactor: clipStretchFactor(clip, project.bpm),
             instrument: clip.instrument
           })
           continue
         }
 
-        let buffer = clip.sourceUrl ? buffers.get(clip.sourceUrl) : undefined
-        if (clip.warpEnabled && clip.originalBpm && clip.sourceUrl) {
-           const bpm = project.bpm || 120
-           const key = `${clip.sourceUrl}_warp_${clip.originalBpm}_${bpm}`
-           if (buffers.has(key)) {
-             buffer = buffers.get(key)
-           }
-        }
+        const { buffer, stretchFactor } = clipBuffer(clip, project.bpm, buffers)
         
         if (buffer) {
           laneClips.push({ 

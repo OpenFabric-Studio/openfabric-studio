@@ -27,7 +27,10 @@ const engine = vi.hoisted(() => ({
   getLaneLevel: vi.fn(() => ({ peak: 0, clipping: false, peakL: 0, peakR: 0 })),
   getMasterLevel: vi.fn(() => ({ peak: 0, clipping: false, peakL: 0, peakR: 0 })),
 }))
-vi.mock('../../composables/useTimelineEngine', () => ({ useTimelineEngine: () => engine }))
+vi.mock('../../composables/useTimelineEngine', async original => {
+  const actual = await original<typeof import('../../composables/useTimelineEngine')>()
+  return { useTimelineEngine: () => ({ ...engine, toScheduledClips: actual.useTimelineEngine().toScheduledClips }) }
+})
 vi.mock('../../composables/audioPlayback', () => ({ getSharedAudioCtx: () => audioClock }))
 vi.mock('../../api/tracks', async (original) => ({ ...await original<typeof import('../../api/tracks')>(), uploadTrack: vi.fn(), saveTrack: vi.fn() }))
 vi.mock('../../audio/mixerEngine', async (original) => ({ ...await original<typeof import('../../audio/mixerEngine')>(), decodeStem: vi.fn() }))
@@ -337,6 +340,151 @@ function deferred<T>() {
   const promise = new Promise<T>((release, fail) => { resolve = release; reject = fail })
   return { promise, resolve, reject }
 }
+
+async function pendingWarp() {
+  const base = new AudioBuffer({ numberOfChannels: 1, length: 80000, sampleRate: 8000 })
+  const warped = new AudioBuffer({ numberOfChannels: 1, length: 40000, sampleRate: 8000 })
+  const stretching = deferred<AudioBuffer>()
+  vi.mocked(decodeStem).mockResolvedValue(base)
+  vi.mocked(timeStretchBuffer).mockReturnValue(stretching.promise)
+  engine.render.mockResolvedValue(warped)
+  const editor = await mountEditor()
+  const lane = editor.store.project.lanes[0]
+  if (!lane) throw new Error('Missing warp lane')
+  lane.clips.push({ id: 'warped', sourceUrl: '/audio.wav', sourceLabel: 'Warped', timelineStart: 0,
+    trimStart: 2, trimEnd: 8, warpEnabled: true, originalBpm: 60 })
+  for (let index = 0; index < 8; index++) await nextTick()
+  const exportAction = [...editor.container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(exportAction instanceof HTMLButtonElement)) throw new Error('Missing warp export')
+  return { ...editor, base, warped, stretching, exportAction }
+}
+
+it('waits for one shared warp before exporting the captured clip and tempo', async () => {
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, base, warped, stretching, exportAction } = await pendingWarp()
+  exportAction.click()
+  await settlePlayback(); await settlePlayback()
+  expect(engine.render).not.toHaveBeenCalled()
+  expect(exportAction.disabled).toBe(true)
+  store.updateClip('warped', { trimStart: 3 })
+  await settlePlayback(); await settlePlayback()
+  expect(timeStretchBuffer).toHaveBeenCalledExactlyOnceWith(base, 2)
+  stretching.resolve(warped)
+  for (let index = 0; index < 20; index++) await nextTick()
+  const call = engine.render.mock.calls[0]
+  expect(call?.[0].lanes[0]?.clips[0]?.trimStart).toBe(2)
+  expect(call?.[1].get('/audio.wav_warp_60_120')).toStrictEqual(warped)
+  expect(call?.[2]).toBe(3)
+  expect(exportsApi.createAudioExport).toHaveBeenCalledOnce()
+})
+
+it('does not publish wrong-tempo audio when the required stretch fails', async () => {
+  vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  const { container, stretching, exportAction } = await pendingWarp()
+  exportAction.click(); await settlePlayback(); await settlePlayback()
+  stretching.reject(new Error('Private engine failure /private/source.wav'))
+  for (let index = 0; index < 20; index++) await nextTick()
+  expect(engine.render).not.toHaveBeenCalled()
+  expect(tracksApi.saveTrack).not.toHaveBeenCalled()
+  expect(container.textContent).toContain('Could not prepare warped audio. Retry the export.')
+  expect(container.textContent).not.toContain('/private/source.wav')
+  expect(exportAction.disabled).toBe(false)
+})
+
+it('reschedules current playback when a pending warp becomes available', async () => {
+  const { store, container, warped, stretching } = await pendingWarp()
+  transportButton(container).click(); await settlePlayback()
+  expect(engine.play).toHaveBeenCalledOnce()
+  store.playheadSec = 1.25
+  stretching.resolve(warped)
+  for (let index = 0; index < 12; index++) await nextTick()
+  expect(engine.play).toHaveBeenCalledTimes(2)
+  expect(engine.play.mock.calls.at(-1)?.[2]).toBe(1.25)
+  expect(engine.play.mock.calls.at(-1)?.[1].get('/audio.wav_warp_60_120')).toStrictEqual(warped)
+})
+
+it.each(['disable-warp', 'cached-tempo'] as const)('reschedules playback after a %s change without a new buffer', async change => {
+  const { store, container, warped, stretching } = await pendingWarp()
+  stretching.resolve(warped)
+  for (let index = 0; index < 12; index++) await nextTick()
+  transportButton(container).click(); await settlePlayback()
+  store.playheadSec = 1
+  if (change === 'disable-warp') store.updateClip('warped', { warpEnabled: false })
+  else store.setBpm(60)
+  for (let index = 0; index < 8; index++) await nextTick()
+  expect(engine.play).toHaveBeenCalledTimes(2)
+  expect(engine.play.mock.calls.at(-1)?.[2]).toBe(1)
+})
+
+it.each(['Mute clip', 'Solo clip'])('reschedules playback once when %s changes the audible clip selection', async label => {
+  const { store, container, warped, stretching } = await pendingWarp()
+  stretching.resolve(warped)
+  for (let index = 0; index < 12; index++) await nextTick()
+  store.project.lanes[0]?.clips.push({ id: 'other', type: 'midi', sourceLabel: 'Other',
+    timelineStart: 0, trimStart: 0, trimEnd: 2, notes: [] })
+  await settlePlayback()
+  transportButton(container).click(); await settlePlayback()
+  const action = container.querySelector(`button[aria-label="${label}"]`)
+  if (!(action instanceof HTMLButtonElement)) throw new Error('Missing clip action')
+  action.click()
+  for (let index = 0; index < 8; index++) await nextTick()
+  expect(engine.play).toHaveBeenCalledTimes(2)
+})
+
+it('adopts each completed warp while another source is still stretching', async () => {
+  const second = deferred<AudioBuffer>()
+  const { store, container, base, warped, stretching } = await pendingWarp()
+  vi.mocked(timeStretchBuffer).mockImplementation(buffer => buffer.duration === base.duration ? stretching.promise : second.promise)
+  vi.mocked(decodeStem).mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 96000, sampleRate: 8000 }))
+  store.project.lanes[0]?.clips.push({ id: 'second', sourceUrl: '/second.wav', sourceLabel: 'Second',
+    timelineStart: 0, trimStart: 0, trimEnd: 12, warpEnabled: true, originalBpm: 60 })
+  for (let index = 0; index < 8; index++) await nextTick()
+  transportButton(container).click(); await settlePlayback()
+  stretching.resolve(warped)
+  for (let index = 0; index < 12; index++) await nextTick()
+  expect(engine.play).toHaveBeenCalledTimes(2)
+  expect(engine.play.mock.calls.at(-1)?.[1].has('/second.wav_warp_60_120')).toBe(false)
+  second.resolve(new AudioBuffer({ numberOfChannels: 1, length: 48000, sampleRate: 8000 }))
+  for (let index = 0; index < 12; index++) await nextTick()
+  expect(engine.play).toHaveBeenCalledTimes(3)
+})
+
+it('ignores a pending export stretch after another editor session takes over', async () => {
+  const { store, warped, stretching, exportAction } = await pendingWarp()
+  exportAction.click(); await settlePlayback(); await settlePlayback()
+  store.newProject()
+  stretching.resolve(warped)
+  for (let index = 0; index < 20; index++) await nextTick()
+  expect(engine.render).not.toHaveBeenCalled()
+  expect(tracksApi.saveTrack).not.toHaveBeenCalled()
+  expect(engine.play).not.toHaveBeenCalled()
+})
+
+it.each(['muted', 'solo-excluded', 'lane-muted', 'lane-solo-excluded'] as const)('does not let a %s clip with unavailable warped audio block export', async excluded => {
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing excluded clip lane')
+  lane.clips.push({ id: 'excluded', sourceUrl: '/missing.wav', sourceLabel: 'Excluded', timelineStart: 0,
+    trimStart: 0, trimEnd: 10, warpEnabled: true, originalBpm: 60, muted: excluded === 'muted' })
+  if (excluded === 'solo-excluded') lane.clips.push({ id: 'solo', type: 'midi', sourceLabel: 'Solo',
+    timelineStart: 0, trimStart: 0, trimEnd: 1, solo: true, notes: [] })
+  if (excluded === 'lane-muted') lane.settings.muted = true
+  if (excluded === 'lane-solo-excluded') {
+    const other = store.project.lanes[1]
+    if (!other) throw new Error('Missing solo lane')
+    other.settings.solo = true
+  }
+  vi.mocked(decodeStem).mockRejectedValue(new Error('Missing excluded source'))
+  engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  const exportAction = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(exportAction instanceof HTMLButtonElement)) throw new Error('Missing excluded clip export')
+  exportAction.click()
+  for (let index = 0; index < 20; index++) await nextTick()
+  expect(engine.render).toHaveBeenCalledOnce()
+  expect(timeStretchBuffer).not.toHaveBeenCalled()
+  expect(exportsApi.createAudioExport).toHaveBeenCalledOnce()
+})
 
 it('retains loaded warp buffers for playback and export when base decoding finishes before stretching', async () => {
   const base = new AudioBuffer({ numberOfChannels: 1, length: 80000, sampleRate: 8000 })

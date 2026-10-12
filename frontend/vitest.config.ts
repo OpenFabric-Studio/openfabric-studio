@@ -5,6 +5,7 @@ export default defineConfig({
   plugins: [vue()],
   test: {
     environment: 'node',
+    setupFiles: ['./src/testSetup.ts'],
     clearMocks: true,
     restoreMocks: true,
   },

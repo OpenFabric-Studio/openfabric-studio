@@ -9,6 +9,7 @@ import { getSharedAudioCtx } from '../../composables/audioPlayback'
 import { decodeStem, defaultMasterSettings, defaultChannelSettings } from '../../audio/mixerEngine'
 import type { ChannelSettings } from '../../audio/mixerEngine'
 import { clipDuration, stretchFactor } from '../../audio/timelineTypes'
+import { effectiveLaneGain } from '../../audio/timelineEngine'
 import type { Clip, TimelineProject } from '../../audio/timelineTypes'
 import { encodeWav } from '../../audio/wavEncoder'
 import { createPollingLoop } from '../../composables/polling'
@@ -470,7 +471,7 @@ async function doExport(): Promise<void> {
   const format = exportFormat.value
   const duration = store.totalDuration
   const snapshot = parseTimelineProject(project)
-  const sourceBuffers = new Map(buffers.value)
+  const targetBuffers = buffers.value
   const isCurrent = () => !unmounted && token === exportGeneration && currentLoad === loadToken && store.session === session
   exporting.value = true
   exportError.value = null
@@ -479,6 +480,10 @@ async function doExport(): Promise<void> {
   let tracking = false
   try {
     const settings = (await getAudioSettings()).settings
+    const ready = await prepareWarpedBuffers(snapshot, targetBuffers, isCurrent)
+    if (!isCurrent()) return
+    if (!ready) { exportError.value = t('editor.exportStretchFailed'); return }
+    const sourceBuffers = new Map(targetBuffers)
     const rendered = await engine.render(snapshot, sourceBuffers, duration)
     // Keep rendered PCM independent from the codec/house target. Only app-owned
     // library URLs supply ancestry; arbitrary imports remain unknown.
@@ -618,7 +623,6 @@ function onToggleMute(laneId: string, payload: { clipId: string; enabled: boolea
   if (!clip) return
   clip.muted = payload.enabled
   store.snapshot()
-  if (store.playing) void resumePlayback(store.playheadSec)
 }
 
 function onToggleSolo(laneId: string, payload: { clipId: string; enabled: boolean }): void {
@@ -628,7 +632,6 @@ function onToggleSolo(laneId: string, payload: { clipId: string; enabled: boolea
   if (!clip) return
   clip.solo = payload.enabled
   store.snapshot()
-  if (store.playing) void resumePlayback(store.playheadSec)
 }
 
 watch(
@@ -643,25 +646,43 @@ watch(
 )
 
 let projectWatchGeneration = 0
-async function prepareWarpedBuffers(project: TimelineProject, targetBuffers: Map<string, AudioBuffer>, isCurrent: () => boolean): Promise<void> {
+const warpJobs = new WeakMap<AudioBuffer, Map<number, Promise<AudioBuffer>>>()
+async function prepareWarpedBuffers(project: TimelineProject, targetBuffers: Map<string, AudioBuffer>, isCurrent: () => boolean): Promise<boolean> {
+  let ready = true
+  const anySolo = project.lanes.some(lane => lane.clips.some(clip => clip.solo))
+  const anyLaneSolo = project.lanes.some(lane => lane.settings.solo)
   for (const lane of project.lanes) {
+    if (effectiveLaneGain(lane.settings, anyLaneSolo) <= 0) continue
     for (const clip of lane.clips) {
-      if (!isCurrent()) return
-      if (!clip.warpEnabled || !clip.originalBpm || !clip.sourceUrl) continue
+      if (!isCurrent()) return false
+      if (clip.muted || anySolo && !clip.solo) continue
+      if (clip.type === 'midi' || !clip.warpEnabled || !clip.originalBpm || !clip.sourceUrl) continue
       const bpm = project.bpm || 120
       if (clip.originalBpm === bpm) continue
       const key = `${clip.sourceUrl}_warp_${clip.originalBpm}_${bpm}`
       const baseBuffer = targetBuffers.get(clip.sourceUrl)
-      if (!baseBuffer || targetBuffers.has(key)) continue
+      if (targetBuffers.has(key)) continue
+      if (!baseBuffer) { ready = false; continue }
       try {
-        const stretched = await timeStretchBuffer(baseBuffer, bpm / clip.originalBpm)
-        if (!isCurrent()) return
+        let jobs = warpJobs.get(baseBuffer)
+        if (!jobs) { jobs = new Map(); warpJobs.set(baseBuffer, jobs) }
+        const ratio = bpm / clip.originalBpm
+        let pending = jobs.get(ratio)
+        if (!pending) {
+          const sourceJobs = jobs
+          pending = timeStretchBuffer(baseBuffer, ratio).finally(() => sourceJobs.delete(ratio))
+          jobs.set(ratio, pending)
+        }
+        const stretched = await pending
+        if (!isCurrent()) return false
         targetBuffers.set(key, stretched)
       } catch (error) {
         if (isCurrent()) console.error('Stretch failed', error)
+        ready = false
       }
     }
   }
+  return ready
 }
 watch(
   [() => store.project, loadingAudio],
@@ -687,9 +708,19 @@ watch(
         }
       }
     }
-    await prepareWarpedBuffers(project, targetBuffers, () => generation === projectWatchGeneration && currentLoad === loadToken && targetBuffers === buffers.value)
+    const isCurrent = () => generation === projectWatchGeneration && currentLoad === loadToken && targetBuffers === buffers.value
+    await prepareWarpedBuffers(project, targetBuffers, isCurrent)
   },
   { deep: true },
+)
+
+watch(
+  () => engine.toScheduledClips(store.project, buffers.value).flatMap<AudioBuffer | number | undefined>(clip => [clip.buffer, clip.stretchFactor]),
+  (next, previous) => {
+    if (store.playing && (next.length !== previous.length || next.some((value, index) => value !== previous[index]))) {
+      void resumePlayback(store.playheadSec)
+    }
+  },
 )
 
 function onKeydown(e: KeyboardEvent) {

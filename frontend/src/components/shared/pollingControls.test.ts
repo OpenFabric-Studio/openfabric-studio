@@ -6,6 +6,7 @@ import { i18n, setLocale } from '../../i18n'
 import * as stemsApi from '../../api/stems'
 import * as midiApi from '../../api/midi'
 import * as voicesApi from '../../api/voices'
+import * as localEnginesApi from '../../api/localEngines'
 import type { StemsStatus } from '../../api/stems'
 import type { MidiStatus } from '../../api/midi'
 import type { VoiceProfile } from '../../api/voices'
@@ -17,6 +18,7 @@ import { preparedVoice } from '../../views/voice/voiceTestFixtures'
 
 vi.mock('../../api/stems', () => ({ getSeparationStatus: vi.fn(), startSeparation: vi.fn(), cancelSeparation: vi.fn(), deleteStems: vi.fn() }))
 vi.mock('../../api/midi', () => ({ getMidiStatus: vi.fn(), startTranscription: vi.fn(), cancelTranscription: vi.fn(), deleteMidi: vi.fn() }))
+vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(), listLocalEngines: vi.fn() }))
 vi.mock('../../api/voices', async (original) => ({
   ...await original<typeof import('../../api/voices')>(),
   listVoices: vi.fn(), getActiveVoiceId: vi.fn(), setActiveVoiceId: vi.fn(), buildVoice: vi.fn(),
@@ -57,6 +59,7 @@ beforeEach(() => {
   vi.mocked(stemsApi.getSeparationStatus).mockResolvedValue(idleStems)
   vi.mocked(midiApi.getMidiStatus).mockResolvedValue(midiStatus('idle'))
   vi.mocked(voicesApi.listVoices).mockResolvedValue([])
+  vi.mocked(localEnginesApi.listLocalEngines).mockResolvedValue({ engines: [], video_preference: 'ltx', note: 'Song videos stay on LTX.' })
   vi.mocked(voicesApi.getActiveVoiceId).mockReturnValue(null)
   vi.mocked(voicesApi.getVoicePreparation).mockResolvedValue({ status: 'idle' })
   vi.mocked(voicesApi.voiceSeparationOptions).mockResolvedValue([{ id: 'fast', available: true }])

@@ -3,11 +3,12 @@ import * as audioPlayback from '../composables/audioPlayback'
 import { useTimelineEngine } from '../composables/useTimelineEngine'
 import { defaultChannelSettings, defaultMasterSettings } from './mixerEngine'
 import type { TimelineProject } from './timelineTypes'
-import { TestAudioBuffer, TestAudioContext } from './testWebAudio'
+import { TestAudioBuffer, TestAudioContext, TestOfflineAudioContext } from './testWebAudio'
 
 beforeEach(() => {
   TestAudioContext.instances = []
   vi.stubGlobal('AudioContext', TestAudioContext)
+  vi.stubGlobal('OfflineAudioContext', TestOfflineAudioContext)
   vi.stubGlobal('AudioBuffer', TestAudioBuffer)
   vi.spyOn(audioPlayback, 'getSharedAudioCtx').mockReturnValue(new AudioContext())
 })
@@ -28,6 +29,42 @@ function project(laneCount = 1): TimelineProject {
 function buffers(): Map<string, AudioBuffer> {
   return new Map([['/audio.wav', new AudioBuffer({ numberOfChannels: 1, length: 32000, sampleRate: 8000 })]])
 }
+
+it.each([60, 240])('uses source time until the %i BPM warp is ready in preview and export', async originalBpm => {
+  const engine = useTimelineEngine()
+  const current = project()
+  const clip = current.lanes[0]?.clips[0]
+  if (!clip) throw new Error('Missing audio clip')
+  Object.assign(clip, { timelineStart: 1, trimStart: 2, trimEnd: 6, warpEnabled: true, originalBpm })
+  const original = new AudioBuffer({ numberOfChannels: 1, length: 80000, sampleRate: 8000 })
+  const factor = originalBpm / 120
+  const warped = new AudioBuffer({ numberOfChannels: 1, length: 80000 * factor, sampleRate: 8000 })
+  const sourceBuffers = new Map([['/audio.wav', original], ['/audio.wav_warp_120_120', original]])
+
+  for (const ready of [false, true]) {
+    if (ready) sourceBuffers.set(`/audio.wav_warp_${originalBpm}_120`, warped)
+    const actualFactor = ready ? factor : 1
+    const selected = engine.toScheduledClips(current, sourceBuffers)[0]
+    expect(selected?.buffer).toBe(ready ? warped : original)
+    expect(selected?.stretchFactor).toBe(actualFactor)
+    await engine.play(current, sourceBuffers, 1)
+    const preview = TestAudioContext.instances[0].nodes.filter(node => node.kind === 'buffer-source').at(-1)
+    expect(preview?.startCalls).toEqual([[5.05, 2 * actualFactor, 4 * actualFactor]])
+    await engine.render(current, sourceBuffers, 10)
+    const rendered = TestAudioContext.instances.at(-1)?.nodes.find(node => node.kind === 'buffer-source')
+    expect(rendered?.buffer).toBe(ready ? warped : original)
+    expect(rendered?.startCalls).toEqual([[1, 2 * actualFactor, 4 * actualFactor]])
+  }
+  engine.teardown()
+})
+
+it('keeps MIDI timing warped without requiring an audio buffer', () => {
+  const current = project()
+  const clip = current.lanes[0]?.clips[0]
+  if (!clip) throw new Error('Missing MIDI clip')
+  Object.assign(clip, { type: 'midi', warpEnabled: true, originalBpm: 60, notes: [] })
+  expect(useTimelineEngine().toScheduledClips(current, new Map())[0]?.stretchFactor).toBe(0.5)
+})
 
 it('keeps source routing, retained lane identity and the master when lanes are added or reordered', async () => {
   const engine = useTimelineEngine()

@@ -106,6 +106,21 @@ def type_of(schema: JsonObject) -> str:
     return {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean', 'null': 'null'}[string_of(kind)]
 
 
+def runtime_schema(schema: JsonObject) -> JsonObject:
+    """Omit unused annotations at schema nodes, preserving domain property names."""
+    result = {key: value for key, value in schema.items() if key not in {'title', 'description', 'default'}}
+    for key in ('properties', '$defs'):
+        if key in result:
+            result[key] = {name: runtime_schema(object_of(value)) for name, value in object_of(result[key]).items()}
+    for key in ('anyOf', 'oneOf'):
+        if key in result:
+            result[key] = [runtime_schema(object_of(value)) for value in list_of(result[key])]
+    for key in ('items', 'additionalProperties'):
+        if isinstance(result.get(key), dict):
+            result[key] = runtime_schema(object_of(result[key]))
+    return result
+
+
 def generate() -> str:
     definitions: dict[str, JsonObject] = {}
     for model in ALL_MODELS:
@@ -132,7 +147,8 @@ def generate() -> str:
         else:
             output += f'export type {name} = {type_of(schema)}\n\n'
     output += 'export type JsonObject = Record<string, JsonValue>\n\n'
-    output += 'const schemas = ' + json.dumps(definitions, ensure_ascii=False, indent=2) + ' as const\n\n'
+    runtime = {name: runtime_schema(schema) for name, schema in definitions.items()}
+    output += 'const schemas = ' + json.dumps(runtime, ensure_ascii=False, indent=2) + ' as const\n\n'
     if 'JsonValue' in definitions:
         output += 'export function isJsonValue(value: unknown): value is JsonValue {\n  return decodeSchema(schemas.JsonValue, value, schemas)\n}\n\n'
     for model in ALL_MODELS:
