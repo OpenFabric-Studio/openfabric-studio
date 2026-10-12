@@ -76,6 +76,13 @@ requesting another generation. A new approved redo is a new paid request.
 Video with a known remote ID can resume GET-only tracking/download. Stopping
 tracking does not establish remote cancellation, stop billing or promise a
 refund. The application does not attach arbitrary remote IDs it cannot verify.
+Status polling and other JSON GET reads make at most three attempts for transient
+network failures or HTTP 408, 429, 500, 502, 503 and 504. All attempts share one
+180-second request window. Backoff starts at one then two seconds; valid
+`Retry-After` seconds or HTTP dates can extend it up to 30 seconds. A longer
+server-requested delay ends the read instead of retrying early; known video jobs
+can still resume tracking later. Cancellation/shutdown stops pending backoff.
+Malformed/oversized responses, permanent rejections and paid POSTs are not retried.
 Music can retry saving an already validated download without generating again;
 its recorded digest must still match. Completed media survives navigation and
 reload. Corrupt retained records stay on disk; history warns rather than silently

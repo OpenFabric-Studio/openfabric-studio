@@ -80,6 +80,12 @@ Use the actual data folder displayed in the app. Setup downloads only the pinned
 
 CPU media tests verify stream/duration/frame-rate/dimension validation, covers, visualizers, timed text, framing, reuse and recovery. Installed-engine CPU tests verify the real tiling wrappers. **Perceptual quality, full-song GPU time and peak memory have not been established by these tests.** Compare a few fixed-seed short shots with the same source, prompts and references before committing to a full song.
 
+Timed text includes both boundary frames when its start/end timestamps land on
+export frames. CPU regression fixtures inspect exact decoded frames around those
+boundaries, shot cuts and held tails in landscape, portrait and square exports.
+Failed pixel assertions retain diagnostic PNGs in a temporary directory and print
+its location; these synthetic checks establish timing and sequencing.
+
 ## Character trainer
 
 Silent videos and reels can train one person's look on this Mac. Add at least three photos, and optional clips of eight seconds or less. Consent is required.

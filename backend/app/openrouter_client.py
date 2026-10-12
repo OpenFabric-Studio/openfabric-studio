@@ -6,6 +6,7 @@ import binascii
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 import hashlib
 import io
 import json
@@ -37,6 +38,7 @@ _VIDEO_LIMIT = 512*1024*1024
 _SSE_LIMIT = 192*1024*1024
 _REJECTION_LIMIT = 16*1024
 _REJECTION_TIMEOUT = 5.0
+_READ_TRANSIENT_HTTP = frozenset({408, 429, 500, 502, 503, 504})
 _LOG = logging.getLogger(__name__)
 _ACTIVE: set[asyncio.Task[object]] = set()
 _REGISTRY_LOCK = threading.RLock()
@@ -128,6 +130,22 @@ def _http_error(status: int) -> OpenRouterError:
     code=rejection_code(status) or 'provider_request_failed'
     return OpenRouterError(code,409 if status in {402,429} else 503,provider_http_status=status)
 
+def _read_retry_delay(attempt: int, retry_after: str) -> float | None:
+    delay = float(2 ** attempt)
+    value = retry_after.strip()
+    if not value: return delay
+    if len(value) > 128: return None
+    if value.isascii() and value.isdigit():
+        requested = float(value)
+    else:
+        try:
+            when = parsedate_to_datetime(value)
+            if when.tzinfo is None: return delay
+            requested = (when - datetime.now(timezone.utc)).total_seconds()
+        except (ValueError, TypeError, OverflowError): return delay
+    # A long server delay ends this read; truncating it would retry too early.
+    return max(delay, requested) if requested <= 30 else None
+
 def _diagnostic_text(value: str) -> str:
     return ''.join(character for character in value if unicodedata.category(character)[0]!='C'
         and unicodedata.category(character) not in {'Zl','Zp'})
@@ -191,14 +209,29 @@ class OpenRouterClient:
 
     async def _json_request(self, method: str, path: str, *, payload: JsonObject | None=None, authenticated: bool=True, limit: int | None=None, receipt_id: str | None=None) -> JsonObject:
         try:
-            async with asyncio.timeout(180), self._session(authenticated=authenticated) as client, client.stream(method,_BASE+path,json=payload) as response:
-                if receipt_id is not None: ledger.record_http_status(receipt_id,response.status_code)
-                if not 200<=response.status_code<300:
-                    if receipt_id is not None: await self._log_rejection(response,payload,receipt_id)
-                    raise _http_error(response.status_code)
-                data=await self._read(response,_JSON_LIMIT if limit is None else limit)
-                return _json.validate_json(data)
+            async with asyncio.timeout(180), self._session(authenticated=authenticated) as client:
+                attempt = 0
+                while True:
+                    try:
+                        async with client.stream(method,_BASE+path,json=payload) as response:
+                            if receipt_id is not None: ledger.record_http_status(receipt_id,response.status_code)
+                            if not 200<=response.status_code<300:
+                                if receipt_id is not None: await self._log_rejection(response,payload,receipt_id)
+                                response.raise_for_status()
+                            data=await self._read(response,_JSON_LIMIT if limit is None else limit)
+                            return _json.validate_json(data)
+                    except (httpx.HTTPStatusError, httpx.NetworkError, httpx.TimeoutException, httpx.RemoteProtocolError) as error:
+                        failed_response = error.response if isinstance(error, httpx.HTTPStatusError) else None
+                        if method != 'GET' or receipt_id is not None or attempt >= 2:
+                            raise
+                        if failed_response is not None and failed_response.status_code not in _READ_TRANSIENT_HTTP:
+                            raise
+                        delay = _read_retry_delay(attempt, failed_response.headers.get('retry-after', '') if failed_response is not None else '')
+                        if delay is None: raise
+                        attempt += 1
+                        await asyncio.sleep(delay)
         except OpenRouterError: raise
+        except httpx.HTTPStatusError as error: raise _http_error(error.response.status_code) from error
         except (httpx.HTTPError,TimeoutError) as error: raise OpenRouterError('provider_unavailable') from error
         except (ValidationError,ValueError) as error: raise OpenRouterError('provider_response_invalid') from error
 
