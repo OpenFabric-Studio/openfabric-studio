@@ -4,6 +4,7 @@ import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import VoiceClonePage from './VoiceClonePage.vue'
 import * as api from '../../api/voices'
+vi.mock('./ArtistProductionPanel.vue', () => ({ default: { template: '<section data-artist-production-fixture />' } }))
 import * as audiobooksApi from '../../api/audiobooks'
 import * as profilesApi from '../../api/voiceProfiles'
 import { i18n, setLocale } from '../../i18n'

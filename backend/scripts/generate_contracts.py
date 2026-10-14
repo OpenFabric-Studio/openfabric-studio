@@ -31,6 +31,12 @@ from app.support_contracts import SUPPORT_CLIENT_MODELS
 from app.character_swap_contracts import CHARACTER_SWAP_CLIENT_MODELS
 from app.video_scene_contracts import VIDEO_SCENE_CLIENT_MODELS
 from app.clip_host_contracts import CLIP_HOST_CLIENT_MODELS
+from app.artist_contracts import ArtistProfile, CreateArtistRequest, BindArtistVoiceRequest, ArtistsResponse, ArtistConsentRequest, ArtistConsentVersion, ArtistConsentsResponse
+from app.artist_production_contracts import ARTIST_PRODUCTION_CLIENT_MODELS
+from app.voice_retention_contracts import VoiceDeletionPlan, VoiceDeletionReceipt, ConfirmVoiceDeletionRequest
+from app.recording_contracts import RecordingLabels, RecordingSession, RecordingSessionsResponse, RecordingScript, InspectRecordingRequest
+from app.royalty_contracts import ROYALTY_CLIENT_MODELS
+from app.singer_range_contracts import SingerRangeRequest, SingerRangeProfile, PlannedRangeRequest, RangeAssessment
 
 ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS, *SPEAKER_REVIEW_CLIENT_MODELS, *EXPORT_PROVENANCE_CLIENT_MODELS]
 ALL_MODELS.extend(READING_MEDIA_CLIENT_MODELS)
@@ -38,6 +44,12 @@ ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)
 ALL_MODELS.extend(CHARACTER_SWAP_CLIENT_MODELS)
 ALL_MODELS.extend(VIDEO_SCENE_CLIENT_MODELS)
 ALL_MODELS.extend(CLIP_HOST_CLIENT_MODELS)
+ALL_MODELS.extend([ArtistProfile, CreateArtistRequest, BindArtistVoiceRequest, ArtistsResponse, ArtistConsentRequest, ArtistConsentVersion, ArtistConsentsResponse,
+    VoiceDeletionPlan, VoiceDeletionReceipt, ConfirmVoiceDeletionRequest, RecordingSession, RecordingSessionsResponse, RecordingScript, InspectRecordingRequest,
+    *ARTIST_PRODUCTION_CLIENT_MODELS])
+ALL_MODELS.extend(ROYALTY_CLIENT_MODELS)
+ALL_MODELS.append(RecordingLabels)
+ALL_MODELS.extend([SingerRangeRequest, SingerRangeProfile, PlannedRangeRequest, RangeAssessment])
 
 DEST = Path(__file__).resolve().parents[2] / 'frontend/src/api/generated.ts'
 SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'oneOf', 'discriminator', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}

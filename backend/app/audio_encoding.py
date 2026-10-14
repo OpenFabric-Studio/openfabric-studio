@@ -11,6 +11,7 @@ from pydantic import (
     ConfigDict,
     Field,
     TypeAdapter,
+    StrictBool,
     ValidationError,
     field_validator,
 )
@@ -86,6 +87,7 @@ class CreateAudioExportRequest(EncodingContract):
     settings: AudioEncodingSettings | None = None
     operation: Literal['export','analyze'] = 'export'
     source_origin: Literal['recorded','unknown'] | None = None
+    strict_release: StrictBool = False
 
 
 StemName = Literal["vocals", "drums", "bass", "other"]
@@ -103,6 +105,7 @@ class AudioExportResult(EncodingContract):
     settings: AudioEncodingSettings
     operation: Literal['export','analyze'] = 'export'
     source_origin: Literal['recorded','unknown'] | None = None
+    strict_release: StrictBool = False
     input_metrics: AudioMetrics | None = None
     output_metrics: AudioMetrics | None = None
     target_result: TargetResult = 'off'

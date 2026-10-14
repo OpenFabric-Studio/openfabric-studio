@@ -49,7 +49,8 @@ async def create_export(
 ) -> AudioExportResponse:
     try:
         return await audio_exports.create_export(
-            track_id, version_id, body.format, body.settings, operation=body.operation,source_origin=body.source_origin
+            track_id, version_id, body.format, body.settings, operation=body.operation,source_origin=body.source_origin,
+            strict_release=body.strict_release
         )
     except (audio_exports.AudioExportError, AudioEncodingError) as exc:
         _raise(exc)

@@ -14,5 +14,7 @@ export const exportQuality = {
   videoHint: 'The disclosure uses the bundled font. Provider marks remain in the source pictures.',
   assessment: 'Audio assessment', measurementUnavailable: 'Measurements are unavailable for this selected file.',
   editorPreview: 'Processed export preview',
+  legacyLineage: 'Legacy / non-strict export: source lineage and rights remain unreviewed. This file is not approved for release.',
+  productionReview: 'Production export for listening and review. Release approval is a separate rights decision.',
   errors: { export_failed: 'The processed export could not be completed. The saved original remains in your library.', audio_measurement_failed: 'Audio measurements could not be completed.', source_origin_conflict: 'This source has known generated content; that description cannot override it.', manifest_unavailable: 'This export has no verified provenance manifest.', manifest_media_changed: 'The media changed after publication.', loudness_target_warning: 'The encoded file differs from the chosen loudness target.', loudness_target_inconclusive: 'The encoded target could not be measured.' },
 }

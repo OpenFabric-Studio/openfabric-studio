@@ -1,0 +1,26 @@
+export const recordingQCEn = {
+  title: 'Original recording QC', intro: 'Inspect original format and streamed amplitude measurements. These facts do not rate singing quality or establish identity, language or pitch ability.',
+  captureLabels: 'Declared capture labels', language: 'Language (declared)', register: 'Register (declared)', articulation: 'Articulation (declared)', expression: 'Expression (declared)',
+  labelsHint: 'These labels apply to future training uploads and the first inspection of an older recording. Labels describe your capture notes; the app does not detect them.',
+  immutable: 'The first stored labels and measurements remain unchanged. Editing capture labels does not rewrite this recording history.',
+  source: 'Existing training recording', choose: 'Choose an original training file', inspect: 'Inspect original training recording', refresh: 'Refresh recording facts', loading: 'Loading recording facts…', measured: 'Original recording facts saved.',
+  alreadyInspected: 'This original already has a stored first inspection. Its labels are shown below.',
+  training: 'Training recordings', heldOut: 'Held-out listening recordings', empty: 'No stored recording facts for this purpose.',
+  heldOutHint: 'Held-out records are shown for review. Choose dedicated comparison uploads in Compare; training recordings cannot be relabeled as held-out here.',
+  format: 'Actual original format', duration: 'Original duration', bytes: 'Original file size', sha: 'Original bytes SHA-256', labels: 'First stored labels', unknownLabel: 'Not recorded',
+  peak: 'Maximum sample amplitude', rms: 'RMS level', fullScale: 'Samples at or above 0.999 full scale', silence: 'Near-silence audio fraction', noiseProxy: 'Quietest-decile amplitude proxy', samples: 'Samples analyzed',
+  measurementHint: 'Streaming amplitude screening uses 100 ms RMS windows. Near-silence windows have RMS below 0.001. The quietest-decile value is not an isolated noise measurement or signal-to-noise ratio. Review representative passages by listening.',
+  warnings: {
+    noise_estimate_is_amplitude_proxy: 'The noise-floor estimate is an amplitude proxy; music, breath and silence can affect it.',
+    pitch_listening_required: 'Pitch, vowels, articulation and expression require listening review.',
+    full_scale_samples: 'Samples reach the near-full-scale threshold. Review overload and distortion in the original.',
+    mostly_near_silence: 'At least half the audio is near silence under the amplitude screen.',
+    capture_differs_from_guidance: 'Original capture differs from dry mono 48 kHz / 24-bit WAV guidance. Conversion cannot restore missing detail.',
+  },
+  errors: {
+    unknown: 'Recording facts could not be loaded or saved. Refresh before inspecting again.', recording_invalid_audio: 'This original could not be decoded completely for screening.', recording_decode_limit: 'The recording exceeds the supported screening duration, sample rate or channel limits.', recording_source_changed: 'Original bytes changed during inspection. Review the source before trying again.',
+    recording_held_out_overlap: 'This recording is held out and cannot enter training.', recording_training_overlap: 'This recording is already used for training and cannot be held out.', recording_duplicate: 'These bytes already have a different saved recording identity.',
+    recording_too_large: 'The original exceeds the 512 MiB limit.', recording_unavailable: 'The original is unavailable for inspection.', voice_retention_frozen: 'This voice is frozen for deletion review.',
+    artist_consent_required: 'Record signed permission evidence before inspecting this registered voice.', artist_consent_revoked: 'Artist permission has been revoked.', artist_operation_not_allowed: 'The agreement does not permit this operation.', artist_consent_expired: 'Artist permission has expired.',
+  },
+}

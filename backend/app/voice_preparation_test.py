@@ -626,15 +626,11 @@ class PreparationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(started, [])
             self.assertFalse(prep.busy())
 
-    async def test_cleanup_failure_prevents_voice_deletion_after_drain(self) -> None:
-        from app import voice_preparation as prep
+    async def test_legacy_delete_requires_inventory_review_without_removing_files(self) -> None:
         from app.api.routes_voices import delete_voice
-        async def fail(path):
-            raise OSError('could not terminate owned process')
-        with patch.object(prep, 'cancel', side_effect=fail), self.assertLogs('app.voice_build', level='ERROR'):
-            with self.assertRaises(HTTPException) as raised:
-                await delete_voice(self.voice_id)
-        self.assertEqual(raised.exception.detail, 'voice_cleanup_failed')
+        with self.assertRaises(HTTPException) as raised:
+            await delete_voice(self.voice_id)
+        self.assertEqual(raised.exception.detail, 'voice_retention_review_required')
         self.assertTrue(self.path.is_dir())
 
     async def test_failed_preparation_publication_releases_busy_registry(self) -> None:

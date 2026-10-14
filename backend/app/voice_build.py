@@ -40,7 +40,7 @@ from pydantic import TypeAdapter, ValidationError
 from . import db
 from .atomic_files import JsonObject, document_lock, read_object, write_object
 from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, kill_process_tree, request_cancel, spawn_process
-from .config import DATA_DIR, FFMPEG_BIN_DIR, LOG_DIR, SEED_VC_DIR
+from .config import DATA_DIR, FFMPEG_BIN_DIR, LOG_DIR as LOG_DIR, SEED_VC_DIR as SEED_VC_DIR
 from .data_root import place_seed_models
 from .orchestrator.process import tail_log
 from .stems import gpu_lock, separate_file
@@ -50,6 +50,8 @@ from .voice_artifacts import ModelArtifact, StoredModel, load_registry, choices,
 from .voice_artifacts import resolve_model_artifact as resolve_registered_model
 from .voice_preparation import PreparationDocument
 from .voice_progress import VoiceProgressTracker, read_progress, finish_progress
+from .artist_contracts import ArtistConsentVersion
+from . import voice_authorization
 if TYPE_CHECKING:
     from .client_contracts import VoiceProfileResponse
     from .voice_contracts import VoiceTrialMetrics
@@ -168,6 +170,8 @@ class BuildJob:
     compare_checkpoints: bool = False
     models: list[StoredModel] = field(default_factory=list)
     timing: VoiceProgressTracker | None = None
+    authorization: ArtistConsentVersion | None = None
+    usage_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 @dataclass
@@ -189,6 +193,11 @@ class ApplyJob:
     partial_outputs: set[Path] = field(default_factory=set, repr=False)
     audio_version_id: str | None = None
     timing: VoiceProgressTracker = field(default_factory=lambda: VoiceProgressTracker.create('apply', ''))
+    production_run_id: str | None = None
+    production_vocal_asset_id: str | None = None
+    authorization: ArtistConsentVersion | None = None
+    model_artifact: ModelArtifact | None = None
+    usage_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
 _builds: dict[str, BuildJob] = {}
@@ -583,6 +592,8 @@ def _nonneg_float(value) -> float:
 
 
 def voices_root() -> Path:
+    if VOICES_DIR.is_symlink():
+        raise HTTPException(status_code=409, detail='invalid_voice_storage')
     VOICES_DIR.mkdir(parents=True, exist_ok=True)
     return VOICES_DIR
 
@@ -733,6 +744,14 @@ def public_from_path(path: Path) -> dict:
             active_id = 'trained'
         view['models'] = [item.model_dump(mode='json') for item in models]
         view['active_model_id'] = active_id
+        try:
+            permission = voice_authorization.authorize(voice_id, 'convert')
+            view['use_status'] = 'allowed' if permission is not None else 'legacy_unreviewed'
+            view['use_error_code'] = ''
+        except HTTPException as exc:
+            view['usable'] = False
+            view['use_status'] = 'blocked'
+            view['use_error_code'] = str(exc.detail)
         return view
 
 
@@ -987,17 +1006,20 @@ def _child_env() -> dict[str, str]:
     return env
 
 
-async def _spawn(cmd: list[str], *, cwd: Path, log_name: str, slot: VoiceProcessSlot) -> int:
+async def _spawn(cmd: list[str], *, cwd: Path, log_name: str, slot: VoiceProcessSlot, offline: bool = False) -> int:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_path = LOG_DIR / f"{log_name}.log"
     handle = open(log_path, "w", encoding="utf-8", errors="replace")
     proc: asyncio.subprocess.Process | None = None
     drained = False
     try:
+        env = _child_env()
+        if offline:
+            env.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'})
         if isinstance(slot, ProcSlot) and slot.parent_liveness:
-            proc = await spawn_apply_worker(cmd, cwd, _child_env(), handle.fileno())
+            proc = await spawn_apply_worker(cmd, cwd, env, handle.fileno())
         else:
-            proc = await spawn_process(*cmd, cwd=str(cwd), env=_child_env(), stdout=handle, stderr=asyncio.subprocess.STDOUT)
+            proc = await spawn_process(*cmd, cwd=str(cwd), env=env, stdout=handle, stderr=asyncio.subprocess.STDOUT)
         slot.track(proc)
         try:
             code = await proc.wait()
@@ -1036,6 +1058,8 @@ def configured_base_filename() -> str:
 async def _ensure_pretrained_base(directory: Path, job: BuildJob, filename: str) -> Path:
     destination = directory / 'base.pth'
     cached = pretrained_singing_checkpoint(filename)
+    if cached is None and job.authorization is not None:
+        raise VoiceBuildError('reviewed_baseline_required')
     if cached:
         shutil.copyfile(cached, destination)
     else:
@@ -1131,6 +1155,7 @@ async def _watch_train(job: BuildJob, stop: asyncio.Event) -> None:
 
 
 async def _build_inner(job: BuildJob) -> None:
+    voice_authorization.recheck(job.voice_id, job.authorization, 'train')
     from . import voice_preparation as prep
     from .seed_vc_compat import ensure_compatibility, EngineCompatibilityError
     path = voice_dir(job.voice_id)
@@ -1261,6 +1286,7 @@ async def _build_inner(job: BuildJob) -> None:
                     preview=relative(old_preview if old_preview.is_file() else previous.reference)))
         except HTTPException:
             pass
+    voice_authorization.recheck(job.voice_id, job.authorization, 'train')
     publish(path, models, models[-1].id)
     if job.timing is not None:
         job.timing.advance(1)
@@ -1328,10 +1354,13 @@ async def _run_build(job: BuildJob) -> None:
             _sync_build(job)
         if _builds.get(job.voice_id) is job:
             _builds.pop(job.voice_id, None)
+        voice_authorization.record(job.authorization, 'train', 'done' if job.status == 'ready' else 'cancelled' if job.status == 'cancelled' else 'failed',
+            job.usage_id, voice_id=job.voice_id, error_code=job.error_code)
 
 
 def start_build(voice_id: str, *, clean: bool = False, preparation_revision: str | None = None,
     training_steps: Literal[0, 200, 500, 1000] = 200, resume: bool = False, compare_checkpoints: bool = False) -> dict:
+    authorization = voice_authorization.authorize(voice_id, 'train')
     from .resource_admission import require_setup_idle
     require_setup_idle()
     path = voice_dir(voice_id)
@@ -1363,6 +1392,8 @@ def start_build(voice_id: str, *, clean: bool = False, preparation_revision: str
         preparation=preparation, training_steps=1000 if compare_checkpoints else training_steps,
         resume=resume, compare_checkpoints=compare_checkpoints,
         timing=VoiceProgressTracker.create('build', preparation.response.revision))
+    job.authorization = authorization
+    voice_authorization.record(authorization, 'train', 'requested', job.usage_id, voice_id=voice_id)
     _builds[voice_id] = job
     _sync_build(job)
     job.task = asyncio.create_task(_run_build(job))
@@ -1565,6 +1596,13 @@ def _write_apply(job: ApplyJob) -> None:
     write_object(_apply_file(job.track_id), payload)
     from .audio_versions import sync_application
     sync_application(job.audio_version_id, job.track_id, job.status, job.error_code)
+    if job.status in {'done', 'failed', 'cancelled'}:
+        if job.production_run_id is not None:
+            from .production_render import record_terminal
+            record_terminal(job)
+        else:
+            voice_authorization.record(job.authorization, 'convert', job.status, job.usage_id,
+                voice_id=job.voice_id, track_id=job.track_id, error_code=job.error_code)
 
 
 def record_apply_failure(voice_id: str, track_id: int, code: str) -> None:
@@ -1797,14 +1835,21 @@ def _apply_paths(row: sqlite3.Row) -> tuple[Path, Path]:
 
 
 async def _apply_inner(job: ApplyJob) -> None:
+    voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
     _apply_phase(job, 'preparing')
     voice_path = voice_dir(job.voice_id)
     registry = load_registry(voice_path)
     try:
-        artifact = resolve_model_artifact(voice_path, registry.active_model_id or 'trained')
+        artifact = job.model_artifact or resolve_model_artifact(voice_path, registry.active_model_id or 'trained')
     except HTTPException:
         raise VoiceBuildError("not_ready")
     checkpoint, config, reference = artifact.checkpoint, artifact.config, artifact.reference
+    production = None
+    if job.production_run_id is not None:
+        from . import artist_production, production_render
+        production = artist_production.get_run(job.production_run_id)
+        artifact = production_render.require_run(production)
+        checkpoint, config, reference = artifact.checkpoint, artifact.config, artifact.reference
     row = db.get_track(job.track_id)
     if not row:
         raise VoiceBuildError("track_missing")
@@ -1839,21 +1884,29 @@ async def _apply_inner(job: ApplyJob) -> None:
         if proc is not None:
             _apply_phase(job, 'separating')
 
-    stems = await separate_file(
-        audio,
-        work / "stems",
-        log_name=f"voice_apply_{job.track_id}",
-        on_proc=_track_separate,
-        new_session=True,
-        spawn=spawn_apply_worker,
-    )
+    if production is not None:
+        from .artist_production import asset_path
+        stems = {'vocals': asset_path(production.request.guide_asset_id),
+            'accompaniment': asset_path(production.request.accompaniment_asset_id)}
+    else:
+        stems = await separate_file(
+            audio,
+            work / "stems",
+            log_name=f"voice_apply_{job.track_id}",
+            on_proc=_track_separate,
+            new_session=True,
+            spawn=spawn_apply_worker,
+        )
     _check(job)
-    missing = [name for name in ("vocals", "drums", "bass", "other") if name not in stems]
+    missing = [name for name in (("vocals", "accompaniment") if production else ("vocals", "drums", "bass", "other")) if name not in stems]
     if missing:
         raise VoiceBuildError("no_stems")
     converted = work / "converted"
     converted.mkdir(parents=True)
     _apply_phase(job, 'preparing')
+    if production is not None:
+        from .production_render import assess_guide
+        await assess_guide(job, production)
     # A published reference is already a reviewed contiguous <=10s window.
     # Legacy voices keep their prior reference-selection behavior.
     target_ref = reference if registry.models else await ensure_target_reference(voice_path, reference, job.slot, lambda: job.cancel)
@@ -1887,7 +1940,13 @@ async def _apply_inner(job: ApplyJob) -> None:
         stop = asyncio.Event()
         watcher = asyncio.create_task(_watch_apply(job, log_name, stop))
         try:
-            code = await _spawn(command, cwd=SEED_VC_DIR, log_name=log_name, slot=job.slot)
+            voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
+            if production is not None:
+                from .production_render import require_run
+                require_run(production)
+                code = await _spawn(command, cwd=SEED_VC_DIR, log_name=log_name, slot=job.slot, offline=True)
+            else:
+                code = await _spawn(command, cwd=SEED_VC_DIR, log_name=log_name, slot=job.slot)
         finally:
             stop.set()
             await await_cleanup(watcher)
@@ -1895,7 +1954,7 @@ async def _apply_inner(job: ApplyJob) -> None:
     if code != 0:
         raise VoiceBuildError("convert_failed", _failure_detail(log_name))
     wavs = sorted(converted.glob("vc_*.wav"))
-    if not wavs:
+    if len(wavs) != 1:
         raise VoiceBuildError("convert_failed", _failure_detail(log_name))
     _apply_phase(job, 'mixing')
     expected_seconds = await _probe_duration(stems['vocals'])
@@ -1914,15 +1973,16 @@ async def _apply_inner(job: ApplyJob) -> None:
     dest = destination
     partial = partial_wav(dest)
     job.partial_outputs.add(partial)
+    accompaniment = [stems['accompaniment']] if production else [stems['drums'], stems['bass'], stems['other']]
+    mix_inputs = [argument for path in accompaniment for argument in ('-i', str(path))]
     await _ffmpeg(
         [
             "-y",
             "-i", str(matched),
-            "-i", str(stems["drums"]),
-            "-i", str(stems["bass"]),
-            "-i", str(stems["other"]),
-            "-filter_complex", remix_filter(4),
+            *mix_inputs,
+            "-filter_complex", remix_filter(1 + len(accompaniment)),
             "-map", "[out]",
+            *(["-c:a", "pcm_f32le"] if production is not None else []),
             "-f", "wav",
             str(partial),
         ],
@@ -1930,7 +1990,14 @@ async def _apply_inner(job: ApplyJob) -> None:
         lambda: job.cancel,
     )
     _check(job)
+    voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
+    if production is not None:
+        from .production_render import converted_master
+        converted_master(job, matched, partial)
     partial.replace(dest)
+    if production is not None:
+        from .production_render import complete_run
+        complete_run(job, dest)
     if not db.update_track_audio(job.track_id, dest):
         raise VoiceBuildError("track_missing")
     db.delete_track_stems(job.track_id)
@@ -1956,6 +2023,8 @@ def _cleanup_apply_files(job: ApplyJob) -> None:
 
 
 async def _run_apply(job: ApplyJob) -> None:
+    from .artist_production import ProductionError
+    from .artists import ArtistError
     try:
         await _apply_inner(job)
     except asyncio.CancelledError:
@@ -1981,6 +2050,11 @@ async def _run_apply(job: ApplyJob) -> None:
             job.status = "failed"
             job.error_code = exc.code
             job.error = ""
+        _write_apply(job)
+    except (ProductionError, ArtistError, HTTPException) as exc:
+        job.status = 'cancelled' if job.cancel else 'failed'
+        job.error_code = exc.code if isinstance(exc, (ProductionError, ArtistError)) else str(exc.detail)
+        job.error = ''
         _write_apply(job)
     except Exception:
         logger.exception("Voice job failed")
@@ -2013,7 +2087,9 @@ async def _run_apply(job: ApplyJob) -> None:
                     _applies.pop(job.track_id, None)
 
 
-def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = None) -> dict:
+def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = None,
+                production_run_id: str | None = None) -> dict:
+    authorization = voice_authorization.authorize(voice_id, 'convert')
     from .resource_admission import require_setup_idle
     require_setup_idle()
     if track_id in _apply_cancelling or track_id in _apply_deleting or any(job.cleanup_pending for job in _applies.values()):
@@ -2025,6 +2101,14 @@ def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = 
     _preview, usable = _artifact_flags(voice_path, meta)
     if not usable:
         raise HTTPException(status_code=409, detail="not_ready")
+    registry = load_registry(voice_path)
+    pinned_artifact = resolve_model_artifact(voice_path, registry.active_model_id or 'trained')
+    production_run = None
+    if production_run_id is not None:
+        from .artist_production import get_run
+        from .production_render import require_run
+        production_run = get_run(production_run_id)
+        pinned_artifact = require_run(production_run)
     row = db.get_track(track_id)
     if not row:
         raise HTTPException(status_code=404, detail="track_missing")
@@ -2046,10 +2130,20 @@ def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = 
         track_id=track_id,
         duration_sec=float(row["duration_ms"] or 0) / 1000,
         audio_version_id=audio_version_id,
+        authorization=authorization,
+        production_run_id=production_run_id,
     )
+    job.model_artifact = pinned_artifact
     job.started_at = job.timing.progress.queued_at
     _applies[track_id] = job
     try:
+        if production_run is not None:
+            from .artist_production import save_run
+            production_run.audio_version_id = audio_version_id
+            production_run.status = 'running'
+            save_run(production_run)
+        else:
+            voice_authorization.record(authorization, 'convert', 'requested', job.usage_id, voice_id=voice_id, track_id=track_id)
         _write_apply(job)
         job.task = asyncio.create_task(_run_apply(job))
     except BaseException:

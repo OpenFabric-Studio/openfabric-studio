@@ -136,6 +136,8 @@ class VoiceProfileResponse(Contract):
     built_from: list[str]
     has_preview: bool
     usable: bool
+    use_status: Literal['legacy_unreviewed', 'allowed', 'blocked'] = 'legacy_unreviewed'
+    use_error_code: str = ''
     clean_vocals: bool = False
     prepared: bool = False
     prep_kept_sec: float = Field(default=0, ge=0)

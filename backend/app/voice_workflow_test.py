@@ -26,6 +26,9 @@ class DurationTests(unittest.TestCase):
     def test_selection_uses_prepared_budget_instead_of_fixed_fifteen_minutes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)
+            self.enterContext(patch('app.recording_sessions._voice_root', return_value=path.resolve()))
+            (path / 'recordings').mkdir()
+            (path / 'recordings' / 'voice.wav').write_bytes(b'fixture source')
             segments = [VoiceSegment(id=str(index), source_filename='voice.wav', start_sec=index * 10,
                 end_sec=(index + 1) * 10, duration_sec=10, score=.8, periodicity=.9,
                 level_db=-16, peak=.8, clipped_fraction=0, accepted=True, reasons=[]) for index in range(100)]
@@ -45,6 +48,9 @@ class DurationTests(unittest.TestCase):
     def test_saved_budget_can_increase_without_repeating_preparation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary)
+            self.enterContext(patch('app.recording_sessions._voice_root', return_value=path.resolve()))
+            (path / 'recordings').mkdir()
+            (path / 'recordings' / 'voice.wav').write_bytes(b'fixture source')
             segments = [VoiceSegment(id=str(index), source_filename='voice.wav', start_sec=index * 10,
                 end_sec=(index + 1) * 10, duration_sec=10, score=.8, periodicity=.9,
                 level_db=-16, peak=.8, clipped_fraction=0, accepted=True, reasons=[]) for index in range(100)]
@@ -62,6 +68,7 @@ class CoverageJobTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.path = Path(self.temp.name)
+        self.enterContext(patch('app.recording_sessions._voice_root', return_value=self.path.resolve()))
         (self.path / 'recordings').mkdir()
         (self.path / 'recordings' / 'voice.wav').write_bytes(b'source')
         from app.atomic_files import write_object

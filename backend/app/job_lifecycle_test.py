@@ -22,7 +22,11 @@ class JobLifecycleTests(unittest.IsolatedAsyncioTestCase):
         self.voice_id = "a" * 32
         self.voice_path = self.root / self.voice_id
         self.voice_path.mkdir()
-        voice.write_meta(self.voice_path, {"id": self.voice_id, "recordings": [{"filename": "source.wav", "bytes": 6}], "status": "idle"})
+        (self.voice_path / 'model.pth').write_bytes(b'fixture model')
+        (self.voice_path / 'config.yml').write_bytes(b'fixture config')
+        voice.write_meta(self.voice_path, {"id": self.voice_id, "recordings": [{"filename": "source.wav", "bytes": 6}], "status": "idle",
+            'checkpoint': str(self.voice_path / 'model.pth'), 'config': str(self.voice_path / 'config.yml'),
+            'reference': str(self.voice_path / 'recordings' / 'source.wav')})
         (self.voice_path / "recordings").mkdir()
         (self.voice_path / "recordings" / "source.wav").write_bytes(b"marker")
         from app import voice_preparation as preparation

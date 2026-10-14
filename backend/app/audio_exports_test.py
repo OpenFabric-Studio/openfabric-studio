@@ -119,15 +119,104 @@ class AudioExportTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "cancelled")
         self.assertFalse(exports.work_busy())
         with (
-            patch(
-                "app.audio_exports.write_object",
-                side_effect=OSError("private path disk full"),
-            ),
+            patch("app.audio_exports.write_object", side_effect=OSError("private path disk full")),
             self.assertRaises(exports.AudioExportError) as caught,
         ):
             await exports.create_export(self.track_id, self.version_id, "flac")
         self.assertEqual(caught.exception.code, "export_write_failed")
         self.assertFalse(exports.work_busy())
+
+    async def test_production_context_above_legacy_limit_round_trips_with_atomic_capacity_guard(self) -> None:
+        from app.artist_production_contracts import ProductionGate, ProductionProvenance, SourceAsset, VoiceModelSnapshot, ModelFileIdentity
+        job = await exports.create_export(self.track_id, self.version_id, 'wav')
+        self.assertEqual((await self.done(job.id)).status, 'done')
+        document = exports.load_document(self.track_id, job.id)
+        files = [ModelFileIdentity(role=role, name='fixture-' + 'x' * 290, sha256='f' * 64)
+            for role in ('checkpoint', 'configuration', 'voice_reference')]
+        files.extend(ModelFileIdentity(role='installed_auxiliary_candidate', name='x' * 300, sha256=f'{index:064x}') for index in range(161))
+        model = VoiceModelSnapshot(voice_id='b' * 32, model_revision_id='fixture', files=files, diffusion_steps=30)
+        asset = SourceAsset(id='c' * 32, sha256='d' * 64, role='master', origin='ai_generated', provider='openfabric',
+            created_at='fixture', classification_basis='app_workflow', reference_only=False)
+        document.production_context = ProductionProvenance(run_id='e' * 32, project_id=1, artist_id='b' * 32,
+            consent_version_id='c' * 32, audio_version_id=self.version_id, graph_root_id=asset.id,
+            graph_sha256='f' * 64, assets=[asset], model=model, gate=ProductionGate())
+        exports.save_document(document)
+        path = exports._directory(self.track_id, job.id) / 'export.json'
+        before = path.read_bytes()
+        self.assertGreater(len(before), 65536)
+        self.assertEqual(exports.load_document(self.track_id, job.id).production_context.model, model)
+        with patch.object(exports, '_MAX_DOCUMENT_BYTES', len(before) - 1), self.assertRaises(exports.AudioExportError) as capacity:
+            exports.save_document(document)
+        self.assertEqual(capacity.exception.code, 'export_record_capacity_exceeded')
+        self.assertEqual(path.read_bytes(), before)
+
+    async def test_original_artist_track_export_and_reuse_check_live_consent(self) -> None:
+        from app.artist_contracts import ArtistConsentRequest, CreateArtistRequest
+        from app.artists import add_consent_revision, create_artist
+        voice_id = 'b' * 32
+        artist = create_artist(CreateArtistRequest(name='Fixture artist', voice_id=voice_id))
+        add_consent_revision(artist.id, ArtistConsentRequest(status='active', operator_label='Fixture reviewer',
+            signed_evidence_ref='fixture agreement', human_declaration='Authorized fixture export for application testing.',
+            allowed_operations=['export'], allowed_uses=['production']))
+        db.get_db().execute('UPDATE tracks SET params_json=? WHERE id=?', (json.dumps({'voice_id': voice_id}), self.track_id))
+        db.get_db().commit()
+        job = await exports.create_export(self.track_id, self.version_id, 'wav')
+        self.assertEqual((await self.done(job.id)).status, 'done')
+        self.assertIsNotNone(exports.load_document(self.track_id, job.id).artist_permission)
+        add_consent_revision(artist.id, ArtistConsentRequest(status='revoked', operator_label='Fixture reviewer',
+            human_declaration='Fixture export authorization revoked for application testing.'))
+        with self.assertRaises(exports.AudioExportError) as retrieval:
+            exports.export_file(self.track_id, self.version_id, job.id)
+        self.assertEqual(retrieval.exception.code, 'artist_consent_revoked')
+        with self.assertRaises(exports.AudioExportError):
+            exports.manifest_file(self.track_id, self.version_id, job.id, 'json')
+        for format in ('wav', 'flac'):
+            with self.subTest(format=format), self.assertRaises(exports.AudioExportError) as denied:
+                await exports.create_export(self.track_id, self.version_id, format)
+            self.assertEqual(denied.exception.code, 'artist_consent_revoked')
+        document = exports.load_document(self.track_id, job.id)
+        document.expected_primary = str(self.source)
+        exports.save_document(document)
+        await exports.recover_exports()
+        self.assertEqual(exports.get_export(self.track_id, self.version_id, job.id).status, 'done')
+
+    async def test_interrupted_artist_export_after_revocation_does_not_abort_recovery(self) -> None:
+        from app.artist_contracts import ArtistConsentRequest, CreateArtistRequest
+        from app.artists import add_consent_revision, create_artist
+        voice_id = 'b' * 32
+        artist = create_artist(CreateArtistRequest(name='Fixture artist', voice_id=voice_id))
+        add_consent_revision(artist.id, ArtistConsentRequest(status='active', operator_label='Fixture reviewer',
+            signed_evidence_ref='fixture agreement', human_declaration='Authorized fixture export for application testing.',
+            allowed_operations=['export'], allowed_uses=['production']))
+        db.get_db().execute('UPDATE tracks SET params_json=? WHERE id=?', (json.dumps({'voice_id': voice_id}), self.track_id))
+        db.get_db().commit()
+        job = await exports.create_export(self.track_id, self.version_id, 'wav')
+        self.assertEqual((await self.done(job.id)).status, 'done')
+        document = exports.load_document(self.track_id, job.id)
+        document.status = 'running'
+        exports.save_document(document)
+        add_consent_revision(artist.id, ArtistConsentRequest(status='revoked', operator_label='Fixture reviewer',
+            human_declaration='Fixture export authorization revoked for application testing.'))
+        await exports.recover_exports()
+        recovered = exports.get_export(self.track_id, self.version_id, job.id)
+        self.assertEqual(recovered.status, 'failed')
+        self.assertEqual(recovered.error_code, 'artist_consent_revoked')
+        self.assertTrue(exports._artifact(exports.load_document(self.track_id, job.id)).is_file())
+
+    async def test_cancelled_artist_export_has_terminal_usage_evidence(self) -> None:
+        from app.artist_contracts import ArtistConsentRequest, CreateArtistRequest
+        from app.artists import add_consent_revision, create_artist
+        from app.artist_production import usage_ledger
+        voice_id = 'b' * 32
+        artist = create_artist(CreateArtistRequest(name='Fixture artist', voice_id=voice_id))
+        add_consent_revision(artist.id, ArtistConsentRequest(status='active', operator_label='Fixture reviewer',
+            signed_evidence_ref='fixture agreement', human_declaration='Authorized fixture export for application testing.',
+            allowed_operations=['export'], allowed_uses=['production']))
+        db.get_db().execute('UPDATE tracks SET params_json=? WHERE id=?', (json.dumps({'voice_id': voice_id}), self.track_id))
+        db.get_db().commit()
+        job = await exports.create_export(self.track_id, self.version_id, 'wav')
+        await exports.cancel_export(self.track_id, self.version_id, job.id)
+        self.assertEqual([event.outcome for event in usage_ledger().events], ['requested', 'cancelled'])
 
     async def test_recovery_adopts_atomic_output_after_interrupted_publication(
         self,

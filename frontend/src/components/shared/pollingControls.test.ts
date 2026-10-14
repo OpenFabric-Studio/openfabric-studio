@@ -6,6 +6,7 @@ import { i18n, setLocale } from '../../i18n'
 import * as stemsApi from '../../api/stems'
 import * as midiApi from '../../api/midi'
 import * as voicesApi from '../../api/voices'
+vi.mock('../../views/voice/ArtistProductionPanel.vue', () => ({ default: { template: '<section data-artist-production-fixture />' } }))
 import * as localEnginesApi from '../../api/localEngines'
 import type { StemsStatus } from '../../api/stems'
 import type { MidiStatus } from '../../api/midi'

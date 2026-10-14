@@ -4,6 +4,7 @@ import { createApp, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import VoiceClonePage from './SingingVoiceWorkspace.vue'
 import * as api from '../../api/voices'
+import * as productionApi from '../../api/artistProduction'
 import { i18n, setLocale } from '../../i18n'
 import { preparedVoice, voiceProfile } from './voiceTestFixtures'
 
@@ -15,6 +16,8 @@ vi.mock('../../api/voices', async (original) => ({ ...await original<typeof impo
   voiceSeparationOptions: vi.fn(), listVoiceTrialSources: vi.fn(), listVoiceComparisons: vi.fn(),
   deleteVoice: vi.fn(), selectVoiceModel: vi.fn(), analyzeVoiceCoverage: vi.fn(), startVoiceComparison: vi.fn(), cancelVoicePreparation: vi.fn(),
 }))
+vi.mock('./ArtistProductionPanel.vue', () => ({ default: { template: '<section data-artist-production-fixture />' } }))
+vi.mock('../../api/artistProduction', async original => ({ ...await original<typeof import('../../api/artistProduction')>(), planVoiceDeletion: vi.fn(), confirmVoiceDeletion: vi.fn() }))
 vi.mock('../../composables/audioPlayback', async (original) => ({ ...await original<typeof import('../../composables/audioPlayback')>(), fetchAndComputePeaks: vi.fn().mockResolvedValue([0.1, 0.4]) }))
 
 let app: App | undefined
@@ -376,8 +379,9 @@ it('does not warn about an explicitly excluded recording in the published traini
   expect(container.textContent).not.toContain('These files changed after the last build')
 })
 
-it('requires a named confirmation before deleting a singing voice', async () => {
-  vi.mocked(api.deleteVoice).mockResolvedValue(undefined)
+it('requires a frozen inventory and a second confirmation before deleting a singing voice', async () => {
+  vi.mocked(productionApi.planVoiceDeletion).mockResolvedValue({ id: 'a'.repeat(32), voice_id: voiceProfile().id, created_at: 'fixture', status: 'pending', plan_sha256: 'a'.repeat(64), items: [] })
+  vi.mocked(productionApi.confirmVoiceDeletion).mockResolvedValue({ plan_id: 'a'.repeat(32), voice_id: voiceProfile().id, created_at: 'fixture', status: 'deleted', plan_sha256: 'a'.repeat(64), sequence: 1, items: [], voice_assets_deleted: true, full_erasure_verified: false, receipt_sha256: 'b'.repeat(64) })
   const container = await mount()
   await click(container, 'Delete voice')
   expect(api.deleteVoice).not.toHaveBeenCalled()
@@ -391,7 +395,12 @@ it('requires a named confirmation before deleting a singing voice', async () => 
   const confirm = document.querySelector('[role="dialog"] [data-confirm-delete]')
   if (!(confirm instanceof HTMLButtonElement)) throw new Error('Missing confirm')
   confirm.click(); await settle()
-  expect(api.deleteVoice).toHaveBeenCalledTimes(1)
+  expect(productionApi.planVoiceDeletion).toHaveBeenCalledTimes(1)
+  expect(productionApi.confirmVoiceDeletion).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Closing this review leaves that freeze in place')
+  confirm.click(); await settle()
+  expect(productionApi.confirmVoiceDeletion).toHaveBeenCalledTimes(1)
+  expect(api.deleteVoice).not.toHaveBeenCalled()
 })
 
 it('collapses historical completed job details while keeping active work expanded', async () => {

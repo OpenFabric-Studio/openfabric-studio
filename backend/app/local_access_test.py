@@ -49,6 +49,13 @@ class LocalAccessTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(self.start.await_count, 2)
 
+    async def test_remote_client_cannot_spoof_localhost_headers(self) -> None:
+        transport = httpx.ASGITransport(app=main.app, client=('198.51.100.9', 1234), raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url='http://127.0.0.1:9000') as remote:
+            response = await remote.post('/api/tracks/1/stems', headers={'host': '127.0.0.1:9000'})
+        self.assertEqual(response.status_code, 403)
+        self.start.assert_not_awaited()
+
     async def test_explicit_loopback_development_origin_remains_supported(self) -> None:
         with patch.dict('os.environ', {'OPENFABRIC_SETUP_ALLOWED_ORIGINS': 'http://localhost:5173'}):
             response = await self.client.post('/api/tracks/1/stems', headers={

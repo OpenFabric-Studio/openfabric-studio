@@ -19,6 +19,10 @@ import { exportQuality } from './exportQuality'
 import { speechWorkspaceEn } from './speechWorkspace'
 import { localEnginesEn } from './localEngines'
 import { singingWorkspaceEn, voiceStudioEn } from './singingWorkspace'
+import { artistProductionEn } from './artistProduction'
+import { singerRangeEn } from './singerRange'
+import { royaltiesEn } from './royalties'
+import { recordingQCEn } from './recordingQC'
 import { referenceWorkspaceEn } from './referenceWorkspace'
 import { generationWorkspaceEn } from './generationWorkspace'
 import { videoWorkspaceEn, videoErrorsEn } from './videoWorkspace'
@@ -55,6 +59,10 @@ export default {
   speechWorkspace: speechWorkspaceEn,
   localEngines: localEnginesEn,
   singingWorkspace: singingWorkspaceEn, voiceStudio: voiceStudioEn,
+  artistProduction: artistProductionEn,
+  singerRange: singerRangeEn,
+  royalties: royaltiesEn,
+  recordingQC: recordingQCEn,
   referenceWorkspace: referenceWorkspaceEn,
   generationWorkspace: generationWorkspaceEn,
   ...upstreamLibraryEn,
