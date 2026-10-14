@@ -45,12 +45,22 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **ACE-Step 1.5** | Text/style music generation, covers, section edits |
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
+| **Artist production (experimental)** | Local consent/QC, pinned guide conversion, source lineage, release review and configurable accounting |
 | **Speech profiles** | Reference clips for speech and audiobooks, with four licensed English starter voices |
 | **Video Studio** | Local LTX pictures and optional quoted OpenRouter shots with approvals/export |
 | **OpenRouter media** | Bring your own key for cloud speech, video and experimental Lyria music |
 | **Demucs / DAW** | Stems and multitrack timeline |
 
 UI language: English. Brand palette: near-black + indigo (`#4F46E5` / `#6366F1`).
+
+The [artist-production workflow](docs/artist-production/PRODUCTION_WORKFLOW.md) uses an
+authorized human guide and independently reviewed accompaniment. Seed-VC inherits
+the guide's performance; it is not notes/lyrics-driven singing synthesis. Source
+lineage, permission, range and model hashes are checked separately from human rights
+approval. Commercial release remains blocked where dependency evidence is incomplete;
+real singer quality and GPU throughput are unverified. See the
+[acceptance report](docs/artist-production/ACCEPTANCE_REPORT.md) and
+[component evidence](docs/artist-production/LICENSE_AND_MODEL_EVIDENCE.md).
 
 ---
 

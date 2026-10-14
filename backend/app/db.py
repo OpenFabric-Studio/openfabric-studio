@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,7 @@ FILES_DIR = DATA_DIR / "files"
 VIDEOS_DIR = DATA_DIR / "videos"
 
 _db: Optional[sqlite3.Connection] = None
+_db_open_lock = threading.RLock()
 # Shown on the track list. After 999999 the next track takes the smallest
 # free number again, so two saved tracks never share a number.
 SHORT_ID_MAX = 999_999
@@ -101,9 +103,22 @@ def take_short_id(db: sqlite3.Connection) -> int:
 
 def get_db() -> sqlite3.Connection:
     global _db
+    with _db_open_lock:
+        try:
+            return _open_db()
+        except BaseException:
+            if _db is not None:
+                _db.close()
+                _db = None
+            raise
+
+
+def _open_db() -> sqlite3.Connection:
+    global _db
     if _db is None:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
-        _db = sqlite3.connect(DB_PATH, check_same_thread=False)
+        # Shared cached statements can return inconsistent rows on CPython 3.12/3.13 (python/cpython#118172).
+        _db = sqlite3.connect(DB_PATH, check_same_thread=False, cached_statements=0)
         _db.row_factory = sqlite3.Row
         _db.execute("PRAGMA journal_mode = WAL;")
         _db.execute("PRAGMA synchronous = NORMAL;")
@@ -177,6 +192,18 @@ def get_db() -> sqlite3.Connection:
         """)
         _db.commit()
         try:
+            from .artists import migrate as migrate_artists
+            migrate_artists(_db)
+            from .artist_production import migrate as migrate_artist_production
+            migrate_artist_production(_db)
+            from .voice_retention import migrate as migrate_voice_retention
+            migrate_voice_retention(_db)
+            from .recording_sessions import migrate as migrate_recording_sessions
+            migrate_recording_sessions(_db)
+            from .singer_ranges import migrate as migrate_singer_ranges
+            migrate_singer_ranges(_db)
+            from .royalty_accounting import migrate as migrate_royalty_accounting
+            migrate_royalty_accounting(_db)
             from .audio_version_store import migrate as migrate_audio_versions
             migrate_audio_versions(_db)
             from .generation_library import migrate as migrate_generation_library

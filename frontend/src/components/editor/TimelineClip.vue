@@ -11,6 +11,7 @@ const props = defineProps<{
   clip: Clip
   pxPerSecond: number
   buffer: AudioBuffer | null
+  bufferStretchFactor: number
   /** Original source duration; buffer may still be waiting for its warped replacement. */
   sourceDuration?: number
   snapCandidates: number[]
@@ -311,8 +312,9 @@ function drawPeaks(): void {
   // Audio drawing logic
   if (!buffer) return
   const sampleRate = buffer.sampleRate
-  const startSample = Math.max(0, Math.floor((props.clip.trimStart * sf) * sampleRate))
-  const endSample = Math.min(buffer.length, Math.floor((props.clip.trimEnd * sf) * sampleRate))
+  const bufferFactor = props.bufferStretchFactor
+  const startSample = Math.max(0, Math.floor((props.clip.trimStart * bufferFactor) * sampleRate))
+  const endSample = Math.min(buffer.length, Math.floor((props.clip.trimEnd * bufferFactor) * sampleRate))
   const totalSamples = Math.max(1, endSample - startSample)
   
   // 1 point per pixel for a perfectly smooth curve

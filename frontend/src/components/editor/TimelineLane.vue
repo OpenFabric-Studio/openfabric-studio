@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ChannelSettings } from '../../audio/mixerEngine'
 import type { Clip, TimelineLane } from '../../audio/timelineTypes'
+import { clipBuffer } from '../../audio/timelineTypes'
 import TimelineClip from './TimelineClip.vue'
 import { TRACK_COLORS } from '../../utils/trackColors'
 
@@ -65,13 +66,8 @@ function onHeaderFocus(e: FocusEvent): void {
   if (isTextInput || el.matches(':focus-visible')) emit('selectLane')
 }
 
-function bufferFor(clip: Clip): AudioBuffer | null {
-  if (!clip.sourceUrl) return null
-  if (clip.warpEnabled && clip.originalBpm) {
-    const key = `${clip.sourceUrl}_warp_${clip.originalBpm}_${store.project.bpm}`
-    if (props.buffers.has(key)) return props.buffers.get(key) ?? null
-  }
-  return props.buffers.get(clip.sourceUrl) ?? null
+function bufferFor(clip: Clip) {
+  return clipBuffer(clip, store.project.bpm, props.buffers)
 }
 </script>
 
@@ -172,7 +168,8 @@ function bufferFor(clip: Clip): AudioBuffer | null {
         :key="clip.id"
         :clip="clip"
         :px-per-second="pxPerSecond"
-        :buffer="bufferFor(clip)"
+        :buffer="bufferFor(clip).buffer"
+        :buffer-stretch-factor="bufferFor(clip).stretchFactor"
         :source-duration="clip.sourceUrl ? buffers.get(clip.sourceUrl)?.duration : undefined"
         :snap-candidates="snapCandidates"
         :grid-step-sec="gridStepSec"

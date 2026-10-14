@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException, Request
@@ -63,10 +64,13 @@ class LocalAccessMiddleware:
         if scope['type'] == 'http':
             request = Request(scope)
             try:
+                peer = request.client
+                if peer is None or not ipaddress.ip_address(peer.host).is_loopback:
+                    raise HTTPException(403, detail='setup_origin_forbidden')
                 require_local_host(request)
                 if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
                     require_local_origin(request)
-            except HTTPException:
+            except (HTTPException, ValueError):
                 response = JSONResponse({'detail': 'setup_origin_forbidden'}, status_code=403)
                 await response(scope, receive, send)
                 return

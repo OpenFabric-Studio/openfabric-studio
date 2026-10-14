@@ -84,8 +84,13 @@ export async function uploadRecordings(
   voiceId: string,
   files: File[],
   signal?: AbortSignal,
+  labels?: import('./contracts').RecordingLabels,
 ): Promise<VoiceUploadResponse> {
   const form = new FormData()
+  if (labels) {
+    const { parseRecordingLabels } = await import('./contracts')
+    form.append('recording_labels', JSON.stringify(parseRecordingLabels(labels)))
+  }
   for (const file of files) form.append('files', file, file.name)
   return apiFetch(voicePath(voiceId, 'recordings'), { method: 'POST', body: form, signal }, parseVoiceUploadResponse)
 }

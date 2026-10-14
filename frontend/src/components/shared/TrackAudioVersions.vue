@@ -298,6 +298,7 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
     <a v-if="playable" :href="playable" :download="playbackFilename ?? ''" class="inline-block text-xs text-accent1 hover:underline">{{ t('trackAudio.downloadSelected', { format: playbackFormat }) }}</a>
     <TaggedAudioDownload v-if="playback" class="ml-3" :track-id="trackId" :version-id="playback.version.id" :export-id="playback.export?.id" />
     <AudioQualityReport :metrics="playbackMetrics" :target-result="playback?.export?.target_result" :measurement-unavailable="measurementsUnavailable" />
+    <p v-if="playback?.export && !(playback.export.strict_release && playback.export.provenance?.production?.gate.approved_for_release)" data-release-review role="note" class="text-xs text-amber-300">{{ t(playback.export.provenance?.production ? 'exportQuality.productionReview' : 'exportQuality.legacyLineage') }}</p>
     <div v-if="playback?.export?.provenance" class="flex flex-wrap gap-3 text-xs text-text-dim"><span>{{ t('exportQuality.origin', { origin: playback.export.provenance.content_origin }) }}</span><a v-if="playback.export.provenance_url" :href="playback.export.provenance_url" download class="text-accent1 underline">{{ t('exportQuality.json') }}</a><a v-if="playback.export.manifest_url" :href="playback.export.manifest_url" download class="text-accent1 underline">{{ t('exportQuality.manifest') }}</a></div>
     <div v-if="selected && selected.status !== 'done' && !active(selected.status)" class="flex flex-wrap items-center gap-2 text-xs" aria-live="polite">
       <StatusBadge :status="selected.status" />
@@ -327,6 +328,7 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
           <li v-for="item in exports" :key="item.id" class="flex flex-wrap items-center gap-2 text-xs">
             <span class="text-text-dim">{{ item.operation === 'analyze' ? t('exportQuality.diagnostics') : quality(item) }}</span>
             <a v-if="item.status === 'done' && item.audio_url" :href="item.audio_url" :download="item.filename ?? ''" class="text-accent1 hover:underline">{{ t('common.download') }}</a>
+            <span v-if="item.status === 'done' && item.operation !== 'analyze' && !(item.strict_release && item.provenance?.production?.gate.approved_for_release)" role="note" class="w-full text-amber-300">{{ t(item.provenance?.production ? 'exportQuality.productionReview' : 'exportQuality.legacyLineage') }}</span>
             <template v-else><StatusBadge :status="item.status" /><span v-if="item.error_code" class="text-status-failed">{{ te(`trackAudio.errors.${item.error_code}`) ? t(`trackAudio.errors.${item.error_code}`) : t('trackAudio.errors.unknown') }}</span><button type="button" :disabled="pending" class="text-accent1 hover:underline disabled:opacity-50" @click="exportAction(item, active(item.status) ? 'cancel' : 'retry')">{{ active(item.status) ? t('common.cancel') : t('trackAudio.retry') }}</button></template>
           </li>
         </ul>

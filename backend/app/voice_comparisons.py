@@ -19,7 +19,7 @@ from .atomic_files import JsonObject, document_lock, read_object, write_object
 from .contracts import Contract
 from .config import SEED_VC_DIR
 from .orchestrator.process import tail_log
-from .job_lifecycle import await_cleanup, cancel_and_wait, request_cancel
+from .job_lifecycle import await_cleanup, cancel_and_wait, request_cancel, run_owned_thread
 from .stems import gpu_lock
 from .gpu_lease import gpu_lease
 from .voice_contracts import (
@@ -29,6 +29,8 @@ from .voice_contracts import (
 )
 from .voice_separation import separate_vocal
 from .voice_artifacts import ModelArtifact
+from .artist_contracts import ArtistConsentVersion
+from . import voice_authorization
 
 logger = logging.getLogger(__name__)
 _ID = re.compile(r"^[0-9a-f]{32}$")
@@ -53,6 +55,7 @@ class ComparisonJob:
     task: asyncio.Task[None] | None = None
     models: dict[str, ModelArtifact] = field(default_factory=dict)
     references: dict[str, Path] = field(default_factory=dict)
+    authorization: ArtistConsentVersion | None = None
 
 
 @dataclass(frozen=True)
@@ -152,6 +155,7 @@ def source_path(root: Path, source_id: str) -> Path:
 
 
 async def add_source(voice_id: str, upload: UploadFile) -> VoiceTrialSource:
+    authorization = voice_authorization.authorize(voice_id, 'convert', use='evaluation')
     from .voice_build import _probe_duration, ALLOWED_AUDIO_EXT
     root = _voice_path(voice_id)
     filename = Path((upload.filename or "").replace("\\", "/")).name
@@ -177,6 +181,16 @@ async def add_source(voice_id: str, upload: UploadFile) -> VoiceTrialSource:
         if not math.isfinite(duration) or duration <= 0 or duration > 7200:
             raise HTTPException(status_code=422, detail="invalid_audio")
         partial.replace(dest)
+        from .recording_sessions import RecordingError, require_held_out_file
+        try:
+            require_held_out_file(voice_id, dest)
+            if authorization is not None:
+                from .recording_contracts import RecordingLabels
+                from .recording_sessions import inspect_file
+                await run_owned_thread(inspect_file, dest, voice_id, 'held_out', RecordingLabels(), original_filename=filename)
+        except RecordingError as exc:
+            raise HTTPException(exc.status_code, detail=exc.code) from exc
+        voice_authorization.recheck(voice_id, authorization, 'convert', use='evaluation')
         source = VoiceTrialSource(id=source_id, filename=filename, duration_sec=duration)
         with document_lock(root / "trials" / "sources.json"):
             registry = _source_registry(root)
@@ -190,6 +204,7 @@ async def add_source(voice_id: str, upload: UploadFile) -> VoiceTrialSource:
 
 
 def start_comparison(voice_id: str, request: VoiceComparisonRequest) -> VoiceComparisonResponse:
+    authorization = voice_authorization.authorize(voice_id, 'convert', use='evaluation')
     from .resource_admission import require_setup_idle
     require_setup_idle()
     from .voice_build import resolve_model_artifact, resolve_reference_artifact
@@ -197,6 +212,11 @@ def start_comparison(voice_id: str, request: VoiceComparisonRequest) -> VoiceCom
     if any(key[0] == voice_id for key in _jobs):
         raise HTTPException(status_code=409, detail="comparison_busy")
     source_path(root, request.source_id)
+    from .recording_sessions import RecordingError, require_held_out_file
+    try:
+        require_held_out_file(voice_id, source_path(root, request.source_id))
+    except RecordingError as exc:
+        raise HTTPException(exc.status_code, detail=exc.code) from exc
     source = next(item.source for item in _source_registry(root).sources if item.source.id == request.source_id)
     if request.start_sec + request.duration_sec > source.duration_sec + 0.05:
         raise HTTPException(status_code=422, detail="trial_out_of_range")
@@ -207,6 +227,8 @@ def start_comparison(voice_id: str, request: VoiceComparisonRequest) -> VoiceCom
     trials = [VoiceComparisonTrial(id=str(index), model_id=model_id, reference_id=reference_id, diffusion_steps=steps) for index, (model_id, reference_id, steps) in enumerate(combinations)]
     response = VoiceComparisonResponse(id=uuid.uuid4().hex, voice_id=voice_id, status="queued", source_filename=source.filename, request=request, trials=trials)
     job = ComparisonJob(response=response, path=_directory(root, response.id), models=models, references=reference_paths)
+    job.authorization = authorization
+    voice_authorization.record(authorization, 'convert', 'requested', response.id, voice_id=voice_id)
     persist_response(root, response)
     _jobs[(voice_id, response.id)] = job
     job.task = asyncio.create_task(_run(job))
@@ -246,6 +268,7 @@ async def _run_trial(job: ComparisonJob, trial: VoiceComparisonTrial, source: Pa
     if model.config is not None:
         command.extend(["--config", str(model.config)])
     async with gpu_lease(gpu_lock, 'voice_conversion', voice._voice_name(job.response.voice_id)):
+        voice_authorization.recheck(job.response.voice_id, job.authorization, 'convert', use='evaluation')
         code = await voice._spawn(command, cwd=SEED_VC_DIR, log_name=f"trial_{job.response.id}_{trial.id}", slot=slot)
     wavs = list(output.glob("vc_*.wav"))
     if code != 0 or len(wavs) != 1:
@@ -253,6 +276,7 @@ async def _run_trial(job: ComparisonJob, trial: VoiceComparisonTrial, source: Pa
     audio = job.path / "audio" / f"{trial.id}.wav"
     audio.parent.mkdir(exist_ok=True)
     shutil.copyfile(wavs[0], audio)
+    voice_authorization.recheck(job.response.voice_id, job.authorization, 'convert', use='evaluation')
     measure = Path(__file__).with_name("voice_measure.py")
     log_name = f"trial_measure_{job.response.id}_{trial.id}"
     expected = await voice._probe_duration(source)
@@ -273,6 +297,7 @@ async def _run(job: ComparisonJob) -> None:
     root = job.path.parents[2]
     slot = voice.ProcSlot()
     try:
+        voice_authorization.recheck(job.response.voice_id, job.authorization, 'convert', use='evaluation')
         ensure_compatibility(SEED_VC_DIR)
         voice.ensure_whisper_float32_off_cuda()
         models, references = _snapshot(job)
@@ -323,7 +348,11 @@ async def _run(job: ComparisonJob) -> None:
                 if trial.status in _ACTIVE:
                     trial.status = "failed"
                     trial.error_code = job.response.error_code or "trial_failed"
-        _finish(job)
+        try:
+            voice_authorization.record(job.authorization, 'convert', job.response.status, job.response.id,
+                voice_id=job.response.voice_id, error_code=job.response.error_code)
+        finally:
+            _finish(job)
 
 
 def _finish(job: ComparisonJob) -> None:

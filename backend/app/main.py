@@ -45,6 +45,7 @@ from .api.routes_yue2_upload import router as yue2_upload_router
 from .api.routes_openrouter import router as openrouter_router
 from .api.routes_clip_host import router as clip_host_router
 from .api.routes_cloud_music import router as cloud_music_router
+from .api.routes_artist_production import router as artist_production_router
 from .desktop_runtime import router as desktop_runtime_router
 from .module_security import LocalAccessMiddleware
 from .config import DATA_DIR, FRONTEND_DIST_DIR, LOG_DIR, SEED_VC_DIR, _LEGACY_LOG_DIR
@@ -68,6 +69,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yue_upload.start()
         await audio_versions.recover()
         await audio_exports.recover_exports()
+        from . import production_render, voice_retention
+        production_render.recover()
+        voice_retention.reconcile_deletions()
         ace_jobs.recover()
         yue_jobs.recover()
         await reference_imports.start()
@@ -139,6 +143,7 @@ app.include_router(desktop_runtime_router)
 app.include_router(openrouter_router)
 app.include_router(clip_host_router)
 app.include_router(cloud_music_router)
+app.include_router(artist_production_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)
 app.include_router(stem_exports_router)

@@ -31,7 +31,7 @@ class ReplacementRoute(APIRoute):
     """Cap only this multipart endpoint before each chunk reaches its parser."""
     def get_route_handler(self) -> Callable[[Request], Coroutine[object, object, Response]]:
         handler = super().get_route_handler()
-        if self.path != '/api/voices/replace':
+        if self.path not in {'/api/voices/replace', '/api/artist-production/assets', '/api/voices/{voice_id}/recordings'}:
             return handler
         async def bounded(request: Request) -> Response:
             limit = MAX_UPLOAD_BYTES + MAX_MULTIPART_OVERHEAD_BYTES

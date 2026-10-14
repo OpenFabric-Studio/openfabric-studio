@@ -5,12 +5,23 @@ import asyncio
 import os
 import signal
 import sys
-from collections.abc import Awaitable, Mapping
-from typing import IO, TypeVar
+from collections.abc import Awaitable, Callable, Mapping
+from typing import IO, ParamSpec, TypeVar
 
 from .orchestrator.windows_job import WindowsJob
 
 T = TypeVar("T")
+P = ParamSpec('P')
+
+
+async def run_owned_thread(function: Callable[P, T], *args: P.args, **kwargs: P.kwargs) -> T:
+    """Drain filesystem work before cancellation lets its caller remove inputs."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args, **kwargs))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        await await_cleanup(asyncio.gather(task, return_exceptions=True))
+        raise
 
 # Strong ownership survives an exited wrapper or a failed descendant drain.
 # Only verified empty jobs are removed; PID reuse cannot alias a process object.

@@ -23,7 +23,7 @@ async function mountClip(overrides: Partial<Clip> = {}, sourceDuration = 5, snap
   let selections = 0
   const container = document.body.appendChild(document.createElement('div'))
   app = createApp({ render: () => h(TimelineClip, {
-    clip: clip.value, buffer, sourceDuration, pxPerSecond: 100, gridStepSec: 0.5, snapEnabled: false,
+    clip: clip.value, buffer, bufferStretchFactor: factor, sourceDuration, pxPerSecond: 100, gridStepSec: 0.5, snapEnabled: false,
     snapCandidates, selected: true, laneName: 'Piano', theme: TRACK_COLORS[0],
     onTrim: (payload) => { clip.value = { ...clip.value, ...payload } },
     onMove: (timelineStart) => { clip.value.timelineStart = timelineStart },

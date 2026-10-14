@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 from .contracts import Contract
 from .audio_quality_contracts import AudioMetrics,LoudnessSettings,TargetResult
+from .artist_production_contracts import ProductionProvenance
 
 ContentOrigin=Literal['generated','mixed','recorded','unknown']
 
@@ -48,6 +49,7 @@ class ExportProvenance(Contract):
     audio_target_result: TargetResult | None=None
     visible_ai_label: bool=False
     informational_only: Literal[True]=True
+    production: ProductionProvenance | None = None
 
 
 EXPORT_PROVENANCE_CLIENT_MODELS: list[type[BaseModel]]=[ExportProvenance,ProvenanceComponent]

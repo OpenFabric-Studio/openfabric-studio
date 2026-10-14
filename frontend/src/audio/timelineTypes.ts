@@ -57,6 +57,16 @@ export function stretchFactor(clip: Pick<Clip, 'warpEnabled' | 'originalBpm'>, p
   return 1.0
 }
 
+/** Buffer offsets must use the time domain of the buffer actually available. */
+export function clipBuffer(clip: Clip, projectBpm: number, buffers: Map<string, AudioBuffer>): { buffer: AudioBuffer | null; stretchFactor: number } {
+  if (!clip.sourceUrl) return { buffer: null, stretchFactor: 1 }
+  if (clip.warpEnabled && clip.originalBpm) {
+    const warped = buffers.get(`${clip.sourceUrl}_warp_${clip.originalBpm}_${projectBpm || 120}`)
+    if (warped) return { buffer: warped, stretchFactor: stretchFactor(clip, projectBpm) }
+  }
+  return { buffer: buffers.get(clip.sourceUrl) ?? null, stretchFactor: 1 }
+}
+
 export function clipDuration(clip: Clip, projectBpm: number = 120): number {
   return (clip.trimEnd - clip.trimStart) * stretchFactor(clip, projectBpm)
 }

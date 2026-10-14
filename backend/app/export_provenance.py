@@ -8,6 +8,7 @@ from pydantic import TypeAdapter, ValidationError
 from .contracts import JsonObject
 from .export_provenance_contracts import ContentOrigin, ExportProvenance, ProvenanceComponent
 from .audio_quality_contracts import AudioMetrics,LoudnessSettings,TargetResult
+from .artist_production_contracts import ProductionProvenance
 from .video_projects import atomic_text
 if TYPE_CHECKING:
     from .video_projects import StoredVideoProject
@@ -24,8 +25,12 @@ class ProvenanceError(Exception):
 def digest(path: Path) -> str:
     if path.is_symlink() or not path.is_file():raise ProvenanceError('manifest_unavailable')
     checksum=hashlib.sha256()
+    before=path.stat()
     with path.open('rb') as source:
         while block:=source.read(1024*1024):checksum.update(block)
+    after=path.stat()
+    if (before.st_dev,before.st_ino,before.st_size,before.st_mtime_ns,before.st_ctime_ns)!=(after.st_dev,after.st_ino,after.st_size,after.st_mtime_ns,after.st_ctime_ns):
+        raise ProvenanceError('manifest_media_changed')
     return checksum.hexdigest()
 
 
@@ -56,6 +61,14 @@ def text(value: ExportProvenance) -> str:
         if item.engine:lines.append(f'  Engine: {item.engine}; model={item.model_id or "unknown"}; identity={item.engine_fingerprint or "unknown"}')
         if item.provider_receipt_id:lines.append(f'  Provider receipt: {item.provider_receipt_id}; job={item.provider_job_id or "unavailable"}')
     lines.extend(['','Processing:',*(f'- {step}' for step in value.transformations)])
+    if value.production is not None:
+        proof=value.production
+        lines.extend(['',f'Clean Master source graph: {proof.graph_root_id}; SHA-256={proof.graph_sha256}',
+            f'Artist: {proof.artist_id}; consent version: {proof.consent_version_id}',
+            f'Voice revision: {proof.model.model_revision_id}; technical lineage eligible={proof.gate.technical_eligible}',
+            f'Human release review: {proof.gate.approved_for_release}; blockers={", ".join(proof.gate.blockers) or "none"}',
+            f'Evidence: {proof.evidence_visibility}; graph digest covers the complete local evidence, not this redacted snapshot.',
+            'Local operator attestations are not authenticated identities or automated legal certification.'])
     if value.audio_target is not None and value.audio_target_result is not None:
         lines.append(f'Audio target: {value.audio_target.profile}; LUFS/dBTP={value.audio_target.target}; assessment={value.audio_target_result}')
     if value.measured_audio:
@@ -70,12 +83,43 @@ def path_for(media: Path,format: Literal['json','txt']) -> Path:
 
 def write(media: Path,value: ExportProvenance) -> None:
     if digest(media)!=value.artifact_sha256:raise ProvenanceError('manifest_media_changed')
-    documents=((path_for(media,'json'),value.model_dump_json(indent=2)+'\n'),(path_for(media,'txt'),text(value)))
+    shared=value.model_copy(deep=True)
+    if shared.production is not None:
+        shared.production=shareable_production(shared.production)
+    documents=((path_for(media,'json'),shared.model_dump_json(indent=2)+'\n'),(path_for(media,'txt'),text(shared)))
     if any(len(body.encode('utf-8'))>MAX_MANIFEST_BYTES for _,body in documents):
         raise ProvenanceError('manifest_capacity_exceeded')
     for target,body in documents:
         if target.is_symlink():raise ProvenanceError('manifest_unavailable')
         atomic_text(target,body)
+
+
+def shareable_production(value: ProductionProvenance) -> ProductionProvenance:
+    """Keep the complete evidence local; shared documents link to its hashes."""
+    shared=value.model_copy(deep=True)
+    shared.evidence_visibility='shared_references'
+    def reference(raw: str) -> str:
+        if raw.startswith('local-ref:') and len(raw)==74 and all(char in '0123456789abcdef' for char in raw[10:]):
+            return raw
+        return 'local-ref:'+hashlib.sha256(raw.encode('utf-8')).hexdigest()
+    known_providers={'unknown','local','suno','udio','ace-step','ace_step','yue2','openrouter','seed-vc','openfabric'}
+    for asset in shared.assets:
+        asset.provider=asset.provider if asset.provider in known_providers else reference(asset.provider)
+        asset.declaration=None
+        asset.declaration_revisions=[]
+        asset.transformation=reference(asset.transformation) if asset.transformation else ''
+        asset.reviews=[review.model_copy(update={'reviewer_label':'local operator declaration',
+            'evidence_ref':reference(review.evidence_ref),'note':''}) for review in asset.reviews]
+    shared.release_reviews=[review.model_copy(update={'reviewer_label':'local operator declaration',
+        'evidence_ref':reference(review.evidence_ref),'note':''}) for review in shared.release_reviews]
+    shared.model.model_revision_id=reference(shared.model.model_revision_id)
+    for item in shared.model.files:
+        item.name=item.role+':'+item.sha256
+    if shared.model.preparation_revision:
+        shared.model.preparation_revision=reference(shared.model.preparation_revision)
+    if shared.range_assessment is not None:
+        shared.range_assessment=shared.range_assessment.model_copy(update={'chosen_key':''})
+    return shared
 
 
 def read(media: Path) -> ExportProvenance:

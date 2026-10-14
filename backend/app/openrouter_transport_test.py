@@ -7,8 +7,10 @@ import os
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
+from email.utils import format_datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import httpx
 from pydantic import ValidationError
 from app import openrouter_catalog as catalog, openrouter_settings as settings, openrouter_requests as ledger, openrouter_client as client_module
@@ -33,6 +35,182 @@ class TransportTests(unittest.IsolatedAsyncioTestCase):
         catalog.publish([*catalog.normalize_video(VIDEO),*catalog.normalize_audio(AUDIO,'speech'),*catalog.normalize_audio(MUSIC,'music')])
 
     async def asyncTearDown(self) -> None: settings.credentials.clear_session()
+
+    async def test_poll_retries_transient_http_without_repeating_paid_submission(self) -> None:
+        calls: list[tuple[str, str]] = []
+        responses: list[httpx.Response] = []
+        body = OpenRouterVideoRequest(model='google/veo-3.1-fast', prompt='Sunrise', duration=4, size='1280x720')
+        quote = catalog.quote_video(body); receipt = ledger.prepare('retry-job', quote)
+        def serve(request: httpx.Request) -> httpx.Response:
+            calls.append((request.method, request.url.path))
+            if request.method == 'POST': return httpx.Response(202, json={'id': 'remote-retry', 'status': 'pending'})
+            self.assertEqual(ledger.get(receipt.id).remote_id, 'remote-retry')
+            response = httpx.Response((429, 503, 200)[len(responses)], json={'id': 'remote-retry', 'status': 'completed'})
+            responses.append(response)
+            return response
+        async def backoff(delay: float) -> None:
+            self.assertTrue(responses[-1].is_closed)
+            self.assertTrue(client_module.work_busy())
+        client = OpenRouterClient(transport=httpx.MockTransport(serve))
+        remote = await client.submit_video(receipt.id, body, quote.id)
+        with patch.object(client_module.asyncio, 'sleep', side_effect=backoff) as sleep:
+            result = await client.poll_video(remote.id)
+        self.assertEqual(result.status, 'completed')
+        self.assertEqual(calls, [('POST', '/api/v1/videos')] + [('GET', '/api/v1/videos/remote-retry')] * 3)
+        self.assertEqual([call.args[0] for call in sleep.await_args_list], [1.0, 2.0])
+        self.assertFalse(client_module.work_busy())
+
+    async def test_read_retry_bound_and_permanent_rejections(self) -> None:
+        for status in (408, 429, 500, 502, 503, 504, 400, 401, 402, 403, 404, 501, 302):
+            with self.subTest(status=status), patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep:
+                calls: list[str] = []
+                def serve(request: httpx.Request) -> httpx.Response:
+                    calls.append(request.method)
+                    return httpx.Response(status)
+                with self.assertRaises(OpenRouterError) as failure:
+                    await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-bound')
+                expected = 3 if status in {408, 429, 500, 502, 503, 504} else 1
+                self.assertEqual(len(calls), expected)
+                self.assertEqual(sleep.await_count, expected - 1)
+                self.assertEqual(failure.exception.provider_http_status, status)
+
+    async def test_read_retries_network_failures(self) -> None:
+        for kind in (httpx.ConnectError, httpx.ReadError, httpx.ReadTimeout, httpx.RemoteProtocolError):
+            with self.subTest(error=kind), patch.object(client_module.asyncio, 'sleep', AsyncMock()):
+                calls = 0
+                def serve(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    if calls < 3: raise kind('synthetic network interruption', request=request)
+                    return httpx.Response(200, json={'id': 'remote-network', 'status': 'completed'})
+                result = await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-network')
+                self.assertEqual(result.status, 'completed'); self.assertEqual(calls, 3)
+
+    async def test_read_network_retry_exhaustion_keeps_stable_error(self) -> None:
+        calls = 0
+        def serve(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            raise httpx.ConnectError('synthetic outage', request=request)
+        with patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep:
+            with self.assertRaisesRegex(OpenRouterError, 'provider_unavailable'):
+                await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-outage')
+        self.assertEqual(calls, 3); self.assertEqual(sleep.await_count, 2)
+        self.assertFalse(client_module.work_busy())
+
+    async def test_read_retry_discards_partial_body_and_closes_stream(self) -> None:
+        closed = False; calls = 0
+        class Interrupted(httpx.AsyncByteStream):
+            async def __aiter__(inner) -> AsyncIterator[bytes]:
+                yield b'{"id":"partial'
+                raise httpx.ReadError('synthetic interrupted body')
+            async def aclose(inner) -> None:
+                nonlocal closed
+                closed = True
+        def serve(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=Interrupted()) if calls == 1 else httpx.Response(200, json={'id': 'remote-stream', 'status': 'completed'})
+        async def backoff(delay: float) -> None:
+            self.assertTrue(closed)
+        with patch.object(client_module.asyncio, 'sleep', side_effect=backoff):
+            result = await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-stream')
+        self.assertEqual(result.status, 'completed'); self.assertEqual(calls, 2)
+
+    async def test_read_does_not_retry_invalid_or_oversized_responses(self) -> None:
+        for content, code in ((b'not json', 'provider_response_invalid'), (b'{}', 'provider_response_invalid'),
+                              (b'{"id":"other","status":"completed"}', 'provider_response_invalid'),
+                              (b'x' * 65, 'provider_output_too_large')):
+            with self.subTest(content=content), patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep:
+                calls = 0
+                def serve(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(200, content=content)
+                with patch.object(client_module, '_JSON_LIMIT', 64), self.assertRaisesRegex(OpenRouterError, code):
+                    await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-invalid')
+                self.assertEqual(calls, 1); sleep.assert_not_awaited()
+
+    async def test_read_retries_share_one_total_deadline(self) -> None:
+        actual_timeout = asyncio.timeout; calls = 0; timeouts: list[float | None] = []
+        def deadline(seconds: float | None) -> asyncio.Timeout:
+            timeouts.append(seconds)
+            return actual_timeout(0.05)
+        async def serve(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls < 3: return httpx.Response(503)
+            await asyncio.Event().wait()
+            return httpx.Response(200)
+        with patch.object(client_module.asyncio, 'timeout', side_effect=deadline), patch.object(client_module.asyncio, 'sleep', AsyncMock()):
+            with self.assertRaisesRegex(OpenRouterError, 'provider_unavailable') as failure:
+                await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-deadline')
+        self.assertIsInstance(failure.exception.__cause__, TimeoutError)
+        self.assertEqual(calls, 3); self.assertEqual(timeouts, [180])
+        self.assertFalse(client_module.work_busy())
+
+    async def test_read_retry_after_seconds_dates_and_invalid_headers(self) -> None:
+        now = datetime(2026, 10, 12, tzinfo=timezone.utc)
+        future = format_datetime(now + timedelta(seconds=20), usegmt=True)
+        for value, expected in (('7', 7.0), ('0', 1.0), ('30', 30.0), ('invalid', 1.0), ('-1', 1.0), ('NaN', 1.0),
+                                ('١', 1.0), ('Wed, 21 Oct 2015 07:28:00 GMT', 1.0), (future, 20.0)):
+            with self.subTest(header=value), patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep, patch.object(client_module, 'datetime', wraps=datetime) as clock:
+                clock.now.return_value = now
+                calls = 0
+                def serve(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(429, headers=[(b'Retry-After', value.encode('utf-8'))]) if calls == 1 else httpx.Response(200, json={'id': 'remote-header', 'status': 'completed'})
+                await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-header')
+                self.assertEqual(calls, 2); self.assertEqual(sleep.await_count, 1)
+                delay = sleep.await_args_list[0].args[0]
+                self.assertEqual(delay, expected)
+
+    async def test_read_never_retries_before_a_long_retry_after(self) -> None:
+        future = format_datetime(datetime.now(timezone.utc) + timedelta(hours=1), usegmt=True)
+        for value in ('31', '9999999999', '1' * 129, '0' * 127 + '31', future):
+            with self.subTest(header=value), patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep:
+                calls = 0
+                def serve(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    return httpx.Response(429, headers={'Retry-After': value})
+                with self.assertRaisesRegex(OpenRouterError, 'provider_rate_limited'):
+                    await OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-later')
+                self.assertEqual(calls, 1); sleep.assert_not_awaited()
+
+    async def test_paid_video_submission_never_retries_transient_failures(self) -> None:
+        for status in (429, 503, None):
+            with self.subTest(status=status), patch.object(client_module.asyncio, 'sleep', AsyncMock()) as sleep:
+                calls = 0
+                def serve(request: httpx.Request) -> httpx.Response:
+                    nonlocal calls
+                    calls += 1
+                    if status is None: raise httpx.ReadError('ambiguous submission', request=request)
+                    return httpx.Response(status)
+                body = OpenRouterVideoRequest(model='google/veo-3.1-fast', prompt='Sunrise', duration=4, size='1280x720')
+                quote = catalog.quote_video(body); receipt = ledger.prepare('single-post', quote)
+                with self.assertRaises(OpenRouterError):
+                    await OpenRouterClient(transport=httpx.MockTransport(serve)).submit_video(receipt.id, body, quote.id)
+                self.assertEqual(calls, 1); sleep.assert_not_awaited()
+                self.assertEqual(ledger.get(receipt.id).state, 'failed' if status == 429 else 'submission_unknown')
+
+    async def test_shutdown_cancels_read_backoff_without_another_request(self) -> None:
+        entered = asyncio.Event(); responses: list[httpx.Response] = []
+        def serve(request: httpx.Request) -> httpx.Response:
+            response = httpx.Response(503); responses.append(response); return response
+        async def backoff(delay: float) -> None:
+            self.assertTrue(responses[-1].is_closed)
+            entered.set(); await asyncio.Event().wait()
+        with patch.object(client_module.asyncio, 'sleep', side_effect=backoff):
+            task = asyncio.create_task(OpenRouterClient(transport=httpx.MockTransport(serve)).poll_video('remote-stop'))
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+                await client_module.shutdown()
+                self.assertTrue(task.cancelled()); self.assertFalse(client_module.work_busy())
+                self.assertEqual(len(responses), 1)
+            finally:
+                task.cancel(); await asyncio.gather(task, return_exceptions=True)
 
     async def test_quote_single_claim_and_changed_body_refused(self) -> None:
         body=OpenRouterMusicRequest(model='google/lyria-3-clip-preview',prompt='Piano'); quote=catalog.quote_music(body); first=ledger.prepare('job',quote)

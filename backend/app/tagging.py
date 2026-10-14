@@ -29,6 +29,8 @@ from .contracts import Contract, SavedTrack
 from .job_lifecycle import await_cleanup, kill_process_tree
 from .track_view import track_response
 from .export_provenance_contracts import ContentOrigin
+from .artist_contracts import ArtistConsentVersion
+from . import voice_authorization
 from .tagging_genres import guess_genre
 from .video_io import copy_verified, hash_file
 from .video_media import VideoMediaError, tool
@@ -252,11 +254,22 @@ async def _run_tool(identifier: str, argv: list[str], directory: Path, *, max_by
 
 async def _prepare(identifier: str, track_id: int, version_id: str | None,
                    export_id: str | None, options: TaggedDownloadOptions) -> TaggedAudioDownload:
+    from .artist_production import production_provenance, ProductionError
+    from .artists import ArtistError
     directory: Path | None = None
     success = False
+    permission: ArtistConsentVersion | None = None
+    selected_voice_id: str | None = None
+    error_outcome = 'failed'
     try:
         async with _capacity:
             track, version, source = _selected(track_id, version_id, export_id)
+            raw_voice = version.voice_id or track.params.get('voice_id')
+            if isinstance(raw_voice, str):
+                selected_voice_id = raw_voice
+                permission = voice_authorization.authorize(raw_voice, 'export')
+                voice_authorization.record(permission, 'export', 'requested', identifier, voice_id=raw_voice, track_id=track_id)
+            proof = production_provenance(version.id)
             saved_tags = artist_settings.get_settings()
             artist = saved_tags.artist
             ffmpeg, ffprobe = tool("ffmpeg"), tool("ffprobe")
@@ -286,23 +299,44 @@ async def _prepare(identifier: str, track_id: int, version_id: str | None,
                 command += ["-id3v2_version", "3"]
             command += ["-f", extension, str(target)]
             await _run_tool(identifier, command, directory)
+            if selected_voice_id is not None:
+                voice_authorization.recheck(selected_voice_id, permission, 'export')
+            production_provenance(version.id)
             if not target.is_file() or not 0 < target.stat().st_size <= _MAX_BYTES + _MAX_METADATA_BYTES:
                 raise TaggingError("tagging_failed")
             captured.unlink()
             metadata.unlink()
             (directory / "worker.json").unlink(missing_ok=True)
             result = TaggedAudioDownload(identifier, directory, target, download_name(tags, extension))
+            if permission is not None:
+                from .artist_production import append_usage
+                from .artist_production_contracts import UsageEventInput, UsageArtifact
+                output_hash = await hash_file(target)
+                append_usage(UsageEventInput(idempotency_key=f'export:{identifier}:done', operation='export', outcome='done',
+                    artist_id=permission.artist_id, consent_version_id=permission.id, track_id=track_id,
+                    source_graph_id=proof.graph_root_id if proof else None,
+                    inputs=[UsageArtifact(id=version.id, sha256=digest)], outputs=[UsageArtifact(id=identifier, sha256=output_hash)]))
             _pending[identifier] = result
             success = True
             return result
+    except asyncio.CancelledError:
+        error_outcome = 'cancelled'
+        raise
     except VideoMediaError as exc:
         raise TaggingError("ffmpeg_missing") from exc
+    except HTTPException as exc:
+        raise TaggingError(str(exc.detail)) from exc
+    except (ProductionError, ArtistError) as exc:
+        raise TaggingError(exc.code) from exc
     except artist_settings.ArtistSettingsError as exc:
         raise TaggingError(exc.code) from exc
     except (OSError, ValueError, ValidationError, VideoProjectError) as exc:
         logger.warning("Unable to prepare tagged audio download", exc_info=True)
         raise TaggingError("tagging_failed") from exc
     finally:
+        if not success and permission is not None and selected_voice_id is not None:
+            voice_authorization.record(permission, 'export', error_outcome, identifier, voice_id=selected_voice_id,
+                track_id=track_id, error_code='tagging_failed')
         if directory is not None and not success:
             shutil.rmtree(directory, ignore_errors=True)
 

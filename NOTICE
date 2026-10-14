@@ -48,6 +48,15 @@ or commercial use.
 
 Attribution for planned / inspired work
 ---------------------------------------
+- Bounded cloud-read retries and exact-frame video regression checks were inspired
+  by HeyGen CLI and HyperFrames (Apache-2.0):
+  https://github.com/heygen-com/heygen-cli and https://github.com/heygen-com/hyperframes.
+  OpenFabric uses its own HTTP client, job ownership and CPU media fixtures; no
+  upstream source, fonts, branded assets or media were copied.
+- Local calendar date presets and pending-warp playback/export handling follow
+  reliability ideas from Remiqora (MIT): commit b4d4afe and PR #47 by ringo380
+  (https://github.com/inikolax/remiqora). OpenFabric reimplemented them using its
+  existing editor, session guards and tests; no upstream source was copied.
 - Voice-profile UX pattern inspired by LocalAI (MIT) — https://github.com/mudler/LocalAI
   OpenFabric implements its own FastAPI + SQLite voice-profile store; LocalAI code is not copied.
 - Talking / audiobook engine: GPT-SoVITS (MIT) — https://github.com/RVC-Boss/GPT-SoVITS

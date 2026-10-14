@@ -72,7 +72,7 @@ class ComparisonCancellationTests(unittest.IsolatedAsyncioTestCase):
         from app import voice_comparisons as trials
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with patch.object(trials, '_voice_path', return_value=root), patch('app.voice_build._probe_duration', new=AsyncMock(return_value=3.0)):
+            with patch.object(trials, '_voice_path', return_value=root), patch('app.recording_sessions._voice_root', return_value=root.resolve()), patch('app.voice_build._probe_duration', new=AsyncMock(return_value=3.0)):
                 source = await trials.add_source('a'*32, UploadFile(file=BytesIO(b'audio'), filename='../song.wav'))
                 self.assertEqual(source.filename, 'song.wav')
                 self.assertEqual(trials.source_path(root, source.id).read_bytes(), b'audio')

@@ -36,6 +36,13 @@ function formatButton(node: HTMLElement, prefix: string) {
   return found
 }
 function exportsForOriginal(items: AudioExportResponse[] = [exported]) { api.exports.mockImplementation((_trackId: number, versionId: string) => Promise.resolve({ exports: versionId === original.id ? items : [] })) }
+it('labels successful legacy exports as unreviewed rather than release approved', async () => {
+  exportsForOriginal([{ ...exported, warnings: ['legacy_lineage_unreviewed'], strict_release: false }])
+  const node = mount(); await settle(); button(node, 'Original').click(); await settle()
+  formatButton(node, 'MP3').click(); await settle()
+  expect(node.querySelector('[data-release-review]')?.textContent).toContain('Legacy / non-strict export')
+  expect(node.querySelector('[data-release-review]')?.textContent).toContain('not approved for release')
+})
 it('forwards playing and processing state for cards retained by pagination', async () => {
   const playing: boolean[] = [], processing: boolean[] = []
   api.list.mockResolvedValue({ track_id: 42, original_available: true, versions: [original, queued] })

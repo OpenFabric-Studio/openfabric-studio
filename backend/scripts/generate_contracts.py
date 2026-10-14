@@ -31,6 +31,12 @@ from app.support_contracts import SUPPORT_CLIENT_MODELS
 from app.character_swap_contracts import CHARACTER_SWAP_CLIENT_MODELS
 from app.video_scene_contracts import VIDEO_SCENE_CLIENT_MODELS
 from app.clip_host_contracts import CLIP_HOST_CLIENT_MODELS
+from app.artist_contracts import ArtistProfile, CreateArtistRequest, BindArtistVoiceRequest, ArtistsResponse, ArtistConsentRequest, ArtistConsentVersion, ArtistConsentsResponse
+from app.artist_production_contracts import ARTIST_PRODUCTION_CLIENT_MODELS
+from app.voice_retention_contracts import VoiceDeletionPlan, VoiceDeletionReceipt, ConfirmVoiceDeletionRequest
+from app.recording_contracts import RecordingLabels, RecordingSession, RecordingSessionsResponse, RecordingScript, InspectRecordingRequest
+from app.royalty_contracts import ROYALTY_CLIENT_MODELS
+from app.singer_range_contracts import SingerRangeRequest, SingerRangeProfile, PlannedRangeRequest, RangeAssessment
 
 ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS, *SPEAKER_REVIEW_CLIENT_MODELS, *EXPORT_PROVENANCE_CLIENT_MODELS]
 ALL_MODELS.extend(READING_MEDIA_CLIENT_MODELS)
@@ -38,6 +44,12 @@ ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)
 ALL_MODELS.extend(CHARACTER_SWAP_CLIENT_MODELS)
 ALL_MODELS.extend(VIDEO_SCENE_CLIENT_MODELS)
 ALL_MODELS.extend(CLIP_HOST_CLIENT_MODELS)
+ALL_MODELS.extend([ArtistProfile, CreateArtistRequest, BindArtistVoiceRequest, ArtistsResponse, ArtistConsentRequest, ArtistConsentVersion, ArtistConsentsResponse,
+    VoiceDeletionPlan, VoiceDeletionReceipt, ConfirmVoiceDeletionRequest, RecordingSession, RecordingSessionsResponse, RecordingScript, InspectRecordingRequest,
+    *ARTIST_PRODUCTION_CLIENT_MODELS])
+ALL_MODELS.extend(ROYALTY_CLIENT_MODELS)
+ALL_MODELS.append(RecordingLabels)
+ALL_MODELS.extend([SingerRangeRequest, SingerRangeProfile, PlannedRangeRequest, RangeAssessment])
 
 DEST = Path(__file__).resolve().parents[2] / 'frontend/src/api/generated.ts'
 SUPPORTED = {'$defs', '$ref', 'title', 'description', 'default', 'type', 'anyOf', 'oneOf', 'discriminator', 'enum', 'const', 'properties', 'required', 'additionalProperties', 'items', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'minLength', 'maxLength', 'minItems', 'maxItems', 'pattern'}
@@ -106,6 +118,21 @@ def type_of(schema: JsonObject) -> str:
     return {'string': 'string', 'integer': 'number', 'number': 'number', 'boolean': 'boolean', 'null': 'null'}[string_of(kind)]
 
 
+def runtime_schema(schema: JsonObject) -> JsonObject:
+    """Omit unused annotations at schema nodes, preserving domain property names."""
+    result = {key: value for key, value in schema.items() if key not in {'title', 'description', 'default'}}
+    for key in ('properties', '$defs'):
+        if key in result:
+            result[key] = {name: runtime_schema(object_of(value)) for name, value in object_of(result[key]).items()}
+    for key in ('anyOf', 'oneOf'):
+        if key in result:
+            result[key] = [runtime_schema(object_of(value)) for value in list_of(result[key])]
+    for key in ('items', 'additionalProperties'):
+        if isinstance(result.get(key), dict):
+            result[key] = runtime_schema(object_of(result[key]))
+    return result
+
+
 def generate() -> str:
     definitions: dict[str, JsonObject] = {}
     for model in ALL_MODELS:
@@ -132,7 +159,8 @@ def generate() -> str:
         else:
             output += f'export type {name} = {type_of(schema)}\n\n'
     output += 'export type JsonObject = Record<string, JsonValue>\n\n'
-    output += 'const schemas = ' + json.dumps(definitions, ensure_ascii=False, indent=2) + ' as const\n\n'
+    runtime = {name: runtime_schema(schema) for name, schema in definitions.items()}
+    output += 'const schemas = ' + json.dumps(runtime, ensure_ascii=False, indent=2) + ' as const\n\n'
     if 'JsonValue' in definitions:
         output += 'export function isJsonValue(value: unknown): value is JsonValue {\n  return decodeSchema(schemas.JsonValue, value, schemas)\n}\n\n'
     for model in ALL_MODELS:

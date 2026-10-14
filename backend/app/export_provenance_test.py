@@ -8,6 +8,41 @@ from app.export_provenance_contracts import ProvenanceComponent,GenerationIdenti
 
 
 class ExportProvenanceCapacityTests(unittest.TestCase):
+    def test_shared_production_manifest_keeps_hashes_without_private_evidence_text(self) -> None:
+        from app.artist_production_contracts import (ProductionProvenance, ProductionGate, SourceAsset,
+            SourceDeclaration, RightsReview, VoiceModelSnapshot, ModelFileIdentity)
+        with tempfile.TemporaryDirectory() as directory:
+            media = Path(directory) / 'master.wav'
+            media.write_bytes(b'fixture')
+            private = '/private-artist/recordings/take-name.wav'
+            asset = SourceAsset(id='a' * 32, sha256='b' * 64, role='guide_vocal', origin='human_recorded',
+                provider=private, created_at='2026-10-14', classification_basis='user_declaration', reference_only=False,
+                declaration=SourceDeclaration(role='guide_vocal', origin='human_recorded', provider=private,
+                    original_filename=private, rights_holder=private, evidence_ref=private),
+                reviews=[RightsReview(id='c' * 32, created_at='2026-10-14', status='approved',
+                    reviewer_label=private, evidence_ref=private, note=private)])
+            model = VoiceModelSnapshot(voice_id='d' * 32, model_revision_id=private, diffusion_steps=30,
+                files=[ModelFileIdentity(role=role, name=private, sha256='e' * 64)
+                    for role in ('checkpoint', 'configuration', 'voice_reference')])
+            proof = ProductionProvenance(run_id='f' * 32, project_id=1, artist_id='d' * 32,
+                consent_version_id='c' * 32, audio_version_id='a' * 32, graph_root_id=asset.id,
+                graph_sha256='e' * 64, assets=[asset], model=model, gate=ProductionGate())
+            captured = provenance.manifest('fixture', 'track_audio', media,
+                [ProvenanceComponent(role='audio', content_origin='mixed', source_id='fixture', source_sha256='b' * 64)])
+            captured.production = proof
+            provenance.write(media, captured)
+            shared = provenance.read(media)
+            self.assertNotIn('private-artist', provenance.path_for(media, 'json').read_text())
+            self.assertIsNotNone(shared.production)
+            self.assertEqual(shared.production.evidence_visibility, 'shared_references')
+            self.assertEqual(shared.production.assets[0].sha256, asset.sha256)
+            self.assertEqual(shared.production.graph_sha256, proof.graph_sha256)
+            self.assertTrue(shared.production.assets[0].reviews[0].evidence_ref.startswith('local-ref:'))
+            self.assertEqual(captured.production.assets[0].declaration.evidence_ref, private)
+            before = provenance.path_for(media, 'json').read_bytes()
+            provenance.write(media, shared)
+            self.assertEqual(provenance.path_for(media, 'json').read_bytes(), before)
+
     def test_supported_long_book_manifest_round_trips_and_rejects_oversized_replacement_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             media=Path(directory)/'book.wav';media.write_bytes(b'fixture')

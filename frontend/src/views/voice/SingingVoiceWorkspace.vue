@@ -18,6 +18,10 @@ import { emptyVoiceReviewState, voiceWorkspaceSteps, type VoiceWorkspaceStep } f
 import { voiceStepFacts } from './voiceProgress'
 import VoiceJobSummary from './VoiceJobSummary.vue'
 import LocalEnginePanel from './LocalEnginePanel.vue'
+import ArtistProductionPanel from './ArtistProductionPanel.vue'
+import { planVoiceDeletion, confirmVoiceDeletion } from '../../api/artistProduction'
+import type { VoiceDeletionPlan } from '../../api/contracts'
+import type { RecordingLabels } from '../../api/contracts'
 import { singingStage, singingInitialStage, publishedSourcesChanged, type SingingStage } from './singingNavigation'
 
 const props = withDefaults(defineProps<{ active?: boolean }>(), { active: true })
@@ -28,7 +32,12 @@ const router = useRouter()
 // is visible. Only deliberate navigation in Singing can replace this intent.
 let singingIntent = { voice: route.query.voice, stage: singingStage(route.query.stage) }
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+function deletionItemError(code: string): string {
+  const key = `artistProduction.deletionErrors.${code}`
+  return te(key) ? t(key) : t('artistProduction.deletionErrors.unknown')
+}
 
 const voices = ref<VoiceProfile[]>([])
 const selectedId = ref<string | null>(null)
@@ -39,6 +48,9 @@ const workspace = ref<HTMLElement | null>(null)
 const comparisonActivity = ref('')
 const deleting = ref(false)
 const deleteTarget = ref<VoiceProfile | null>(null)
+const deletionPlan = ref<VoiceDeletionPlan | null>(null)
+const recordingLabels = ref<RecordingLabels>({})
+watch(deleteTarget, () => { deletionPlan.value = null })
 const deleteDialog = ref<HTMLElement | null>(null)
 useDialogA11y(deleteDialog, () => !!deleteTarget.value, () => { if (!deleting.value) deleteTarget.value = null })
 watch(() => props.active, async active => {
@@ -127,6 +139,7 @@ const preparing = computed(() => preparation.value?.status === 'queued' || prepa
 const recordingsChanged = computed(() => publishedSourcesChanged(selected.value, preparation.value))
 watch(selected, (voice, previous) => {
   if (voice?.id === previous?.id) return
+  recordingLabels.value = {}
   preparation.value = null
   const requested = !singingIntent.voice || singingIntent.voice === voice?.id ? singingIntent.stage : null
   deliberateNavigation = requested !== null
@@ -223,7 +236,10 @@ function statusLabel(voice: VoiceProfile): string {
 }
 
 function errorText(err: unknown): string {
-  if (err instanceof ApiError) return voiceErrorText(err.message)
+  if (err instanceof ApiError) {
+    if (te(`artistProduction.deletionErrors.${err.message}`)) return deletionItemError(err.message)
+    return voiceErrorText(err.message)
+  }
   return voiceErrorText('unknown')
 }
 
@@ -364,7 +380,9 @@ async function addFiles(fileList: FileList | File[] | null) {
       uploading.value = true
       voice = created
     }
-    const result = await voicesApi.uploadRecordings(voice.id, files, session.signal)
+    const result = Object.values(recordingLabels.value).some(Boolean)
+      ? await voicesApi.uploadRecordings(voice.id, files, session.signal, recordingLabels.value)
+      : await voicesApi.uploadRecordings(voice.id, files, session.signal)
     if (!session.isCurrent()) return
     replaceVoice(result.voice)
     preparation.value = null
@@ -403,8 +421,24 @@ async function confirmDelete() {
   error.value = ''
   notice.value = ''
   try {
-    await voicesApi.deleteVoice(voice.id, session.signal)
+    if (!deletionPlan.value) {
+      const plan = await planVoiceDeletion(voice.id, session.signal)
+      if (session.isCurrent()) deletionPlan.value = plan
+      return
+    }
+    const receipt = await confirmVoiceDeletion(deletionPlan.value.id, {
+      plan_sha256: deletionPlan.value.plan_sha256, confirm_voice_id: voice.id, delete_voice_assets: true,
+    }, session.signal)
     if (!session.isCurrent()) return
+    const blob = new Blob([JSON.stringify(receipt, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url; link.download = `voice-deletion-${receipt.plan_id}.json`; link.click()
+    URL.revokeObjectURL(url)
+    if (!receipt.voice_assets_deleted) {
+      error.value = t('artistProduction.deletionPending')
+      return
+    }
     deleteTarget.value = null
     if (getActiveVoiceId() === voice.id) setActiveVoiceId(null)
     syncActive()
@@ -541,6 +575,7 @@ onBeforeUnmount(() => {
       <p v-if="!selected" class="text-sm text-text-dim">{{ t('voiceClone.dropFirst') }}</p>
 
       <template v-if="selected">
+        <ArtistProductionPanel v-if="activeStep === 'overview' || activeStep === 'files'" :key="`artist-${selected.id}`" :voice="selected" :active="active" @labels="recordingLabels = $event" />
         <p v-if="activeStep === 'files'" class="text-sm text-text-dim">{{ t('voiceClone.recordingsHint') }}</p>
         <p v-if="activeStep === 'files' && !selected.recordings.length" class="text-sm text-text-dim">{{ t('voiceClone.noRecordings') }}</p>
 
@@ -579,6 +614,28 @@ onBeforeUnmount(() => {
     </section>
     <LocalEnginePanel class="lg:col-span-2" kind="singing" :active="active" />
     </div>
-    <Teleport to="body"><div v-if="deleteTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"><section ref="deleteDialog" data-voice-confirmation role="dialog" aria-modal="true" aria-labelledby="singing-delete-title" aria-describedby="singing-delete-body" tabindex="-1" class="w-full max-w-md space-y-4 rounded-xl border border-border bg-panel p-5"><h2 id="singing-delete-title" class="text-lg font-semibold">{{ t('singingWorkspace.deleteTitle', { name: deleteTarget.name }) }}</h2><p id="singing-delete-body" class="text-sm text-text-dim">{{ t('singingWorkspace.deleteHint') }}</p><div class="flex justify-end gap-3"><button type="button" :disabled="deleting" class="min-h-11 rounded-lg border border-border px-4 text-sm" @click="deleteTarget = null">{{ t('common.cancel') }}</button><button data-confirm-delete type="button" :disabled="deleting" class="min-h-11 rounded-lg bg-status-failed px-4 text-sm text-white disabled:opacity-50" @click="confirmDelete">{{ deleting ? t('common.loading') : t('voiceClone.deleteVoice') }}</button></div></section></div></Teleport>
+    <Teleport to="body">
+      <div v-if="deleteTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <section ref="deleteDialog" data-voice-confirmation role="dialog" aria-modal="true" aria-labelledby="singing-delete-title" aria-describedby="singing-delete-body" tabindex="-1" class="max-h-[90vh] w-full max-w-xl space-y-4 overflow-y-auto rounded-xl border border-border bg-panel p-5">
+          <h2 id="singing-delete-title" class="text-lg font-semibold">{{ t('singingWorkspace.deleteTitle', { name: deleteTarget.name }) }}</h2>
+          <p id="singing-delete-body" class="text-sm text-text-dim">{{ t('artistProduction.deletionPlanHint') }}</p>
+          <ul v-if="deletionPlan" class="space-y-2 break-words text-sm" :aria-label="t('artistProduction.deletionInventory')">
+            <li v-for="item in deletionPlan.items" :key="item.id" class="space-y-1 rounded-lg border border-border p-2">
+              <p><strong>{{ t(`artistProduction.deletionActions.${item.action}`) }}</strong> · {{ t(`artistProduction.deletionKinds.${item.kind}`) }}</p>
+              <p class="text-text-dim">{{ t(`artistProduction.deletionRoots.${item.root_alias}`) }} · {{ item.relative_path || item.id }}</p>
+              <p class="text-text-dim">{{ t(`artistProduction.deletionStatuses.${item.status}`) }}</p>
+              <p v-if="item.error_code" class="text-text-dim">{{ deletionItemError(item.error_code) }}</p>
+              <p v-else-if="item.status === 'pending'" class="text-text-dim">{{ t(item.action === 'delete' ? 'artistProduction.deletionPendingRemoval' : 'artistProduction.deletionSeparateReview') }}</p>
+              <p v-else-if="item.status === 'external'" class="text-text-dim">{{ t('artistProduction.deletionExternalReview') }}</p>
+            </li>
+          </ul>
+          <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
+          <div class="flex flex-wrap justify-end gap-3">
+            <button type="button" :disabled="deleting" class="min-h-11 rounded-lg border border-border px-4 text-sm" @click="deleteTarget = null">{{ deletionPlan ? t('common.close') : t('common.cancel') }}</button>
+            <button data-confirm-delete type="button" :disabled="deleting" class="min-h-11 rounded-lg bg-status-failed px-4 text-sm text-white disabled:opacity-50" @click="confirmDelete">{{ deleting ? t('common.loading') : t(deletionPlan ? 'artistProduction.deletionConfirmAction' : 'artistProduction.deletionPlanAction') }}</button>
+          </div>
+        </section>
+      </div>
+    </Teleport>
   </div>
 </template>

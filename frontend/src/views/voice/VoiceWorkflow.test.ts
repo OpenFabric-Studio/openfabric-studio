@@ -4,6 +4,7 @@ import { createApp, h, nextTick, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import VoiceClonePage from './SingingVoiceWorkspace.vue'
 import * as api from '../../api/voices'
+vi.mock('./ArtistProductionPanel.vue', () => ({ default: { template: '<section data-artist-production-fixture />' } }))
 import { i18n, setLocale } from '../../i18n'
 import { preparedVoice, voiceProfile, comparison } from './voiceTestFixtures'
 import type { VoicePreparationResponse, VoiceProfileResponse, VoiceUploadResponse } from '../../api/contracts'

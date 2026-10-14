@@ -1224,24 +1224,40 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
             if known:self.assertGreater(bright,20,'known mixed AI soundtrack must have a visible disclosure')
             else:self.assertEqual(bright,0,'unknown uploaded source must not be relabeled as generated')
 
-    async def test_visualizer_square_export_applies_only_timed_overlay(self) -> None:
+    async def test_visualizer_export_preserves_indexed_overlay_and_cut_boundaries(self) -> None:
         from app.video_contracts import VideoOverlay
+        from app.video_media import validate_media
+        from PIL import Image
 
+        reference = io.BytesIO()
+        with Image.new("RGB", (704, 448), "red") as image:
+            image.save(reference, "PNG")
+        reference.seek(0)
+        self.project = await self.p.upload_reference(
+            self.project.id,
+            self.project.revision,
+            UploadFile(reference, filename="red.png"),
+        )
         self.project = self.p.update(
             self.project.id,
             UpdateVideoProjectRequest(
                 revision=self.project.revision,
                 mode="visualizer",
+                shots=[
+                    self.project.shots[0],
+                    self.project.shots[1].model_copy(
+                        update={"reference_id": self.project.references[-1].id}
+                    ),
+                ],
                 overlays=[
                     VideoOverlay(
                         id="d" * 32,
                         text="Hello",
                         position="top",
-                        start_sec=0,
+                        start_sec=0.5,
                         end_sec=1,
                     )
                 ],
-                export_settings=VideoExportSettings(aspect="square"),
             ),
         )
         self.project = await self.r.start(
@@ -1250,35 +1266,58 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
             operation="render",
         )
         await self.finish()
-        self.assertEqual(self.project.job.status, "ready")
-        from app.video_media import validate_media
-
-        output = self.r.output_file(self.project.id)
-        await validate_media(output, 5, (448, 448), require_audio=True)
-
-        def top_red(seconds: str) -> float:
-            frame = subprocess.check_output(
-                [
-                    shutil.which("ffmpeg") or "ffmpeg",
-                    "-v",
-                    "error",
-                    "-ss",
-                    seconds,
-                    "-i",
-                    str(output),
-                    "-frames:v",
-                    "1",
-                    "-pix_fmt",
-                    "rgb24",
-                    "-f",
-                    "rawvideo",
-                    "-",
-                ]
-            )
-            top = frame[: 448 * 120 * 3]
-            return sum(top[0::3]) / len(top[0::3])
-
-        self.assertGreater(top_red("0.5"), top_red("2.5") + 1)
+        self.assertEqual(self.project.job.status, "ready", self.project.job.error_code)
+        indices = (11, 12, 13, 23, 24, 25, 47, 48, 49, 95, 96, 97)
+        for settings, size in (
+            (VideoExportSettings(aspect="landscape"), (704, 396)),
+            (VideoExportSettings(aspect="portrait"), (252, 448)),
+            (VideoExportSettings(aspect="square"), (448, 448)),
+        ):
+            with self.subTest(aspect=settings.aspect):
+                if settings.aspect != "landscape":
+                    self.project = await self.r.export(
+                        self.project.id,
+                        VideoExportRequest(revision=self.project.revision, settings=settings),
+                    )
+                    await self.finish()
+                    self.assertEqual(self.project.job.status, "ready", self.project.job.error_code)
+                output = self.r.output_file(self.project.id)
+                await validate_media(output, 5, size, require_audio=True)
+                pixels = subprocess.check_output([
+                    shutil.which("ffmpeg") or "ffmpeg", "-v", "error", "-i", str(output),
+                    "-vf", "select=" + "+".join(f"eq(n\\,{index})" for index in indices),
+                    "-fps_mode", "passthrough", "-pix_fmt", "rgb24", "-f", "rawvideo", "-",
+                ])
+                width, height = size
+                frame_bytes = width * height * 3
+                self.assertEqual(len(pixels), len(indices) * frame_bytes)
+                frames = {index: pixels[position * frame_bytes:(position + 1) * frame_bytes]
+                          for position, index in enumerate(indices)}
+                try:
+                    for index, frame in frames.items():
+                        bright = sum(1 for offset in range(0, width * (height // 3) * 3, 3)
+                                     if min(frame[offset:offset + 3]) > 180)
+                        # Existing overlay intervals include both endpoint frames at 24 fps.
+                        if 12 <= index <= 24:
+                            self.assertGreater(bright, 20, f"Frame {index}: missing title")
+                        else:
+                            self.assertEqual(bright, 0, f"Frame {index}: title outside its interval")
+                        offset = (height // 2 * width + width // 2) * 3
+                        red, green, blue = frame[offset:offset + 3]
+                        self.assertLess(green, 50, f"Frame {index}: unexpected background")
+                        if index < 48:
+                            self.assertGreater(blue, 150, f"Frame {index}: first shot shifted")
+                            self.assertLess(red, 50, f"Frame {index}: second shot began early")
+                        else:
+                            self.assertGreater(red, 150, f"Frame {index}: second shot/tail missing")
+                            self.assertLess(blue, 50, f"Frame {index}: first shot persisted after cut")
+                except AssertionError:
+                    diagnostics = Path(tempfile.mkdtemp(prefix="openfabric-frame-failure-"))
+                    for index, frame in frames.items():
+                        with Image.frombytes("RGB", size, frame) as image:
+                            image.save(diagnostics / f"{settings.aspect}-frame-{index}.png")
+                    print(f"Video boundary frames retained in {diagnostics}", file=sys.stderr)
+                    raise
 
     async def test_resume_preserves_completed_shot_and_failed_variant_history(
         self,

@@ -364,6 +364,9 @@ async def cancel_version(track_id: int, version_id: str) -> AudioVersion:
 
 
 async def retry_version(track_id: int, version_id: str) -> AudioVersion:
+    from .artist_production import run_for_version
+    if run_for_version(version_id) is not None:
+        raise HTTPException(status_code=409, detail='production_retry_requires_new_run')
     from . import voice_build
     if track_id in _deleting:
         raise HTTPException(status_code=409, detail='audio_version_busy')

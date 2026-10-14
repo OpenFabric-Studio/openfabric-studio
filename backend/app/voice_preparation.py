@@ -287,6 +287,11 @@ def select(path: Path, request: SelectVoiceSamplesRequest) -> VoicePreparationRe
         reference = next((item for item in response.references if item.id == request.reference_id), None)
         if reference is None or reference.segment_id not in identifiers:
             raise HTTPException(status_code=400, detail='invalid_reference')
+        from .recording_sessions import RecordingError, require_training_sources
+        try:
+            require_training_sources(path.name, sorted({accepted[item].source_filename for item in identifiers}))
+        except RecordingError as exc:
+            raise HTTPException(exc.status_code, detail=exc.code) from exc
         response.selected_segment_ids = request.segment_ids
         response.cleaned_segment_ids = request.cleaned_segment_ids
         response.reference_id = request.reference_id
@@ -316,6 +321,12 @@ def validated(path: Path, revision: str | None) -> PreparationDocument:
             raise HTTPException(status_code=409, detail='singer_unconfirmed')
         if fingerprints(path) != document.fingerprints:
             raise HTTPException(status_code=409, detail='source_changed')
+        from .recording_sessions import RecordingError, require_training_sources
+        try:
+            selected = set(response.selected_segment_ids)
+            require_training_sources(path.name, sorted({item.source_filename for item in response.segments if item.id in selected}))
+        except RecordingError as exc:
+            raise HTTPException(exc.status_code, detail=exc.code) from exc
         return document
 
 

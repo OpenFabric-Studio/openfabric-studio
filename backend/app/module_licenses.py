@@ -12,9 +12,10 @@ REVIEWED_AT = '2026-10-06'
 
 
 def _declared(identifier: str, name: str, scope: LicenseScope, license_name: str, url: str,
-              notes: str = 'Upstream declaration for the linked component. Other dependencies and local versions can have different terms.') -> ModuleLicenseDeclaration:
+              notes: str = 'Upstream declaration for the linked component. Other dependencies and local versions can have different terms.',
+              reviewed_at: str = REVIEWED_AT) -> ModuleLicenseDeclaration:
     return ModuleLicenseDeclaration(component_id=identifier, name=name, scope=scope,
-        status='declared', declared_license=license_name, source_url=url, notes=notes, reviewed_at=REVIEWED_AT)
+        status='declared', declared_license=license_name, source_url=url, notes=notes, reviewed_at=reviewed_at)
 
 
 def _unknown(identifier: str, name: str, scope: LicenseScope, notes: str, url: str | None = None) -> ModuleLicenseDeclaration:
@@ -35,11 +36,12 @@ _DECLARATIONS: dict[ModuleId, tuple[ModuleLicenseDeclaration, ...]] = {
     ),
     'yue2': (
         _declared('audio-cpp', 'audio.cpp native engine', 'code', 'Apache-2.0', 'https://github.com/0xShug0/audio.cpp/blob/v0.8.1/LICENSE'),
-        _unknown('yue2_main_q8_0', 'YuE2 main Q8_0 conversion', 'model', 'Exact converted package terms and source-weight provenance are unverified. The engine source licence does not establish weight rights.', 'https://github.com/0xShug0/audio.cpp/tree/v0.8.1/model_specs'),
-        _unknown('yue2_main_q4_0', 'YuE2 main Q4_0 conversion', 'model', 'Exact converted package terms and source-weight provenance are unverified. The engine source licence does not establish weight rights.', 'https://github.com/0xShug0/audio.cpp/tree/v0.8.1/model_specs'),
-        _unknown('yue2_vae_f16', 'YuE2 VAE F16 conversion', 'model', 'Review the exact VAE checkpoint and conversion terms separately; its package digest verifies bytes, not licensing.', 'https://github.com/0xShug0/audio.cpp/tree/v0.8.1/model_specs'),
-        _unknown('sheetsage2_orig', 'SheetSage2 original package', 'model', 'The selected package model declaration and source-weight provenance are unverified.', 'https://github.com/0xShug0/audio.cpp/tree/v0.8.1/model_specs'),
-        _unknown('muscriptor_small_f32', 'Muscriptor small F32 package', 'model', 'The selected package model declaration and source-weight provenance are unverified.', 'https://github.com/0xShug0/audio.cpp/tree/v0.8.1/model_specs'),
+        _declared('yue2_main_q8_0', 'YuE2 main Q8_0 conversion', 'model', 'CC-BY-NC-4.0', 'https://huggingface.co/audio-cpp/Yue2-3B-GGUF', 'Restricted for commercial production absent separate permission. See docs/artist-production/LICENSE_AND_MODEL_EVIDENCE.md for the 2026-10-14 installed-hash audit.', reviewed_at='2026-10-14'),
+        _declared('yue2_main_q4_0', 'YuE2 main Q4_0 conversion', 'model', 'CC-BY-NC-4.0', 'https://huggingface.co/audio-cpp/Yue2-3B-GGUF', 'Restricted for commercial production absent separate permission; code Apache-2.0 does not clear these weights.', reviewed_at='2026-10-14'),
+        _declared('yue2_vae_f16', 'YuE2 VAE F16 conversion', 'model', 'CC-BY-NC-4.0', 'https://huggingface.co/audio-cpp/Yue2-3B-GGUF', 'The converted package has noncommercial terms. Local replacements and source rights require independent review.', reviewed_at='2026-10-14'),
+        _declared('sheetsage2_orig', 'SheetSage2 original package', 'model', 'CC-BY-NC-4.0', 'https://huggingface.co/audio-cpp/SheetSage2-GGUF', 'Restricted for commercial production absent separate permission. The package includes a separately relevant MERT2 backbone.', reviewed_at='2026-10-14'),
+        _declared('muscriptor_small_f32', 'Muscriptor small F32 package', 'model', 'CC-BY-NC-4.0', 'https://huggingface.co/MuScriptor/muscriptor-small', 'Restricted for commercial production absent separate permission; publisher also specifies additional source-rights conditions.', reviewed_at='2026-10-14'),
+        _unknown('native-source-rights', 'Native music source data and compositions', 'source_data', 'Model labels do not clear source training data, compositions, references or artist permissions.'),
     ),
     'speech': (
         _declared('gpt-sovits-code', 'GPT-SoVITS source', 'code', 'MIT', 'https://github.com/RVC-Boss/GPT-SoVITS/blob/48b1a0169a28582a8984402f82cf438d3bfa6aca/LICENSE'),
