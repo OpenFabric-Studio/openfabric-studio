@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOrchestratorStore } from '../../stores/orchestrator'
 import { useLoraTrainingStore } from '../../stores/loraTraining'
 import { useLoraRegistry } from '../../composables/useLoraRegistry'
 import { formatDuration } from '../../composables/formatDuration'
-import { uploadDatasetFiles } from '../../api/loraDataset'
+import { preprocessLoraDataset, autoLabelLoraDataset } from '../../api/loraDataset'
+import { useLoraDatasetWorkspace } from '../../composables/useLoraDatasetWorkspace'
+import DatasetLibrary from '../../components/ace-step/DatasetLibrary.vue'
+import type { LoraWorkspaceForm } from '../../api/generated'
 import * as aceStepApi from '../../api/aceStep'
 import { ApiError } from '../../api/http'
 import ModelOfflineBanner from '../../components/shared/ModelOfflineBanner.vue'
@@ -16,8 +19,40 @@ import type { DatasetSample } from '../../api/aceStepTraining'
 
 const orchestrator = useOrchestratorStore()
 const store = useLoraTrainingStore()
+const unmatchedWork = computed(() => (store.discoveredAutoLabel?.status === 'running' && store.discoveredAutoLabel.task_id !== store.autoLabelTaskId)
+  || (store.discoveredPreprocess?.status === 'running' && store.discoveredPreprocess.task_id !== store.preprocessTaskId)
+  || (store.discoveredTraining?.is_training && !store.isTraining))
 const { add: addLora } = useLoraRegistry()
 const { t, tm } = useI18n()
+
+const form = reactive<Required<LoraWorkspaceForm>>({
+  audio_dir: 'datasets/my-voice',
+  custom_tag: '',
+  tag_position: 'replace',
+  all_instrumental: true,
+  skip_metas: false,
+  format_lyrics: false,
+  transcribe_lyrics: false,
+  only_unlabeled: true,
+  genre_ratio: 0,
+  output_dir: '',
+  skip_existing: false,
+  tensor_dir: '',
+  lora_output_dir: './lora_output',
+  lora_rank: 64,
+  lora_alpha: 128,
+  lora_dropout: 0.1,
+  learning_rate: 0.0001,
+  train_epochs: 10,
+  train_batch_size: 1,
+  gradient_accumulation: 4,
+  save_every_n_epochs: 5,
+  training_seed: 42,
+  use_fp8: false,
+  gradient_checkpointing: false,
+  export_path: '',
+  registry_name: '',
+})
 
 const helpOpen = ref<'dataset' | 'training' | null>(null)
 
@@ -69,39 +104,24 @@ watch(isRunning, (running) => {
 })
 
 onMounted(() => {
-  store.startBackgroundTasks()
+  void library.initialize()
   if (isRunning.value) void checkModelReady()
 })
 onBeforeUnmount(() => store.stopBackgroundTasks())
 
 // ── 1. Dataset ──
-const audioDir = ref('datasets/my-voice')
-const datasetName = ref('my_lora_dataset')
-const customTag = ref('')
-const tagPosition = ref<'prepend' | 'append' | 'replace'>('replace')
-const allInstrumental = ref(true)
+const audioDir = toRef(form, 'audio_dir')
+const customTag = toRef(form, 'custom_tag')
+const tagPosition = toRef(form, 'tag_position')
+const allInstrumental = toRef(form, 'all_instrumental')
 const loadPath = ref('')
 
-async function onScan() {
-  try {
-    await store.scanDataset({
-      audio_dir: audioDir.value,
-      dataset_name: datasetName.value,
-      custom_tag: customTag.value,
-      tag_position: tagPosition.value,
-      all_instrumental: allInstrumental.value,
-    })
-  } catch {
-    // store.scanError already holds the message
-  }
-}
+async function onScan() { await library.scan() }
 async function onLoadDataset() {
-  if (!loadPath.value.trim()) return
-  try {
-    await store.loadDataset(loadPath.value.trim())
-  } catch {
-    // store.scanError already holds the message
-  }
+  await library.refresh()
+  const entry = library.datasets.value.find(item => item.dataset_path === loadPath.value.trim() && !item.trashed)
+  if (entry) await library.select(entry.id)
+  else library.error.value = t('loraRecovery.unsafe')
 }
 
 // Bulk browser upload: ACE-Step's own dataset API only scans a server-local
@@ -115,12 +135,13 @@ const uploadMessage = ref('')
 const uploadError = ref('')
 
 function pickFiles() {
-  fileInput.value?.click()
+  if (!library.disabled.value && library.selected.value) fileInput.value?.click()
 }
 function onFilesPicked(e: Event) {
-  const files = Array.from((e.target as HTMLInputElement).files || [])
+  if (!(e.target instanceof HTMLInputElement)) return
+  const files = Array.from(e.target.files || [])
   if (files.length) void handleFiles(files)
-  ;(e.target as HTMLInputElement).value = ''
+  e.target.value = ''
 }
 function onDrop(e: DragEvent) {
   e.preventDefault()
@@ -129,15 +150,16 @@ function onDrop(e: DragEvent) {
   if (files.length) void handleFiles(files)
 }
 async function handleFiles(files: File[]) {
+  const entry = library.selected.value
+  if (!entry || library.disabled.value || uploading.value) return
   uploading.value = true
   uploadError.value = ''
   uploadMessage.value = ''
   try {
-    const res = await uploadDatasetFiles(datasetName.value, files)
-    audioDir.value = res.audio_dir
+    const res = await library.upload(files)
+    if (!res) return
     const skipped = res.skipped.length ? t('lora.uploadedSkipped', { count: res.skipped.length, names: res.skipped.join(', ') }) : ''
     uploadMessage.value = t('lora.uploadedMessage', { saved: res.saved.length, skipped })
-    await onScan()
   } catch (err) {
     uploadError.value = err instanceof Error ? err.message : String(err)
   } finally {
@@ -148,19 +170,26 @@ async function handleFiles(files: File[]) {
 const labeledCount = computed(() => store.samples.filter((s) => s.labeled).length)
 
 // ── 2. Auto-label ──
-const skipMetas = ref(false)
-const formatLyrics = ref(false)
-const transcribeLyrics = ref(false)
-const onlyUnlabeled = ref(false)
+const skipMetas = toRef(form, 'skip_metas')
+const formatLyrics = toRef(form, 'format_lyrics')
+const transcribeLyrics = toRef(form, 'transcribe_lyrics')
+const onlyUnlabeled = toRef(form, 'only_unlabeled')
 
 async function onAutoLabel() {
+  if (!await library.saveSnapshot()) return
+  const entry = library.selected.value
+  if (!entry) return
   await store.startAutoLabel({
     skip_metas: skipMetas.value,
     format_lyrics: formatLyrics.value,
     transcribe_lyrics: transcribeLyrics.value,
     only_unlabeled: onlyUnlabeled.value,
     save_path: store.datasetPath || undefined,
+  }, async request => {
+    const response = await autoLabelLoraDataset(entry.id, { revision: entry.revision, skip_metas: request.skip_metas, format_lyrics: request.format_lyrics, transcribe_lyrics: request.transcribe_lyrics, only_unlabeled: request.only_unlabeled })
+    return { ...response, message: response.message ?? '' }
   })
+  await library.syncWorkspace()
 }
 
 // ── 3. Review samples ──
@@ -181,8 +210,9 @@ watch(
 )
 async function saveSample(sample: DatasetSample) {
   const e = editing.value[sample.index]
-  if (!e) return
-  await store.updateSample(sample.index, {
+  const entry = library.selected.value
+  if (!e || !entry || library.disabled.value) return
+  const saved = await library.updateSample(sample.index, {
     caption: e.caption,
     genre: e.genre,
     lyrics: e.lyrics,
@@ -192,52 +222,52 @@ async function saveSample(sample: DatasetSample) {
     language: e.language,
     is_instrumental: e.is_instrumental,
   })
-  delete editing.value[sample.index]
+  if (saved) delete editing.value[sample.index]
 }
 
-const genreRatio = ref(0)
-const savePath = ref('')
-async function onSaveDataset() {
-  if (!savePath.value.trim()) return
-  await store.saveDataset({
-    save_path: savePath.value.trim(),
-    dataset_name: datasetName.value,
-    custom_tag: customTag.value,
-    tag_position: tagPosition.value,
-    all_instrumental: allInstrumental.value,
-    genre_ratio: genreRatio.value,
-  })
-}
+const genreRatio = toRef(form, 'genre_ratio')
+async function onSaveDataset() { await library.saveSnapshot() }
 
 // ── 4. Preprocess ──
-const outputDir = ref('')
+const outputDir = toRef(form, 'output_dir')
 function suggestOutputDir() {
   if (!outputDir.value) outputDir.value = `${audioDir.value.replace(/\/$/, '')}/tensors`
 }
-const skipExisting = ref(false)
+const skipExisting = toRef(form, 'skip_existing')
 async function onPreprocess() {
   suggestOutputDir()
-  await store.startPreprocess({ output_dir: outputDir.value, skip_existing: skipExisting.value })
+  const entry = library.selected.value
+  if (!entry || !await library.saveSnapshot()) return
+  const current = library.selected.value
+  if (!current) return
+  await store.startPreprocess({ output_dir: outputDir.value, skip_existing: skipExisting.value }, async request => {
+    const result = await preprocessLoraDataset(current.id, { revision: current.revision, output_dir: request.output_dir, skip_existing: request.skip_existing })
+    return { ...result, message: result.message ?? '' }
+  })
+  await library.syncWorkspace()
 }
 
 // ── 5. Training ──
-const tensorDir = ref('')
-const loraOutputDir = ref('./lora_output')
-const loraRank = ref(64)
-const loraAlpha = ref(128)
-const loraDropout = ref(0.1)
-const learningRate = ref(0.0001)
-const trainEpochs = ref(10)
-const trainBatchSize = ref(1)
-const gradientAccumulation = ref(4)
-const saveEveryNEpochs = ref(5)
-const trainingSeed = ref(42)
-const useFp8 = ref(false)
-const gradientCheckpointing = ref(false)
+const tensorDir = toRef(form, 'tensor_dir')
+const loraOutputDir = toRef(form, 'lora_output_dir')
+const loraRank = toRef(form, 'lora_rank')
+const loraAlpha = toRef(form, 'lora_alpha')
+const loraDropout = toRef(form, 'lora_dropout')
+const learningRate = toRef(form, 'learning_rate')
+const trainEpochs = toRef(form, 'train_epochs')
+const trainBatchSize = toRef(form, 'train_batch_size')
+const gradientAccumulation = toRef(form, 'gradient_accumulation')
+const saveEveryNEpochs = toRef(form, 'save_every_n_epochs')
+const trainingSeed = toRef(form, 'training_seed')
+const useFp8 = toRef(form, 'use_fp8')
+const gradientCheckpointing = toRef(form, 'gradient_checkpointing')
 
 async function onStartTraining() {
   const dir = tensorDir.value || store.preprocessOutputDir
-  if (!dir) return
+  if (!dir || library.disabled.value) return
+  tensorDir.value = dir
+  loraOutputDir.value = `${loraOutputDir.value.replace(/\/run-[0-9a-f-]+\/?$/, '').replace(/\/$/, '')}/run-${crypto.randomUUID()}`
+  if (!await library.persist()) return
   await store.startTraining({
     tensor_dir: dir,
     lora_rank: loraRank.value,
@@ -267,17 +297,27 @@ const etaLabel = computed(() => {
 })
 
 // ── 6. Export ──
-const exportPath = ref('')
-const registryName = ref('')
+const exportPath = toRef(form, 'export_path')
+const registryName = toRef(form, 'registry_name')
 async function onExport() {
   if (!exportPath.value.trim() || !registryName.value.trim()) return
   await store.exportAndRegister(exportPath.value.trim(), loraOutputDir.value, registryName.value.trim(), addLora)
   registryName.value = ''
 }
+
+const library = useLoraDatasetWorkspace(store, form, isRunning)
 </script>
 
 <template>
   <div class="space-y-6">
+    <DatasetLibrary :datasets="library.datasets.value" :selected-id="library.selectedId.value" :disabled="library.disabled.value" :loading="library.busy.value" :status="store.autoLabelRunning || store.preprocessRunning || store.isTraining ? t('loraRecovery.active') : library.busy.value ? t('loraRecovery.saving') : t('loraRecovery.saved')" @select="library.select" @create="library.create" @rename="library.rename" @trash="library.trash" @restore="library.restore" />
+    <div v-if="library.error.value" role="alert" class="flex flex-wrap items-center gap-3 text-sm text-status-failed"><p>{{ library.error.value }}</p><button type="button" class="min-h-11 rounded-lg border border-border px-3" :disabled="library.busy.value" @click="library.initialize">{{ t('musicLora.refresh') }}</button></div>
+    <p v-if="library.issues.value" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.issues', { count: library.issues.value }) }}</p>
+    <p v-if="library.notice.value" role="status" class="text-sm text-status-queued">{{ library.notice.value }}</p>
+    <p v-if="store.autoLabelReconnecting || store.preprocessReconnecting || store.trainingReconnecting" role="status" class="rounded-xl border border-status-queued/40 p-4 text-sm text-text-dim">{{ t('loraRecovery.reconnecting') }}</p>
+    <p v-if="store.autoLabelInterrupted || store.preprocessInterrupted || store.trainingInterrupted" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.interrupted') }}</p>
+    <p v-if="unmatchedWork" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.discovered') }}</p>
+    <p v-if="store.autoLabelSubmissionUnknown || store.preprocessSubmissionUnknown || store.trainingSubmissionUnknown" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.submissionUnknown') }}</p>
     <ModelOfflineBanner v-if="!isRunning" model-id="ace_step" :status="modelStatus" :error="modelError" />
 
     <template v-else>
@@ -310,17 +350,17 @@ async function onExport() {
           <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'dataset'">{{ t('common.help') }}</button>
         </div>
 
-        <label class="space-y-1 block max-w-xs">
-          <span class="text-xs text-text-dim">{{ t('lora.datasetNameLabel') }}</span>
-          <input v-model="datasetName" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" />
-        </label>
-
         <div
           class="flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-8 text-center transition-colors"
           :class="dragging ? 'border-accent1 bg-accent1/5' : 'border-border'"
           @dragover.prevent="dragging = true"
           @dragleave.prevent="dragging = false"
           @drop="onDrop"
+          role="button"
+          :tabindex="library.disabled.value || !library.selected.value ? -1 : 0"
+          :aria-disabled="library.disabled.value || !library.selected.value"
+          @keydown.enter.prevent="pickFiles"
+          @keydown.space.prevent="pickFiles"
           @click="pickFiles"
         >
           <input ref="fileInput" type="file" multiple accept="audio/*,.wav,.mp3,.flac,.ogg,.opus" class="hidden" @change="onFilesPicked" />
@@ -359,12 +399,12 @@ async function onExport() {
         </label>
         <p class="text-xs text-text-dim">{{ t('lora.clipTrimHint') }}</p>
         <div class="flex flex-wrap items-center gap-3">
-          <button type="button" class="accent-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="store.scanning" @click="onScan">
+          <button type="button" class="accent-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="library.disabled.value || !library.selected.value" @click="onScan">
             {{ store.scanning ? t('lora.scanning') : t('lora.scanFolder') }}
           </button>
           <span class="text-text-dim">{{ t('lora.or') }}</span>
           <input v-model="loadPath" type="text" class="w-56 rounded-lg border border-border bg-panel-2 p-1.5 text-xs text-text" :placeholder="t('lora.loadPathPlaceholder')" />
-          <button type="button" class="rounded-lg bg-panel-2 px-3 py-1.5 text-xs text-text-dim hover:text-text" @click="onLoadDataset">{{ t('lora.load') }}</button>
+          <button type="button" class="rounded-lg bg-panel-2 px-3 py-1.5 text-xs text-text-dim hover:text-text" :disabled="library.disabled.value" @click="onLoadDataset">{{ t('lora.load') }}</button>
         </div>
         <p v-if="store.scanError" class="text-xs text-status-failed">{{ store.scanError }}</p>
         <p v-if="store.samples.length" class="text-sm text-text-dim">
@@ -385,11 +425,11 @@ async function onExport() {
           <button
             type="button"
             class="accent-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-            :disabled="store.autoLabelStarting || store.autoLabelRunning"
+            :disabled="library.disabled.value || !library.selected.value"
             @click="onAutoLabel"
           >
             <span v-if="store.autoLabelStarting || store.autoLabelRunning" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-            {{ store.autoLabelStarting ? t('lora.starting') : store.autoLabelRunning ? t('lora.labeling') : t('lora.labelAuto') }}
+            {{ store.autoLabelStarting ? t('lora.starting') : store.autoLabelRunning ? t('lora.labeling') : onlyUnlabeled ? t('loraRecovery.resumeLabel') : t('lora.labelAuto') }}
           </button>
           <div v-if="store.autoLabelRunning || store.autoLabelTotal" class="space-y-2">
             <ProgressBar :value="store.autoLabelTotal ? (store.autoLabelCurrent / store.autoLabelTotal) * 100 : 0" />
@@ -429,7 +469,7 @@ async function onExport() {
                   <td class="p-2"><input v-model.number="edited(s).bpm" type="number" class="w-16 rounded border border-border bg-panel-2 p-1 text-text" /></td>
                   <td class="p-2"><input v-model="edited(s).keyscale" type="text" class="w-16 rounded border border-border bg-panel-2 p-1 text-text" /></td>
                   <td class="p-2"><input v-model="edited(s).is_instrumental" type="checkbox" class="accent-accent1" /></td>
-                  <td class="p-2"><button type="button" class="rounded bg-panel-2 px-2 py-1 text-text-dim hover:text-text" @click="saveSample(s)">{{ t('lora.save') }}</button></td>
+                  <td class="p-2"><button type="button" class="rounded bg-panel-2 px-2 py-1 text-text-dim hover:text-text disabled:opacity-50" :disabled="library.disabled.value" @click="saveSample(s)">{{ t('lora.save') }}</button></td>
                 </tr>
               </tbody>
             </table>
@@ -441,7 +481,7 @@ async function onExport() {
               <input v-model.number="genreRatio" type="range" min="0" max="100" step="5" class="w-full accent-accent1" />
             </label>
             <div class="flex gap-2">
-              <input v-model="savePath" type="text" class="flex-1 rounded-lg border border-border bg-panel-2 p-1.5 text-xs text-text" :placeholder="t('lora.savePathPlaceholder')" />
+              <span class="flex-1 break-all text-xs text-text-dim">{{ store.datasetPath }}</span>
               <button type="button" class="rounded-lg bg-panel-2 px-3 py-1.5 text-xs text-text-dim hover:text-text" @click="onSaveDataset">{{ t('lora.save') }}</button>
             </div>
           </CollapsibleDetails>
@@ -451,13 +491,14 @@ async function onExport() {
         <section class="space-y-3 rounded-xl border border-border bg-panel p-5">
           <h2 class="text-lg font-semibold text-text">{{ t('lora.step4Title') }}</h2>
           <p class="text-xs text-text-dim">{{ t('lora.preprocessHint') }}</p>
+          <p class="text-xs text-text-dim">{{ t('loraRecovery.reuseHint') }}</p>
           <div class="flex flex-wrap items-center gap-3">
             <input v-model="outputDir" type="text" class="w-64 rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('lora.outputDirPlaceholder')" @focus="suggestOutputDir" />
             <label class="flex items-center gap-2 text-sm text-text-dim"><input v-model="skipExisting" type="checkbox" class="accent-accent1" /> {{ t('lora.skipExisting') }}</label>
             <button
               type="button"
               class="accent-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              :disabled="store.preprocessStarting || store.preprocessRunning"
+              :disabled="library.disabled.value || !library.selected.value"
               @click="onPreprocess"
             >
               <span v-if="store.preprocessStarting || store.preprocessRunning" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
@@ -472,12 +513,16 @@ async function onExport() {
           <p v-if="store.preprocessOutputDir" class="text-xs text-text-dim">{{ t('lora.done', { path: store.preprocessOutputDir }) }}</p>
         </section>
 
+      </template>
+
+      <template v-if="store.samples.length || store.training?.is_training || store.trainingInterrupted || (store.training?.current_step ?? 0) > 0 || store.preprocessOutputDir || tensorDir">
         <!-- 5. Training -->
         <section class="space-y-3 rounded-xl border border-border bg-panel p-5">
           <div class="flex items-center justify-between">
             <h2 class="text-lg font-semibold text-text">{{ t('lora.step5Title') }}</h2>
             <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'training'">{{ t('common.help') }}</button>
           </div>
+          <p class="text-xs leading-relaxed text-text-dim">{{ t('loraRecovery.checkpointLimit') }}</p>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <label class="space-y-1">
               <span class="text-xs text-text-dim">{{ t('lora.tensorDirLabel') }}</span>
@@ -511,7 +556,7 @@ async function onExport() {
             <button
               type="button"
               class="accent-gradient inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-              :disabled="store.trainingStarting || store.isTraining || (!tensorDir && !store.preprocessOutputDir)"
+              :disabled="library.disabled.value || (!tensorDir && !store.preprocessOutputDir)"
               @click="onStartTraining"
             >
               <span v-if="store.trainingStarting" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent"></span>

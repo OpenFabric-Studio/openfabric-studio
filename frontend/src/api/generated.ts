@@ -535,6 +535,14 @@ export type AudiobookRepairsResponse = {
   "repairs": Array<AudiobookRepair>
 }
 
+export type AutoLabelLoraDatasetRequest = {
+  "revision": number
+  "skip_metas"?: boolean
+  "format_lyrics"?: boolean
+  "transcribe_lyrics"?: boolean
+  "only_unlabeled"?: boolean
+}
+
 export type BindArtistVoiceRequest = {
   "voice_id": string
 }
@@ -877,6 +885,10 @@ export type CreateGenerationPresetRequest = {
   "name": string
   "settings": (AceGenerationSettings | YueGenerationSettings)
   "source_history_id": (string | null)
+}
+
+export type CreateLoraDatasetRequest = {
+  "name": string
 }
 
 export type CreateStemExportRequest = {
@@ -1260,6 +1272,128 @@ export type LocalMusicRequest = {
 
 export type LocalVideoProviderConfig = {
   "provider"?: "local"
+}
+
+export type LoraDatasetEntry = {
+  "id": string
+  "name": string
+  "dataset_path": string
+  "audio_dir": string
+  "sample_count": number
+  "labeled_count": number
+  "revision": number
+  "trashed"?: boolean
+  "available"?: boolean
+  "error_code"?: string
+}
+
+export type LoraDatasetIssue = {
+  "path": string
+  "code": "dataset_invalid" | "dataset_path_unsafe" | "dataset_unavailable"
+}
+
+export type LoraDatasetMetadata = {
+  "custom_tag"?: string
+  "tag_position"?: "prepend" | "append" | "replace"
+  "all_instrumental"?: boolean
+  "genre_ratio"?: number
+}
+
+export type LoraDatasetOperationResponse = {
+  "metadata"?: LoraDatasetMetadata
+  "dataset": LoraDatasetEntry
+  "samples": Array<LoraDatasetSample>
+  "message"?: string
+}
+
+export type LoraDatasetRevision = {
+  "revision": number
+}
+
+export type LoraDatasetSample = {
+  "index"?: number
+  "id": string
+  "filename"?: string
+  "audio_path"?: string
+  "duration"?: number
+  "caption"?: string
+  "genre"?: string
+  "prompt_override"?: ("caption" | "genre" | null)
+  "lyrics"?: string
+  "raw_lyrics"?: string
+  "formatted_lyrics"?: string
+  "bpm"?: (number | null)
+  "keyscale"?: string
+  "timesignature"?: string
+  "language"?: string
+  "is_instrumental"?: boolean
+  "custom_tag"?: string
+  "labeled"?: boolean
+}
+
+export type LoraDatasetTaskStarted = {
+  "task_id": string
+  "message"?: string
+  "total": number
+}
+
+export type LoraDatasetsResponse = {
+  "datasets": Array<LoraDatasetEntry>
+  "issues"?: Array<LoraDatasetIssue>
+}
+
+export type LoraObservedTask = {
+  "task_id"?: string
+  "dataset_id": string
+  "dataset_path": string
+  "output_dir"?: string
+}
+
+export type LoraPreprocessReceipt = {
+  "dataset_id": string
+  "dataset_hash": string
+  "model_identity": string
+  "output_dir": string
+  "task_id"?: string
+}
+
+export type LoraWorkspace = {
+  "revision"?: number
+  "selected_dataset_id"?: (string | null)
+  "training_tensor_dir"?: string
+  "form"?: LoraWorkspaceForm
+  "auto_label_task"?: (LoraObservedTask | null)
+  "preprocess_task"?: (LoraObservedTask | null)
+  "preprocess_receipt"?: (LoraPreprocessReceipt | null)
+}
+
+export type LoraWorkspaceForm = {
+  "audio_dir"?: string
+  "custom_tag"?: string
+  "tag_position"?: "prepend" | "append" | "replace"
+  "all_instrumental"?: boolean
+  "skip_metas"?: boolean
+  "format_lyrics"?: boolean
+  "transcribe_lyrics"?: boolean
+  "only_unlabeled"?: boolean
+  "genre_ratio"?: number
+  "output_dir"?: string
+  "skip_existing"?: boolean
+  "tensor_dir"?: string
+  "lora_output_dir"?: string
+  "lora_rank"?: number
+  "lora_alpha"?: number
+  "lora_dropout"?: number
+  "learning_rate"?: number
+  "train_epochs"?: number
+  "train_batch_size"?: number
+  "gradient_accumulation"?: number
+  "save_every_n_epochs"?: number
+  "training_seed"?: number
+  "use_fp8"?: boolean
+  "gradient_checkpointing"?: boolean
+  "export_path"?: string
+  "registry_name"?: string
 }
 
 export type LoudnessSettings = {
@@ -1920,6 +2054,12 @@ export type PrepareVoiceRequest = {
   "max_selected_seconds"?: number
 }
 
+export type PreprocessLoraDatasetRequest = {
+  "revision": number
+  "output_dir": string
+  "skip_existing"?: boolean
+}
+
 export type ProductionGate = {
   "technical_eligible"?: boolean
   "approved_for_release"?: boolean
@@ -2346,6 +2486,11 @@ export type RenameCharacterSwapRequest = {
   "name": string
 }
 
+export type RenameLoraDatasetRequest = {
+  "revision": number
+  "name": string
+}
+
 export type RetainedAudioInfo = {
   "source": RetainedAudioSource
   "duration_ms": number
@@ -2442,6 +2587,14 @@ export type RvcRequest = {
   "input_path": string
 }
 
+export type SaveLoraDatasetRequest = {
+  "revision": number
+  "custom_tag"?: string
+  "tag_position"?: "prepend" | "append" | "replace"
+  "all_instrumental"?: boolean
+  "genre_ratio"?: number
+}
+
 export type SavedTrack = {
   "id": number
   "short_id": (number | null)
@@ -2459,6 +2612,14 @@ export type SavedTrack = {
   "abc_url": (string | null)
   "stems": (Record<string, string> | null)
   "midi": (Record<string, string> | null)
+}
+
+export type ScanLoraDatasetRequest = {
+  "revision": number
+  "audio_dir"?: (string | null)
+  "custom_tag"?: string
+  "tag_position"?: "prepend" | "append" | "replace"
+  "all_instrumental"?: boolean
 }
 
 export type SelectVoiceModelRequest = {
@@ -2922,6 +3083,19 @@ export type UpdateGenerationPresetRequest = {
   "settings": (AceGenerationSettings | YueGenerationSettings)
   "source_history_id": (string | null)
   "revision": number
+}
+
+export type UpdateLoraDatasetSampleRequest = {
+  "revision": number
+  "caption"?: string
+  "genre"?: string
+  "prompt_override"?: ("caption" | "genre" | null)
+  "lyrics"?: string
+  "bpm"?: (number | null)
+  "keyscale"?: string
+  "timesignature"?: string
+  "language"?: string
+  "is_instrumental"?: boolean
 }
 
 export type UpdateVideoProjectRequest = {
@@ -20382,6 +20556,759 @@ const schemas = {
     ],
     "type": "object"
   },
+  "LoraDatasetRevision": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "type": "object"
+  },
+  "CreateLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "name"
+    ],
+    "type": "object"
+  },
+  "RenameLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "name": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "name"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetEntry": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "dataset_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "audio_dir": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "sample_count": {
+        "maximum": 100000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "labeled_count": {
+        "maximum": 100000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "trashed": {
+        "type": "boolean"
+      },
+      "available": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "maxLength": 120,
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "dataset_path",
+      "audio_dir",
+      "sample_count",
+      "labeled_count",
+      "revision"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetIssue": {
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "code": {
+        "enum": [
+          "dataset_invalid",
+          "dataset_path_unsafe",
+          "dataset_unavailable"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "code"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "datasets": {
+        "items": {
+          "$ref": "#/$defs/LoraDatasetEntry"
+        },
+        "maxItems": 10000,
+        "type": "array"
+      },
+      "issues": {
+        "items": {
+          "$ref": "#/$defs/LoraDatasetIssue"
+        },
+        "maxItems": 10000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "datasets"
+    ],
+    "type": "object"
+  },
+  "LoraWorkspaceForm": {
+    "additionalProperties": false,
+    "properties": {
+      "audio_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "custom_tag": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "tag_position": {
+        "enum": [
+          "prepend",
+          "append",
+          "replace"
+        ],
+        "type": "string"
+      },
+      "all_instrumental": {
+        "type": "boolean"
+      },
+      "skip_metas": {
+        "type": "boolean"
+      },
+      "format_lyrics": {
+        "type": "boolean"
+      },
+      "transcribe_lyrics": {
+        "type": "boolean"
+      },
+      "only_unlabeled": {
+        "type": "boolean"
+      },
+      "genre_ratio": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "output_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "skip_existing": {
+        "type": "boolean"
+      },
+      "tensor_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "lora_output_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "lora_rank": {
+        "maximum": 256,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "lora_alpha": {
+        "maximum": 512,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "lora_dropout": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "learning_rate": {
+        "exclusiveMinimum": 0,
+        "maximum": 1,
+        "type": "number"
+      },
+      "train_epochs": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "train_batch_size": {
+        "maximum": 1024,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "gradient_accumulation": {
+        "maximum": 10000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "save_every_n_epochs": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "training_seed": {
+        "maximum": 4294967295,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "use_fp8": {
+        "type": "boolean"
+      },
+      "gradient_checkpointing": {
+        "type": "boolean"
+      },
+      "export_path": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "registry_name": {
+        "maxLength": 120,
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "LoraObservedTask": {
+    "additionalProperties": false,
+    "properties": {
+      "task_id": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "dataset_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "dataset_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "output_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "dataset_path"
+    ],
+    "type": "object"
+  },
+  "LoraPreprocessReceipt": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "dataset_hash": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "model_identity": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "output_dir": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "task_id": {
+        "maxLength": 200,
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "dataset_hash",
+      "model_identity",
+      "output_dir"
+    ],
+    "type": "object"
+  },
+  "LoraWorkspace": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "selected_dataset_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "training_tensor_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "form": {
+        "$ref": "#/$defs/LoraWorkspaceForm"
+      },
+      "auto_label_task": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LoraObservedTask"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "preprocess_task": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LoraObservedTask"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "preprocess_receipt": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LoraPreprocessReceipt"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ScanLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "audio_dir": {
+        "anyOf": [
+          {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "custom_tag": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "tag_position": {
+        "enum": [
+          "prepend",
+          "append",
+          "replace"
+        ],
+        "type": "string"
+      },
+      "all_instrumental": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "type": "object"
+  },
+  "SaveLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "custom_tag": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "tag_position": {
+        "enum": [
+          "prepend",
+          "append",
+          "replace"
+        ],
+        "type": "string"
+      },
+      "all_instrumental": {
+        "type": "boolean"
+      },
+      "genre_ratio": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetSample": {
+    "properties": {
+      "index": {
+        "maximum": 100000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "audio_path": {
+        "maxLength": 4096,
+        "type": "string"
+      },
+      "duration": {
+        "maximum": 86400,
+        "minimum": 0,
+        "type": "number"
+      },
+      "caption": {
+        "maxLength": 100000,
+        "type": "string"
+      },
+      "genre": {
+        "maxLength": 10000,
+        "type": "string"
+      },
+      "prompt_override": {
+        "anyOf": [
+          {
+            "enum": [
+              "caption",
+              "genre"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "lyrics": {
+        "maxLength": 200000,
+        "type": "string"
+      },
+      "raw_lyrics": {
+        "maxLength": 200000,
+        "type": "string"
+      },
+      "formatted_lyrics": {
+        "maxLength": 200000,
+        "type": "string"
+      },
+      "bpm": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "keyscale": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "timesignature": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "language": {
+        "maxLength": 100,
+        "type": "string"
+      },
+      "is_instrumental": {
+        "type": "boolean"
+      },
+      "custom_tag": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "labeled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetMetadata": {
+    "properties": {
+      "custom_tag": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "tag_position": {
+        "enum": [
+          "prepend",
+          "append",
+          "replace"
+        ],
+        "type": "string"
+      },
+      "all_instrumental": {
+        "type": "boolean"
+      },
+      "genre_ratio": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "type": "object"
+  },
+  "LoraDatasetOperationResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "metadata": {
+        "$ref": "#/$defs/LoraDatasetMetadata"
+      },
+      "dataset": {
+        "$ref": "#/$defs/LoraDatasetEntry"
+      },
+      "samples": {
+        "items": {
+          "$ref": "#/$defs/LoraDatasetSample"
+        },
+        "maxItems": 100000,
+        "type": "array"
+      },
+      "message": {
+        "maxLength": 2000,
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset",
+      "samples"
+    ],
+    "type": "object"
+  },
+  "PreprocessLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "output_dir": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "skip_existing": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision",
+      "output_dir"
+    ],
+    "type": "object"
+  },
+  "LoraDatasetTaskStarted": {
+    "additionalProperties": false,
+    "properties": {
+      "task_id": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "message": {
+        "maxLength": 2000,
+        "type": "string"
+      },
+      "total": {
+        "maximum": 100000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "task_id",
+      "total"
+    ],
+    "type": "object"
+  },
+  "AutoLabelLoraDatasetRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "skip_metas": {
+        "type": "boolean"
+      },
+      "format_lyrics": {
+        "type": "boolean"
+      },
+      "transcribe_lyrics": {
+        "type": "boolean"
+      },
+      "only_unlabeled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "type": "object"
+  },
+  "UpdateLoraDatasetSampleRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "caption": {
+        "maxLength": 100000,
+        "type": "string"
+      },
+      "genre": {
+        "maxLength": 10000,
+        "type": "string"
+      },
+      "prompt_override": {
+        "anyOf": [
+          {
+            "enum": [
+              "caption",
+              "genre"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "lyrics": {
+        "maxLength": 200000,
+        "type": "string"
+      },
+      "bpm": {
+        "anyOf": [
+          {
+            "maximum": 1000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "keyscale": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "timesignature": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "language": {
+        "maxLength": 100,
+        "type": "string"
+      },
+      "is_instrumental": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision"
+    ],
+    "type": "object"
+  },
   "EngineRuntime": {
     "additionalProperties": false,
     "properties": {
@@ -26799,6 +27726,158 @@ function isMusicQueueCancelRequest(value: unknown): value is MusicQueueCancelReq
 }
 export function parseMusicQueueCancelRequest(value: unknown): MusicQueueCancelRequest {
   if (!isMusicQueueCancelRequest(value)) throw new TypeError("Invalid MusicQueueCancelRequest response")
+  return value
+}
+
+function isLoraDatasetRevision(value: unknown): value is LoraDatasetRevision {
+  return decodeSchema(schemas.LoraDatasetRevision, value, schemas)
+}
+export function parseLoraDatasetRevision(value: unknown): LoraDatasetRevision {
+  if (!isLoraDatasetRevision(value)) throw new TypeError("Invalid LoraDatasetRevision response")
+  return value
+}
+
+function isCreateLoraDatasetRequest(value: unknown): value is CreateLoraDatasetRequest {
+  return decodeSchema(schemas.CreateLoraDatasetRequest, value, schemas)
+}
+export function parseCreateLoraDatasetRequest(value: unknown): CreateLoraDatasetRequest {
+  if (!isCreateLoraDatasetRequest(value)) throw new TypeError("Invalid CreateLoraDatasetRequest response")
+  return value
+}
+
+function isRenameLoraDatasetRequest(value: unknown): value is RenameLoraDatasetRequest {
+  return decodeSchema(schemas.RenameLoraDatasetRequest, value, schemas)
+}
+export function parseRenameLoraDatasetRequest(value: unknown): RenameLoraDatasetRequest {
+  if (!isRenameLoraDatasetRequest(value)) throw new TypeError("Invalid RenameLoraDatasetRequest response")
+  return value
+}
+
+function isLoraDatasetEntry(value: unknown): value is LoraDatasetEntry {
+  return decodeSchema(schemas.LoraDatasetEntry, value, schemas)
+}
+export function parseLoraDatasetEntry(value: unknown): LoraDatasetEntry {
+  if (!isLoraDatasetEntry(value)) throw new TypeError("Invalid LoraDatasetEntry response")
+  return value
+}
+
+function isLoraDatasetIssue(value: unknown): value is LoraDatasetIssue {
+  return decodeSchema(schemas.LoraDatasetIssue, value, schemas)
+}
+export function parseLoraDatasetIssue(value: unknown): LoraDatasetIssue {
+  if (!isLoraDatasetIssue(value)) throw new TypeError("Invalid LoraDatasetIssue response")
+  return value
+}
+
+function isLoraDatasetsResponse(value: unknown): value is LoraDatasetsResponse {
+  return decodeSchema(schemas.LoraDatasetsResponse, value, schemas)
+}
+export function parseLoraDatasetsResponse(value: unknown): LoraDatasetsResponse {
+  if (!isLoraDatasetsResponse(value)) throw new TypeError("Invalid LoraDatasetsResponse response")
+  return value
+}
+
+function isLoraWorkspaceForm(value: unknown): value is LoraWorkspaceForm {
+  return decodeSchema(schemas.LoraWorkspaceForm, value, schemas)
+}
+export function parseLoraWorkspaceForm(value: unknown): LoraWorkspaceForm {
+  if (!isLoraWorkspaceForm(value)) throw new TypeError("Invalid LoraWorkspaceForm response")
+  return value
+}
+
+function isLoraObservedTask(value: unknown): value is LoraObservedTask {
+  return decodeSchema(schemas.LoraObservedTask, value, schemas)
+}
+export function parseLoraObservedTask(value: unknown): LoraObservedTask {
+  if (!isLoraObservedTask(value)) throw new TypeError("Invalid LoraObservedTask response")
+  return value
+}
+
+function isLoraPreprocessReceipt(value: unknown): value is LoraPreprocessReceipt {
+  return decodeSchema(schemas.LoraPreprocessReceipt, value, schemas)
+}
+export function parseLoraPreprocessReceipt(value: unknown): LoraPreprocessReceipt {
+  if (!isLoraPreprocessReceipt(value)) throw new TypeError("Invalid LoraPreprocessReceipt response")
+  return value
+}
+
+function isLoraWorkspace(value: unknown): value is LoraWorkspace {
+  return decodeSchema(schemas.LoraWorkspace, value, schemas)
+}
+export function parseLoraWorkspace(value: unknown): LoraWorkspace {
+  if (!isLoraWorkspace(value)) throw new TypeError("Invalid LoraWorkspace response")
+  return value
+}
+
+function isScanLoraDatasetRequest(value: unknown): value is ScanLoraDatasetRequest {
+  return decodeSchema(schemas.ScanLoraDatasetRequest, value, schemas)
+}
+export function parseScanLoraDatasetRequest(value: unknown): ScanLoraDatasetRequest {
+  if (!isScanLoraDatasetRequest(value)) throw new TypeError("Invalid ScanLoraDatasetRequest response")
+  return value
+}
+
+function isSaveLoraDatasetRequest(value: unknown): value is SaveLoraDatasetRequest {
+  return decodeSchema(schemas.SaveLoraDatasetRequest, value, schemas)
+}
+export function parseSaveLoraDatasetRequest(value: unknown): SaveLoraDatasetRequest {
+  if (!isSaveLoraDatasetRequest(value)) throw new TypeError("Invalid SaveLoraDatasetRequest response")
+  return value
+}
+
+function isLoraDatasetSample(value: unknown): value is LoraDatasetSample {
+  return decodeSchema(schemas.LoraDatasetSample, value, schemas)
+}
+export function parseLoraDatasetSample(value: unknown): LoraDatasetSample {
+  if (!isLoraDatasetSample(value)) throw new TypeError("Invalid LoraDatasetSample response")
+  return value
+}
+
+function isLoraDatasetMetadata(value: unknown): value is LoraDatasetMetadata {
+  return decodeSchema(schemas.LoraDatasetMetadata, value, schemas)
+}
+export function parseLoraDatasetMetadata(value: unknown): LoraDatasetMetadata {
+  if (!isLoraDatasetMetadata(value)) throw new TypeError("Invalid LoraDatasetMetadata response")
+  return value
+}
+
+function isLoraDatasetOperationResponse(value: unknown): value is LoraDatasetOperationResponse {
+  return decodeSchema(schemas.LoraDatasetOperationResponse, value, schemas)
+}
+export function parseLoraDatasetOperationResponse(value: unknown): LoraDatasetOperationResponse {
+  if (!isLoraDatasetOperationResponse(value)) throw new TypeError("Invalid LoraDatasetOperationResponse response")
+  return value
+}
+
+function isPreprocessLoraDatasetRequest(value: unknown): value is PreprocessLoraDatasetRequest {
+  return decodeSchema(schemas.PreprocessLoraDatasetRequest, value, schemas)
+}
+export function parsePreprocessLoraDatasetRequest(value: unknown): PreprocessLoraDatasetRequest {
+  if (!isPreprocessLoraDatasetRequest(value)) throw new TypeError("Invalid PreprocessLoraDatasetRequest response")
+  return value
+}
+
+function isLoraDatasetTaskStarted(value: unknown): value is LoraDatasetTaskStarted {
+  return decodeSchema(schemas.LoraDatasetTaskStarted, value, schemas)
+}
+export function parseLoraDatasetTaskStarted(value: unknown): LoraDatasetTaskStarted {
+  if (!isLoraDatasetTaskStarted(value)) throw new TypeError("Invalid LoraDatasetTaskStarted response")
+  return value
+}
+
+function isAutoLabelLoraDatasetRequest(value: unknown): value is AutoLabelLoraDatasetRequest {
+  return decodeSchema(schemas.AutoLabelLoraDatasetRequest, value, schemas)
+}
+export function parseAutoLabelLoraDatasetRequest(value: unknown): AutoLabelLoraDatasetRequest {
+  if (!isAutoLabelLoraDatasetRequest(value)) throw new TypeError("Invalid AutoLabelLoraDatasetRequest response")
+  return value
+}
+
+function isUpdateLoraDatasetSampleRequest(value: unknown): value is UpdateLoraDatasetSampleRequest {
+  return decodeSchema(schemas.UpdateLoraDatasetSampleRequest, value, schemas)
+}
+export function parseUpdateLoraDatasetSampleRequest(value: unknown): UpdateLoraDatasetSampleRequest {
+  if (!isUpdateLoraDatasetSampleRequest(value)) throw new TypeError("Invalid UpdateLoraDatasetSampleRequest response")
   return value
 }
 

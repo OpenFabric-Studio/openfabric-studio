@@ -36,6 +36,7 @@ async function select(id: ModelId) {
     <header class="space-y-3 border-b border-border pb-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div><h1 class="text-2xl font-semibold text-text">{{ t('musicWorkspace.title') }}</h1><p class="mt-2 text-sm text-text-dim">{{ t('musicQueue.intro') }}</p></div>
+        <RouterLink v-if="!route.path.startsWith('/music/lora')" to="/music/lora" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicLora.manage') }}</RouterLink>
         <RouterLink v-if="route.name !== 'music'" to="/music" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicQueue.backToQueue') }}</RouterLink>
       </div>
       <details class="rounded-xl border border-border bg-panel p-3">
@@ -47,7 +48,6 @@ async function select(id: ModelId) {
           </button>
           <RouterLink v-for="model in localModels" :key="model.id" :to="`/music/${model.path}`" :data-model="model.id" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent2" :class="route.name === model.id ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim hover:bg-panel-2 hover:text-text'"><AppIcon name="yue2" /><span>{{ t(`localMusic.engines.${model.id}`) }}<span class="mt-1 block text-xs text-text-dim">{{ t('localMusic.experimental') }}</span></span></RouterLink>
           <RouterLink to="/music/openrouter" data-model="openrouter" :aria-pressed="route.name === 'openrouter-music'" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent2" :class="route.name === 'openrouter-music' ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim'"><AppIcon name="yue2" /><span>{{ t('cloudMusic.title') }}<span class="mt-1 block text-xs text-text-dim">OpenRouter · {{ t('cloudMusic.experimental') }}</span></span></RouterLink>
-          <RouterLink to="/music/lora" class="flex min-h-11 items-center rounded-xl border border-border px-4 py-3 text-sm text-text-dim focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicLora.manage') }}</RouterLink>
         </div>
         <p id="music-switch-hint" class="mt-3 text-xs leading-relaxed text-text-dim">{{ t('musicWorkspace.switchHint') }}</p>
       </details>

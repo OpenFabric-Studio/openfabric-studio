@@ -13,11 +13,13 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
-from typing import BinaryIO
+from typing import Annotated, BinaryIO
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from ..config import ACE_STEP_DIR
+from .. import lora_datasets
+from ..resource_admission import ResourceBusyError, reserve_native_control
 
 from ..client_contracts import UploadDatasetFilesResponse
 
@@ -47,16 +49,38 @@ def _unique_dest(target_dir: Path, filename: str) -> tuple[Path, BinaryIO]:
 async def upload_dataset_files(
     dataset_name: str = Form(...),
     files: list[UploadFile] = File(...),
+    dataset_id: Annotated[str | None, Form(max_length=32)] = None,
+    revision: Annotated[int | None, Form(ge=0, le=9007199254740991)] = None,
 ) -> UploadDatasetFilesResponse:
+    try:
+        async with lora_datasets.native_lock:
+            lease = await reserve_native_control()
+            try:
+                await lora_datasets.require_native_idle()
+                if dataset_id is not None:
+                    if revision is None:
+                        raise HTTPException(422, 'dataset_revision_required')
+                    entry = lora_datasets.get_dataset(dataset_id, revision)
+                    target = lora_datasets.confined_path(entry.audio_dir)
+                    return _upload_files(target, entry.audio_dir, files)
+                safe_name = _sanitize_dataset_name(dataset_name)
+                engine_root = ACE_STEP_DIR.resolve()
+                datasets_root = (engine_root / 'datasets').resolve()
+                target_dir = (datasets_root / safe_name).resolve()
+                if not datasets_root.is_relative_to(engine_root) or not target_dir.is_relative_to(datasets_root):
+                    raise HTTPException(status_code=409, detail='dataset_path_unsafe')
+                return _upload_files(target_dir, f'datasets/{safe_name}', files)
+            finally:
+                await lease.release()
+    except lora_datasets.LoraDatasetError as exc:
+        raise HTTPException(exc.status, exc.code) from exc
+    except ResourceBusyError as exc:
+        raise HTTPException(409, exc.code) from exc
+
+
+def _upload_files(target_dir: Path, audio_dir: str, files: list[UploadFile]) -> UploadDatasetFilesResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
-
-    safe_name = _sanitize_dataset_name(dataset_name)
-    engine_root = ACE_STEP_DIR.resolve()
-    datasets_root = (engine_root / 'datasets').resolve()
-    target_dir = (datasets_root / safe_name).resolve()
-    if not datasets_root.is_relative_to(engine_root) or not target_dir.is_relative_to(datasets_root):
-        raise HTTPException(status_code=409, detail='dataset_path_unsafe')
     target_dir.mkdir(parents=True, exist_ok=True)
 
     saved: list[str] = []
@@ -82,4 +106,4 @@ async def upload_dataset_files(
             detail=f"No supported audio files in upload. Allowed: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
         )
 
-    return UploadDatasetFilesResponse(audio_dir=f'datasets/{safe_name}', saved=saved, skipped=skipped)
+    return UploadDatasetFilesResponse(audio_dir=audio_dir, saved=saved, skipped=skipped)

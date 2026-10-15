@@ -9,6 +9,7 @@ Act as a senior technical and business partner. Be direct, skeptical, and eviden
 - Prefer the smallest maintainable root-cause fix. Add infrastructure or dependencies only when a concrete requirement justifies them.
 - Use focused parallel agents for independent problem domains when useful; assign exclusive file ownership and review the integrated result.
 - Do not commit, publish, deploy, rewrite Git history, or run production migrations unless explicitly requested.
+- Before future commits or pushes, ask which branch the maintainer wants unless the current request explicitly names the target branch. Do not assume the active branch is the intended destination.
 
 ## Maintained fork workflow
 

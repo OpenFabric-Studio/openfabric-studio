@@ -12,6 +12,8 @@ import { musicWorkspaceEn } from './musicWorkspace'
 import { musicQueueEn } from './musicQueue'
 import { localMusicEn } from './localMusic'
 import { musicLoraEn } from './musicLora'
+import { loraRecoveryEn } from './loraRecovery'
+import { loraWorkspaceEn } from './loraWorkspace'
 import { videoExperienceEn } from './videoExperience'
 import { videoDirectionEn } from './videoDirection'
 import { videoLibraryEn } from './videoLibrary'
@@ -57,6 +59,8 @@ export default {
   musicQueue: musicQueueEn,
   localMusic: localMusicEn,
   musicLora: musicLoraEn,
+  loraRecovery: loraRecoveryEn,
+  loraWorkspace: loraWorkspaceEn,
   videoExperience: videoExperienceEn,
   videoDirection: videoDirectionEn,
   videoLibrary: videoLibraryEn,

@@ -401,3 +401,18 @@ it('keeps completed briefs in paginated Results and explains retained older hist
   expect(node.querySelector('audio[data-track="42"]')).toBe(retained)
   retained?.dispatchEvent(new Event('pause')); await settle(); expect(node.querySelectorAll('audio')).toHaveLength(2)
 })
+
+
+it('retains a running queue through a transient observation failure and reconnects without replaying actions', async () => {
+  const active = batch('a'.repeat(32), 'running')
+  api.getMusicQueue.mockResolvedValueOnce(snapshot([active], 3, 'running')).mockRejectedValueOnce(new Error('/private/token')).mockResolvedValue(snapshot([batch('a'.repeat(32), 'done')], 4, 'idle'))
+  const { node } = await mount()
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(node.querySelector('[data-queue-batch]')?.textContent).toContain('Evening')
+  expect(node.textContent).toContain(i18n.global.t('musicQueue.errors.observe'))
+  expect(node.textContent).not.toContain('/private/token')
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(api.getMusicQueue).toHaveBeenCalledTimes(3)
+  expect(node.textContent).not.toContain(i18n.global.t('musicQueue.errors.observe'))
+  expect(api.controlMusicQueue).not.toHaveBeenCalled(); expect(api.enqueueMusicQueue).not.toHaveBeenCalled(); expect(api.retryMusicQueue).not.toHaveBeenCalled()
+})

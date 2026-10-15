@@ -85,6 +85,16 @@ export interface AutoLabelStatus {
   error?: string
 }
 
+export interface IdleDatasetTask {
+  task_id: string | null
+  status: 'idle'
+  progress: string
+  current: number
+  total: number
+}
+export type LatestAutoLabelStatus = IdleDatasetTask | AutoLabelStatus
+export type LatestPreprocessStatus = IdleDatasetTask | PreprocessStatus
+
 export interface PreprocessRequest {
   output_dir: string
   skip_existing?: boolean
@@ -228,6 +238,16 @@ function parsePreprocess(value: unknown): PreprocessStatus {
   }
 }
 
+function parseLatest<T>(value: unknown, parseActive: (value: unknown) => T): IdleDatasetTask | T {
+  const row = v.record(value)
+  if (row.status !== 'idle') {
+    const taskId = v.string(row.task_id)
+    if (!taskId || taskId.length > 200) throw new Error('Invalid model response')
+    return parseActive(row)
+  }
+  return { task_id: v.nullableString(row.task_id), status: 'idle', progress: v.string(row.progress), current: v.number(row.current), total: v.number(row.total) }
+}
+
 export function parseTrainingStatus(value: unknown): TrainingStatus {
   const row = v.record(value)
   return {
@@ -251,16 +271,18 @@ async function get<T>(path: string, parse: (value: unknown) => T, signal?: Abort
 export const scanDataset = (req: ScanDatasetRequest) => post('/v1/dataset/scan', req, parseScan)
 export const loadDataset = (dataset_path: string) => post('/v1/dataset/load', { dataset_path }, parseScan)
 export const saveDataset = (req: SaveDatasetRequest) => post('/v1/dataset/save', req, parseMessage)
-export const getSamples = () => get('/v1/dataset/samples', (value) => ({ samples: v.array(v.record(value).samples, parseDatasetSample) }))
+export const getSamples = (signal?: AbortSignal) => get('/v1/dataset/samples', (value) => ({ samples: v.array(v.record(value).samples, parseDatasetSample) }), signal)
 export const updateSample = async (idx: number, req: UpdateSampleRequest): Promise<DatasetSample> => {
   const row = v.record(v.nativePayload(await apiJson(`${BASE}/v1/dataset/sample/${idx}`, { ...req, sample_idx: idx }, 'PUT')))
   return parseDatasetSample(row.sample)
 }
 
 export const startAutoLabel = (req: AutoLabelRequest) => post('/v1/dataset/auto_label_async', req, parseStarted)
+export const latestAutoLabelStatus = (signal?: AbortSignal): Promise<LatestAutoLabelStatus> => get('/v1/dataset/auto_label_status', value => parseLatest(value, parseAutoLabel), signal)
 export const autoLabelStatus = (taskId: string, signal?: AbortSignal) => get(`/v1/dataset/auto_label_status/${encodeURIComponent(taskId)}`, parseAutoLabel, signal)
 
 export const startPreprocess = (req: PreprocessRequest) => post('/v1/dataset/preprocess_async', req, parseStarted)
+export const latestPreprocessStatus = (signal?: AbortSignal): Promise<LatestPreprocessStatus> => get('/v1/dataset/preprocess_status', value => parseLatest(value, parsePreprocess), signal)
 export const preprocessStatus = (taskId: string, signal?: AbortSignal) => get(`/v1/dataset/preprocess_status/${encodeURIComponent(taskId)}`, parsePreprocess, signal)
 
 export const startLoraTraining = (req: StartLoraTrainingRequest) => post('/v1/training/start', req, (value): StartTrainingResponse => {

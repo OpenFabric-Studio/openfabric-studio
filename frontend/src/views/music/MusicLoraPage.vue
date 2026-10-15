@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import * as library from '../../api/musicLora'
@@ -10,21 +10,26 @@ import type { MusicAdapter, MusicLoraCapabilities, StableLoraSample, StableLoraT
 import { createPollingLoop } from '../../composables/polling'
 import LibraryPicker from '../../components/editor/LibraryPicker.vue'
 
+const props = withDefaults(defineProps<{ engine?: Exclude<MusicLoraCapabilities['engines'][number]['engine'], 'ace_step'> }>(), { engine: 'stable_audio3' })
 const { t } = useI18n()
 const capabilities = ref<MusicLoraCapabilities['engines']>([]), adapters = ref<MusicAdapter[]>([])
 const status = ref<StableLoraTrainingStatus | null>(null), jobs = ref<StableLoraTrainingJob[]>([])
+const historyKnown = ref(false), reconnecting = ref(false)
 const adapterHistoryIncomplete = ref(false), trainingHistoryIncomplete = ref(false), busy = ref(false), error = ref('')
-const importEngine = ref<MusicAdapter['engine']>('stable_audio3'), importTarget = ref<MusicAdapter['target']>('small-music'), importName = ref(''), importFile = ref<File | null>(null)
+const importEngine = computed<MusicAdapter['engine']>(() => props.engine === 'yue2' ? 'yue2' : 'stable_audio3')
+const importTarget = ref<MusicAdapter['target']>(props.engine === 'yue2' ? 'ar' : 'small-music'), importName = ref(''), importFile = ref<File | null>(null)
+const modelCapabilities = computed(() => capabilities.value.filter(value => value.engine === props.engine))
+const modelAdapters = computed(() => adapters.value.filter(value => value.engine === props.engine))
 const fileInput = ref<HTMLInputElement | null>(null)
 const importTargets = computed<MusicAdapter['target'][]>(() => importEngine.value === 'stable_audio3' ? ['small-music', 'medium'] : ['ar', 'nar'])
-const canImport = computed(() => !!importFile.value && /\.safetensors$/i.test(importFile.value.name) && importFile.value.size > 8 && importFile.value.size <= 512 * 1024 * 1024 && importName.value.trim().length > 0 && importName.value.length <= 120)
+const canImport = computed(() => modelCapabilities.value.some(value => value.loading) && !!importFile.value && /\.safetensors$/i.test(importFile.value.name) && importFile.value.size > 8 && importFile.value.size <= 512 * 1024 * 1024 && importName.value.trim().length > 0 && importName.value.length <= 120)
 const name = ref(''), variant = ref<NonNullable<StableLoraTrainingRequest['variant']>>('small-music')
 const samples = ref<Array<StableLoraSample & { title: string }>>([]), pickerOpen = ref(false)
 const maxSteps = ref(1000), rank = ref<NonNullable<StableLoraTrainingRequest['rank']>>(16), learningRate = ref(0.0001), seed = ref(42)
 const active = computed(() => jobs.value.some(ongoing))
 const weightsReady = computed(() => variant.value === 'small-music' ? status.value?.small_weights_ready : status.value?.medium_weights_ready)
 const ready = computed(() => status.value?.supported && status.value.installed && weightsReady.value && capabilities.value.some(engine => engine.engine === 'stable_audio3' && engine.training))
-const canTrain = computed(() => ready.value && !active.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
+const canTrain = computed(() => ready.value && historyKnown.value && !active.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
   && samples.value.every(sample => sample.caption.trim().length > 0 && sample.caption.length <= 4000)
   && Number.isInteger(maxSteps.value) && maxSteps.value >= 1 && maxSteps.value <= 100000
   && Number.isFinite(learningRate.value) && learningRate.value >= 0.0000001 && learningRate.value <= 0.01
@@ -51,9 +56,10 @@ const poll = createPollingLoop(async context => {
   try {
     const response = await training.listStableLora(context.signal)
     if (!alive || !context.isCurrent()) return false
-    jobs.value = response.jobs; trainingHistoryIncomplete.value = response.history_incomplete ?? false
-  } catch { if (alive && context.isCurrent()) error.value = t('musicLora.errors.load') }
-  return active.value
+    jobs.value = response.jobs; historyKnown.value = true; reconnecting.value = false; trainingHistoryIncomplete.value = response.history_incomplete ?? false
+    if (error.value === t('musicLora.errors.training')) error.value = ''
+  } catch { if (alive && context.isCurrent()) reconnecting.value = true }
+  return active.value || !historyKnown.value
 }, 2500)
 async function action(work: (signal: AbortSignal, isCurrent: () => boolean) => Promise<void>, fallback: string) {
   if (!alive || busy.value) return
@@ -62,18 +68,19 @@ async function action(work: (signal: AbortSignal, isCurrent: () => boolean) => P
   controller = request; busy.value = true; error.value = ''
   try { await work(request.signal, isCurrent) }
   catch (cause) { if (isCurrent()) error.value = errorText(cause instanceof ApiError ? cause.message : null, fallback) }
-  finally { if (isCurrent()) { busy.value = false; controller = undefined; if (active.value) poll.start(false) } }
+  finally { if (isCurrent()) { busy.value = false; controller = undefined; if (props.engine === 'stable_audio3' && (active.value || !historyKnown.value)) poll.start(false) } }
 }
 function refresh() {
   return action(async (signal, isCurrent) => {
-    const results = await Promise.allSettled([library.musicLoraCapabilities(signal), library.listMusicAdapters(signal), training.stableLoraStatus(signal), training.listStableLora(signal)])
+    const results = await Promise.allSettled([library.musicLoraCapabilities(signal), props.engine !== 'heartmula' ? library.listMusicAdapters(signal) : Promise.resolve(null), props.engine === 'stable_audio3' ? training.stableLoraStatus(signal) : Promise.resolve(null), props.engine === 'stable_audio3' ? training.listStableLora(signal) : Promise.resolve(null)])
     if (!isCurrent()) return
     const [capability, registry, setup, history] = results
     if (capability.status === 'fulfilled') capabilities.value = capability.value.engines
-    if (registry.status === 'fulfilled') { adapters.value = registry.value.adapters; adapterHistoryIncomplete.value = registry.value.history_incomplete ?? false }
-    if (setup.status === 'fulfilled') status.value = setup.value
-    if (history.status === 'fulfilled') { jobs.value = history.value.jobs; trainingHistoryIncomplete.value = history.value.history_incomplete ?? false }
-    if (results.some(result => result.status === 'rejected')) error.value = t('musicLora.errors.load')
+    if (registry.status === 'fulfilled' && registry.value) { adapters.value = registry.value.adapters; adapterHistoryIncomplete.value = registry.value.history_incomplete ?? false }
+    if (setup.status === 'fulfilled' && setup.value) status.value = setup.value
+    if (history.status === 'fulfilled' && history.value) { jobs.value = history.value.jobs; historyKnown.value = true; reconnecting.value = false; trainingHistoryIncomplete.value = history.value.history_incomplete ?? false }
+    if (history.status === 'rejected') reconnecting.value = true
+    if ([capability, registry, setup].some(result => result.status === 'rejected')) error.value = t('musicLora.errors.load')
   }, 'musicLora.errors.load')
 }
 function fileChanged(event: Event) {
@@ -99,8 +106,9 @@ function start() {
   if (!canTrain.value) return
   const request: StableLoraTrainingRequest = { name: name.value.trim(), variant: variant.value, samples: samples.value.map(sample => ({ track_id: sample.track_id, caption: sample.caption.trim() })), max_steps: maxSteps.value, rank: rank.value, learning_rate: learningRate.value, seed: seed.value }
   return action(async (signal, isCurrent) => {
+    historyKnown.value = false
     const response = await training.submitStableLora(request, signal)
-    if (isCurrent()) jobs.value = [response, ...jobs.value.filter(job => job.id !== response.id)]
+    if (isCurrent()) { jobs.value = [response, ...jobs.value.filter(job => job.id !== response.id)]; historyKnown.value = true }
   }, 'musicLora.errors.training')
 }
 function cancel(job: StableLoraTrainingJob) {
@@ -109,31 +117,30 @@ function cancel(job: StableLoraTrainingJob) {
     if (isCurrent()) jobs.value = jobs.value.map(existing => existing.id === response.id ? response : existing)
   }, 'musicLora.errors.training')
 }
-watch(importEngine, engine => { importTarget.value = engine === 'stable_audio3' ? 'small-music' : 'ar' })
 onMounted(() => { void refresh() })
 onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.stop() })
 </script>
 
 <template>
   <div class="min-w-0 space-y-5" :aria-busy="busy">
-    <header class="space-y-2"><h2 class="text-xl font-semibold text-text">{{ t('musicLora.title') }}</h2><p class="text-sm text-text-dim">{{ t('musicLora.intro') }}</p></header>
+    <header class="space-y-2"><h2 class="text-xl font-semibold text-text">{{ t(`musicLora.engines.${props.engine}`) }}</h2><p class="text-sm text-text-dim">{{ t(`loraWorkspace.models.${props.engine}`) }}</p></header>
     <p v-if="busy" role="status" class="text-sm text-text-dim">{{ t('musicLora.working') }}</p>
+    <p v-if="reconnecting" role="status" class="text-sm text-status-queued">{{ t('loraWorkspace.reconnecting') }}</p>
     <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
     <p v-if="adapterHistoryIncomplete || trainingHistoryIncomplete" role="alert" class="text-sm text-status-queued">{{ t('musicLora.historyIncomplete') }}</p>
     <section class="space-y-3 rounded-xl border border-border bg-panel p-5">
       <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-semibold text-text">{{ t('musicLora.capability') }}</h3><button type="button" class="lora-button" :disabled="busy" @click="refresh">{{ t('musicLora.refresh') }}</button></div>
-      <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="text-text-dim"><tr><th scope="col" class="p-2">{{ t('musicLora.engine') }}</th><th scope="col" class="p-2">{{ t('musicLora.loading') }}</th><th scope="col" class="p-2">{{ t('musicLora.training') }}</th><th scope="col" class="p-2"><span class="sr-only">{{ t('musicLora.capability') }}</span></th></tr></thead><tbody><tr v-for="engine in capabilities" :key="engine.engine" :data-engine="engine.engine" class="border-t border-border"><th scope="row" class="p-2 font-medium text-text">{{ t(`musicLora.engines.${engine.engine}`) }}</th><td class="p-2 text-text-dim">{{ t(engine.loading ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-text-dim">{{ t(engine.training ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-xs text-text-dim">{{ t(`musicLora.reasons.${engine.reason}`) }}</td></tr></tbody></table></div>
-      <RouterLink to="/ace-step/lora" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.ace') }}</RouterLink><p class="text-xs text-text-dim">{{ t('musicLora.aceHint') }}</p>
+      <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="text-text-dim"><tr><th scope="col" class="p-2">{{ t('musicLora.engine') }}</th><th scope="col" class="p-2">{{ t('musicLora.loading') }}</th><th scope="col" class="p-2">{{ t('musicLora.training') }}</th><th scope="col" class="p-2"><span class="sr-only">{{ t('musicLora.capability') }}</span></th></tr></thead><tbody><tr v-for="engine in modelCapabilities" :key="engine.engine" :data-engine="engine.engine" class="border-t border-border"><th scope="row" class="p-2 font-medium text-text">{{ t(`musicLora.engines.${engine.engine}`) }}</th><td class="p-2 text-text-dim">{{ t(engine.loading ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-text-dim">{{ t(engine.training ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-xs text-text-dim">{{ t(`musicLora.reasons.${engine.reason}`) }}</td></tr></tbody></table></div>
     </section>
-    <form class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="importAdapter">
+    <form v-if="modelCapabilities.some(value => value.loading)" class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="importAdapter">
       <h3 class="font-semibold text-text">{{ t('musicLora.import') }}</h3><p class="text-xs leading-relaxed text-text-dim">{{ t('musicLora.formatHint') }}</p>
-      <div class="grid gap-4 sm:grid-cols-2"><label class="lora-label">{{ t('musicLora.engine') }}<select v-model="importEngine" name="import-engine" class="lora-input" :disabled="busy"><option value="stable_audio3">{{ t('musicLora.engines.stable_audio3') }}</option><option value="yue2">{{ t('musicLora.engines.yue2') }}</option></select></label><label class="lora-label">{{ t('musicLora.target') }}<select v-model="importTarget" name="import-target" class="lora-input" :disabled="busy"><option v-for="target in importTargets" :key="target" :value="target">{{ t(`musicLora.targets.${target}`) }}</option></select></label></div>
+      <div class="grid gap-4 sm:grid-cols-2"><label class="lora-label">{{ t('musicLora.target') }}<select v-model="importTarget" name="import-target" class="lora-input" :disabled="busy"><option v-for="target in importTargets" :key="target" :value="target">{{ t(`musicLora.targets.${target}`) }}</option></select></label></div>
       <label class="lora-label">{{ t('musicLora.name') }}<input v-model="importName" name="import-name" maxlength="120" required class="lora-input" :disabled="busy" /></label>
       <label class="lora-label">{{ t('musicLora.file') }}<input ref="fileInput" type="file" accept=".safetensors" required class="lora-input" :disabled="busy" @change="fileChanged" /></label>
       <button type="submit" class="lora-button" :disabled="busy || !canImport">{{ t('musicLora.importAction') }}</button>
     </form>
-    <section class="space-y-3 rounded-xl border border-border bg-panel p-5"><h3 class="font-semibold text-text">{{ t('musicLora.history') }}</h3><p v-if="!adapters.length" class="text-sm text-text-dim">{{ t('musicLora.empty') }}</p><ul class="space-y-3"><li v-for="adapter in adapters" :key="adapter.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"><div><h4 class="break-words text-sm font-medium text-text">{{ adapter.name }}</h4><p class="text-xs text-text-dim">{{ t(`musicLora.engines.${adapter.engine}`) }} · {{ t(`musicLora.targets.${adapter.target}`) }}</p></div><a :href="musicAdapterFileUrl(adapter.id)" :download="`${adapter.name}.safetensors`" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.download') }}</a></li></ul></section>
-    <form data-training class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="start">
+    <section v-if="props.engine !== 'heartmula'" class="space-y-3 rounded-xl border border-border bg-panel p-5"><h3 class="font-semibold text-text">{{ t('musicLora.history') }}</h3><p v-if="!modelAdapters.length" class="text-sm text-text-dim">{{ t('musicLora.empty') }}</p><ul class="space-y-3"><li v-for="adapter in modelAdapters" :key="adapter.id" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border p-3"><div><h4 class="break-words text-sm font-medium text-text">{{ adapter.name }}</h4><p class="text-xs text-text-dim">{{ t(`musicLora.engines.${adapter.engine}`) }} · {{ t(`musicLora.targets.${adapter.target}`) }}</p></div><a :href="musicAdapterFileUrl(adapter.id)" :download="`${adapter.name}.safetensors`" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.download') }}</a></li></ul></section>
+    <form v-if="props.engine === 'stable_audio3'" data-training class="space-y-4 rounded-xl border border-border bg-panel p-5" @submit.prevent="start">
       <h3 class="font-semibold text-text">{{ t('musicLora.stableTraining') }}</h3><p class="text-xs leading-relaxed text-text-dim">{{ t('musicLora.fresh') }}</p>
       <RouterLink to="/settings#module-stable_audio3" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.setup') }}</RouterLink>
       <p v-if="status && !status.supported" class="text-sm text-status-queued">{{ t('musicLora.unsupportedPlatform') }}</p><p v-else-if="status && !status.installed" class="text-sm text-status-queued">{{ t('musicLora.missingRuntime') }}</p><p v-else-if="status && !weightsReady" class="text-sm text-status-queued">{{ t('musicLora.missingWeights') }}</p>
@@ -142,7 +149,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"><label class="lora-label">{{ t('musicLora.steps') }}<input v-model.number="maxSteps" name="training-steps" type="number" min="1" max="100000" step="1" required class="lora-input" :disabled="busy" /></label><label class="lora-label">{{ t('musicLora.rank') }}<select v-model.number="rank" name="training-rank" class="lora-input" :disabled="busy"><option v-for="value in [8, 16, 32]" :key="value" :value="value">{{ value }}</option></select></label><label class="lora-label">{{ t('musicLora.learningRate') }}<input v-model.number="learningRate" name="training-learning-rate" type="number" min="0.0000001" max="0.01" step="any" required class="lora-input" :disabled="busy" /></label><label class="lora-label">{{ t('musicLora.seed') }}<input v-model.number="seed" name="training-seed" type="number" min="0" max="2147483647" step="1" required class="lora-input" :disabled="busy" /></label></div>
       <button type="submit" class="lora-button accent-gradient text-white" :disabled="busy || !canTrain">{{ t('musicLora.start') }}</button>
     </form>
-    <section class="space-y-4"><h3 class="font-semibold text-text">{{ t('musicLora.trainingHistory') }}</h3><p v-if="!jobs.length" class="text-sm text-text-dim">{{ t('musicLora.emptyTraining') }}</p><article v-for="job in jobs" :key="job.id" class="space-y-3 rounded-xl border border-border bg-panel p-5"><div class="flex flex-wrap items-start justify-between gap-3"><div><h4 class="break-words font-medium text-text">{{ job.request.name }}</h4><p role="status" class="mt-1 text-xs text-text-dim">{{ t(`musicLora.states.${job.status}`) }} · {{ t(`musicLora.stages.${job.stage ?? 'preparing'}`) }}</p></div><button v-if="ongoing(job)" type="button" class="lora-button" :disabled="busy" @click="cancel(job)">{{ t('musicLora.cancel') }}</button></div><p v-if="job.status === 'failed'" role="alert" class="text-sm text-status-failed">{{ errorText(job.error_code, 'musicLora.errors.failed') }}</p><a v-if="job.adapter" :href="musicAdapterFileUrl(job.adapter.id)" :download="`${job.adapter.name}.safetensors`" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.download') }}</a></article></section>
+    <section v-if="props.engine === 'stable_audio3'" class="space-y-4"><h3 class="font-semibold text-text">{{ t('musicLora.trainingHistory') }}</h3><p v-if="!jobs.length" class="text-sm text-text-dim">{{ t('musicLora.emptyTraining') }}</p><article v-for="job in jobs" :key="job.id" class="space-y-3 rounded-xl border border-border bg-panel p-5"><div class="flex flex-wrap items-start justify-between gap-3"><div><h4 class="break-words font-medium text-text">{{ job.request.name }}</h4><p role="status" class="mt-1 text-xs text-text-dim">{{ t(`musicLora.states.${job.status}`) }} · {{ t(`musicLora.stages.${job.stage ?? 'preparing'}`) }}</p></div><button v-if="ongoing(job)" type="button" class="lora-button" :disabled="busy" @click="cancel(job)">{{ t('musicLora.cancel') }}</button></div><p v-if="job.status === 'failed'" role="alert" class="text-sm text-status-failed">{{ errorText(job.error_code, 'musicLora.errors.failed') }}</p><a v-if="job.adapter" :href="musicAdapterFileUrl(job.adapter.id)" :download="`${job.adapter.name}.safetensors`" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.download') }}</a></article></section>
     <LibraryPicker v-if="pickerOpen" track-only @pick="pickTrack" @close="pickerOpen = false" />
   </div>
 </template>

@@ -28,6 +28,7 @@ from app.local_music_contracts import LOCAL_MUSIC_CLIENT_MODELS
 from app.music_lora_contracts import MUSIC_LORA_CLIENT_MODELS
 from app.stable_lora_contracts import STABLE_LORA_CLIENT_MODELS
 from app.music_queue_contracts import MUSIC_QUEUE_CLIENT_MODELS
+from app.lora_dataset_contracts import LORA_DATASET_CLIENT_MODELS
 from app.speaker_review_contracts import SPEAKER_REVIEW_CLIENT_MODELS
 from app.export_provenance_contracts import EXPORT_PROVENANCE_CLIENT_MODELS
 from app.reading_media_contracts import READING_MEDIA_CLIENT_MODELS
@@ -48,6 +49,7 @@ ALL_MODELS.extend(LOCAL_MUSIC_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(STABLE_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_QUEUE_CLIENT_MODELS)
+ALL_MODELS.extend(LORA_DATASET_CLIENT_MODELS)
 ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)
 ALL_MODELS.extend(CHARACTER_SWAP_CLIENT_MODELS)
 ALL_MODELS.extend(VIDEO_SCENE_CLIENT_MODELS)

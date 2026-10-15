@@ -8,15 +8,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from ..config import MODELS
+from pydantic import TypeAdapter
+from ..config import MODELS, ACE_STEP_DIR
+from ..contracts import JsonValue
 from ..orchestrator.manager import manager
 from ..orchestrator.state import ModelStatus
 from .. import video_jobs, native_yue
+from .. import lora_datasets
 from ..job_lifecycle import await_cleanup
 from ..resource_admission import NativeLease, ResourceBusyError, reserve_native, reserve_native_control
 
@@ -103,6 +107,36 @@ def _accelerator_mutation(model_id: str, path: str, method: str) -> bool:
     return model_id == 'yue2' and endpoint in {'v1/tasks/run', 'v1/models/load', 'v1/models/unload'}
 
 
+async def _training_proxy(base_url: str, request: Request, path: str, owner: _ProxyOwnership | None) -> Response:
+    """Serialize builder mutations with the catalog's snapshot/start transactions."""
+    async with lora_datasets.native_lock:
+        await lora_datasets.require_native_idle(require_running=True)
+        if path.startswith('v1/dataset/') and lora_datasets.get_workspace().selected_dataset_id:
+            raise lora_datasets.LoraDatasetError('dataset_library_required')
+        if path == 'v1/training/start':
+            raw = await request.body()
+            if len(raw) > 65536:
+                raise lora_datasets.LoraDatasetError('dataset_request_too_large', 413)
+            try:
+                body: JsonValue = TypeAdapter(JsonValue).validate_json(raw)
+            except ValueError as exc:
+                raise lora_datasets.LoraDatasetError('dataset_request_invalid', 422) from exc
+            folder = body.get('lora_output_dir', './lora_output') if isinstance(body, dict) else None
+            if not isinstance(folder, str) or not folder or len(folder) > 4096 or '\\' in folder or '\x00' in folder:
+                raise lora_datasets.LoraDatasetError('dataset_path_unsafe', 422)
+            relative = Path(folder)
+            root = ACE_STEP_DIR.resolve()
+            output = (root / relative).resolve()
+            if relative.is_absolute() or '..' in relative.parts or not output.is_relative_to(root):
+                raise lora_datasets.LoraDatasetError('dataset_path_unsafe', 422)
+            if output.exists() and (not output.is_dir() or any(output.iterdir())):
+                raise lora_datasets.LoraDatasetError('training_output_exists')
+        elif path in {'v1/dataset/preprocess', 'v1/dataset/preprocess_async'}:
+            # Unattested filename-based tensor reuse can silently mix datasets.
+            raise lora_datasets.LoraDatasetError('dataset_library_required')
+        return await _proxy_to(base_url, request, path, owner)
+
+
 def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
     async def _route(request: Request, path: str = "") -> Response:
         rs = manager.state.models[model_id]
@@ -126,7 +160,9 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
                 if rs.status != ModelStatus.RUNNING:
                     await await_cleanup(owner.close())
                     return JSONResponse({'error': 'model_inactive'}, status_code=503)
-            response = await _proxy_to(MODELS[model_id].proxy_target, request, path, owner)
+            endpoint = path.strip('/')
+            guarded = mutation and model_id == 'ace_step' and (endpoint.startswith('v1/dataset/') or endpoint in {'v1/training/start', 'v1/init'})
+            response = await _training_proxy(MODELS[model_id].proxy_target, request, endpoint, owner) if guarded else await _proxy_to(MODELS[model_id].proxy_target, request, path, owner)
             if owner:
                 previous = response.background
                 async def cleanup() -> None:
@@ -140,6 +176,15 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
             return response
         except ResourceBusyError as exc:
             return JSONResponse({'error': str(exc)}, status_code=409)
+        except lora_datasets.LoraDatasetError as exc:
+            if owner:
+                await await_cleanup(owner.close())
+            return JSONResponse({'error': exc.code}, status_code=exc.status)
+        except (OSError, ValueError):
+            logger.exception('Native dataset control failed')
+            if owner:
+                await await_cleanup(owner.close())
+            return JSONResponse({'error': 'dataset_storage_unavailable'}, status_code=503)
         except httpx.HTTPError:
             logger.exception('Native model proxy failed')
             if owner:
