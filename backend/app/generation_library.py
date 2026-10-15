@@ -344,7 +344,12 @@ def import_presets(connection: sqlite3.Connection, request: ImportGenerationPres
     imported = 0
     with _transaction(connection):
         for legacy in request.presets:
-            fingerprint = hashlib.sha256(json.dumps({'name': legacy.name, 'settings': json.loads(legacy.settings.model_dump_json())},
+            settings = TypeAdapter(JsonObject).validate_json(legacy.settings.model_dump_json())
+            # Preserve fingerprints written before the optional YuE adapter fields existed.
+            for field in ('arAdapter', 'narAdapter'):
+                if settings.get(field) is None:
+                    settings.pop(field, None)
+            fingerprint = hashlib.sha256(json.dumps({'name': legacy.name, 'settings': settings},
                                                     sort_keys=True, ensure_ascii=False).encode()).hexdigest()
             previous = connection.execute('SELECT fingerprint,preset_id FROM generation_preset_imports WHERE legacy_key=?', (legacy.legacy_key,)).fetchone()
             if previous is not None:

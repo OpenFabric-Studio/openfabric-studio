@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import tempfile
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from app.stems_test import assert_worker_stops_after_parent_crash
 
 from app.voice_build import (
     apply_view,
@@ -254,6 +258,17 @@ class ParseTests(unittest.TestCase):
 
 
 class FfmpegTests(unittest.IsolatedAsyncioTestCase):
+    async def test_preparation_ffmpeg_keeps_stderr_diagnostics(self) -> None:
+        from app import voice_build as voice
+        from app.voice_preparation import PreparationJob
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.object(voice, 'VOICES_DIR', Path(temporary) / 'voices'), \
+             patch.object(voice, '_tool', return_value=sys.executable):
+            slot = PreparationJob()
+            result = await voice._ffmpeg(['-c', 'import sys;sys.stderr.write("mean_volume: -18.5 dB\\n")'], slot, lambda: False)
+            self.assertEqual(parse_mean_volume(result), -18.5)
+            self.assertIsNone(slot.proc)
+
     async def test_merge_and_slice_keeps_a_tone(self):
         from app.voice_build import _ffmpeg
 
@@ -291,3 +306,22 @@ class FfmpegTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(VoiceBuildError) as raised:
                 await slice_dataset(silent, root / "dataset", root / "reference.wav", slot, lambda: False)
             self.assertEqual(raised.exception.code, "too_quiet")
+
+
+@unittest.skipIf(sys.platform == 'win32', 'POSIX hard-parent-death fixture')
+class VoiceParentCrashTests(unittest.TestCase):
+    def test_build_and_preparation_workers_stop_with_backend(self) -> None:
+        for slot in ('voice.BuildJob("a"*32).slot', 'PreparationJob()'):
+            with self.subTest(slot=slot), tempfile.TemporaryDirectory() as temporary:
+                assert_worker_stops_after_parent_crash(self, Path(temporary).resolve(),
+                    "from app import voice_build as voice\nfrom app.voice_preparation import PreparationJob\n"
+                    "voice.LOG_DIR=root/'logs'; voice.VOICES_DIR=root/'voices'\n"
+                    "voice._child_env=lambda:os.environ.copy()\n"
+                    f"await voice._spawn(worker,cwd=root,log_name='crash',slot={slot})")
+
+    def test_preparation_ffmpeg_stops_with_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            assert_worker_stops_after_parent_crash(self, Path(temporary).resolve(),
+                "from app import voice_build as voice\nfrom app.voice_preparation import PreparationJob\n"
+                "voice.VOICES_DIR=root/'voices'; voice._tool=lambda name:sys.executable\n"
+                "await voice._ffmpeg(worker[1:],PreparationJob(),lambda:False)")

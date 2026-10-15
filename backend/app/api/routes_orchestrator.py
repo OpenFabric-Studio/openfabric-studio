@@ -49,6 +49,11 @@ async def switch(req: SwitchRequest) -> JsonObject:
 @router.post("/stop", response_model=OrchestratorStatusResponse)
 async def stop(request: Request) -> JsonObject:
     require_local_origin(request)
+    from ..music_queue_ownership import stop_for_manual_control
+    try:
+        await stop_for_manual_control()
+    except ResourceBusyError as exc:
+        raise HTTPException(409, detail=exc.code) from exc
     model_id = manager.state.active_model
     if model_id is None:
         return manager.status_snapshot()

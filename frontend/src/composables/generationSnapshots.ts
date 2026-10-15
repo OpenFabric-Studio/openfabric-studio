@@ -13,12 +13,14 @@ export function emptyAceSettings(): AceGenerationSettings {
 export function emptyYueSettings(): YueGenerationSettings {
   return { engine: 'yue2', referenceImportId: null, title: '', lyrics: '', style: '', cot: 'off', precision: 'q8_0', abc: '',
     cfgScale: null, numInferenceSteps: 8, semantic: samplingSettings(null), abcSampling: samplingSettings(null),
-    seed: 831001, randomSeed: false, batchSize: 1, voiceId: null, referenceRequiresReupload: false }
+    seed: 831001, randomSeed: false, batchSize: 1, voiceId: null, arAdapter: null, narAdapter: null, referenceRequiresReupload: false }
 }
 // Stable content fingerprint for migration identity, not a security checksum.
 function fingerprint(settings: object): string {
   let hash = 14695981039346656037n
-  for (const char of JSON.stringify(settings)) { hash ^= BigInt(char.charCodeAt(0)); hash = BigInt.asUintN(64, hash * 1099511628211n) }
+  // Newly optional adapters must not import an unchanged legacy preset twice.
+  const serialized = JSON.stringify(settings, (key: string, value: unknown) => (key === 'arAdapter' || key === 'narAdapter') && value === null ? undefined : value)
+  for (const char of serialized) { hash ^= BigInt(char.charCodeAt(0)); hash = BigInt.asUintN(64, hash * 1099511628211n) }
   return hash.toString(16).padStart(16, '0')
 }
 function json(raw: string | null): unknown { try { return raw ? JSON.parse(raw) : null } catch { return null } }

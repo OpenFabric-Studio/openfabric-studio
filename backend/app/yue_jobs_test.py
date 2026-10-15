@@ -11,10 +11,13 @@ import wave
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from pydantic import ValidationError
 
-from app import db, yue_jobs
+from app import db, music_lora, yue_jobs
 from app.contracts import JsonObject
+from app.music_lora_contracts import MusicAdapter, MusicAdapterSelection
+from app.music_lora_test import adapter_bytes
 from app.yue_contracts import YueOptions, YueSubmitRequest
 
 
@@ -45,6 +48,23 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
     def request(self, seed: int = 12) -> YueSubmitRequest:
         return YueSubmitRequest(lyrics='[Verse]\nA test', seed=seed, options=YueOptions(style='jazz'))
 
+    async def test_queue_reservation_rejects_external_submit_before_job_publication(self) -> None:
+        from app import music_queue_ownership as ownership
+        with patch.object(ownership, '_owner', None), patch.object(ownership, '_resources_idle', new=AsyncMock(return_value=True)):
+            owner = await ownership.reserve()
+            with self.assertRaises(HTTPException) as caught:
+                yue_jobs.submit(self.request())
+            self.assertEqual(caught.exception.detail, 'music_queue_busy')
+            self.assertEqual(yue_jobs.list_jobs(), [])
+            with owner.context(), patch.object(yue_jobs, 'launch') as launch:
+                job = yue_jobs.submit(self.request())
+                launch.assert_called_once_with(job.id)
+            self.assertTrue(await owner.release())
+
+    def register_adapter(self, target: str) -> MusicAdapter:
+        return music_lora.import_stream(io.BytesIO(adapter_bytes('yue2', target)), filename='style.safetensors',
+            name='My ' + target, engine='yue2', target=target)
+
     async def test_completion_persists_track_without_a_browser(self) -> None:
         async def native(endpoint: str, payload: JsonObject) -> JsonObject:
             return {'audio': audio_fixture(), 'timing': {'wall_ms': 10, 'audio_duration_ms': 10}}
@@ -57,6 +77,148 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(db.list_tracks('yue2')), 1)
         self.assertTrue(Path(db.list_tracks('yue2')[0]['audio_path']).is_file())
         self.assertFalse(yue_jobs.work_busy())
+
+    async def test_disabling_adapters_reloads_a_resident_adapted_session(self) -> None:
+        resident = {**yue_jobs._COMPACT_ARENAS, 'yue2.model_gguf': 'yue2-3b-q8_0.gguf',
+                    'yue2.ar_lora': '/private/ar.safetensors', 'yue2.ar_lora_scale': '0.5',
+                    'yue2.nar_lora': '/private/nar.safetensors', 'yue2.nar_lora_scale': '1.0'}
+        native = AsyncMock(side_effect=[{'data': [{'id': 'yue2', 'loaded': True, 'session_options': resident}]}, {}])
+        with patch.object(yue_jobs, '_native_json', new=native):
+            await yue_jobs._load_model('a' * 32, 'q8_0')
+        self.assertEqual(native.await_count, 2)
+        self.assertEqual(native.await_args_list[1].args[0], '/v1/models/load')
+        requested = native.await_args_list[1].args[1]['session_options']
+        self.assertFalse(any('lora' in key for key in requested))
+
+    async def test_disabling_legacy_adapter_reloads_its_session(self) -> None:
+        resident = {**yue_jobs._COMPACT_ARENAS, 'yue2.model_gguf': 'yue2-3b-q8_0.gguf',
+                    'yue2.lora': '/private/ar.safetensors', 'yue2.lora_scale': '0.5'}
+        native = AsyncMock(side_effect=[{'data': [{'id': 'yue2', 'loaded': True, 'session_options': resident}]}, {}])
+        with patch.object(yue_jobs, '_native_json', new=native):
+            await yue_jobs._load_model('a' * 32, 'q8_0')
+        self.assertEqual(native.await_count, 2)
+        requested = native.await_args_list[1].args[1]['session_options']
+        self.assertFalse(any('lora' in key for key in requested))
+
+    def test_adapter_selection_is_an_id_and_bounded_strength_not_a_native_path(self) -> None:
+        raw = self.request().model_dump()
+        raw['ar_adapter'] = {'id': 'a' * 32, 'strength': 0.5}
+        raw['nar_adapter'] = {'id': 'b' * 32, 'strength': 0.0}
+        try:
+            restored = YueSubmitRequest.model_validate(raw).model_dump()
+        except ValidationError as exc:
+            self.fail(f'Valid managed adapter selections were rejected: {exc}')
+        self.assertEqual(restored['ar_adapter'], raw['ar_adapter'])
+        self.assertEqual(restored['nar_adapter'], raw['nar_adapter'])
+        for bad in ({'id': '/private/ar.safetensors', 'strength': 1.0},
+                    {'id': 'a' * 32, 'strength': 2.1}, {'id': 'a' * 32, 'strength': float('nan')},
+                    {'id': 'a' * 32, 'strength': 1.0, 'path': '/private/file'}):
+            with self.subTest(selection=bad), self.assertRaises(ValidationError):
+                YueSubmitRequest.model_validate({**raw, 'ar_adapter': bad})
+
+    async def test_native_load_uses_independent_adapters_and_saves_their_provenance(self) -> None:
+        ar, nar = self.register_adapter('ar'), self.register_adapter('nar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=ar.id, strength=0.5)
+        request.nar_adapter = MusicAdapterSelection(id=nar.id, strength=0.0)
+        calls: list[tuple[str, JsonObject | None]] = []
+        async def native(endpoint: str, payload: JsonObject | None) -> JsonObject:
+            calls.append((endpoint, payload))
+            if endpoint.startswith('/v1/models?'):
+                return {'data': []}
+            return {'audio': audio_fixture()} if endpoint == '/v1/tasks/run' else {}
+        with patch.object(yue_jobs, '_native_json', side_effect=native):
+            queued = yue_jobs.submit(request)
+            self.assertEqual(queued.ar_adapter, request.ar_adapter)
+            self.assertEqual(queued.nar_adapter, request.nar_adapter)
+            await asyncio.wait_for(yue_jobs._tasks[queued.id], 2)
+        loaded = calls[1][1]
+        assert loaded is not None
+        session = loaded['session_options']
+        self.assertEqual(session, {**yue_jobs._COMPACT_ARENAS, 'yue2.model_gguf': 'yue2-3b-q8_0.gguf',
+            'yue2.ar_lora': str(music_lora.resolve(request.ar_adapter, engine='yue2', target='ar')),
+            'yue2.ar_lora_scale': '0.5',
+            'yue2.nar_lora': str(music_lora.resolve(request.nar_adapter, engine='yue2', target='nar')),
+            'yue2.nar_lora_scale': '0.0'})
+        generated = calls[2][1]
+        assert generated is not None
+        self.assertNotIn('ar_adapter', str(generated))
+        self.assertNotIn('nar_adapter', str(generated))
+        track = yue_jobs.get_job(queued.id).track
+        assert track is not None
+        self.assertEqual(track.params['ar_adapter'], {'id': ar.id, 'strength': 0.5})
+        self.assertEqual(track.params['nar_adapter'], {'id': nar.id, 'strength': 0.0})
+        self.assertEqual(track.params['_music_adapters'], [
+            {**ar.model_dump(mode='json'), 'strength': 0.5}, {**nar.model_dump(mode='json'), 'strength': 0.0}])
+        self.assertIn('arAdapter', str(track.params['_generation_settings']))
+        self.assertNotIn(str(db.DATA_DIR), str(track.params))
+
+    def test_incompatible_adapter_is_rejected_before_a_job_is_created(self) -> None:
+        adapter = self.register_adapter('nar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=adapter.id)
+        with patch.object(yue_jobs, 'launch'), self.assertRaises(HTTPException) as caught:
+            yue_jobs.submit(request)
+        self.assertEqual(caught.exception.detail, 'music_lora_target_mismatch')
+        self.assertEqual(yue_jobs.list_jobs(), [])
+
+    def test_legacy_runtime_rejects_adapter_requests_but_preserves_plain_generation(self) -> None:
+        adapter = self.register_adapter('ar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=adapter.id)
+        with patch.object(yue_jobs, 'YUE2_LORA_AVAILABLE', False), patch.object(yue_jobs, 'launch'):
+            with self.assertRaises(HTTPException) as caught:
+                yue_jobs.submit(request)
+            self.assertEqual(caught.exception.detail, 'music_lora_runtime_unsupported')
+            self.assertEqual(yue_jobs.submit(self.request()).status, 'queued')
+        self.assertEqual(len(yue_jobs.list_jobs()), 1)
+
+    async def test_changed_runtime_in_queue_cannot_silently_ignore_adapters(self) -> None:
+        adapter = self.register_adapter('ar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=adapter.id)
+        with patch.object(yue_jobs, 'launch'):
+            queued = yue_jobs.submit(request)
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, 'YUE2_LORA_AVAILABLE', False), \
+             patch.object(yue_jobs, '_native_json', new=native), self.assertLogs('app.yue_jobs', level='ERROR'):
+            yue_jobs.launch(queued.id)
+            await asyncio.wait_for(yue_jobs._tasks[queued.id], 2)
+        native.assert_not_awaited()
+        self.assertEqual(yue_jobs.get_job(queued.id).error_code, 'music_lora_runtime_unsupported')
+
+    async def test_queued_adapter_manifest_must_match_accepted_provenance(self) -> None:
+        adapter = self.register_adapter('ar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=adapter.id)
+        with patch.object(yue_jobs, 'launch'):
+            queued = yue_jobs.submit(request)
+        manifest = db.DATA_DIR / 'music-lora' / adapter.id / 'manifest.json'
+        manifest.write_text(adapter.model_copy(update={'name': 'Changed after admission'}).model_dump_json())
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, '_native_json', new=native), self.assertLogs('app.yue_jobs', level='ERROR'):
+            yue_jobs.launch(queued.id)
+            await asyncio.wait_for(yue_jobs._tasks[queued.id], 2)
+        native.assert_not_awaited()
+        self.assertEqual(yue_jobs.get_job(queued.id).error_code, 'music_lora_adapter_changed')
+
+    async def test_changed_adapter_in_queue_fails_before_native_mutation(self) -> None:
+        adapter = self.register_adapter('ar')
+        request = self.request()
+        request.ar_adapter = MusicAdapterSelection(id=adapter.id)
+        with patch.object(yue_jobs, 'launch'):
+            queued = yue_jobs.submit(request)
+        path = music_lora.resolve(request.ar_adapter, engine='yue2', target='ar')
+        path.write_bytes(path.read_bytes() + b'changed')
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, '_native_json', new=native), self.assertLogs('app.yue_jobs', level='ERROR'):
+            yue_jobs.launch(queued.id)
+            await asyncio.wait_for(yue_jobs._tasks[queued.id], 2)
+        native.assert_not_awaited()
+        result = yue_jobs.get_job(queued.id)
+        self.assertEqual(result.status, 'failed')
+        self.assertEqual(result.error_code, 'music_lora_adapter_changed')
+        self.assertNotIn(str(db.DATA_DIR), result.model_dump_json())
 
     async def test_cancel_queued_job_never_resets_another_job(self) -> None:
         entered = asyncio.Event()
@@ -165,6 +327,30 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
         yue_jobs.recover()
         self.assertEqual(len(db.list_tracks()), 1)
 
+    async def test_catalog_failure_has_save_error_and_recovers_retained_audio_without_inference(self) -> None:
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, '_load_model', new=AsyncMock()), \
+             patch.object(yue_jobs, '_native_json', new=native), \
+             patch.object(db, 'insert_track', side_effect=OSError('private storage failure')), \
+             self.assertLogs('app.yue_jobs', level='ERROR'):
+            job = yue_jobs.submit(self.request())
+            await asyncio.wait_for(yue_jobs._tasks[job.id], 2)
+        failed = yue_jobs.get_job(job.id)
+        self.assertEqual(failed.status, 'failed')
+        self.assertEqual(failed.error_code, 'save_failed')
+        retained = db.FILES_DIR / 'yue2' / f'yue_{job.id}.wav'
+        self.assertTrue(retained.is_file())
+        self.assertEqual(db.list_tracks(), [])
+        with patch.object(yue_jobs, '_native_json', new=native):
+            yue_jobs.recover()
+            yue_jobs.recover()
+        recovered = yue_jobs.get_job(job.id)
+        self.assertEqual(recovered.status, 'done')
+        self.assertIsNotNone(recovered.track)
+        self.assertEqual(len(db.list_tracks()), 1)
+        self.assertEqual(native.await_count, 1)
+        self.assertTrue(retained.is_file())
+
     async def test_deleted_track_does_not_reappear_from_durable_job_feed(self) -> None:
         with patch.object(yue_jobs, '_load_model', new=AsyncMock()), patch.object(yue_jobs, '_native_json', new=AsyncMock(return_value={'audio': audio_fixture()})):
             job = yue_jobs.submit(self.request())
@@ -201,6 +387,7 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
             with self.assertLogs('app.yue_jobs', level='ERROR'):
                 await asyncio.wait_for(yue_jobs._tasks[job.id], 2)
         self.assertEqual(yue_jobs.get_job(job.id).status, 'failed')
+        self.assertEqual(yue_jobs.get_job(job.id).error_code, 'generation_failed')
         self.assertEqual(db.list_tracks(), [])
 
     def test_untrusted_native_options_are_bounded(self) -> None:

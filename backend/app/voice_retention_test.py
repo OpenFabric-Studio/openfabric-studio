@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeout
 import sqlite3
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -24,13 +27,15 @@ class VoiceRetentionTests(unittest.IsolatedAsyncioTestCase):
         (self.voice / 'recordings').mkdir(parents=True)
         (self.voice / 'recordings' / 'take.wav').write_bytes(b'original recording')
         (self.voice / 'voice.json').write_text('{"id":"' + self.voice_id + '","name":"Fixture"}')
-        self.connection = sqlite3.connect(':memory:', check_same_thread=False)
+        database = self.root / 'catalog.db'
+        self.connection = sqlite3.connect(database, check_same_thread=False, isolation_level=None)
         self.connection.row_factory = sqlite3.Row
         self.addCleanup(self.connection.close)
         self.connection.execute('CREATE TABLE tracks(id INTEGER PRIMARY KEY,params_json TEXT NOT NULL,audio_path TEXT,abc_path TEXT)')
         audio_version_store.migrate(self.connection)
         retention.migrate(self.connection)
         self.enterContext(patch.object(db, 'get_db', return_value=self.connection))
+        self.enterContext(patch.object(db, 'DB_PATH', database))
         self.enterContext(patch.object(db, 'DATA_DIR', self.root))
         self.enterContext(patch.object(retention, 'DATA_DIR', self.root))
         self.enterContext(patch.object(db, 'FILES_DIR', self.root / 'files'))
@@ -50,6 +55,15 @@ class VoiceRetentionTests(unittest.IsolatedAsyncioTestCase):
             retention.require_not_frozen(self.voice_id)
         self.assertEqual(raised.exception.detail, 'voice_retention_frozen')
         self.assertTrue((self.voice / 'recordings' / 'take.wav').is_file())
+
+    async def test_receipt_write_rolls_back_if_plan_update_fails(self) -> None:
+        plan = retention.plan_deletion(self.voice_id)
+        original = retention.get_plan(plan.id)
+        self.connection.execute("CREATE TRIGGER reject_plan_update BEFORE UPDATE ON voice_deletion_plans BEGIN SELECT RAISE(ABORT,'injected update failure'); END")
+        with self.assertRaises(sqlite3.IntegrityError):
+            retention._record(plan.model_copy(update={'status': 'executing'}), plan.items)
+        self.assertEqual(self.connection.execute('SELECT count(*) FROM voice_deletion_receipts').fetchone()[0], 0)
+        self.assertEqual(retention.get_plan(plan.id), original)
 
     async def test_confirmation_is_bound_to_reviewed_plan(self) -> None:
         plan = retention.plan_deletion(self.voice_id)
@@ -275,3 +289,50 @@ class VoiceRetentionTests(unittest.IsolatedAsyncioTestCase):
                         retention._record(plan, plan.items)
                     self.assertEqual(raised.exception.detail, 'voice_retention_receipt_capacity_exceeded')
                     self.assertEqual(self.connection.execute('SELECT count(*) FROM voice_deletion_receipts').fetchone()[0], 1)
+
+
+class VoiceRetentionTransactionTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for name, value in (('_db', None), ('DATA_DIR', self.root), ('DB_PATH', self.root / 'catalog.db'), ('FILES_DIR', self.root / 'files')):
+            self.enterContext(patch.object(db, name, value))
+        self.enterContext(patch.object(retention, 'DATA_DIR', self.root))
+        self.enterContext(patch.object(voice_build, 'VOICES_DIR', self.root / 'voices'))
+        self.voice_id = 'a' * 32
+        voice = self.root / 'voices' / self.voice_id
+        voice.mkdir(parents=True)
+        (voice / 'voice.json').write_text('{"id":"' + self.voice_id + '","name":"Fixture"}')
+        self.connection = db.get_db()
+        self.addCleanup(self.connection.close)
+        self.plan = retention.plan_deletion(self.voice_id)
+
+    def _assert_failed_track_is_rolled_back(self, write: Callable[[], object]) -> None:
+        from app import generation_library
+        started = threading.Event()
+        futures: list[Future[object]] = []
+        def retain() -> object:
+            started.set()
+            return write()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            def fail_snapshot(_connection: sqlite3.Connection, _row: sqlite3.Row) -> None:
+                futures.append(executor.submit(retain))
+                self.assertTrue(started.wait(5))
+                with self.assertRaises(FutureTimeout):
+                    futures[0].result(timeout=.25)
+                raise ValueError('injected track publication failure')
+            with patch.object(generation_library, 'capture_track', side_effect=fail_snapshot):
+                with self.assertRaisesRegex(ValueError, 'injected track publication failure'):
+                    db.insert_track(model='ace_step', title='Fixture', lyrics='', seed=1, duration_ms=1000,
+                        wall_ms=None, params={}, audio_path=self.root / 'files' / 'fixture.wav', abc_path=None)
+            self.assertEqual(len(futures), 1)
+            futures[0].result(timeout=5)
+        self.assertEqual(db.list_tracks(), [])
+        self.assertEqual(retention.get_plan(self.plan.id).id, self.plan.id)
+
+    def test_plan_save_cannot_commit_a_concurrent_failed_track(self) -> None:
+        self._assert_failed_track_is_rolled_back(lambda: retention.plan_deletion(self.voice_id))
+        self.assertEqual(self.connection.execute('SELECT count(*) FROM voice_deletion_plans').fetchone()[0], 1)
+
+    def test_receipt_save_cannot_commit_a_concurrent_failed_track(self) -> None:
+        self._assert_failed_track_is_rolled_back(lambda: retention._record(self.plan, self.plan.items))
+        self.assertEqual(retention.get_receipt(self.plan.id).sequence, 1)

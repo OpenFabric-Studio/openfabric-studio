@@ -5,7 +5,7 @@ it. A PID alone is never treated as proof of ownership.
 """
 
 from __future__ import annotations
-import argparse, asyncio, json, os, signal, subprocess, sys, tempfile, threading, time, uuid
+import argparse, asyncio, json, os, shutil, signal, subprocess, sys, tempfile, threading, time, uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import IO
@@ -145,6 +145,7 @@ async def spawn_owned(
     cwd: Path | None = None,
     env: Mapping[str, str] | None = None,
     stdout: int | None = None,
+    stderr: int | None = asyncio.subprocess.STDOUT,
     on_identity: Callable[[WorkerIdentity], None] | None = None,
 ) -> asyncio.subprocess.Process:
     from .job_lifecycle import await_cleanup, kill_process_tree, register_windows_job
@@ -170,7 +171,7 @@ async def spawn_owned(
             env=env,
             stdin=asyncio.subprocess.PIPE,
             stdout=stdout,
-            stderr=asyncio.subprocess.STDOUT,
+            stderr=stderr,
             start_new_session=sys.platform != "win32",
         )
     )
@@ -199,10 +200,56 @@ async def spawn_owned(
         raise
 
 
+async def run_owned_command(
+    argv: list[str], *, timeout: float, max_bytes: int = 1024 * 1024,
+    env: Mapping[str, str] | None = None, stderr: int | None = asyncio.subprocess.DEVNULL,
+) -> subprocess.CompletedProcess[bytes]:
+    """Bound a short command without closing its parent-liveness pipe."""
+    from .job_lifecycle import await_cleanup, kill_process_tree
+
+    directory = Path(tempfile.mkdtemp(prefix="openfabric-probe-"))
+    proc = await spawn_owned(
+        argv, receipt_path=directory / "worker.json",
+        env=env, stdout=asyncio.subprocess.PIPE, stderr=stderr,
+    )
+    try:
+        output = await read_owned_output(proc, max_bytes=max_bytes, timeout=timeout)
+        return subprocess.CompletedProcess(argv, proc.returncode if proc.returncode is not None else 1, output)
+    finally:
+        # Keep the receipt if draining fails; a PID alone cannot prove ownership.
+        await await_cleanup(kill_process_tree(proc))
+        if proc.stdin is not None:
+            proc.stdin.close()
+        shutil.rmtree(directory)
+
+
+async def drain_receipt(path: Path) -> None:
+    """Require complete ownership proof when creation returned no live handle."""
+    if path.is_symlink() or path.stat().st_size > 65536:
+        raise OSError('worker_identity_unverified')
+    try:
+        receipt = WorkerReceipt.model_validate_json(path.read_bytes())
+    except ValidationError as exc:
+        raise OSError('worker_identity_unverified') from exc
+    identity = WorkerIdentity(pid=receipt.pid, token=receipt.token, receipt=str(path))
+    if not await terminate_verified(identity):
+        raise OSError('worker_identity_unverified')
+
+
+def _posix_group_exited(pid: int) -> bool:
+    if sys.platform == 'win32':
+        return False
+    try:
+        os.killpg(pid, 0)
+    except ProcessLookupError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 async def terminate_verified(identity: WorkerIdentity) -> bool:
     """False means a live process could not be verified; never kill that PID."""
-    from .job_lifecycle import spawn_process, communicate_process
-
     if sys.platform == "win32":
         command = [
             "powershell",
@@ -212,11 +259,11 @@ async def terminate_verified(identity: WorkerIdentity) -> bool:
         ]
     else:
         command = ["ps", "-p", str(identity.pid), "-o", "command="]
-    proc = await spawn_process(
-        *command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-    )
-    out, _ = await communicate_process(proc, 5)
-    text = out.decode(errors="replace").strip()
+    try:
+        result = await run_owned_command(command, timeout=5, max_bytes=65536)
+    except WorkerOutputError:
+        return False
+    text = result.stdout.decode(errors="replace").strip()
     if text and (
         str(Path(__file__).resolve()) not in text
         or f"--token {identity.token}" not in text
@@ -228,7 +275,7 @@ async def terminate_verified(identity: WorkerIdentity) -> bool:
             return False
         receipt = WorkerReceipt.model_validate_json(path.read_bytes())
     except (OSError, ValidationError):
-        return not text and sys.platform != "win32"
+        return not text and sys.platform != "win32" and _posix_group_exited(identity.pid)
     if receipt.pid != identity.pid or receipt.token != identity.token:
         return False
     if sys.platform == "win32":
@@ -255,17 +302,16 @@ async def terminate_verified(identity: WorkerIdentity) -> bool:
         except (OSError, TimeoutError):
             return False
     if not text:
-        return True
+        # A leader can exit before its descendants; never clear an unverified group.
+        return _posix_group_exited(identity.pid)
     try:
         if os.getpgid(identity.pid) != identity.pid:
             return False
         os.killpg(identity.pid, signal.SIGKILL)
     except ProcessLookupError:
-        return True
+        return _posix_group_exited(identity.pid)
     for _ in range(100):
-        try:
-            os.kill(identity.pid, 0)
-        except ProcessLookupError:
+        if _posix_group_exited(identity.pid):
             return True
         await asyncio.sleep(0.02)
     return False

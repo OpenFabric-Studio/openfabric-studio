@@ -10,10 +10,13 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections.abc import Callable
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from starlette.datastructures import UploadFile
+from app.video_process import WorkerIdentity
+from app.video_contracts import VideoCharacterTrainingJob
 
 
 def _png(path: Path, color: str) -> None:
@@ -68,6 +71,153 @@ class CharacterTrainingTests(unittest.IsolatedAsyncioTestCase):
         cancelled = await self.training.cancel_job(identifier)
         self.assertEqual(cancelled.status, "cancelled")
         self.assertNotIn(identifier, self.training._TASKS)
+
+    async def test_failed_normalizer_drain_preserves_receipt_blocks_admission_and_retries(self) -> None:
+        from app.job_lifecycle import kill_process_tree
+        from app.video_media import MediaInfo
+
+        marker = self.root / 'normalizer-started'
+        command = [sys.executable, '-c', f"from pathlib import Path;import time;Path({str(marker)!r}).write_text('started');time.sleep(60)"]
+        processes: list[asyncio.subprocess.Process] = []
+        original = self.training.spawn_owned
+
+        async def capture(argv: list[str], *, receipt_path: Path, stdout: int | None = None, on_identity: Callable[[WorkerIdentity], None] | None = None) -> asyncio.subprocess.Process:
+            process = await original(argv, receipt_path=receipt_path, stdout=stdout, on_identity=on_identity)
+            processes.append(process)
+            return process
+
+        task: asyncio.Task[VideoCharacterTrainingJob] | None = None
+        identifier = ''
+        try:
+            with patch.object(self.training, 'probe_media', AsyncMock(return_value=MediaInfo(64,64,24,2,0))), patch.object(self.training, 'normalization_argv', return_value=command), patch.object(self.training, 'spawn_owned', side_effect=capture), patch.object(self.training, 'kill_process_tree', AsyncMock(side_effect=OSError('injected drain failure'))):
+                task = asyncio.create_task(self.training._create_job(name='Fixture', consent_confirmed=True, uploads=[_upload(self.photos[0])]))
+                async with asyncio.timeout(5):
+                    while not marker.exists():
+                        await asyncio.sleep(.01)
+                root = next(self.training.jobs_root().iterdir())
+                identifier = root.name
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                self.assertTrue(root.is_dir(), 'Failed drain removed live normalizer inputs')
+                self.assertTrue((root / 'identity.json').is_file())
+                self.assertTrue((root / 'worker.json').is_file())
+                self.assertTrue(self.training.work_busy())
+                with self.assertRaises(self.projects.VideoProjectError) as error:
+                    await self.training.create_job(name='Other',consent_confirmed=True,uploads=[])
+                self.assertEqual(error.exception.code,'busy')
+                await self.training.recover()
+                self.assertTrue(root.exists(), 'Failed recovery discarded owned inputs')
+                self.assertTrue(self.training.work_busy())
+            await self.training.recover()
+            self.assertIsNotNone(processes[0].returncode)
+            self.assertFalse(root.exists())
+            self.assertFalse(self.training.work_busy())
+        finally:
+            if task is not None:
+                task.cancel()
+                await asyncio.gather(task,return_exceptions=True)
+            for process in processes:
+                await kill_process_tree(process)
+            if hasattr(self.training,'_NORMALIZERS'):
+                self.training._NORMALIZERS.pop(identifier,None)
+            self.training._UNVERIFIED.discard(identifier)
+
+    async def test_recovery_drains_unpublished_normalizer_receipt(self) -> None:
+        from app.job_lifecycle import kill_process_tree
+        from app.video_process import WorkerIdentity, spawn_owned
+        root = self.training.job_dir('c'*32)
+        root.mkdir(parents=True)
+        receipt = root / 'worker.json'
+
+        def record(identity: WorkerIdentity) -> None:
+            (root / 'identity.json').write_text(identity.model_dump_json())
+
+        process = await spawn_owned([sys.executable,'-c','import time;time.sleep(60)'], receipt_path=receipt, on_identity=record)
+        try:
+            async with asyncio.timeout(5):
+                while not receipt.is_file():
+                    await asyncio.sleep(.01)
+            self.assertEqual(self.training.list_jobs(), [])
+            await self.training.recover()
+            self.assertFalse(root.exists(), 'Unpublished worker was omitted from startup recovery')
+            self.assertFalse(self.training.work_busy())
+        finally:
+            await kill_process_tree(process)
+            self.training._UNVERIFIED.discard('c'*32)
+
+    async def test_cancel_and_shutdown_drain_unpublished_normalizers(self) -> None:
+        from app.job_lifecycle import kill_process_tree
+        from app.video_process import spawn_owned
+        for operation, identifier in (('cancel','d'*32),('shutdown','e'*32)):
+            with self.subTest(operation=operation):
+                root = self.training.job_dir(identifier)
+                root.mkdir(parents=True)
+                receipt = root / 'worker.json'
+                def record(identity: WorkerIdentity) -> None:
+                    self.training._NORMALIZERS[identifier] = (None,identity)
+                    (root/'identity.json').write_text(identity.model_dump_json())
+                process = await spawn_owned([sys.executable,'-c','import time;time.sleep(60)'],receipt_path=receipt,on_identity=record)
+                self.training._NORMALIZERS[identifier] = (process,self.training._NORMALIZERS[identifier][1])
+                try:
+                    if operation == 'cancel':
+                        with self.assertRaises(self.projects.VideoProjectError) as error:
+                            await self.training.cancel_job(identifier)
+                        self.assertEqual(error.exception.code,'not_found')
+                    else:
+                        await self.training.shutdown()
+                    self.assertIsNotNone(process.returncode)
+                    self.assertFalse(root.exists())
+                    self.assertFalse(self.training.work_busy())
+                finally:
+                    await kill_process_tree(process)
+                    self.training._NORMALIZERS.pop(identifier,None)
+                    self.training._UNVERIFIED.discard(identifier)
+
+    async def test_spawn_failure_before_return_retains_unpublished_identity_for_recovery(self) -> None:
+        from app.job_lifecycle import kill_process_tree
+        from app.video_media import MediaInfo
+        processes: list[asyncio.subprocess.Process] = []
+        original = self.training.spawn_owned
+        async def fail_after_launch(argv: list[str], *, receipt_path: Path, stdout: int | None = None, on_identity: Callable[[WorkerIdentity], None] | None = None) -> asyncio.subprocess.Process:
+            process = await original(argv,receipt_path=receipt_path,stdout=stdout,on_identity=on_identity)
+            processes.append(process)
+            async with asyncio.timeout(5):
+                while not receipt_path.is_file():
+                    await asyncio.sleep(.01)
+            raise OSError('Injected creation cancellation drain failure')
+        identifier = ''
+        try:
+            with patch.object(self.training,'probe_media',AsyncMock(return_value=MediaInfo(64,64,24,2,0))), patch.object(self.training,'normalization_argv',return_value=[sys.executable,'-c','import time;time.sleep(60)']), patch.object(self.training,'spawn_owned',side_effect=fail_after_launch):
+                with self.assertRaises(OSError):
+                    await self.training._create_job(name='Fixture',consent_confirmed=True,uploads=[_upload(self.photos[0])])
+            root = next(self.training.jobs_root().iterdir())
+            identifier = root.name
+            self.assertTrue((root/'identity.json').exists())
+            self.assertTrue((root/'worker.json').exists())
+            self.assertTrue(self.training.work_busy())
+            await self.training.recover()
+            self.assertFalse(root.exists())
+            self.assertFalse(self.training.work_busy())
+        finally:
+            for process in processes:
+                await kill_process_tree(process)
+            self.training._NORMALIZERS.pop(identifier,None)
+            self.training._UNVERIFIED.discard(identifier)
+
+    async def test_unpublished_receipt_with_wrong_root_is_never_used_to_kill(self) -> None:
+        root = self.training.job_dir('f'*32)
+        root.mkdir(parents=True)
+        identity = WorkerIdentity(pid=42,token='a'*32,receipt=str(self.root/'unowned.json'))
+        (root/'identity.json').write_text(identity.model_dump_json())
+        try:
+            with patch.object(self.training,'terminate_verified',AsyncMock()) as terminate:
+                await self.training.recover()
+            terminate.assert_not_called()
+            self.assertTrue(root.exists())
+            self.assertTrue(self.training.work_busy())
+        finally:
+            self.training._NORMALIZERS.pop('f'*32,None)
+            self.training._UNVERIFIED.discard('f'*32)
 
     async def test_shutdown_drains_running_training_child(self) -> None:
         identifier = "a" * 32

@@ -261,8 +261,7 @@ class VoiceReplacementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(replacement.MAX_DURATION_SECONDS, 7200)
         for output, expected in [(b'NaN', 'invalid_audio'), (b'inf', 'invalid_audio'),
                                  (b'0', 'invalid_audio'), (b'-1', 'invalid_audio'), (b'7201', 'audio_too_long')]:
-            with self.subTest(output=output), patch.object(replacement, 'spawn_process', new=AsyncMock(return_value=Mock(returncode=0))), \
-                 patch.object(replacement, 'communicate_process', new=AsyncMock(return_value=(output, b''))):
+            with self.subTest(output=output), patch.object(replacement, 'run_owned_command', new=AsyncMock(return_value=Mock(returncode=0, stdout=output))):
                 with self.assertRaises(HTTPException) as error:
                     await replacement._duration(self.root / 'fixture.wav')
                 self.assertEqual(error.exception.detail, expected)
@@ -275,6 +274,19 @@ class VoiceReplacementTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()['detail'], 'audio_too_long')
         self.assertEqual(db.list_tracks(), [])
         self.assertEqual(list((self.root / 'files').rglob('*.*')), [])
+
+    async def test_bounded_probe_failures_return_safe_http_errors_and_rollback(self) -> None:
+        from app import voice_replacement as replacement
+        from app.video_process import WorkerOutputError
+
+        for failure, code in ((WorkerOutputError('private output'), 'invalid_audio'),
+                              (TimeoutError('private timeout'), 'audio_validation_timeout')):
+            with self.subTest(code=code), patch.object(replacement, 'run_owned_command', AsyncMock(side_effect=failure)):
+                response = await self.replace()
+            self.assertEqual(response.status_code, 400, response.text)
+            self.assertEqual(response.json(), {'detail': code})
+            self.assertEqual(db.list_tracks(), [])
+            self.assertEqual(list((self.root / 'files').rglob('*.*')), [])
 
     async def test_voice_becoming_unready_during_decode_rolls_back(self) -> None:
         from app import voice_replacement as replacement

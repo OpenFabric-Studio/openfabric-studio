@@ -18,12 +18,25 @@ def _declared(identifier: str, name: str, scope: LicenseScope, license_name: str
         status='declared', declared_license=license_name, source_url=url, notes=notes, reviewed_at=reviewed_at)
 
 
-def _unknown(identifier: str, name: str, scope: LicenseScope, notes: str, url: str | None = None) -> ModuleLicenseDeclaration:
+def _unknown(identifier: str, name: str, scope: LicenseScope, notes: str, url: str | None = None,
+             reviewed_at: str = REVIEWED_AT) -> ModuleLicenseDeclaration:
     return ModuleLicenseDeclaration(component_id=identifier, name=name, scope=scope, status='unknown',
-        source_url=url, notes=notes, reviewed_at=REVIEWED_AT)
+        source_url=url, notes=notes, reviewed_at=reviewed_at)
 
 
 _DECLARATIONS: dict[ModuleId, tuple[ModuleLicenseDeclaration, ...]] = {
+    'heartmula': (
+        _declared('heartlib-mlx-code', 'Community HeartMuLa MLX source', 'code', 'Apache-2.0', 'https://github.com/Acelogic/heartlib-mlx/blob/02dd2e22f6a1bf1a2f769a13f8af952a7a4e9cee/pyproject.toml', 'The community port declares Apache-2.0 in its package metadata. Model conversion compatibility and local checkpoint provenance remain separate.', reviewed_at='2026-10-14'),
+        _declared('heartmula-3b', 'HeartMuLa-oss-3B published weights', 'model', 'Apache-2.0', 'https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B', reviewed_at='2026-10-14'),
+        _declared('heartcodec-20260123', 'HeartCodec-oss-20260123 published weights', 'auxiliary', 'Apache-2.0', 'https://huggingface.co/HeartMuLa/HeartCodec-oss-20260123', 'Current public codec model card; compatibility of a locally converted codec with this community port needs an actual preview. The older HeartCodec-oss URL in its README is not currently publicly available.', reviewed_at='2026-10-14'),
+        _unknown('heartmula-local-conversions', 'Local MLX conversions and tokenizer', 'model', 'The app does not establish conversion accuracy, original hashes or provenance of a local model folder.', reviewed_at='2026-10-14'),
+    ),
+    'stable_audio3': (
+        _declared('stable-audio3-code', 'Official Stable Audio 3 source and MLX runtime', 'code', 'MIT', 'https://github.com/Stability-AI/stable-audio-3/blob/77e0398c26f7d22d801ec1bb036307e8b231f741/LICENSE', reviewed_at='2026-10-14'),
+        _declared('stable-audio3-optimized', 'Stable Audio 3 optimized music and codec weights', 'model', 'Stability AI Community License', 'https://huggingface.co/stabilityai/stable-audio-3-optimized', 'Custom terms include commercial conditions; source MIT does not replace the model agreement.', reviewed_at='2026-10-14'),
+        _declared('stable-audio3-t5gemma', 'T5Gemma text encoder', 'auxiliary', 'Gemma Terms of Use', 'https://huggingface.co/stabilityai/stable-audio-3-optimized', 'Publisher states that T5Gemma is redistributed under Google Gemma Terms of Use.', reviewed_at='2026-10-14'),
+        _unknown('stable-audio3-local-bundles', 'Local optimized bundles and conversions', 'model', 'The app checks required local artifacts without clearing their rights or certifying a replacement checkpoint.', reviewed_at='2026-10-14'),
+    ),
     'speaker_review': (
         _declared('speechbrain-code', 'SpeechBrain 1.0.3 source', 'code', 'Apache-2.0', 'https://github.com/speechbrain/speechbrain/blob/v1.0.3/LICENSE'),
         _declared('ecapa-voxceleb', 'ECAPA VoxCeleb published checkpoint', 'model', 'Apache-2.0', 'https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb', 'Publisher model-card declaration for the reviewed checkpoint. VoxCeleb source data and third-party dependencies have separate terms.'),

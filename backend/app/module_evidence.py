@@ -39,7 +39,7 @@ class CapabilityReceipt(BaseModel):
 
 
 def environment_fingerprint(environment: ModuleEnvironment, identifier: ModuleId) -> str | None:
-    """Hash at most 5,000 package entries and small source entrypoints."""
+    """Hash at most 5,000 package entries and bounded engine source files."""
     from .module_catalog import DEFINITIONS, engine_python
     engine = environment.paths[identifier]
     python = engine_python(engine, environment.platform)
@@ -54,6 +54,14 @@ def environment_fingerprint(environment: ModuleEnvironment, identifier: ModuleId
             if path.is_file():
                 if stat.st_size > 2 * 1024**2:
                     return None
+                digest.update(path.read_bytes())
+        if identifier in ('heartmula', 'stable_audio3'):
+            source = engine / ('src/heartlib_mlx' if identifier == 'heartmula' else 'optimized/mlx')
+            for count, path in enumerate(sorted(source.rglob('*.py')), start=1):
+                stat = path.stat()
+                if count > 500 or stat.st_size > 2 * 1024**2:
+                    return None
+                digest.update(str(path.relative_to(engine)).encode())
                 digest.update(path.read_bytes())
         if environment.platform == 'win32':
             sites = [engine / '.venv/Lib/site-packages']

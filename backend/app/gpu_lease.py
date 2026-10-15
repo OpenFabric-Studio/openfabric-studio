@@ -1,4 +1,4 @@
-"""Label actual holders of the existing shared GPU lock without changing admission."""
+"""Label GPU lock holders and honor the active music coordinator reservation."""
 from __future__ import annotations
 
 import asyncio
@@ -25,9 +25,14 @@ def gpu_owner(lock: asyncio.Lock) -> GpuOwner:
 
 @asynccontextmanager
 async def gpu_lease(lock: asyncio.Lock, reason: VoiceQueueReason, label: str = '') -> AsyncIterator[None]:
+    from .music_queue_ownership import require_access
+    from .resource_admission import admission_lock
+    require_access()
     async with lock:
-        owner = GpuOwner(reason, label.strip()[:200])
-        _owners[lock] = owner
+        async with admission_lock:
+            require_access()
+            owner = GpuOwner(reason, label.strip()[:200])
+            _owners[lock] = owner
         try:
             yield
         finally:

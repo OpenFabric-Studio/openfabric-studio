@@ -7,6 +7,7 @@ import { useLoraRegistry } from '../../composables/useLoraRegistry'
 import { formatDuration } from '../../composables/formatDuration'
 import { uploadDatasetFiles } from '../../api/loraDataset'
 import * as aceStepApi from '../../api/aceStep'
+import { ApiError } from '../../api/http'
 import ModelOfflineBanner from '../../components/shared/ModelOfflineBanner.vue'
 import ProgressBar from '../../components/shared/ProgressBar.vue'
 import CollapsibleDetails from '../../components/shared/CollapsibleDetails.vue'
@@ -56,7 +57,8 @@ async function onInitModel() {
     await aceStepApi.initModel(true)
     await checkModelReady()
   } catch (err) {
-    initError.value = err instanceof Error ? err.message : String(err)
+    initError.value = err instanceof ApiError && err.message === 'native_operation_failed'
+      ? t('storeErrors.nativeOperationFailed') : err instanceof Error ? err.message : String(err)
   } finally {
     initializing.value = false
   }

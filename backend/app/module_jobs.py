@@ -231,6 +231,11 @@ _speech_inflight = 0
 _setup_reservations = 0
 
 
+def speech_work_busy() -> bool:
+    with _speech_gate:
+        return _speech_inflight > 0
+
+
 def work_busy() -> bool:
     with _speech_gate:
         if _setup_reservations > 0:
@@ -245,8 +250,9 @@ def work_busy() -> bool:
 def speech_admission() -> Iterator[None]:
     """Thread-safe exclusion between actual speech synthesis and setup."""
     global _speech_inflight
+    from .music_queue_ownership import busy
     with _speech_gate:
-        if work_busy():
+        if busy() or work_busy():
             raise ModuleSetupError('setup_busy')
         _speech_inflight += 1
     try:
@@ -272,8 +278,9 @@ def _application_busy() -> bool:
 
 def _reserve_setup() -> None:
     global _setup_reservations
+    from .music_queue_ownership import busy
     with _speech_gate:
-        if _speech_inflight or _setup_reservations or _application_busy():
+        if busy() or _speech_inflight or _setup_reservations or _application_busy():
             raise ModuleSetupError('setup_busy')
         _setup_reservations += 1
 

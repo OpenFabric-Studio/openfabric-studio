@@ -1,9 +1,15 @@
 import { acceptHMRUpdate, defineStore } from 'pinia'
 import * as api from '../api/aceStepTraining'
 import { i18n } from '../i18n'
+import { ApiError } from '../api/http'
 import { createPollingLoop, type PollContext, type PollingLoop } from '../composables/polling'
 
 const t = i18n.global.t
+
+function errorText(cause: unknown): string {
+  return cause instanceof ApiError && cause.message === 'native_operation_failed'
+    ? t('storeErrors.nativeOperationFailed') : cause instanceof Error ? cause.message : String(cause)
+}
 
 const AUTOLABEL_POLL_MS = 2000
 const PREPROCESS_POLL_MS = 2000
@@ -74,7 +80,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.samples = res.samples
         return res
       } catch (err) {
-        this.scanError = err instanceof Error ? err.message : String(err)
+        this.scanError = errorText(err)
         throw err
       } finally {
         this.scanning = false
@@ -89,7 +95,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.datasetPath = path
         return res
       } catch (err) {
-        this.scanError = err instanceof Error ? err.message : String(err)
+        this.scanError = errorText(err)
         throw err
       } finally {
         this.scanning = false
@@ -121,7 +127,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.autoLabelTotal = res.total
         if (this._backgroundWatching) this._pollAutoLabel()
       } catch (err) {
-        this.autoLabelError = err instanceof Error ? err.message : String(err)
+        this.autoLabelError = errorText(err)
       } finally {
         this.autoLabelStarting = false
       }
@@ -151,7 +157,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         } catch (err) {
           if (!context.isCurrent()) return false
           this.autoLabelRunning = false
-          this.autoLabelError = err instanceof Error ? err.message : String(err)
+          this.autoLabelError = errorText(err)
           return false
         }
         return true
@@ -176,7 +182,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.preprocessTotal = res.total
         if (this._backgroundWatching) this._pollPreprocess(req.output_dir)
       } catch (err) {
-        this.preprocessError = err instanceof Error ? err.message : String(err)
+        this.preprocessError = errorText(err)
       } finally {
         this.preprocessStarting = false
       }
@@ -211,7 +217,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         } catch (err) {
           if (!context.isCurrent()) return false
           this.preprocessRunning = false
-          this.preprocessError = err instanceof Error ? err.message : String(err)
+          this.preprocessError = errorText(err)
           return false
         }
         return true
@@ -227,7 +233,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         await api.startLoraTraining(req)
         if (this._backgroundWatching) this._ensureTrainingPoll()
       } catch (err) {
-        this.trainingError = err instanceof Error ? err.message : String(err)
+        this.trainingError = errorText(err)
       } finally {
         this.trainingStarting = false
       }
@@ -236,7 +242,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
       try {
         await api.stopTraining()
       } catch (err) {
-        this.trainingError = err instanceof Error ? err.message : String(err)
+        this.trainingError = errorText(err)
       }
     },
     async refreshTrainingStatus(context?: PollContext) {
@@ -274,7 +280,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         addToRegistry(registryName, adapterPath)
         this.lastExportedPath = adapterPath
       } catch (err) {
-        this.exportError = err instanceof Error ? err.message : String(err)
+        this.exportError = errorText(err)
         throw err
       } finally {
         this.exporting = false

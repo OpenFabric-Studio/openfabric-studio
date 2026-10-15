@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from .config import DATA_DIR
+from .config import DATA_DIR as DATA_DIR
 from .contracts import JsonObject
 
 DB_PATH = DATA_DIR / "aicollector.db"
@@ -212,6 +212,10 @@ def _open_db() -> sqlite3.Connection:
             migrate_yue_jobs(_db)
             from .cloud_music import migrate as migrate_cloud_music
             migrate_cloud_music(_db)
+            from .local_music import migrate as migrate_local_music
+            migrate_local_music(_db)
+            from .stable_lora import migrate as migrate_stable_lora
+            migrate_stable_lora(_db)
         except BaseException:
             # Do not retain a partly initialized connection after a migration
             # interruption. Additive migrations are safe to retry on next open.
@@ -255,6 +259,7 @@ def insert_track(
     audio_version_id: str | None = None,
     yue_job_id: str | None = None,
     cloud_music_job_id: str | None = None,
+    local_music_job_id: str | None = None,
 ) -> int:
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
@@ -293,6 +298,10 @@ def insert_track(
             attached_cloud = db.execute('UPDATE cloud_music_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, cloud_music_job_id))
             if attached_cloud.rowcount != 1:
                 raise ValueError('invalid_cloud_music_attachment')
+        if local_music_job_id is not None:
+            attached_local = db.execute('UPDATE local_music_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, local_music_job_id))
+            if attached_local.rowcount != 1:
+                raise ValueError('invalid_local_music_attachment')
         if audio_version_id is not None:
             attached = db.execute("UPDATE audio_versions SET worker_track_id=? WHERE id=? AND kind='voice' AND worker_track_id IS NULL",
                                   (cur.lastrowid, audio_version_id))

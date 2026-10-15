@@ -31,7 +31,8 @@ from typing import Literal, Optional
 import httpx
 
 from . import db, native_yue
-from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, request_cancel, spawn_process
+from .job_lifecycle import await_cleanup, cancel_and_wait, request_cancel
+from .video_process import run_owned_command
 
 logger = logging.getLogger(__name__)
 from .config import (
@@ -109,16 +110,12 @@ async def _to_mono_wav(src: Path) -> Path:
     env = os.environ.copy()
     env["PATH"] = f"{FFMPEG_BIN_DIR}{os.pathsep}{env.get('PATH', '')}"
     try:
-        proc = await spawn_process(
+        result = await run_owned_command([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
             "-i", str(src), "-ac", "1", "-ar", "44100", "-c:a", "pcm_s16le", out_path,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-        )
-        _, stderr = await communicate_process(proc)
-        if proc.returncode != 0:
-            raise RuntimeError(f"ffmpeg failed to convert audio to WAV: {stderr.decode('utf-8', 'replace').strip()[:500]}")
+        ], env=env, stderr=subprocess.STDOUT, timeout=300)
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg failed to convert audio to WAV: {result.stdout.decode('utf-8', 'replace').strip()[:500]}")
         return Path(out_path)
     except (Exception, asyncio.CancelledError):
         Path(out_path).unlink(missing_ok=True)

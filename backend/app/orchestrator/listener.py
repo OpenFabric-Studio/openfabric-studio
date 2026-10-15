@@ -7,7 +7,8 @@ import re
 import sys
 from pathlib import Path
 
-from ..job_lifecycle import await_cleanup, communicate_process, spawn_process
+from ..job_lifecycle import await_cleanup
+from ..video_process import WorkerOutputError, run_owned_command
 
 
 def _parse_pids(output: bytes, prefix: str = '') -> frozenset[int]:
@@ -92,8 +93,11 @@ async def listener_pids(port: int) -> frozenset[int]:
 
 
 async def _query_pids(command: list[str], prefix: str, allow_empty_exit: bool) -> frozenset[int]:
-    process = await spawn_process(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-    output, _ = await communicate_process(process, timeout=3)
-    if process.returncode not in (0, 1) or (process.returncode == 1 and (output or not allow_empty_exit)):
+    try:
+        result = await run_owned_command(command, timeout=3, max_bytes=65536)
+    except WorkerOutputError as exc:
+        raise OSError('Native listener identity output exceeded its limit') from exc
+    output = result.stdout
+    if result.returncode not in (0, 1) or (result.returncode == 1 and (output or not allow_empty_exit)):
         raise OSError('Native listener ownership query failed')
     return _parse_pids(output, prefix)

@@ -8,16 +8,22 @@ import CollapsibleDetails from '../../components/shared/CollapsibleDetails.vue'
 import HelpModal from '../../components/shared/HelpModal.vue'
 import TagInput from '../../components/shared/TagInput.vue'
 import VoiceSelect from '../../components/shared/VoiceSelect.vue'
+import MusicAdapterSelect from '../../components/shared/MusicAdapterSelect.vue'
 import GenerationLibraryButton from '../../components/shared/GenerationLibraryButton.vue'
 import ReferencePreparationButton from '../../components/shared/ReferencePreparationButton.vue'
 import { setActiveVoiceId } from '../../api/voices'
-import type { YueGenerationSettings } from '../../api/contracts'
+import { parseMusicAdapterSelection } from '../../api/contracts'
+import { ApiError } from '../../api/http'
+import type { MusicAdapterSelection, YueGenerationSettings } from '../../api/contracts'
 import { pendingYueDraft, pendingYueReference } from '../../composables/generationDrafts'
 import { samplingSettings, finiteNumber, SAMPLING_KEYS, type SamplingKey, type SamplingSettings } from '../../composables/generationPresets'
 
 const props = withDefaults(defineProps<{ generationAvailable?: boolean }>(), { generationAvailable: true })
 const store = useYue2Store()
 const selectedVoiceId = ref<string | null>(null)
+const arAdapter = ref<MusicAdapterSelection | null>(null)
+const narAdapter = ref<MusicAdapterSelection | null>(null)
+const arAdapterValid = ref(true), narAdapterValid = ref(true)
 const referenceNotice = ref(false)
 const { t, tm } = useI18n()
 
@@ -38,6 +44,8 @@ watch(
     numInferenceSteps.value = finiteNumber(params.num_inference_steps) ? params.num_inference_steps : params.num_inference_steps === null ? null : 8
     Object.assign(semantic, samplingSettings(params.semantic))
     Object.assign(abcSampling, samplingSettings(params.abc_sampling))
+    arAdapter.value = copiedAdapter(params.ar_adapter)
+    narAdapter.value = copiedAdapter(params.nar_adapter)
     for (const key of SAMPLING_KEYS) {
       const semanticValue = params[`semantic_${key}`]
       const abcValue = params[`abc_${key}`]
@@ -77,6 +85,7 @@ const snapshot = computed<YueGenerationSettings>(() => ({
   abc: abc.value, cfgScale: cfgScale.value, numInferenceSteps: numInferenceSteps.value,
   semantic: { ...semantic }, abcSampling: { ...abcSampling }, seed: seed.value, randomSeed: randomSeed.value,
   batchSize: batchSize.value, voiceId: selectedVoiceId.value, referenceRequiresReupload: referenceNotice.value,
+  arAdapter: arAdapter.value, narAdapter: narAdapter.value,
 }))
 watch(pendingYueDraft, saved => {
   if (!saved) return
@@ -85,6 +94,7 @@ watch(pendingYueDraft, saved => {
   Object.assign(semantic, saved.semantic); Object.assign(abcSampling, saved.abcSampling)
   seed.value = saved.seed ?? 831001; randomSeed.value = saved.randomSeed; batchSize.value = saved.batchSize
   referenceImportId.value = saved.referenceImportId ?? null; referenceNotice.value = saved.referenceRequiresReupload
+  arAdapter.value = saved.arAdapter ?? null; narAdapter.value = saved.narAdapter ?? null
   setActiveVoiceId(saved.voiceId); selectedVoiceId.value = saved.voiceId; pendingYueDraft.value = null
 }, { immediate: true })
 watch(pendingYueReference, edit => {
@@ -146,8 +156,12 @@ function buildOptions(): GenerateOptions {
   return options
 }
 
+function copiedAdapter(value: unknown): MusicAdapterSelection | null {
+  try { return parseMusicAdapterSelection(value) } catch { return null }
+}
+
 async function submit() {
-  if (!props.generationAvailable || submitting.value) return
+  if (!props.generationAvailable || submitting.value || !arAdapterValid.value || !narAdapterValid.value) return
   formError.value = ''
   if (!lyrics.value.trim()) {
     formError.value = t('yueGen.enterLyrics')
@@ -171,9 +185,12 @@ async function submit() {
       options: buildOptions(),
       settings: snapshot.value,
       voiceId: selectedVoiceId.value,
+      arAdapter: arAdapter.value,
+      narAdapter: narAdapter.value,
     })
   } catch (cause) {
-    if (formAlive) formError.value = t(cause instanceof TypeError ? 'generationWorkspace.invalid' : 'generationWorkspace.submitFailed')
+    if (formAlive) formError.value = t(cause instanceof ApiError && cause.message === 'music_lora_runtime_unsupported'
+      ? 'musicLora.errors.runtime' : cause instanceof TypeError ? 'generationWorkspace.invalid' : 'generationWorkspace.submitFailed')
   } finally {
     if (formAlive) submitting.value = false
   }
@@ -184,7 +201,7 @@ async function submit() {
   <div class="lg:sticky lg:top-20 lg:self-start">
     <div class="space-y-4 rounded-xl border border-border bg-panel p-4">
       <VoiceSelect link @select="selectedVoiceId = $event" />
-      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || !generationAvailable" @click="submit">
+      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || !generationAvailable || !arAdapterValid || !narAdapterValid" @click="submit">
         {{ submitting ? t('yueGen.submitting') : t('yueGen.submit') }}
       </button>
       <p v-if="formError" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ formError }}</p>
@@ -195,16 +212,16 @@ async function submit() {
 
       <div class="space-y-1.5">
         <div class="flex items-center justify-between">
-          <label class="text-sm font-medium text-text">{{ t('aceGen.lyricsLabel') }}</label>
+          <label for="yue-lyrics" class="text-sm font-medium text-text">{{ t('aceGen.lyricsLabel') }}</label>
           <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'lyrics'">{{ t('common.help') }}</button>
         </div>
-        <textarea v-model="lyrics" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-sm text-text" :placeholder="t('aceGen.lyricsPlaceholder')"></textarea>
+        <textarea id="yue-lyrics" v-model="lyrics" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-sm text-text" :placeholder="t('aceGen.lyricsPlaceholder')"></textarea>
       </div>
 
       <div class="space-y-1.5">
-        <label class="text-sm font-medium text-text" for="yue-song-title">{{ t('yueGen.songTitle') }}</label>
-        <input id="yue-song-title" v-model="songTitle" maxlength="500" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 text-sm text-text" :placeholder="t('yueGen.songTitlePlaceholder')" :aria-label="t('yueGen.songTitle')">
-        <p class="text-xs text-text-dim">{{ t('yueGen.songTitleHint') }}</p>
+        <label class="text-sm font-medium text-text" for="yue-song-title">{{ t('aceGen.songTitle') }}</label>
+        <input id="yue-song-title" v-model="songTitle" maxlength="500" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 text-sm text-text" :placeholder="t('aceGen.songTitlePlaceholder')" :aria-label="t('aceGen.songTitle')">
+        <p class="text-xs text-text-dim">{{ t('aceGen.songTitleHint') }}</p>
       </div>
 
       <div class="space-y-1.5">
@@ -218,16 +235,16 @@ async function submit() {
       <div class="grid grid-cols-2 gap-3">
         <div>
           <div class="mb-1 flex items-center justify-between">
-            <label class="text-xs text-text-dim">{{ t('yueGen.cotModeLabel') }}</label>
+            <label for="yue-cot" class="text-xs text-text-dim">{{ t('yueGen.cotModeLabel') }}</label>
             <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'cot'">?</button>
           </div>
-          <select v-model="cot" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+          <select id="yue-cot" v-model="cot" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
             <option v-for="o in COT_OPTIONS" :key="o.value" :value="o.value">{{ o.label }}</option>
           </select>
         </div>
         <div>
-          <label class="mb-1 block text-xs text-text-dim">{{ t('yueGen.precisionLabel') }}</label>
-          <select v-model="precision" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+          <label for="yue-precision" class="mb-1 block text-xs text-text-dim">{{ t('yueGen.precisionLabel') }}</label>
+          <select id="yue-precision" v-model="precision" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
             <option value="q8_0">q8_0</option>
             <option value="q4_0">q4_0</option>
           </select>
@@ -237,16 +254,16 @@ async function submit() {
 
       <div v-if="cot !== 'off'" class="space-y-3 rounded-lg border border-border bg-panel-2/50 p-3">
         <div>
-          <label class="text-xs text-text-dim">{{ t('yueGen.abcScore') }}</label>
-          <textarea v-model="abc" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-xs text-text"></textarea>
+          <label for="yue-abc" class="text-xs text-text-dim">{{ t('yueGen.abcScore') }}</label>
+          <textarea id="yue-abc" v-model="abc" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-xs text-text"></textarea>
         </div>
 
       </div>
 
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <label class="text-xs text-text-dim">{{ t('aceGen.seed') }}</label>
-          <input v-model.number="seed" type="number" :disabled="randomSeed" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text disabled:opacity-40" />
+          <label for="yue-seed" class="text-xs text-text-dim">{{ t('aceGen.seed') }}</label>
+          <input id="yue-seed" v-model.number="seed" type="number" :disabled="randomSeed" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text disabled:opacity-40" />
         </div>
         <label class="flex items-end gap-2 pb-2 text-xs text-text-dim">
           <input v-model="randomSeed" type="checkbox" class="rounded border-border" />
@@ -260,15 +277,26 @@ async function submit() {
       </div>
 
       <CollapsibleDetails :summary="t('aceGen.advancedSettings')">
+        <div class="space-y-3">
+          <p class="text-xs text-text-dim">{{ t('musicLora.yueHint') }}</p>
+          <fieldset class="space-y-2">
+            <legend class="text-xs text-text-dim">{{ t('musicLora.arAdapter') }}</legend>
+            <MusicAdapterSelect v-model="arAdapter" engine="yue2" target="ar" :disabled="submitting || !generationAvailable" @validity="arAdapterValid = $event" />
+          </fieldset>
+          <fieldset class="space-y-2">
+            <legend class="text-xs text-text-dim">{{ t('musicLora.narAdapter') }}</legend>
+            <MusicAdapterSelect v-model="narAdapter" engine="yue2" target="nar" :disabled="submitting || !generationAvailable" @validity="narAdapterValid = $event" />
+          </fieldset>
+        </div>
         <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'advanced'">{{ t('aceGen.advancedWhatMeans') }}</button>
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="text-xs text-text-dim">{{ t('yueGen.cfgScale') }}</label>
-            <input v-model.number="cfgScale" type="number" step="0.1" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
+            <label for="yue-cfg-scale" class="text-xs text-text-dim">{{ t('yueGen.cfgScale') }}</label>
+            <input id="yue-cfg-scale" v-model.number="cfgScale" type="number" step="0.1" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
           </div>
           <div>
-            <label class="text-xs text-text-dim">{{ t('aceGen.inferenceSteps') }}</label>
-            <input v-model.number="numInferenceSteps" type="number" min="1" max="256" aria-label="YuE inference steps" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
+            <label for="yue-inference-steps" class="text-xs text-text-dim">{{ t('aceGen.inferenceSteps') }}</label>
+            <input id="yue-inference-steps" v-model.number="numInferenceSteps" type="number" min="1" max="256" :aria-label="t('aceGen.inferenceSteps')" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
           </div>
         </div>
 
@@ -276,8 +304,8 @@ async function submit() {
         <CollapsibleDetails :summary="t('yueGen.semanticSampling')">
           <div class="grid grid-cols-2 gap-2">
             <div v-for="f in SAMPLING_FIELDS" :key="'sem_' + f.key">
-              <label class="text-xs text-text-dim">{{ f.label }}</label>
-              <input v-model.number="semantic[f.key]" type="number" :step="f.step" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
+              <label :for="`yue-semantic-${f.key}`" class="text-xs text-text-dim">{{ f.label }}</label>
+              <input :id="`yue-semantic-${f.key}`" v-model.number="semantic[f.key]" type="number" :step="f.step" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
             </div>
           </div>
         </CollapsibleDetails>
@@ -285,8 +313,8 @@ async function submit() {
         <CollapsibleDetails v-if="cot !== 'off'" :summary="t('yueGen.abcPlannerSampling')">
           <div class="grid grid-cols-2 gap-2">
             <div v-for="f in SAMPLING_FIELDS" :key="'abc_' + f.key">
-              <label class="text-xs text-text-dim">{{ f.label }}</label>
-              <input v-model.number="abcSampling[f.key]" type="number" :step="f.step" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
+              <label :for="`yue-abc-${f.key}`" class="text-xs text-text-dim">{{ f.label }}</label>
+              <input :id="`yue-abc-${f.key}`" v-model.number="abcSampling[f.key]" type="number" :step="f.step" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('yueGen.defaultPlaceholder')" />
             </div>
           </div>
         </CollapsibleDetails>

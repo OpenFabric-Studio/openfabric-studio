@@ -11,11 +11,17 @@ import { clearVoiceWatch, markVoiceWatch, noteVoice, voiceWatchActive } from './
 import type { JobStatus } from '../types'
 import { i18n } from '../i18n'
 import { createPollingLoop, type PollContext, type PollingLoop } from '../composables/polling'
-import type { JsonObject, VoiceJobProgress, YueJobResponse, YueNativeProgress, YueGenerationSettings } from '../api/contracts'
+import type { JsonObject, MusicAdapterSelection, VoiceJobProgress, YueJobResponse, YueNativeProgress, YueGenerationSettings } from '../api/contracts'
 
 const t = i18n.global.t
 
 const HEALTH_MS = 5000
+const ADAPTER_ERROR_KEYS: Record<string, string> = {
+  music_lora_adapter_not_found: 'musicLora.errors.missing', music_lora_adapter_changed: 'musicLora.errors.changed',
+  music_lora_target_mismatch: 'musicLora.errors.format', music_lora_format_invalid: 'musicLora.errors.format',
+  music_lora_storage_unavailable: 'musicLora.errors.load',
+  music_lora_runtime_unsupported: 'musicLora.errors.runtime',
+}
 const jobLoops = new WeakMap<object, PollingLoop>()
 const healthLoops = new WeakMap<object, PollingLoop>()
 type HistoryEdit = { kind: 'renamed'; title: string } | { kind: 'deleted' }
@@ -294,11 +300,11 @@ export const useYue2Store = defineStore('yue2', {
           phaseEtaSeconds: row.phase_eta_seconds, nativeProgress: row.progress, nativeProgressAvailable: row.native_progress_available,
           finalized: row.status === 'done' || row.status === 'failed' || row.status === 'cancelled',
           errorCode: row.error_code,
-          error: row.error_code ? t(`generationWorkspace.errors.${row.error_code}`) : undefined,
+          error: row.error_code ? t(ADAPTER_ERROR_KEYS[row.error_code] ?? `generationWorkspace.errors.${row.error_code}`) : undefined,
           audioUrl: existing?.audioUrl ?? track?.audio_url, savedFilename: track?.filename,
           dbId: track?.id, shortId: track?.short_id, durationSec: track?.duration_ms == null ? null : track.duration_ms / 1000,
           wallSec: track?.wall_ms == null ? null : track.wall_ms / 1000, abcPlan: track?.abc_url ? '' : null,
-          params: track?.params ?? { ...row.options, lyrics: row.lyrics, precision: row.precision, seed: row.seed },
+          params: track?.params ?? { ...row.options, lyrics: row.lyrics, precision: row.precision, seed: row.seed, ar_adapter: row.ar_adapter, nar_adapter: row.nar_adapter },
           voiceId: row.voice_id ?? existing?.voiceId,
         }
         if (!mapped.finalized) rememberGenerationJob(`yue:${row.id}`)
@@ -355,18 +361,20 @@ export const useYue2Store = defineStore('yue2', {
         clearVoiceWatch(Number(trackId))
       }
     },
-    async generateBatch(params: { lyrics: string; style: string; title?: string; cot: CotMode; precision: 'q8_0' | 'q4_0'; baseSeed: number; randomSeed: boolean; batchSize: number; options: GenerateOptions; settings?: YueGenerationSettings; voiceId?: string | null }) {
+    async generateBatch(params: { lyrics: string; style: string; title?: string; cot: CotMode; precision: 'q8_0' | 'q4_0'; baseSeed: number; randomSeed: boolean; batchSize: number; options: GenerateOptions; settings?: YueGenerationSettings; voiceId?: string | null; arAdapter?: MusicAdapterSelection | null; narAdapter?: MusicAdapterSelection | null }) {
       const token = this._sessionGeneration
       const voiceId = params.voiceId === undefined ? getActiveVoiceId() : params.voiceId
       const options = ownedApi.completeYueOptions(params.options)
+      const arAdapter = params.arAdapter ? { ...params.arAdapter } : null
+      const narAdapter = params.narAdapter ? { ...params.narAdapter } : null
       if (!Number.isInteger(params.batchSize) || params.batchSize < 1 || params.batchSize > 4) throw new TypeError(t('generationWorkspace.invalid'))
       for (let index = 0; index < params.batchSize; index++) {
         if (token !== this._sessionGeneration) return
         const seed = params.randomSeed ? Math.floor(Math.random() * 2147483647) : params.baseSeed + index
         const songTitle = (params.title ?? '').trim().slice(0, 500)
-        const settings = params.settings ? { ...params.settings, title: songTitle, style: params.style, lyrics: params.lyrics } : null
+        const settings = params.settings ? { ...params.settings, title: songTitle, style: params.style, lyrics: params.lyrics, arAdapter, narAdapter } : null
         const row = await ownedApi.submit({ title: songTitle, lyrics: params.lyrics,
-          seed, options, precision: params.precision, voice_id: voiceId, settings })
+          seed, options, precision: params.precision, voice_id: voiceId, settings, ar_adapter: arAdapter, nar_adapter: narAdapter })
         if (token !== this._sessionGeneration) return
         rememberGenerationJob(`yue:${row.id}`)
         this._mergeOwned([row])

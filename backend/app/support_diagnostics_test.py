@@ -8,9 +8,16 @@ from pydantic import ValidationError
 from app.module_contracts import ModuleInfo, ModuleInventory, ModuleEvidence
 from app.support_contracts import EngineRuntime, SupportAction, SupportReport
 from app.support_diagnostics import build_report
+from app.module_catalog import MODULE_IDS
 
 
 class SupportDiagnosticsTests(unittest.TestCase):
+    def test_report_includes_the_complete_catalog_with_optional_music(self) -> None:
+        inventory = self.inventory()
+        inventory.modules = [inventory.modules[0].model_copy(update={'id': identifier}) for identifier in MODULE_IDS]
+        report = build_report(inventory, [], [])
+        self.assertEqual([module.id for module in report.modules], list(MODULE_IDS))
+
     def inventory(self) -> ModuleInventory:
         return ModuleInventory(platform='darwin', architecture='arm64', acceleration='apple_silicon',
             managed_root='/Users/private-person/runtime', free_bytes=1000, checked_at='2026-10-07', modules=[

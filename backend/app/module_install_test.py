@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Mapping
+from dataclasses import replace
 import hashlib
 import io
 from pathlib import Path
@@ -27,6 +28,29 @@ class ModuleInstallTests(unittest.IsolatedAsyncioTestCase):
         self.root = Path(self.temporary.name)
         self.environment = ModuleEnvironment.for_root(self.root, platform='darwin', architecture='arm64')
         self.context = InstallContext(ModuleJobService(self.environment), 'a' * 32)
+
+    async def test_music_setup_uses_isolated_dependencies_without_weight_bootstrap(self) -> None:
+        from app.module_catalog import DEFINITIONS
+        environment = replace(self.environment, uv='/fixed/uv')
+        context = InstallContext(ModuleJobService(environment), 'c' * 32)
+        async def clone(context: InstallContext, identifier: install.ModuleId, pin: install.SourcePin, target: Path) -> None:
+            for marker in DEFINITIONS[identifier].source_markers:
+                path = target / marker
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('# pinned source')
+        with patch.object(context, 'run', AsyncMock()) as run, patch.object(install, '_clone', clone), patch.object(install, '_check_environment', AsyncMock()), patch.object(install.shutil, 'which', return_value='/fixed/git'):
+            for identifier in ('heartmula', 'stable_audio3'):
+                outcome = await install.install(context, identifier, True)
+                self.assertEqual(outcome.state, 'manual')
+                self.assertIn('No weights were downloaded', outcome.detail)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(len(commands), 4)
+        heart, stable = environment.paths['heartmula'], environment.paths['stable_audio3']
+        self.assertEqual(commands[0], ['/fixed/uv', 'venv', '--python', '3.11', str(heart / '.venv')])
+        self.assertEqual(commands[1], ['/fixed/uv', 'pip', 'install', '--python', str(engine_python(heart, 'darwin')), '-e', str(heart)])
+        self.assertEqual(commands[2], ['/fixed/uv', 'venv', '--python', '3.11', str(stable / '.venv')])
+        self.assertEqual(commands[3], ['/fixed/uv', 'pip', 'install', '--python', str(engine_python(stable, 'darwin')), '-r', str(stable / 'optimized/mlx/requirements.txt')])
+        self.assertTrue(all('download' not in argument and 'bootstrap' not in argument for command in commands for argument in command))
 
     async def test_cancel_waits_for_staging_deletion_before_releasing_setup(self) -> None:
         await self._assert_staging_deletion_drained(shutdown=False)
@@ -276,6 +300,8 @@ class ModuleInstallTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(private.read_text(), 'keep')
 
     def test_platform_interpreter_and_source_pins_are_fixed(self) -> None:
+        self.assertEqual(install.SOURCE_PINS['heartmula'].commit, '02dd2e22f6a1bf1a2f769a13f8af952a7a4e9cee')
+        self.assertEqual(install.SOURCE_PINS['stable_audio3'].commit, '77e0398c26f7d22d801ec1bb036307e8b231f741')
         self.assertEqual(install.SOURCE_PINS['speech'].commit, '48b1a0169a28582a8984402f82cf438d3bfa6aca')
         self.assertEqual(install.SOURCE_PINS['singing'].commit, '51383efd921027683c89e5348211d93ff12ac2a8')
         self.assertEqual(install.SOURCE_PINS['kokoro'].commit, 'dfb907a02bba8152ca444717ca5d78747ccb4bec')

@@ -715,7 +715,11 @@ watch(
 )
 
 watch(
-  () => engine.toScheduledClips(store.project, buffers.value).flatMap<AudioBuffer | number | undefined>(clip => [clip.buffer, clip.stretchFactor]),
+  () => engine.toScheduledClips(store.project, buffers.value).flatMap<AudioBuffer | number | string | undefined>(clip => [
+    clip.buffer, clip.stretchFactor, clip.laneIndex, clip.type, clip.timelineStart, clip.trimStart, clip.trimEnd,
+    clip.fadeInDuration, clip.fadeOutDuration, clip.instrument,
+    ...(clip.notes ?? []).flatMap(note => [note.note, note.startSec, note.durationSec, note.velocity]),
+  ]),
   (next, previous) => {
     if (store.playing && (next.length !== previous.length || next.some((value, index) => value !== previous[index]))) {
       void resumePlayback(store.playheadSec)

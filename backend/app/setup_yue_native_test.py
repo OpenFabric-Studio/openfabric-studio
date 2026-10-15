@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -184,6 +185,21 @@ class NativeBuildHelperTests(unittest.TestCase):
             binary.write_bytes(b'changed binary')
             with self.assertRaisesRegex(ValueError, 'native_binary_identity_mismatch'):
                 helper.read_build_manifest(binary)
+
+    def test_config_advertises_modern_adapters_only_for_matching_custom_revision(self) -> None:
+        from scripts import setup_yue_native as helper
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / 'audiocpp_server'; binary.write_bytes(b'fixture binary')
+            for pin, expected in ((PINS[0], 'False'), (PINS[1], 'True')):
+                helper.write_manifest(binary, helper.create_manifest(binary, pin, 'cpu'))
+                environment = {**os.environ, 'YUE2_SERVER_BIN': str(binary),
+                    'OPENFABRIC_CONFIG': str(root / 'config.json'), 'OPENFABRIC_DATA_DIR': str(root / 'library'),
+                    'SEED_VC_DIR': str(root / 'seed-vc')}
+                result = subprocess.run([sys.executable, '-c', 'from app.config import YUE2_LORA_AVAILABLE; print(YUE2_LORA_AVAILABLE)'],
+                    cwd=ROOT / 'backend', env=environment, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.strip(), expected)
 
     def test_workspace_inside_read_only_source_is_rejected_before_any_write(self) -> None:
         from scripts import setup_yue_native as helper

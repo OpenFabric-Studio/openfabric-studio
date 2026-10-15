@@ -71,6 +71,8 @@ function backendEnv({ L, manifest, platform }) {
     TORCH_HOME: L.torchHome,
     UV_NO_PROGRESS: '1',
     PYTHONUTF8: '1',
+    // Python caches inside the .app would invalidate its signed resource seal.
+    PYTHONDONTWRITEBYTECODE: '1',
     // Python reads .env before choosing defaults. Injecting engine defaults here
     // would override private .env choices before load_dotenv can see them.
     OPENFABRIC_MODULE_ROOT: process.env.OPENFABRIC_MODULE_ROOT || L.root,

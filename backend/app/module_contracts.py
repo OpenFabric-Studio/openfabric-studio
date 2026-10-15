@@ -7,7 +7,7 @@ from pydantic import ConfigDict, Field, StrictBool, model_validator
 
 from .contracts import Contract
 
-ModuleId = Literal['ace_step', 'yue2', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review']
+ModuleId = Literal['ace_step', 'yue2', 'heartmula', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review']
 ModuleState = Literal['unsupported', 'missing', 'partial', 'installed', 'ready']
 ModuleActionKind = Literal['install', 'download', 'manual', 'verify', 'restart']
 ModuleJobState = Literal['queued', 'running', 'completed', 'awaiting_manual', 'failed', 'cancelled', 'interrupted']
@@ -77,7 +77,7 @@ class ModuleInventory(Contract):
 
 class ModulePlanRequest(Contract):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    features: list[ModuleId] = Field(min_length=1, max_length=16)
+    features: list[ModuleId] = Field(min_length=1, max_length=17)
     download_models: StrictBool = False
 
     @model_validator(mode='after')

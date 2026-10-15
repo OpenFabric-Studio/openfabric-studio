@@ -45,6 +45,10 @@ from .api.routes_yue2_upload import router as yue2_upload_router
 from .api.routes_openrouter import router as openrouter_router
 from .api.routes_clip_host import router as clip_host_router
 from .api.routes_cloud_music import router as cloud_music_router
+from .api.routes_local_music import router as local_music_router
+from .api.routes_music_lora import router as music_lora_router
+from .api.routes_stable_lora import router as stable_lora_router
+from .api.routes_music_queue import router as music_queue_router
 from .api.routes_artist_production import router as artist_production_router
 from .desktop_runtime import router as desktop_runtime_router
 from .module_security import LocalAccessMiddleware
@@ -53,7 +57,7 @@ from .data_root import ensure_layout, place_seed_models
 from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
-from . import cloud_music, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes, clip_hosting
+from . import cloud_music, local_music, stable_lora, music_queue, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes, clip_hosting
 
 
 @asynccontextmanager
@@ -66,6 +70,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         place_seed_models(DATA_DIR, SEED_VC_DIR)
         openrouter_client.start()
         await cloud_music.recover()
+        await local_music.recover()
+        await stable_lora.recover()
         yue_upload.start()
         await audio_versions.recover()
         await audio_exports.recover_exports()
@@ -74,6 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         voice_retention.reconcile_deletions()
         ace_jobs.recover()
         yue_jobs.recover()
+        await music_queue.recover()
         await reference_imports.start()
         await video_jobs.recover()
         await clip_hosting.recover()
@@ -98,14 +105,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Drain one-shot jobs before stopping the engines they depend on.
         try:
             try:
-                await yue_jobs.shutdown()
+                await music_queue.shutdown()
             finally:
-                await ace_jobs.shutdown()
+                try:
+                    await yue_jobs.shutdown()
+                finally:
+                    await ace_jobs.shutdown()
         finally:
             try:
                 try:
                     outcomes = await asyncio.gather(
-                        cloud_music.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(), character_swaps.shutdown(), video_scenes.shutdown(),
+                        cloud_music.shutdown(), local_music.shutdown(), stable_lora.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(), character_swaps.shutdown(), video_scenes.shutdown(),
                         stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
                         audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), speaker_review.shutdown(), reading_media.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
                         optional_engines.shutdown(), video_character_training.shutdown(), video_character_comparison.shutdown(), yue_upload.shutdown(), return_exceptions=True,
@@ -143,6 +153,10 @@ app.include_router(desktop_runtime_router)
 app.include_router(openrouter_router)
 app.include_router(clip_host_router)
 app.include_router(cloud_music_router)
+app.include_router(local_music_router)
+app.include_router(music_lora_router)
+app.include_router(stable_lora_router)
+app.include_router(music_queue_router)
 app.include_router(artist_production_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)

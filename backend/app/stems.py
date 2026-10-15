@@ -19,6 +19,7 @@ import logging
 import os
 import shutil
 import sys
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
@@ -27,7 +28,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from . import db
 from .config import DEMUCS_DIR, FFMPEG_BIN_DIR, LOG_DIR
 from .orchestrator.process import tail_log
-from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree, request_cancel, spawn_process
+from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree, request_cancel
+from .video_process import spawn_owned
 from .gpu_lease import gpu_lease
 from .voice_contracts import VoiceQueueReason
 
@@ -67,11 +69,16 @@ async def start(track_id: int, *, force: bool = False) -> StemJob:
     if job and job.status == "done" and not force:
         return job
     from .resource_admission import require_setup_idle
-    require_setup_idle()
-    job = StemJob(status="queued")
-    _jobs[track_id] = job
-    job.task = asyncio.create_task(_run(track_id))
-    return job
+    from .audio_exports import protect_stem_replacement
+    async with protect_stem_replacement(track_id):
+        job = _jobs.get(track_id)
+        if job and (job.status in ("queued", "running") or job.status == "done" and not force):
+            return job
+        require_setup_idle()
+        job = StemJob(status="queued")
+        _jobs[track_id] = job
+        job.task = asyncio.create_task(_run(track_id))
+        return job
 
 
 async def cancel(track_id: int) -> dict:
@@ -143,12 +150,12 @@ async def separate_file(
             argv = _demucs_cmd(audio, out_dir, quality=quality)
             env = _demucs_env()
             if spawn is None:
-                proc = await spawn_process(
-                    *argv,
-                    cwd=str(DEMUCS_DIR),
+                proc = await spawn_owned(
+                    argv,
+                    receipt_path=out_dir / "worker.json",
+                    cwd=DEMUCS_DIR,
                     env=env,
-                    stdout=log_file,
-                    stderr=asyncio.subprocess.STDOUT,
+                    stdout=log_file.fileno(),
                 )
             else:
                 proc = await spawn(argv, DEMUCS_DIR, env, log_file.fileno())
@@ -157,9 +164,11 @@ async def separate_file(
             drained = False
             try:
                 returncode = await proc.wait()
+                if spawn is None:
+                    await await_cleanup(_kill_tree(proc))
                 drained = True
             except asyncio.CancelledError:
-                await _kill_tree(proc)
+                await await_cleanup(_kill_tree(proc))
                 drained = True
                 shutil.rmtree(out_dir, ignore_errors=True)
                 raise
@@ -192,11 +201,7 @@ async def _kill_tree(proc: asyncio.subprocess.Process | None) -> None:
 
 
 def status(track_id: int) -> dict:
-    # A known job always wins over the DB: while a (re)run is in flight the
-    # old stems_json may still point at files _run() is about to delete, so
-    # trusting the DB here would misreport "done" for a cancelled/failed
-    # redo. The DB is only consulted as a fallback once there's no job left
-    # in memory (e.g. after a backend restart).
+    # A known job wins over the previous successful catalog during a rerun.
     job = _jobs.get(track_id)
     if job:
         return {"status": job.status, "error": job.error}
@@ -223,27 +228,24 @@ async def _run(track_id: int) -> None:
                 job.error = "track not found"
                 return
             audio_path = Path(row["audio_path"])
-            out_dir = db.stems_dir(row["model"], track_id)
-            shutil.rmtree(out_dir, ignore_errors=True)
+            stems_root = db.stems_dir(row["model"], track_id)
+            out_dir = stems_root / uuid.uuid4().hex
             out_dir.mkdir(parents=True, exist_ok=True)
-            # Invalidate any previous run's stems_json now, since its files
-            # were just deleted - the DB must never point at files that no
-            # longer exist, even if this run itself fails or is cancelled.
-            db.update_track_stems(track_id, None)
 
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             log_path = LOG_DIR / f"{log_name}.log"
 
             with open(log_path, "w", encoding="utf-8", errors="replace") as log_file:
-                proc = await spawn_process(
-                    *_demucs_cmd(audio_path, out_dir),
-                    cwd=str(DEMUCS_DIR),
+                proc = await spawn_owned(
+                    _demucs_cmd(audio_path, out_dir),
+                    receipt_path=out_dir / "worker.json",
+                    cwd=DEMUCS_DIR,
                     env=_demucs_env(),
-                    stdout=log_file,
-                    stderr=asyncio.subprocess.STDOUT,
+                    stdout=log_file.fileno(),
                 )
                 job.proc = proc
                 returncode = await proc.wait()
+                await await_cleanup(_kill_tree(proc))
 
             if job.cancel_requested:
                 job.status = "cancelled"
@@ -266,6 +268,8 @@ async def _run(track_id: int) -> None:
                 return
             db.update_track_stems(track_id, stems)
             job.status = "done"
+            from .audio_versions import remove_unshared_track_directory
+            remove_unshared_track_directory(None, stems_root)
     except asyncio.CancelledError:
         await _kill_tree(job.proc)
         job.status = "cancelled"

@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import shutil
 from pathlib import Path
+from typing import BinaryIO
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
@@ -30,26 +31,32 @@ def _sanitize_dataset_name(name: str) -> str:
     return name or "my_lora_dataset"
 
 
-def _unique_dest(target_dir: Path, filename: str) -> Path:
+def _unique_dest(target_dir: Path, filename: str) -> tuple[Path, BinaryIO]:
     stem, _, ext = filename.rpartition(".")
     dest = target_dir / filename
     n = 1
-    while dest.exists():
-        dest = target_dir / f"{stem}_{n}.{ext}"
-        n += 1
-    return dest
+    while True:
+        try:
+            return dest, dest.open('xb')
+        except FileExistsError:
+            dest = target_dir / f"{stem}_{n}.{ext}"
+            n += 1
 
 
 @router.post("/upload", response_model=UploadDatasetFilesResponse)
 async def upload_dataset_files(
     dataset_name: str = Form(...),
     files: list[UploadFile] = File(...),
-):
+) -> UploadDatasetFilesResponse:
     if not files:
         raise HTTPException(status_code=400, detail="No files provided")
 
     safe_name = _sanitize_dataset_name(dataset_name)
-    target_dir = ACE_STEP_DIR / "datasets" / safe_name
+    engine_root = ACE_STEP_DIR.resolve()
+    datasets_root = (engine_root / 'datasets').resolve()
+    target_dir = (datasets_root / safe_name).resolve()
+    if not datasets_root.is_relative_to(engine_root) or not target_dir.is_relative_to(datasets_root):
+        raise HTTPException(status_code=409, detail='dataset_path_unsafe')
     target_dir.mkdir(parents=True, exist_ok=True)
 
     saved: list[str] = []
@@ -60,9 +67,13 @@ async def upload_dataset_files(
         if not filename or ext not in ALLOWED_AUDIO_EXT:
             skipped.append(f.filename or "(unnamed)")
             continue
-        dest = _unique_dest(target_dir, filename)
-        with open(dest, "wb") as out:
-            shutil.copyfileobj(f.file, out)
+        dest, out = _unique_dest(target_dir, filename)
+        try:
+            with out:
+                shutil.copyfileobj(f.file, out)
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
         saved.append(dest.name)
 
     if not saved:
@@ -71,8 +82,4 @@ async def upload_dataset_files(
             detail=f"No supported audio files in upload. Allowed: {', '.join(sorted(ALLOWED_AUDIO_EXT))}",
         )
 
-    return {
-        "audio_dir": f"datasets/{safe_name}",
-        "saved": saved,
-        "skipped": skipped,
-    }
+    return UploadDatasetFilesResponse(audio_dir=f'datasets/{safe_name}', saved=saved, skipped=skipped)

@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 from app.video_jobs import (
     VideoJobError,
@@ -26,6 +27,22 @@ from app.video_jobs import (
     validate_shots,
 )
 from app.work_busy import model_work_busy
+
+
+class MetadataBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_probe_size_and_binary_decode_failures_use_job_errors(self) -> None:
+        from app import video_jobs
+        from app.video_process import WorkerOutputError
+
+        for operation in (video_jobs._probe_duration, video_jobs._video_size, video_jobs._energy_levels):
+            for failure in (WorkerOutputError('private output'), TimeoutError('private timeout')):
+                with self.subTest(operation=operation.__name__, failure=type(failure).__name__), patch.object(video_jobs, 'run_owned_command', AsyncMock(side_effect=failure)):
+                    with self.assertRaises(VideoJobError) as error:
+                        await operation(Path('fixture.mp4'))
+                    self.assertEqual(error.exception.code, 'processing_failed')
+            with self.subTest(operation=operation.__name__), patch.object(video_jobs, 'run_owned_command', AsyncMock(side_effect=OSError('fixture drain failed'))):
+                with self.assertRaises(OSError):
+                    await operation(Path('fixture.mp4'))
 
 
 class FrameTests(unittest.TestCase):

@@ -913,6 +913,17 @@ def active_track_ids() -> set[int]:
             if document.status in {"queued", "running"}}
 
 
+@asynccontextmanager
+async def protect_stem_replacement(track_id: int) -> AsyncIterator[None]:
+    async with _lock:
+        if track_id in _deleting or track_id in _stem_deleting or any(
+            document.track_id == track_id and document.stem_name is not None
+            for document in _running.values()
+        ):
+            raise AudioExportError('stem_busy')
+        yield
+
+
 def _validated_stem(name: str) -> StemName:
     try:
         return _stem_name.validate_python(name)
@@ -1010,6 +1021,9 @@ async def protect_stem_exports_removal(track_id: int) -> AsyncIterator[None]:
     async with _lock:
         if track_id in _stem_deleting or track_id in _deleting:
             raise AudioExportError('track_busy')
+        from . import stems
+        if stems.is_active(track_id):
+            raise AudioExportError('stem_busy')
         _stem_deleting.add(track_id)
         try:
             documents = [doc for doc in _documents(track_id) if doc.stem_name is not None]

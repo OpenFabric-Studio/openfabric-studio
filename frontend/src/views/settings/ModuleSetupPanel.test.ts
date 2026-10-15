@@ -80,3 +80,11 @@ it('shows saved artifact bytes and retry attempts and the optional CPU setup sta
   expect(node.textContent).toContain('Retrying in 1 s')
   expect(node.querySelector('#module-speaker_review')?.textContent).toContain('Weights must be selected explicitly.')
 })
+
+it('shows both additional music modules in Settings so generator setup links have targets', async () => {
+  const modules: ModuleInventory['modules'] = (['heartmula', 'stable_audio3'] as const).map(id => ({ id, name: id, description: 'Local music', state: 'partial', supported: true, managed: false, automation: 'manual', dependencies: [], capabilities: [], evidence: [], actions: [] }))
+  vi.mocked(api.getModules).mockResolvedValue({ ...inventory, modules })
+  const node = await mount()
+  expect(node.querySelector('#module-heartmula')).not.toBeNull()
+  expect(node.querySelector('#module-stable_audio3')).not.toBeNull()
+})

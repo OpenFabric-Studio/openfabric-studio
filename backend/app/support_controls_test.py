@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
 
-from app import resource_admission
+from app import music_queue_ownership as ownership, resource_admission
 from app import support_controls as controls
 from app.config import MODELS
 from app.orchestrator.manager import OrchestratorManager
@@ -21,6 +21,8 @@ class SupportControlTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(controls, 'manager', self.manager))
         self.enterContext(patch.object(resource_admission, 'admission_lock', asyncio.Lock()))
         self.enterContext(patch.object(resource_admission, '_native_inflight', 0))
+        self.enterContext(patch.object(ownership, '_owner', None))
+        self.enterContext(patch.object(ownership, '_stop_handler', None))
         self.enterContext(patch.object(controls, '_idle_state', new=AsyncMock(return_value='idle')))
         self.process = ManagedProcess(MODELS['ace_step'].processes[0])
         self.process._proc = Mock()
@@ -39,6 +41,55 @@ class SupportControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.state.models['ace_step'].status, ModelStatus.STOPPED)
         self.assertIsNone(self.manager.state.active_model)
         self.assertNotIn('ace_step', self.manager._instances)
+
+    async def test_manual_stop_drains_queue_before_stopping_the_exact_engine(self) -> None:
+        owner = await ownership.reserve()
+        calls: list[str] = []
+        async def cancel_queue() -> None:
+            calls.append('queue_drained')
+            self.assertFalse(resource_admission.admission_lock.locked())
+            self.assertTrue(await owner.release())
+        async def stop() -> None:
+            calls.append('engine_stopped')
+        ownership.register_stop_handler(cancel_queue)
+        self.stop.side_effect = stop
+        await controls.stop_engine('ace_step', 'a' * 32)
+        self.assertEqual(calls, ['queue_drained', 'engine_stopped'])
+
+    async def test_manual_stop_accepts_queue_already_unloading_the_requested_instance(self) -> None:
+        owner = await ownership.reserve()
+        async def cancel_queue() -> None:
+            with owner.context():
+                await controls.stop_engine('ace_step', 'a' * 32)
+            self.assertTrue(await owner.release())
+        ownership.register_stop_handler(cancel_queue)
+        await controls.stop_engine('ace_step', 'a' * 32)
+        self.stop.assert_awaited_once()
+        self.assertFalse(ownership.busy())
+
+    async def test_failed_queue_drain_retains_reservation_and_cannot_stop_engine(self) -> None:
+        await ownership.reserve()
+        ownership.register_stop_handler(AsyncMock())
+        with self.assertRaises(controls.EngineControlError) as caught:
+            await controls.stop_engine('ace_step', 'a' * 32)
+        self.assertEqual(caught.exception.code, 'engine_busy')
+        self.assertTrue(ownership.busy())
+        self.stop.assert_not_awaited()
+
+    async def test_internal_queue_unload_never_invokes_manual_stop_callback(self) -> None:
+        owner = await ownership.reserve()
+        callback = AsyncMock()
+        ownership.register_stop_handler(callback)
+        with owner.context():
+            await controls.stop_engine('ace_step', 'a' * 32)
+        callback.assert_not_awaited()
+        self.assertTrue(await owner.release())
+
+    async def test_active_queue_owned_engine_exposes_manual_stop_control(self) -> None:
+        await ownership.reserve()
+        with patch.object(controls, '_idle_state', new=AsyncMock(return_value='busy')):
+            status = await controls.engine_status()
+        self.assertTrue(status.engines[0].can_stop)
 
     async def test_replacement_run_is_not_stopped_by_a_stale_click(self) -> None:
         with self.assertRaises(controls.EngineControlError) as caught:

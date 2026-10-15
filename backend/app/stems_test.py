@@ -4,15 +4,82 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
+import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from collections.abc import Mapping
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-from app import stems
+from pydantic import TypeAdapter
+
+from app import db, stems
 from app.video_process import spawn_owned
+
+
+def assert_worker_stops_after_parent_crash(test: unittest.TestCase, root: Path, operation: str) -> None:
+    marker = root / "worker.pids"
+    child = ("import os,subprocess,sys,time;from pathlib import Path; "
+             "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)']); "
+             f"marker=Path({str(marker)!r}); temporary=marker.with_suffix('.pending'); "
+             "temporary.write_text(f'{os.getpid()} {child.pid} {os.getpgrp()}'); temporary.replace(marker); time.sleep(60)")
+    code = ("import asyncio,os,sys;from pathlib import Path\n"
+            f"root=Path({str(root)!r}); worker_script={child!r}; worker=[sys.executable,'-c',worker_script]\n"
+            "async def main():\n" + "\n".join(" " + line for line in operation.splitlines()) + "\nasyncio.run(main())")
+    env = os.environ.copy()
+    env.update(OPENFABRIC_CONFIG=str(root / "config.json"), OPENFABRIC_DATA_DIR=str(root / "library"),
+               SEED_VC_DIR=str(root / "seed-vc"), PYTHONPATH=str(Path(__file__).resolve().parents[1]),
+               PYTHONDONTWRITEBYTECODE="1")
+    pids: list[int] = []
+    with (root / "backend.log").open("w") as log:
+        parent = subprocess.Popen([sys.executable, "-c", code], env=env, stdout=log, stderr=log)
+        try:
+            until = time.monotonic() + 5
+            while not marker.exists() and parent.poll() is None and time.monotonic() < until:
+                time.sleep(0.02)
+            test.assertTrue(marker.is_file(), (root / "backend.log").read_text())
+            pids = [int(value) for value in marker.read_text().split()]
+            parent.kill()
+            parent.wait(5)
+            for pid in pids[:2]:
+                until = time.monotonic() + 5
+                while time.monotonic() < until:
+                    state = subprocess.run(["ps", "-p", str(pid), "-o", "stat="], capture_output=True, text=True).stdout.strip()
+                    if not state or state.startswith("Z"):
+                        break
+                    time.sleep(0.02)
+                test.assertTrue(not state or state.startswith("Z"), f"Fixture worker {pid} survived backend death: {state}")
+        finally:
+            if parent.poll() is None:
+                parent.kill()
+                parent.wait(5)
+            if pids:
+                try:
+                    os.killpg(pids[2], signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
+@unittest.skipIf(sys.platform == "win32", "POSIX hard-parent-death fixture")
+class StemParentCrashTests(unittest.TestCase):
+    def test_default_separation_stops_with_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            assert_worker_stops_after_parent_crash(self, Path(temporary).resolve(),
+                "from app import stems\nstems.LOG_DIR=root/'logs'; stems.DEMUCS_DIR=root\n"
+                "stems._demucs_cmd=lambda *args,**kwargs:worker\n"
+                "await stems.separate_file(root/'source.wav',root/'output',log_name='crash')")
+
+    def test_saved_track_separation_stops_with_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            assert_worker_stops_after_parent_crash(self, Path(temporary).resolve(),
+                "from app import db,stems\nstems.LOG_DIR=root/'logs'; stems.DEMUCS_DIR=root\n"
+                "stems._demucs_cmd=lambda *args,**kwargs:worker\n"
+                "audio=db.model_dir('upload')/'source.wav'; audio.write_bytes(b'fixture')\n"
+                "identifier=db.insert_track(model='upload',title='Fixture',lyrics='',seed=None,duration_ms=1000,wall_ms=None,params={},audio_path=audio,abc_path=None)\n"
+                "job=await stems.start(identifier)\nawait job.task")
 
 
 class SeparateFileSpawnTests(unittest.IsolatedAsyncioTestCase):
@@ -189,6 +256,95 @@ class SeparateFileSpawnTests(unittest.IsolatedAsyncioTestCase):
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
                 await terminate(worker)
+
+
+class SavedStemReplacementTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        for name, value in [("_db", None), ("DATA_DIR", self.root / "library"),
+                            ("DB_PATH", self.root / "library/catalog.db"),
+                            ("FILES_DIR", self.root / "library/files")]:
+            self.enterContext(patch.object(db, name, value))
+        self.connection = db.get_db()
+        self.addCleanup(self.connection.close)
+        self.enterContext(patch.object(stems, "LOG_DIR", self.root / "logs"))
+        self.enterContext(patch.object(stems, "DEMUCS_DIR", self.root))
+        self.enterContext(patch.object(stems, "_gpu_lock", asyncio.Lock()))
+        self.enterContext(patch.dict(stems._jobs, {}, clear=True))
+        self.addAsyncCleanup(stems.shutdown)
+        self.audio = db.model_dir("upload") / "source.wav"
+        self.audio.write_bytes(b"source fixture")
+        self.track_id = self.track(self.audio)
+        self.output = db.stems_dir("upload", self.track_id)
+        self.output.mkdir(parents=True)
+        self.previous = {name: str(self.output / f"{name}.wav") for name in stems.STEM_NAMES}
+        for name, path in self.previous.items():
+            Path(path).write_bytes(f"previous {name}".encode())
+        db.update_track_stems(self.track_id, self.previous)
+
+    def track(self, audio: Path) -> int:
+        return db.insert_track(model="upload", title="Fixture", lyrics="", seed=None,
+                               duration_ms=1000, wall_ms=None, params={}, audio_path=audio, abc_path=None)
+
+    def catalog(self) -> dict[str, str]:
+        row = db.get_track(self.track_id)
+        if row is None:
+            raise AssertionError("Fixture track disappeared")
+        return TypeAdapter(dict[str, str]).validate_json(row["stems_json"]) if row["stems_json"] else {}
+
+    def assert_previous_retained(self) -> None:
+        self.assertEqual(self.catalog(), self.previous)
+        for name, path in self.previous.items():
+            self.assertEqual(Path(path).read_bytes(), f"previous {name}".encode())
+
+    async def test_failed_rerun_keeps_previous_stems_and_catalog(self) -> None:
+        def command(audio: Path, out_dir: Path) -> list[str]:
+            script = f"from pathlib import Path; Path({str(out_dir / 'vocals.wav')!r}).write_bytes(b'partial'); raise SystemExit(1)"
+            return [sys.executable, "-c", script]
+        with patch.object(stems, "_demucs_cmd", side_effect=command), self.assertLogs("app.stems", level="ERROR"):
+            job = await stems.start(self.track_id, force=True)
+            if job.task is not None:
+                await job.task
+        self.assertEqual(job.status, "failed")
+        self.assert_previous_retained()
+        self.assertEqual(set(self.output.rglob("*.wav")), {Path(path) for path in self.previous.values()})
+
+    async def test_canceled_rerun_keeps_previous_stems_and_catalog(self) -> None:
+        ready = self.root / "ready"
+        def command(audio: Path, out_dir: Path) -> list[str]:
+            script = (f"from pathlib import Path; import time; Path({str(out_dir / 'vocals.wav')!r}).write_bytes(b'partial'); "
+                      f"Path({str(ready)!r}).write_text('ready'); time.sleep(60)")
+            return [sys.executable, "-c", script]
+        with patch.object(stems, "_demucs_cmd", side_effect=command):
+            job = await stems.start(self.track_id, force=True)
+            async with asyncio.timeout(5):
+                while not ready.exists():
+                    await asyncio.sleep(0.01)
+            await stems.cancel(self.track_id)
+        self.assertEqual(job.status, "cancelled")
+        self.assert_previous_retained()
+        self.assertEqual(set(self.output.rglob("*.wav")), {Path(path) for path in self.previous.values()})
+
+    async def test_successful_rerun_publishes_replacement_and_preserves_shared_old_stem(self) -> None:
+        shared = Path(self.previous["vocals"])
+        remaining_track = self.track(shared)
+        def command(audio: Path, out_dir: Path) -> list[str]:
+            script = ("from pathlib import Path; "
+                      f"root=Path({str(out_dir)!r}); "
+                      f"[(root / (name + '.wav')).write_bytes(b'replacement') for name in {stems.STEM_NAMES!r}]")
+            return [sys.executable, "-c", script]
+        with patch.object(stems, "_demucs_cmd", side_effect=command):
+            job = await stems.start(self.track_id, force=True)
+            if job.task is not None:
+                await job.task
+        self.assertEqual(job.status, "done")
+        self.assertEqual(set(self.catalog()), set(stems.STEM_NAMES))
+        for name, path in self.catalog().items():
+            self.assertNotEqual(path, self.previous[name])
+            self.assertEqual(Path(path).read_bytes(), b"replacement")
+        self.assertEqual(shared.read_bytes(), b"previous vocals")
+        self.assertIsNotNone(db.get_track(remaining_track))
+        self.assertFalse(Path(self.previous["drums"]).exists())
 
 
 if __name__ == "__main__":

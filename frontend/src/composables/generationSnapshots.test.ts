@@ -9,6 +9,11 @@ it('migrates validated legacy presets with stable per-engine keys and complete d
   expect(migrated[1]).toMatchObject({ legacy_key: expect.stringMatching(/^yue2_presets:Jazz:[a-f0-9]{16}$/), settings: { engine: 'yue2', numInferenceSteps: null, randomSeed: false } })
   expect(legacyPresetImports(ace, yue)).toEqual(migrated)
 })
+it('keeps the pre-adapter migration identity for an unchanged legacy YuE preset', () => {
+  const raw = JSON.stringify([{ name: 'Jazz', lyrics: 'Lyrics', style: 'jazz', cot: 'off', precision: 'q8_0' }])
+  expect(legacyPresetImports(null, raw)[0]?.legacy_key).toBe('yue2_presets:Jazz:1d857a16682b3733')
+  expect(legacyPresetImports(null, raw)[0]?.settings).toMatchObject({ arAdapter: null, narAdapter: null })
+})
 it('preserves valid presets around malformed storage and rejects out-of-bounds settings', () => {
   expect(legacyPresetImports('broken', JSON.stringify([{ name: 'valid', cot: 'off', precision: 'q8_0' }, { name: 'bad', cot: 'off', precision: 'q8_0', cfgScale: 10001 }]))).toHaveLength(1)
 })

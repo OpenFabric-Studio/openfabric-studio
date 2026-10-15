@@ -14,10 +14,11 @@ import soundfile as sf
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from . import audio_versions, db, native_yue, video_jobs
-from .config import MODELS, yue2_specs, YUE2_PROGRESS_AVAILABLE
-from .contracts import JsonObject
+from . import audio_versions, db, generation_library, music_lora, native_yue, video_jobs
+from .config import MODELS, yue2_specs, YUE2_LORA_AVAILABLE, YUE2_PROGRESS_AVAILABLE
+from .contracts import JsonObject, JsonValue
 from .job_lifecycle import await_cleanup, cancel_and_wait
+from .music_lora_contracts import MusicAdapter, MusicAdapterSelection, MusicLoraError
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .resource_admission import NativeLease, ResourceBusyError, reserve_native
@@ -44,6 +45,7 @@ class _StoredJob(BaseModel):
     request: YueSubmitRequest
     response: YueJobResponse
     track_id: int | None = None
+    adapters: list[MusicAdapter] = Field(default_factory=list, max_length=2)
 
 
 class _NativeModel(BaseModel):
@@ -180,20 +182,36 @@ def work_busy() -> bool:
 
 
 def submit(request: YueSubmitRequest) -> YueJobResponse:
+    from .resource_admission import require_setup_idle
+    require_setup_idle()
     ensure_schema()
     if not _engine_running():
         raise HTTPException(503, detail='model_inactive')
+    if (request.ar_adapter is not None or request.nar_adapter is not None) and not YUE2_LORA_AVAILABLE:
+        raise HTTPException(409, detail='music_lora_runtime_unsupported')
     if request.voice_id:
         from .voice_build import public_voice
         if not public_voice(request.voice_id).get('usable'):
             raise HTTPException(409, detail='voice_not_ready')
     if sum(job.status in _ACTIVE for job in list_jobs()) >= 100:
         raise HTTPException(429, detail='generation_queue_full')
+    adapters: list[MusicAdapter] = []
+    try:
+        for target, selection in (('ar', request.ar_adapter), ('nar', request.nar_adapter)):
+            if selection is not None:
+                music_lora.resolve(selection, engine='yue2', target=target)
+                adapters.append(music_lora.get(selection.id))
+    except MusicLoraError as exc:
+        raise HTTPException(exc.status, detail=exc.code) from exc
+    except OSError as exc:
+        logger.exception('YuE adapter storage unavailable')
+        raise HTTPException(503, detail='music_lora_storage_unavailable') from exc
     job_id = uuid.uuid4().hex
     response = YueJobResponse(id=job_id, status='queued', stage='queued', created_at=_now(),
         title=(request.title.strip() or (request.settings.title.strip() if request.settings is not None else "") or "Untitled")[:500], lyrics=request.lyrics, seed=request.seed,
-        precision=request.precision, options=request.options, voice_id=request.voice_id)
-    stored = _StoredJob(request=request, response=response)
+        precision=request.precision, options=request.options, voice_id=request.voice_id,
+        ar_adapter=request.ar_adapter, nar_adapter=request.nar_adapter)
+    stored = _StoredJob(request=request, response=response, adapters=adapters)
     db.get_db().execute('INSERT INTO yue_jobs(id,payload_json,created_at) VALUES(?,?,?)',
                         (job_id, stored.model_dump_json(), response.created_at))
     db.get_db().commit()
@@ -205,11 +223,19 @@ async def _native_json(endpoint: str, payload: JsonObject | None) -> JsonObject:
     return await native_yue.send(endpoint, payload)
 
 
-async def _load_model(job_id: str, precision: str) -> None:
+async def _load_model(job_id: str, precision: str, ar_adapter: MusicAdapterSelection | None = None,
+                      nar_adapter: MusicAdapterSelection | None = None) -> None:
+    if (ar_adapter is not None or nar_adapter is not None) and not YUE2_LORA_AVAILABLE:
+        raise MusicLoraError('music_lora_runtime_unsupported', 409)
     options = {**_COMPACT_ARENAS, 'yue2.model_gguf': f'yue2-3b-{precision}.gguf'}
+    for target, selection in (('ar', ar_adapter), ('nar', nar_adapter)):
+        if selection is not None:
+            options[f'yue2.{target}_lora'] = str(music_lora.resolve(selection, engine='yue2', target=target)).replace('\\', '/')
+            options[f'yue2.{target}_lora_scale'] = str(selection.strength)
     models = _NativeModels.model_validate(await _native_json('/v1/models?include_session_options=true', None))
     current = next((model for model in models.data if model.id == 'yue2' and model.loaded), None)
-    if current is not None and current.session_options is not None and all(current.session_options.get(key) == value for key, value in options.items()):
+    adapter_keys = ('yue2.ar_lora', 'yue2.ar_lora_scale', 'yue2.nar_lora', 'yue2.nar_lora_scale', 'yue2.lora', 'yue2.lora_scale')
+    if current is not None and current.session_options is not None and all(current.session_options.get(key) == options.get(key) for key in (*options, *adapter_keys)):
         return
     _native_requested.add(job_id)
     spec = yue2_specs()['yue2']
@@ -267,8 +293,18 @@ def _catalog_audio(job: _StoredJob, destination: Path) -> int:
         raise ValueError('Invalid completed score')
     params = _json.validate_json(job.request.options.model_dump_json(exclude_none=True))
     params.update({'precision': job.request.precision, 'seed': job.request.seed, 'song_title': job.response.title})
-    if job.request.settings is not None:
-        params['_generation_settings'] = _json.validate_json(job.request.settings.model_dump_json())
+    params['ar_adapter'] = _json.validate_json(job.request.ar_adapter.model_dump_json()) if job.request.ar_adapter else None
+    params['nar_adapter'] = _json.validate_json(job.request.nar_adapter.model_dump_json()) if job.request.nar_adapter else None
+    provenance: list[JsonValue] = []
+    for adapter in job.adapters:
+        manifest = _json.validate_json(adapter.model_dump_json())
+        selection = job.request.ar_adapter if adapter.target == 'ar' else job.request.nar_adapter
+        if selection is not None:
+            provenance.append({**manifest, 'strength': selection.strength})
+    params['_music_adapters'] = provenance
+    settings = job.request.settings or generation_library.snapshot_from_params('yue2', params, job.request.lyrics, job.request.seed, job.response.title)
+    settings = settings.model_copy(update={'arAdapter': job.request.ar_adapter, 'narAdapter': job.request.nar_adapter})
+    params['_generation_settings'] = _json.validate_json(settings.model_dump_json())
     wall_ms = job.response.elapsed_seconds * 1000
     track_id = db.insert_track(model='yue2', title=job.response.title, lyrics=job.request.lyrics,
         seed=job.request.seed, duration_ms=info.duration * 1000, wall_ms=wall_ms, params=params,
@@ -330,7 +366,10 @@ async def _worker(job_id: str) -> None:
             job.response.status, job.response.stage = 'running', 'loading'
             job.response.queue_reason, job.response.started_at = '', _now()
             _store(job)
-            await _load_model(job_id, job.request.precision)
+            for adapter in job.adapters:
+                if music_lora.get(adapter.id) != adapter:
+                    raise MusicLoraError('music_lora_adapter_changed', 409)
+            await _load_model(job_id, job.request.precision, job.request.ar_adapter, job.request.nar_adapter)
             job.response.stage = 'generating'
             _store(job)
             _native_requested.add(job_id)
@@ -351,9 +390,17 @@ async def _worker(job_id: str) -> None:
         if job.response.status != 'done':
             await await_cleanup(_stop_owned(job, 'cancelled'))
         raise
-    except Exception:
+    except Exception as exc:
         logger.exception('YuE generation failed')
-        job.response.error_code = 'generation_failed'
+        job.response.error_code = exc.code if isinstance(exc, MusicLoraError) else 'generation_failed'
+        if job.response.stage == 'saving':
+            try:
+                retained = db.FILES_DIR.resolve() / 'yue2' / f'yue_{job_id}.wav'
+                if retained.resolve() == retained and retained.is_file():
+                    job.response.error_code = 'save_failed'
+            except OSError:
+                # Unverified output must not promise a recoverable save.
+                pass
         await await_cleanup(_stop_owned(job, 'failed'))
     finally:
         if job.response.status not in ('stopping',):

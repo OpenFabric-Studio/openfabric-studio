@@ -534,14 +534,14 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         workers: list[asyncio.subprocess.Process] = []
 
-        async def encoder(*_argv: str, stdout: int, stderr: int) -> asyncio.subprocess.Process:
-            proc = await spawn_process(sys.executable, "-c", "import time; time.sleep(30)", stdout=stdout, stderr=stderr)
+        async def encoder(_argv: list[str], *, receipt_path: Path, stdout: int | None = None) -> asyncio.subprocess.Process:
+            proc = await spawn_process(sys.executable, "-c", "import time; time.sleep(30)", stdout=stdout, stderr=asyncio.subprocess.STDOUT)
             workers.append(proc)
             started.set()
             return proc
 
         upload = UploadFile(io.BytesIO(self.image.read_bytes()), filename="new.png")
-        with patch.object(self.p, "probe_media", return_value=MediaInfo(80, 60, 0, 0, 0)), patch.object(self.p, "spawn_process", side_effect=encoder):
+        with patch.object(self.p, "probe_media", return_value=MediaInfo(80, 60, 0, 0, 0)), patch.object(self.p, "spawn_owned", side_effect=encoder):
             pending = asyncio.create_task(self.p.upload_reference(self.project.id, self.project.revision, upload))
             try:
                 await wait_for_test_signal(started, pending, description="reference encoder readiness")
@@ -676,20 +676,20 @@ class VideoRenderTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         workers: list[asyncio.subprocess.Process] = []
 
-        async def encoder(*_argv: str, stdout: int, stderr: int) -> asyncio.subprocess.Process:
-            proc = await spawn_process(sys.executable, "-c", "import time; time.sleep(30)", stdout=stdout, stderr=stderr)
+        async def encoder(_argv: list[str], *, receipt_path: Path, stdout: int | None = None) -> asyncio.subprocess.Process:
+            proc = await spawn_process(sys.executable, "-c", "import time; time.sleep(30)", stdout=stdout, stderr=asyncio.subprocess.STDOUT)
             workers.append(proc)
             return proc
 
-        async def blocked_encoder(_proc: asyncio.subprocess.Process, _timeout: float) -> tuple[bytes, bytes]:
+        async def blocked_encoder(_proc: asyncio.subprocess.Process, *, max_bytes: int, timeout: float) -> bytes:
             started.set()
             await asyncio.Event().wait()
-            return b"", b""
+            return b""
 
         upload = UploadFile(io.BytesIO(self.image.read_bytes()), filename="new.png")
         pending: asyncio.Task[VideoProject] | None = None
         try:
-            with patch.object(self.p, "probe_media", return_value=MediaInfo(80, 60, 0, 0, 0)), patch.object(self.p, "spawn_process", side_effect=encoder), patch.object(self.p, "communicate_process", side_effect=blocked_encoder), patch.object(self.p, "kill_process_tree", side_effect=OSError("termination failed")):
+            with patch.object(self.p, "probe_media", return_value=MediaInfo(80, 60, 0, 0, 0)), patch.object(self.p, "spawn_owned", side_effect=encoder), patch.object(self.p, "read_owned_output", side_effect=blocked_encoder), patch.object(self.p, "kill_process_tree", side_effect=OSError("termination failed")):
                 pending = asyncio.create_task(self.p.upload_reference(self.project.id, self.project.revision, upload))
                 await wait_for_test_signal(started, pending, description="reference encoder communication entering")
                 for _ in range(2):

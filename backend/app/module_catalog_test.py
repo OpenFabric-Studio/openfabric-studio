@@ -181,6 +181,47 @@ if __name__ == '__main__':
 
 
 class OptionalEngineCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_music_weight_presence_does_not_claim_ready_or_download(self) -> None:
+        from app import local_music_runtime
+        with tempfile.TemporaryDirectory() as temporary:
+            environment = catalog.ModuleEnvironment.for_root(Path(temporary), platform='darwin', architecture='arm64')
+            for identifier in local_music_runtime.ENGINES:
+                for marker in catalog.DEFINITIONS[identifier].source_markers:
+                    path = environment.paths[identifier] / marker
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text('# source')
+                for path in local_music_runtime.weight_paths(environment, identifier):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(b'unverified local checkpoint')
+            with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(catalog, '_environment_receipt', return_value=True):
+                inventory = await catalog.inventory(environment)
+            modules = {module.id: module for module in inventory.modules}
+            for identifier in local_music_runtime.ENGINES:
+                self.assertEqual(modules[identifier].state, 'installed')
+                self.assertTrue(next(row for row in modules[identifier].evidence if row.code == 'local_model_files').verified)
+                self.assertTrue(any(row.code == 'inference_unverified' for row in modules[identifier].evidence))
+                self.assertNotIn('music_generation_models', modules[identifier].capabilities)
+
+    async def test_local_music_modules_have_honest_platform_setup_and_licenses(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            mac = catalog.ModuleEnvironment.for_root(Path(temporary), platform='darwin', architecture='arm64')
+            linux = replace(mac, platform='linux', architecture='x86_64')
+            with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+                inventory = await catalog.inventory(mac)
+                reviewed = await catalog.plan(ModulePlanRequest(features=['heartmula', 'stable_audio3'], download_models=True), mac)
+                dependencies = await catalog.plan(ModulePlanRequest(features=['heartmula', 'stable_audio3']), mac)
+            modules = {module.id: module for module in inventory.modules}
+            for identifier in ('heartmula', 'stable_audio3'):
+                self.assertTrue(modules[identifier].supported)
+                self.assertEqual(modules[identifier].state, 'missing')
+                self.assertIn('No weights are downloaded', catalog.DEFINITIONS[identifier].guidance)
+                self.assertTrue(modules[identifier].licenses)
+            self.assertFalse(catalog.supported('heartmula', linux))
+            self.assertFalse(catalog.supported('stable_audio3', linux))
+            self.assertEqual([step.module_id for step in reviewed.steps], ['media', 'heartmula', 'stable_audio3'])
+            self.assertEqual(reviewed.required_free_bytes, dependencies.required_free_bytes)
+            self.assertTrue(any(row.scope == 'code' and row.declared_license == 'MIT' for row in modules['stable_audio3'].licenses))
+
     def test_new_local_engines_match_their_mac_limits(self) -> None:
         linux = catalog.ModuleEnvironment.for_root(Path('/tmp/openfabric-linux-modules'), platform='linux', architecture='x86_64')
         mac = catalog.ModuleEnvironment.for_root(Path('/tmp/openfabric-mac-modules'), platform='darwin', architecture='arm64')

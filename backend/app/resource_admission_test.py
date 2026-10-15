@@ -38,6 +38,14 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             await admission.reserve_native(lambda: True)
         self.assertFalse(admission.native_work_inflight())
 
+    async def test_stable_training_blocks_native_and_other_local_admission(self) -> None:
+        from app.work_busy import local_work_busy
+        with patch('app.stable_lora.work_busy', return_value=True):
+            self.assertTrue(local_work_busy())
+            with self.assertRaises(admission.ResourceBusyError):
+                await admission.reserve_native(lambda: False)
+        self.assertFalse(admission.native_work_inflight())
+
     async def test_native_lease_blocks_optional_and_character_submission(self) -> None:
         from app import optional_engines, video_character_training
         from app.video_projects import VideoProjectError

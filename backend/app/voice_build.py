@@ -39,7 +39,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from . import db
 from .atomic_files import JsonObject, document_lock, read_object, write_object
-from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, kill_process_tree, request_cancel, spawn_process
+from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree, request_cancel
+from .video_process import run_owned_command
 from .config import DATA_DIR, FFMPEG_BIN_DIR, LOG_DIR as LOG_DIR, SEED_VC_DIR as SEED_VC_DIR
 from .data_root import place_seed_models
 from .orchestrator.process import tail_log
@@ -132,7 +133,6 @@ class VoiceProcessSlot(Protocol):
 @dataclass
 class ProcSlot:
     proc: asyncio.subprocess.Process | None = None
-    parent_liveness: bool = False
 
     def track(self, proc: asyncio.subprocess.Process | None) -> None:
         self.proc = proc
@@ -188,7 +188,7 @@ class ApplyJob:
     cancel: bool = False
     cleanup_pending: bool = False
     task: asyncio.Task[None] | None = field(default=None, repr=False)
-    slot: VoiceProcessSlot = field(default_factory=lambda: ProcSlot(parent_liveness=True))
+    slot: VoiceProcessSlot = field(default_factory=ProcSlot)
     work_dir: Path | None = field(default=None, repr=False)
     partial_outputs: set[Path] = field(default_factory=set, repr=False)
     audio_version_id: str | None = None
@@ -790,7 +790,7 @@ async def kill_proc(proc: asyncio.subprocess.Process | None) -> None:
 
 
 async def spawn_apply_worker(argv: list[str], cwd: Path, env: Mapping[str, str], stdout: int) -> asyncio.subprocess.Process:
-    """An application child dies with its backend, including hard crashes."""
+    """A voice worker dies with its backend, including hard crashes."""
     from .video_process import spawn_owned
     root = voices_root().resolve()
     directory = root / '_apply' / 'workers'
@@ -815,29 +815,22 @@ async def _communicate_apply(proc: asyncio.subprocess.Process, timeout: float) -
                 chunks.append(chunk)
             await proc.wait()
             return b''.join(chunks)
-    except BaseException:
-        await await_cleanup(kill_proc(proc))
-        raise
     finally:
-        if proc.stdin is not None:
-            proc.stdin.close()
+        try:
+            await await_cleanup(kill_proc(proc))
+        finally:
+            if proc.stdin is not None:
+                proc.stdin.close()
 
 
 async def _ffmpeg(args: list[str], slot: VoiceProcessSlot, cancelled: Callable[[], bool], timeout: float = 1800) -> str:
     if cancelled():
         raise BuildCancelled()
-    protected = isinstance(slot, ProcSlot) and slot.parent_liveness
-    if protected:
-        proc = await spawn_apply_worker([_tool('ffmpeg'), *args], Path.cwd(), os.environ.copy(), asyncio.subprocess.PIPE)
-    else:
-        proc = await spawn_process(_tool('ffmpeg'), *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    proc = await spawn_apply_worker([_tool('ffmpeg'), *args], Path.cwd(), os.environ.copy(), asyncio.subprocess.PIPE)
     slot.track(proc)
     drained = False
     try:
-        if protected:
-            err = await _communicate_apply(proc, timeout)
-        else:
-            _out, err = await communicate_process(proc, timeout)
+        err = await _communicate_apply(proc, timeout)
         drained = True
     except TimeoutError:
         await kill_proc(proc)
@@ -860,18 +853,17 @@ async def _ffmpeg(args: list[str], slot: VoiceProcessSlot, cancelled: Callable[[
 
 
 async def _probe_duration(path: Path) -> float:
-    proc = await spawn_process(
+    result = await run_owned_command([
         _tool("ffprobe"),
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
         str(path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await communicate_process(proc)
+    ], timeout=30)
+    if result.returncode != 0:
+        return 0.0
     try:
-        return float(out.decode().strip())
+        return float(result.stdout.decode().strip())
     except ValueError:
         return 0.0
 
@@ -1016,17 +1008,15 @@ async def _spawn(cmd: list[str], *, cwd: Path, log_name: str, slot: VoiceProcess
         env = _child_env()
         if offline:
             env.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'})
-        if isinstance(slot, ProcSlot) and slot.parent_liveness:
-            proc = await spawn_apply_worker(cmd, cwd, env, handle.fileno())
-        else:
-            proc = await spawn_process(*cmd, cwd=str(cwd), env=env, stdout=handle, stderr=asyncio.subprocess.STDOUT)
+        proc = await spawn_apply_worker(cmd, cwd, env, handle.fileno())
         slot.track(proc)
         try:
             code = await proc.wait()
+            await await_cleanup(kill_proc(proc))
             drained = True
             return code
         except asyncio.CancelledError:
-            await kill_proc(proc)
+            await await_cleanup(kill_proc(proc))
             drained = True
             raise
     finally:

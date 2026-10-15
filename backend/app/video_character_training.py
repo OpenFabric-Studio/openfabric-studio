@@ -23,9 +23,9 @@ from fastapi import UploadFile
 
 from .config import DATA_DIR, LTX_DIR
 from .gpu_lease import gpu_lease
-from .job_lifecycle import await_cleanup, cancel_and_wait, communicate_process, kill_process_tree, spawn_process
+from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
 from .image_normalization import normalization_argv
-from .video_process import WorkerIdentity, spawn_owned, terminate_verified
+from .video_process import WorkerIdentity, WorkerReceipt, WorkerOutputError, read_owned_output, spawn_owned, terminate_verified
 from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
 from .stems import gpu_lock
 from .video_contracts import (
@@ -41,6 +41,7 @@ _ID = re.compile(r"^[0-9a-f]{32}$")
 _TASKS: dict[str, asyncio.Task[None]] = {}
 _UPLOADS: set[asyncio.Task[VideoCharacterTrainingJob]] = set()
 _UNVERIFIED: set[str] = set()
+_NORMALIZERS: dict[str, tuple[asyncio.subprocess.Process | None, WorkerIdentity]] = {}
 _STOPPING = False
 _LOG = logging.getLogger(__name__)
 _MIN_PHOTOS = 3
@@ -110,7 +111,46 @@ def training_busy() -> bool:
 
 
 def work_busy() -> bool:
-    return bool(_UNVERIFIED or _UPLOADS) or any(not task.done() for task in _TASKS.values())
+    return bool(_UNVERIFIED or _UPLOADS or _NORMALIZERS) or any(not task.done() for task in _TASKS.values())
+
+
+async def _drain_normalizer(job_id: str) -> None:
+    try:
+        owned = _NORMALIZERS.get(job_id)
+        if owned is None:
+            identity_path = _artifact(job_id, 'identity.json')
+            if identity_path.is_file():
+                if identity_path.stat().st_size > 65536:
+                    raise VideoProjectError('worker_identity_unverified')
+                identity = WorkerIdentity.model_validate_json(identity_path.read_bytes())
+            else:
+                receipt_path = _artifact(job_id, 'worker.json')
+                if receipt_path.stat().st_size > 65536:
+                    raise VideoProjectError('worker_identity_unverified')
+                receipt = WorkerReceipt.model_validate_json(receipt_path.read_bytes())
+                identity = WorkerIdentity(pid=receipt.pid, token=receipt.token, receipt=str(receipt_path))
+            owned = (None, identity)
+            _NORMALIZERS[job_id] = owned
+        proc, identity = owned
+        if Path(identity.receipt) != _artifact(job_id, 'worker.json'):
+            raise VideoProjectError('worker_identity_unverified')
+        if proc is not None:
+            await kill_process_tree(proc)
+        elif not await terminate_verified(identity):
+            raise VideoProjectError('worker_identity_unverified')
+        _artifact(job_id, 'identity.json').unlink(missing_ok=True)
+        _artifact(job_id, 'worker.json').unlink(missing_ok=True)
+    except (OSError, TimeoutError, ValueError, VideoProjectError) as exc:
+        _UNVERIFIED.add(job_id)
+        raise VideoProjectError('cleanup_failed') from exc
+    _NORMALIZERS.pop(job_id, None)
+    _UNVERIFIED.discard(job_id)
+
+
+async def _discard_unpublished(job_id: str) -> None:
+    await _drain_normalizer(job_id)
+    import shutil
+    shutil.rmtree(job_dir(job_id))
 
 
 def list_jobs() -> list[VideoCharacterTrainingJob]:
@@ -510,15 +550,20 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
                     raise VideoProjectError("reference_too_large")
                 target = root / ("held_out" if held_out else "photos") / f"{index:02d}.png"
                 target.parent.mkdir(parents=True, exist_ok=True)
-                proc = await spawn_process(
-                    *normalization_argv(temporary, target),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                receipt = _artifact(job_id, 'worker.json')
+                def record(identity: WorkerIdentity) -> None:
+                    _NORMALIZERS[job_id] = (None, identity)
+                    atomic_text(_artifact(job_id, 'identity.json'), identity.model_dump_json())
+                proc = await spawn_owned(normalization_argv(temporary, target), receipt_path=receipt,
+                                         stdout=asyncio.subprocess.PIPE, on_identity=record)
+                _NORMALIZERS[job_id] = (proc, _NORMALIZERS[job_id][1])
                 try:
-                    await communicate_process(proc, 30)
+                    try:
+                        await read_owned_output(proc, max_bytes=1024 * 1024, timeout=30)
+                    except (WorkerOutputError, TimeoutError) as exc:
+                        raise VideoProjectError('invalid_reference') from exc
                 finally:
-                    await await_cleanup(kill_process_tree(proc))
+                    await await_cleanup(_drain_normalizer(job_id))
                 if proc.returncode != 0 or not target.is_file():
                     raise VideoProjectError("invalid_reference")
                 original = root / "originals" / f"{index:02d}.bin"
@@ -637,7 +682,9 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
         published = True
         return job
     except BaseException:
-        if not published:
+        if job_id in _NORMALIZERS or _artifact(job_id, 'worker.json').exists():
+            _UNVERIFIED.add(job_id)
+        elif not published:
             import shutil
             shutil.rmtree(root, ignore_errors=True)
         raise
@@ -647,6 +694,9 @@ async def _create_job(*, name: str, consent_confirmed: bool, uploads: list[Uploa
 
 
 async def cancel_job(job_id: str) -> VideoCharacterTrainingJob:
+    if not _job_path(job_id).is_file() and (job_id in _NORMALIZERS or _artifact(job_id, 'identity.json').is_file() or _artifact(job_id, 'worker.json').is_file()):
+        await await_cleanup(_discard_unpublished(job_id))
+        raise VideoProjectError('not_found')
     _load(job_id)
     if job_id in _UNVERIFIED:
         raise VideoProjectError("worker_identity_unverified")
@@ -667,6 +717,17 @@ async def cancel_job(job_id: str) -> VideoCharacterTrainingJob:
 async def recover() -> None:
     global _STOPPING
     _STOPPING = True
+    root = jobs_root()
+    if root.is_dir():
+        for folder in root.iterdir():
+            if not _ID.fullmatch(folder.name):
+                continue
+            try:
+                if not _job_path(folder.name).is_file() and (folder.name in _NORMALIZERS or _artifact(folder.name, 'identity.json').is_file() or _artifact(folder.name, 'worker.json').is_file()):
+                    await await_cleanup(_discard_unpublished(folder.name))
+            except VideoProjectError:
+                _UNVERIFIED.add(folder.name)
+                _LOG.exception('Unpublished character worker cleanup failed')
     for job in list_jobs():
         if job.id in _TASKS:
             continue
@@ -693,4 +754,5 @@ async def shutdown() -> None:
     for task in tuple(_UPLOADS):
         task.cancel()
     await await_cleanup(asyncio.gather(*tuple(_UPLOADS), return_exceptions=True))
+    await await_cleanup(asyncio.gather(*(_discard_unpublished(identifier) for identifier in tuple(_NORMALIZERS)), return_exceptions=True))
     await await_cleanup(asyncio.gather(*(cancel_job(identifier) for identifier in tuple(_TASKS)), return_exceptions=True))

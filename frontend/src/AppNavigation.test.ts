@@ -69,7 +69,10 @@ async function mount(path = '/voice-clone') {
     { path: '/audiobooks', name: 'audiobooks', component: view }, { path: '/music', name: 'music', component: view },
     { path: '/video', name: 'video', component: view }, { path: '/settings', name: 'settings', component: view },
     { path: '/music/ace-step', name: 'ace-step', component: view }, { path: '/music/yue2', name: 'yue2', component: view },
+    { path: '/music/heartmula', name: 'heartmula', component: view }, { path: '/music/stable-audio3', name: 'stable_audio3', component: view },
+    { path: '/music/openrouter', name: 'openrouter-music', component: view },
     { path: '/ace-step/lora', name: 'ace-step-lora', component: view },
+    { path: '/music/lora', name: 'music-lora', component: view },
   ] })
   await router.push(path); await router.isReady()
   const pinia = createPinia()
@@ -103,7 +106,7 @@ it('groups all existing destinations and keeps Settings and Help in the sidebar'
   const nav = sidebar().querySelector('nav[aria-label="Main navigation"]')
   expect(nav).not.toBeNull()
   for (const group of ['Workspace', 'Create', 'Tools']) expect(nav?.querySelector(`section[aria-label="${group}"]`)).not.toBeNull()
-  for (const path of ['/', '/editor', '/music', '/audiobooks', '/voice-clone', '/video', '/settings']) expect(link(path).getAttribute('aria-label')).toBeTruthy()
+  for (const path of ['/', '/editor', '/music', '/music/lora', '/audiobooks', '/voice-clone', '/video', '/settings']) expect(link(path).getAttribute('aria-label')).toBeTruthy()
   expect([...nav?.querySelectorAll('section[aria-label="Create"] .navigation-item') ?? []].map(item => item.getAttribute('aria-label'))).toEqual(['Music', 'Audiobook', 'Video'])
   expect([...nav?.querySelectorAll('section[aria-label="Tools"] .navigation-item') ?? []].map(item => item.getAttribute('aria-label'))).toEqual(['LoRA Training', 'Voice Clone'])
   expect(sidebar().querySelector('[data-model]')).toBeNull()
@@ -216,14 +219,15 @@ it('does not expose a raw engine switch error in the compact header', async () =
   expect(button('Music engine could not start. Retry in Music or check Settings.')).toBeDefined()
 })
 
-it('keeps LoRA discoverable with an explicit running-engine prerequisite', async () => {
+it('opens shared LoRA loading and training regardless of ACE state without starting an engine', async () => {
   const { router, store } = await mount()
-  const training = button('LoRA Training', sidebar())
-  expect(training.getAttribute('aria-disabled')).toBe('true')
-  training.focus(); await settle(); expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Open Music and start ACE-Step 1.5 to train a LoRA.')
-  training.click(); await settle(); expect(router.currentRoute.value.name).toBe('voice-clone')
-  store._applySnapshot(snapshot('running')); await settle(); training.click(); await settle()
-  expect(router.currentRoute.value.name).toBe('ace-step-lora')
+  const training = link('/music/lora')
+  expect(training.getAttribute('aria-disabled')).toBeNull()
+  training.click(); await settle(); expect(router.currentRoute.value.name).toBe('music-lora')
+  store._applySnapshot(snapshot('running')); await settle()
+  await router.push('/voice-clone'); training.click(); await settle()
+  expect(router.currentRoute.value.name).toBe('music-lora')
+  expect(api.switchModel).not.toHaveBeenCalled()
 })
 
 it('keeps Help focus ownership nested inside the mobile drawer', async () => {
@@ -249,7 +253,7 @@ it('provides a skip link that focuses the main workspace', async () => {
 it('removes a hovered tooltip when history hides the mobile drawer', async () => {
   desktop = false; const { router } = await mount()
   button('Open navigation').click(); await settle()
-  const engine = button('LoRA Training', sidebar())
+  const engine = link('/music/lora')
   if (!engine?.parentElement) throw new Error('Missing training tooltip trigger')
   engine.focus(); engine.parentElement.dispatchEvent(new MouseEvent('mouseenter')); await settle()
   expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
@@ -267,16 +271,16 @@ it('dismisses a tapped status tooltip with a second tap or an outside pointer ac
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
 })
 
-it('keeps the unavailable training explanation visible after a touch-style tap', async () => {
-  await mount()
-  const training = button('LoRA Training', sidebar()); training.focus(); training.click(); await settle()
-  expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('Open Music and start ACE-Step 1.5 to train a LoRA.')
+it('opens LoRA on a touch-style tap without starting an engine', async () => {
+  const { router } = await mount()
+  const training = link('/music/lora'); training.focus(); training.click(); await settle()
+  expect(router.currentRoute.value.name).toBe('music-lora')
   expect(api.switchModel).not.toHaveBeenCalled()
 })
 
 it('dismisses a drawer tooltip with Escape before closing the drawer on the next Escape', async () => {
   desktop = false; await mount(); button('Open navigation').click(); await settle()
-  const training = button('LoRA Training', sidebar()); training.focus(); await settle()
+  const training = link('/music/lora'); training.focus(); await settle()
   expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
   key(training, 'Escape'); await settle()
   expect(document.querySelector('[role="tooltip"]')).toBeNull()
@@ -288,7 +292,7 @@ it('dismisses a drawer tooltip with Escape before closing the drawer on the next
 it.each([true, false])('suppresses background tooltips while Help owns focus (desktop=%s)', async isDesktop => {
   desktop = isDesktop; await mount()
   if (!desktop) { button('Open navigation').click(); await settle() }
-  const engine = button('LoRA Training', sidebar())
+  const engine = link('/music/lora')
   if (!engine?.parentElement) throw new Error('Missing training tooltip trigger')
   engine.parentElement.dispatchEvent(new MouseEvent('mouseenter')); await settle()
   expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
@@ -301,12 +305,12 @@ it.each([true, false])('suppresses background tooltips while Help owns focus (de
   expect(document.activeElement).toBe(help)
 })
 
-it('opens Music without starting an engine and marks both model routes as Music', async () => {
+it('opens the queue without starting an engine and marks all advanced generator routes as Music', async () => {
   const { router } = await mount()
   link('/music').click(); await settle()
   expect(router.currentRoute.value.name).toBe('music')
   expect(api.switchModel).not.toHaveBeenCalled()
-  for (const path of ['/music/ace-step', '/music/yue2']) {
+  for (const path of ['/music/ace-step', '/music/yue2', '/music/heartmula', '/music/stable-audio3', '/music/openrouter']) {
     await router.push(path); await settle()
     expect(link('/music').getAttribute('aria-current')).toBe('page')
   }

@@ -5,6 +5,8 @@ from typing import Annotated, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from .music_lora_contracts import MusicAdapterSelection
+
 GenerationEngine = Literal['ace_step', 'yue2']
 GenerationId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 GenerationRevision = Annotated[int, Field(ge=1, le=9_007_199_254_740_991)]
@@ -95,6 +97,8 @@ class YueGenerationSettings(GenerationContract):
     randomSeed: bool = False
     batchSize: int = Field(default=1, ge=1, le=4)
     voiceId: GenerationId | None = None
+    arAdapter: MusicAdapterSelection | None = None
+    narAdapter: MusicAdapterSelection | None = None
     referenceRequiresReupload: bool = False
 
 

@@ -24,7 +24,7 @@ from pathlib import Path
 from .module_contracts import ModuleId
 from .contracts import Contract
 from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
-from .video_process import WorkerIdentity, spawn_owned, terminate_verified
+from .video_process import WorkerIdentity, WorkerOutputError, spawn_owned, terminate_verified
 from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
 from .gpu_lease import gpu_lease
 from .stems import gpu_lock
@@ -282,11 +282,12 @@ async def _validate_output(path: Path) -> None:
         info = await probe_media(path)
         if info.width < 1 or info.height < 1 or info.video_duration <= 0:
             raise OptionalEngineError('engine_failed', 'The engine did not write valid video.')
-        from .job_lifecycle import spawn_process, communicate_process
-        proc = await spawn_process(tool('ffmpeg'), '-v', 'error', '-xerror', '-i', str(path), '-map', '0:v:0', '-f', 'null', '-',
-                                   stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-        await communicate_process(proc, 120)
-        if proc.returncode != 0:
+        from .video_process import run_owned_command
+        try:
+            result = await run_owned_command([tool('ffmpeg'), '-v', 'error', '-xerror', '-i', str(path), '-map', '0:v:0', '-f', 'null', '-'], timeout=120)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise OptionalEngineError('engine_failed', 'The engine did not write valid video.') from exc
+        if result.returncode != 0:
             raise OptionalEngineError('engine_failed', 'The engine did not write valid video.')
 
 
