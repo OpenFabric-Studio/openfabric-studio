@@ -48,7 +48,7 @@ function activePath(path: string) { return path === '/' ? route.path === '/' : r
       <section class="navigation-group" :aria-label="t('appNavigation.tools')">
         <h2 class="navigation-heading" :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.tools') }}</h2>
         <AppTooltip v-slot="{ describedBy }" :text="t('musicLora.navigationHint')" :enabled="props.active" press>
-          <router-link to="/music/lora" class="navigation-item" :aria-label="t('appNavigation.training')" :aria-current="route.name === 'music-lora' || route.name === 'ace-step-lora' ? 'page' : undefined" :aria-describedby="describedBy" @click="emit('navigate')"><AppIcon name="training" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.training') }}</span></router-link>
+          <router-link to="/music/lora" class="navigation-item" :aria-label="t('appNavigation.training')" :aria-current="activePath('/music/lora') ? 'page' : undefined" :aria-describedby="describedBy" @click="emit('navigate')"><AppIcon name="training" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.training') }}</span></router-link>
         </AppTooltip>
         <AppTooltip v-slot="{ describedBy }" :text="t('header.voiceClone')" :enabled="props.active && props.collapsed">
           <router-link to="/voice-clone" class="navigation-item" :aria-label="t('header.voiceClone')" :aria-current="activePath('/voice-clone') ? 'page' : undefined" :aria-describedby="describedBy" @click="emit('navigate')"><AppIcon name="voice" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('header.voiceClone') }}</span></router-link>

@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from typing import BinaryIO
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, HTTPException, UploadFile
 import httpx
@@ -81,6 +81,33 @@ class DatasetUploadTests(unittest.IsolatedAsyncioTestCase):
                 await routes.upload_dataset_files('my_dataset', [self.upload('clip.wav')])
         self.assertEqual(original.read_bytes(), b'original recording')
         self.assertEqual(list(target.iterdir()), [original])
+
+    async def test_selected_id_upload_uses_owned_folder_and_rejects_stale_revision(self) -> None:
+        from app import lora_datasets as library
+        from app.lora_dataset_contracts import CreateLoraDatasetRequest, RenameLoraDatasetRequest
+        with patch.object(library, 'ACE_STEP_DIR', self.engine), patch.object(library, 'DATA_DIR', self.root / 'catalog'):
+            entry = library.create_dataset(CreateLoraDatasetRequest(name='Display name'))
+            response = await routes.upload_dataset_files('ignored name', [self.upload('clip.wav')], entry.id, entry.revision)
+            self.assertEqual(response.audio_dir, entry.audio_dir)
+            self.assertEqual((self.engine / entry.audio_dir / 'clip.wav').read_bytes(), b'complete audio fixture')
+            library.rename_dataset(entry.id, RenameLoraDatasetRequest(name='Renamed', revision=entry.revision))
+            with self.assertRaises(HTTPException) as caught:
+                await routes.upload_dataset_files('ignored name', [self.upload('later.wav')], entry.id, entry.revision)
+            self.assertEqual(caught.exception.detail, 'dataset_revision_conflict')
+            self.assertFalse((self.engine / entry.audio_dir / 'later.wav').exists())
+
+    async def test_legacy_upload_obeys_busy_guard_and_admission_without_partial_files(self) -> None:
+        from app import lora_datasets as library
+        from app.resource_admission import ResourceBusyError
+        with patch.object(library, 'require_native_idle', new=AsyncMock(side_effect=library.LoraDatasetError('dataset_busy'))):
+            with self.assertRaises(HTTPException) as caught:
+                await routes.upload_dataset_files('old-style-name', [self.upload('clip.wav')])
+        self.assertEqual(caught.exception.detail, 'dataset_busy')
+        self.assertFalse((self.datasets / 'old-style-name').exists())
+        with patch.object(routes, 'reserve_native_control', new=AsyncMock(side_effect=ResourceBusyError('module_setup_busy'))):
+            with self.assertRaises(HTTPException) as caught:
+                await routes.upload_dataset_files('old-style-name', [self.upload('clip.wav')])
+        self.assertEqual(caught.exception.status_code, 409)
 
     async def test_http_upload_preserves_sanitization_duplicates_and_extension_skips(self) -> None:
         app = FastAPI()

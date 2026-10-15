@@ -17,7 +17,7 @@ const adapter: MusicAdapter = { id: 'a'.repeat(32), engine: 'stable_audio3', tar
 const request = { name: 'Piano', variant: 'small-music', samples: [{ track_id: 42, caption: 'Solo piano' }], max_steps: 1000, rank: 16, learning_rate: 0.0001, seed: 42 } as const
 function job(status: StableLoraTrainingJob['status'] = 'running'): StableLoraTrainingJob { return { id: 'c'.repeat(32), status, stage: status === 'done' ? 'done' : 'training', created_at: 'now', request: { ...request, samples: [...request.samples] }, adapter: status === 'done' ? adapter : null, error_code: null } }
 async function settle() { for (let index = 0; index < 14; index++) await nextTick() }
-async function mount() { const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicLoraPage }, { path: '/ace-step/lora', component: { render: () => null } }, { path: '/settings', component: { render: () => null } }] }); await router.push('/'); const node = document.body.appendChild(document.createElement('div')); app = createApp(MusicLoraPage).use(router).use(i18n); app.mount(node); await settle(); return node }
+async function mount(engine: 'stable_audio3' | 'yue2' | 'heartmula' = 'stable_audio3') { const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicLoraPage }, { path: '/ace-step/lora', component: { render: () => null } }, { path: '/settings', component: { render: () => null } }] }); await router.push('/'); const node = document.body.appendChild(document.createElement('div')); app = createApp(MusicLoraPage, { engine }).use(router).use(i18n); app.mount(node); await settle(); return node }
 function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
 async function input(node: ParentNode, name: string, value: string) { const element = node.querySelector(`[name="${name}"]`); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error(`Missing ${name}`); element.value = value; element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); await settle() }
 beforeEach(() => {
@@ -31,11 +31,10 @@ beforeEach(() => {
   vi.mocked(tracks.listTracks).mockResolvedValue([{ id: 42, short_id: 42, model: 'upload', title: 'Piano recording', created_at: 'now', lyrics: '', seed: null, duration_ms: 30000, wall_ms: null, params: {}, filename: 'piano.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }])
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
-it('shows actual engine capabilities and links the existing ACE workflow without automatic jobs', async () => {
+it('shows only the selected model capabilities without automatically starting jobs', async () => {
   const node = await mount()
-  expect(node.querySelector('[data-engine="heartmula"]')?.textContent).toContain('no adapter API or trainer')
-  expect(node.querySelector('[data-engine="yue2"]')?.textContent).toContain('Loading only')
-  expect(node.querySelector('a[href="/ace-step/lora"]')).not.toBeNull()
+  expect(node.querySelector('[data-engine="stable_audio3"]')?.textContent).toContain('Native runtime support')
+  expect(node.querySelector('[data-engine="heartmula"]')).toBeNull()
   expect(node.textContent).toContain('PEFT checkpoints with a companion JSON are not supported')
   expect(training.submitStableLora).not.toHaveBeenCalled(); expect(adapters.importMusicAdapter).not.toHaveBeenCalled()
 })
@@ -83,7 +82,7 @@ it('restores durable history, cancels running work and stops polling terminal jo
 it('continues polling after transient errors and exposes a completed checkpoint export', async () => {
   vi.useFakeTimers(); vi.mocked(training.listStableLora).mockResolvedValueOnce({ jobs: [job()], history_incomplete: false }).mockRejectedValueOnce(new Error('/private/token')).mockResolvedValue({ jobs: [job('done')], history_incomplete: false })
   const node = await mount(); await vi.advanceTimersByTimeAsync(2500); await settle()
-  expect(node.textContent).toContain('Could not load music adapters'); expect(node.textContent).not.toContain('/private/token')
+  expect(node.textContent).toContain('Reconnecting to training history'); expect(node.textContent).not.toContain('/private/token')
   await vi.advanceTimersByTimeAsync(2500); await settle()
   expect(node.textContent).toContain('Adapter saved'); expect(node.querySelector(`a[href="/api/music-lora/adapters/${adapter.id}/file"]`)).not.toBeNull()
 })
@@ -109,8 +108,54 @@ it('maps known adapter format errors and never renders internal exception detail
 
 it('explains an older custom YuE runtime that requires an upgrade', async () => {
   vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'yue2', loading: false, training: false, reason: 'upgrade_required' }] })
-  const node = await mount()
+  const node = await mount('yue2')
   expect(node.querySelector('[data-engine="yue2"]')?.textContent).toContain('Update the native engine to use this adapter format')
-  expect(node.textContent).toContain('first 600 seconds of each track')
-  expect(node.textContent).toContain('latents and checkpoints remain on disk')
+  expect(node.querySelector('form[data-training]')).toBeNull()
+  expect(node.querySelector('input[type="file"]')).toBeNull()
+})
+
+
+it('reconnects after an initial history failure and discovers the existing job without resubmitting', async () => {
+  vi.useFakeTimers()
+  vi.mocked(training.listStableLora).mockRejectedValueOnce(new Error('/private/token')).mockResolvedValue({ jobs: [job()], history_incomplete: false })
+  const node = await mount()
+  expect(node.textContent).toContain('Reconnecting to training history')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(node.textContent).toContain('Running')
+  expect(node.textContent).not.toContain('Reconnecting to training history')
+  expect(training.submitStableLora).not.toHaveBeenCalled()
+})
+
+it('confirms history after an uncertain submission before allowing another training job', async () => {
+  vi.useFakeTimers()
+  vi.mocked(training.submitStableLora).mockRejectedValueOnce(new Error('/private/token'))
+  const node = await mount(); await input(node, 'training-name', 'Piano')
+  button(node, 'Add or upload a library track').click(); await settle()
+  button(document, i18n.global.t('library.fullMix')).click(); await settle(); await input(node, 'caption-42', 'Solo piano')
+  button(node, 'Start training').click(); await settle()
+  expect(button(node, 'Start training').disabled).toBe(true)
+  button(node, 'Start training').click(); await settle()
+  expect(training.submitStableLora).toHaveBeenCalledTimes(1)
+  vi.mocked(training.listStableLora).mockResolvedValue({ jobs: [job()], history_incomplete: false })
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(node.textContent).toContain('Running')
+  expect(training.submitStableLora).toHaveBeenCalledTimes(1)
+})
+
+
+it('offers YuE native imports without Stable Audio training controls or requests', async () => {
+  const node = await mount('yue2')
+  expect(node.querySelector('[data-engine="yue2"]')?.textContent).toContain('Loading only')
+  expect(node.querySelector('input[type="file"]')).not.toBeNull()
+  expect(node.querySelector('form[data-training]')).toBeNull()
+  expect(node.querySelector('[name="import-target"]')?.textContent).toContain('AR autoregressive')
+  expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
+})
+
+it('explains HeartMuLa limitations without offering unsupported training or adapter import', async () => {
+  const node = await mount('heartmula')
+  expect(node.querySelector('[data-engine="heartmula"]')?.textContent).toContain('no adapter API or trainer')
+  expect(node.querySelector('form')).toBeNull()
+  expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
 })

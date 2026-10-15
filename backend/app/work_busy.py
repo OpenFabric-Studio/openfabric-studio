@@ -8,12 +8,17 @@ from __future__ import annotations
 import asyncio
 
 import httpx
+from pydantic import TypeAdapter
 
 from . import audio_exports, audiobook_review, audiobook_workflows, midi, optional_engines, reference_imports, stems, video_character_training, video_character_comparison, voice_comparisons, yue_jobs, yue_upload
 from .config import MODELS
+from .contracts import JsonObject, JsonValue
+from .support_contracts import IdleState
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .voice_build import work_busy as voice_work_busy
+
+_json: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 
 
 def _count(value: object) -> int:
@@ -26,18 +31,37 @@ def _count(value: object) -> int:
     return max(0, number)
 
 
-def unwrap_data(payload: object) -> dict:
-    if isinstance(payload, dict) and "data" in payload and "code" in payload:
-        data = payload.get("data")
-        return data if isinstance(data, dict) else {}
-    return payload if isinstance(payload, dict) else {}
+def unwrap_data(payload: object) -> JsonObject:
+    try:
+        value: JsonValue = _json.validate_python(payload)
+    except ValueError:
+        return {}
+    if not isinstance(value, dict):
+        return {}
+    if 'data' in value and 'code' in value:
+        data = value.get('data')
+        return data if type(value.get('code')) is int and value.get('code') == 200 and isinstance(data, dict) else {}
+    return value
 
 
-def model_work_busy(stats: dict, training: dict) -> bool:
-    jobs = stats.get("jobs") if isinstance(stats.get("jobs"), dict) else {}
-    if _count(jobs.get("queued")) or _count(jobs.get("running")) or _count(stats.get("queue_size")):
+def model_work_busy(stats: JsonObject, training: JsonObject) -> bool:
+    jobs = stats.get('jobs')
+    if isinstance(jobs, dict) and (_count(jobs.get('queued')) or _count(jobs.get('running'))):
         return True
-    return bool(training.get("is_training"))
+    return bool(_count(stats.get('queue_size')) or training.get('is_training'))
+
+
+def model_work_state(stats: JsonObject, training: JsonObject) -> IdleState:
+    """Only verified queue counts and training state can authorize idle work."""
+    jobs, is_training = stats.get('jobs'), training.get('is_training')
+    if not isinstance(jobs, dict) or type(is_training) is not bool:
+        return 'unknown'
+    values: list[JsonValue] = [jobs.get('queued'), jobs.get('running')]
+    if 'queue_size' in stats:
+        values.append(stats['queue_size'])
+    if any(not isinstance(value, int) or isinstance(value, bool) or value < 0 for value in values):
+        return 'unknown'
+    return 'busy' if model_work_busy(stats, training) else 'idle'
 
 
 def local_work_busy() -> bool:
@@ -56,30 +80,40 @@ def local_work_busy() -> bool:
     return local_music_busy() or stable_lora_busy() or video_scene_busy() or character_swap_busy() or reading_busy() or cloud_music_busy() or cloud_provider_busy() or audiobook_busy() or audiobook_workflows.work_busy() or audiobook_review.work_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or video_character_comparison.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
 
 
-async def _get_json(client: httpx.AsyncClient, url: str) -> dict:
+async def _get_json(client: httpx.AsyncClient, url: str) -> JsonObject:
     try:
         response = await client.get(url)
-    except httpx.HTTPError:
+        if response.status_code != 200:
+            return {}
+        payload: object = response.json()
+        return unwrap_data(payload)
+    except (httpx.HTTPError, ValueError):
         return {}
-    if response.status_code != 200:
-        return {}
-    try:
-        return unwrap_data(response.json())
-    except ValueError:
-        return {}
+
+
+async def ace_work_state(client: httpx.AsyncClient, base: str) -> IdleState:
+    """Async dataset workers outlive the HTTP request that started them."""
+    stats, training, labeling, preprocessing = await asyncio.gather(*(
+        _get_json(client, f'{base}/{endpoint}') for endpoint in (
+            'v1/stats', 'v1/training/status', 'v1/dataset/auto_label_status', 'v1/dataset/preprocess_status',
+        )
+    ))
+    accounting = model_work_state(stats, training)
+    if accounting != 'idle':
+        return accounting
+    statuses = [labeling.get('status'), preprocessing.get('status')]
+    if any(status not in ('idle', 'running', 'completed', 'failed') for status in statuses):
+        return 'unknown'
+    return 'busy' if 'running' in statuses else 'idle'
 
 
 async def ace_work_busy() -> bool:
-    state = manager.state.models.get("ace_step")
+    state = manager.state.models.get('ace_step')
     if state is None or state.status != ModelStatus.RUNNING:
         return False
-    base = MODELS["ace_step"].proxy_target.rstrip("/")
-    async with httpx.AsyncClient(timeout=1.5) as client:
-        stats, training = await asyncio.gather(
-            _get_json(client, f"{base}/v1/stats"),
-            _get_json(client, f"{base}/v1/training/status"),
-        )
-    return model_work_busy(stats, training)
+    base = MODELS['ace_step'].proxy_target.rstrip('/')
+    async with httpx.AsyncClient(timeout=1.5, trust_env=False) as client:
+        return await ace_work_state(client, base) != 'idle'
 
 
 async def other_work_busy() -> bool:
