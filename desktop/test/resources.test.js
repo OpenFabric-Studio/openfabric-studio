@@ -100,6 +100,14 @@ test('private environment variants are excluded at every backend depth while exa
   assert.equal(await fs.readFile(path.join(root, 'desktop/resources/backend/.env.example'), 'utf8'), '# safe template');
 });
 
+test('required type checks do not package their local mypy database', async (t) => {
+  const { root, run } = await packagingFixture(t);
+  await fs.mkdir(path.join(root, 'backend/.mypy_cache/3.12'), { recursive: true });
+  await fs.writeFile(path.join(root, 'backend/.mypy_cache/3.12/cache.db'), 'LOCAL_TYPE_CHECK_CACHE');
+  run();
+  await assert.rejects(fs.stat(path.join(root, 'desktop/resources/backend/.mypy_cache')), { code: 'ENOENT' });
+});
+
 test('the final packaging guard independently refuses a private frontend environment file', async (t) => {
   const { root, run } = await packagingFixture(t);
   await fs.writeFile(path.join(root, 'frontend/dist/.env.production'), 'PRIVATE_FIXTURE_TOKEN=do-not-package');

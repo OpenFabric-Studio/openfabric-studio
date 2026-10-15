@@ -116,6 +116,7 @@ const selectedModel = ref('')
 
 const selectedLoraPath = ref('')
 const loraScaleVal = ref(1)
+const loraScaleLimited = ref(false)
 const loraStatus = ref('')
 const newLoraName = ref('')
 const newLoraPath = ref('')
@@ -155,7 +156,7 @@ watch(pendingAceDraft, (saved) => {
   savedLoraName.value = saved.loraName
   referenceImportId.value = saved.referenceImportId ?? null
   referenceNotice.value = saved.useRefAudio || saved.styleReferenceRequiresReupload
-  selectedLoraPath.value = ''; loraScaleVal.value = saved.loraScale; loraNotice.value = saved.loraRequiresReselection
+  selectedLoraPath.value = ''; loraScaleVal.value = Math.min(1, saved.loraScale); loraScaleLimited.value = saved.loraScale > 1; loraNotice.value = saved.loraRequiresReselection
   setActiveVoiceId(saved.voiceId); selectedVoiceId.value = saved.voiceId
   pendingAceDraft.value = null
 }, { immediate: true })
@@ -305,8 +306,8 @@ watch(selectedLoraPath, async (path) => {
       if (!formAlive || token !== loraRequest) return
       await api.loraScale(loraScaleVal.value)
     }
-  } catch (err) {
-    if (formAlive && token === loraRequest) loraStatus.value = err instanceof Error ? err.message : String(err)
+  } catch {
+    if (formAlive && token === loraRequest) loraStatus.value = t('aceGen.loraOperationFailed')
   }
 })
 watch(loraScaleVal, (scale) => {
@@ -317,8 +318,8 @@ watch(loraScaleVal, (scale) => {
     if (!formAlive || token !== loraRequest) return
     try {
       await api.loraScale(scale)
-    } catch (err) {
-      if (formAlive && token === loraRequest) loraStatus.value = err instanceof Error ? err.message : String(err)
+    } catch {
+      if (formAlive && token === loraRequest) loraStatus.value = t('aceGen.loraOperationFailed')
     }
   }, 300)
 })
@@ -486,6 +487,7 @@ async function submit() {
       <ReferencePreparationButton engine="ace_step" />
       <p v-if="referenceNotice" class="text-xs text-status-queued">{{ t('generationWorkspace.reupload') }}</p>
       <p v-if="loraNotice" class="text-xs text-status-queued">{{ t('generationWorkspace.reselectLora') }} <button type="button" class="underline" @click="loraNotice = false; savedLoraName = null">{{ t('generationWorkspace.removeLora') }}</button></p>
+      <p v-if="loraScaleLimited" role="status" class="text-xs text-status-queued">{{ t('aceGen.loraScaleAdjusted') }}</p>
       <label class="block space-y-1 text-xs text-text-dim">
         <span>{{ t('generationWorkspace.styleReference') }}</span>
         <input ref="styleFileInput" type="file" accept="audio/*" :aria-label="t('generationWorkspace.styleReference')" class="block w-full text-xs" @change="onStyleFileChange" />
@@ -514,8 +516,8 @@ async function submit() {
       </div>
 
       <div v-if="mode === 'simple'" class="space-y-1.5">
-        <label class="text-sm font-medium text-text">{{ t('aceGen.simpleLabel') }}</label>
-        <textarea v-model="simpleQuery" rows="3" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 text-sm text-text" :placeholder="t('aceGen.simplePlaceholder')"></textarea>
+        <label for="ace-simple-query" class="text-sm font-medium text-text">{{ t('aceGen.simpleLabel') }}</label>
+        <textarea id="ace-simple-query" v-model="simpleQuery" rows="3" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 text-sm text-text" :placeholder="t('aceGen.simplePlaceholder')"></textarea>
       </div>
 
       <div v-else class="space-y-3">
@@ -532,10 +534,10 @@ async function submit() {
         </label>
         <div v-if="!instrumental" class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <label class="text-sm font-medium text-text">{{ t('aceGen.lyricsLabel') }}</label>
+            <label for="ace-lyrics" class="text-sm font-medium text-text">{{ t('aceGen.lyricsLabel') }}</label>
             <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'lyrics'">{{ t('common.help') }}</button>
           </div>
-          <textarea v-model="customLyrics" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-sm text-text" :placeholder="t('aceGen.lyricsPlaceholder')"></textarea>
+          <textarea id="ace-lyrics" v-model="customLyrics" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-sm text-text" :placeholder="t('aceGen.lyricsPlaceholder')"></textarea>
         </div>
       </div>
 
@@ -571,8 +573,8 @@ async function submit() {
           </div>
 
           <div v-if="taskType === 'extract' || taskType === 'lego'">
-            <label class="text-xs text-text-dim">{{ t('aceGen.trackPart') }}</label>
-            <select v-model="trackName" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+            <label for="ace-track-name" class="text-xs text-text-dim">{{ t('aceGen.trackPart') }}</label>
+            <select id="ace-track-name" v-model="trackName" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
               <option v-for="opt in TRACK_NAME_OPTIONS" :key="opt" :value="opt">{{ opt }}</option>
             </select>
           </div>
@@ -583,8 +585,8 @@ async function submit() {
           </div>
 
           <div v-if="taskType === 'cover' || taskType === 'repaint'">
-            <label class="text-xs text-text-dim">{{ t('aceGen.coverStrength', { value: coverStrength.toFixed(2) }) }}</label>
-            <input v-model.number="coverStrength" type="range" min="0" max="1" step="0.05" class="w-full accent-accent1" />
+            <label for="ace-cover-strength" class="text-xs text-text-dim">{{ t('aceGen.coverStrength', { value: coverStrength.toFixed(2) }) }}</label>
+            <input id="ace-cover-strength" v-model.number="coverStrength" type="range" min="0" max="1" step="0.05" class="w-full accent-accent1" />
           </div>
         </div>
       </div>
@@ -592,7 +594,7 @@ async function submit() {
       <template v-if="!isVoiceReplacement">
       <div class="space-y-1">
         <div class="flex flex-wrap items-center justify-between gap-2">
-          <label class="text-xs text-text-dim">{{ durationAuto ? t('aceGen.durationAuto', { value: fitLabel }) : t('aceGen.duration', { value: durationLabel }) }}</label>
+          <label :for="durationAuto ? undefined : 'ace-duration'" class="text-xs text-text-dim">{{ durationAuto ? t('aceGen.durationAuto', { value: fitLabel }) : t('aceGen.duration', { value: durationLabel }) }}</label>
           <ChipGroup
             :model-value="durationAuto ? 'auto' : 'set'"
             :options="[
@@ -603,6 +605,7 @@ async function submit() {
           />
         </div>
         <input
+          id="ace-duration"
           v-if="!durationAuto"
           v-model.number="duration"
           type="range"
@@ -635,8 +638,8 @@ async function submit() {
         <button type="button" class="text-xs text-accent1 hover:underline" @click="helpOpen = 'advanced'">{{ t('aceGen.advancedWhatMeans') }}</button>
         <div class="grid grid-cols-2 gap-2">
           <div>
-            <label class="text-xs text-text-dim">{{ t('aceGen.format') }}</label>
-            <select v-model="audioFormat" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+            <label for="ace-audio-format" class="text-xs text-text-dim">{{ t('aceGen.format') }}</label>
+            <select id="ace-audio-format" v-model="audioFormat" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
               <option value="mp3">mp3</option>
               <option value="wav">wav</option>
               <option value="flac">flac</option>
@@ -651,15 +654,15 @@ async function submit() {
             <input v-model="keyScale" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('aceGen.keyScalePlaceholder')" />
           </div>
           <div>
-            <label class="text-xs text-text-dim">{{ t('aceGen.timeSignature') }}</label>
-            <select v-model="timeSignature" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+            <label for="ace-time-signature" class="text-xs text-text-dim">{{ t('aceGen.timeSignature') }}</label>
+            <select id="ace-time-signature" v-model="timeSignature" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
               <option value="">{{ t('aceGen.timeSignatureAuto') }}</option>
               <option v-for="ts in TIME_SIGNATURES" :key="ts" :value="ts">{{ ts }}</option>
             </select>
           </div>
           <div>
-            <label class="text-xs text-text-dim">{{ t('aceGen.vocalLanguage') }}</label>
-            <select v-model="vocalLanguage" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+            <label for="ace-vocal-language" class="text-xs text-text-dim">{{ t('aceGen.vocalLanguage') }}</label>
+            <select id="ace-vocal-language" v-model="vocalLanguage" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
               <option value="">{{ t('aceGen.vocalLanguageAuto') }}</option>
               <option v-for="lang in VOCAL_LANGUAGES" :key="lang.code" :value="lang.code">{{ languageLabel(lang.code, locale, lang.label) }}</option>
             </select>
@@ -691,8 +694,8 @@ async function submit() {
             <input v-model.number="seedValue" type="number" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" :placeholder="t('aceGen.seedPlaceholder')" />
           </div>
           <div>
-            <label class="text-xs text-text-dim">{{ t('aceGen.model') }}</label>
-            <select v-model="selectedModel" :aria-label="t('aceGen.model')" :disabled="!store.inventory?.models.length" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text disabled:opacity-50">
+            <label for="ace-model" class="text-xs text-text-dim">{{ t('aceGen.model') }}</label>
+            <select id="ace-model" v-model="selectedModel" :aria-label="t('aceGen.model')" :disabled="!store.inventory?.models.length" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text disabled:opacity-50">
               <option v-if="!store.inventory?.models.length" value="">{{ t(store.inventoryLoading ? 'aceGen.inventoryLoading' : 'aceGen.inventoryEmpty') }}</option>
               <option v-for="m in store.inventory?.models ?? []" :key="m.name" :value="m.name">{{ m.name }}</option>
             </select>
@@ -703,14 +706,14 @@ async function submit() {
         </div>
 
         <div class="space-y-2 rounded-lg border border-border bg-panel-2/50 p-3">
-          <label class="text-xs text-text-dim">{{ t('aceGen.lora') }}</label>
-          <select v-model="selectedLoraPath" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+          <label for="ace-lora" class="text-xs text-text-dim">{{ t('aceGen.lora') }}</label>
+          <select id="ace-lora" v-model="selectedLoraPath" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
             <option value="">{{ t('aceGen.noLora') }}</option>
             <option v-for="l in loras" :key="l.path" :value="l.path">{{ l.name }}</option>
           </select>
           <div v-if="selectedLoraPath">
-            <label class="text-xs text-text-dim">{{ t('aceGen.loraStrength', { value: loraScaleVal.toFixed(2) }) }}</label>
-            <input v-model.number="loraScaleVal" type="range" min="0" max="2" step="0.05" class="w-full accent-accent1" />
+            <label for="ace-lora-strength" class="text-xs text-text-dim">{{ t('aceGen.loraStrength', { value: loraScaleVal.toFixed(2) }) }}</label>
+            <input id="ace-lora-strength" v-model.number="loraScaleVal" type="range" min="0" max="1" step="0.05" class="w-full accent-accent1" />
           </div>
           <p v-if="loraStatus" class="text-xs text-status-failed">{{ loraStatus }}</p>
           <div class="flex items-center gap-2">

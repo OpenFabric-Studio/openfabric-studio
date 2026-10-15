@@ -317,6 +317,7 @@ class LibraryFolderInfo(Contract):
         "speechTrials", "models", "logs", "database",
         "videoProjects", "videoCharacters", "videoCharacterTraining",
         "videoCharacterTrainer", "providers",
+        "localMusic", "musicAdapters", "musicTraining",
     ]
 
 

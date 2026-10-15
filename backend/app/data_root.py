@@ -28,11 +28,13 @@ logger = logging.getLogger(__name__)
 
 LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm", "video_character_trainer.json")
 LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials",
-                "video_projects", "video_characters", "video_character_training", "providers")
+                "video_projects", "video_characters", "video_character_training", "providers",
+                "local-music", "music-lora", "stable-lora-training")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
 _METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'),
                    Path('videos'), Path('video_projects'), Path('video_characters'), Path('video_character_training'),
-                   Path('providers'), Path('video_character_trainer.json'))
+                   Path('providers'), Path('video_character_trainer.json'), Path('local-music'),
+                   Path('music-lora'), Path('stable-lora-training'))
 _DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -53,6 +55,9 @@ _LAYOUT = (
     ("audiobooks", "audiobooks"),
     ("voice-profiles", "speechProfiles"),
     ("speech-clone-trials", "speechTrials"),
+    ("local-music", "localMusic"),
+    ("music-lora", "musicAdapters"),
+    ("stable-lora-training", "musicTraining"),
     ("models/seed-vc", "models"),
     ("logs", "logs"),
     ("aicollector.db", "database"),
@@ -233,7 +238,9 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                                   ('audiobook_books', ('export_path', 'mp3_export_path', 'm4b_export_path', 'cover_path')),
                                   ('audiobook_jobs', ('output_path',)),
                                   ('audiobook_sections', ('output_path', 'snapshot_json')),
-                                  ('audiobook_workflows', ('payload',))):
+                                  ('audiobook_workflows', ('payload',)),
+                                  ('local_music_jobs', ('worker_json',)),
+                                  ('stable_lora_jobs', ('worker_json',))):
             if table not in tables:
                 continue
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -244,7 +251,7 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                 for rowid, value in connection.execute(f"SELECT rowid, {column} FROM {table}").fetchall():
                     if not isinstance(value, str) or not value:
                         continue
-                    if column not in (*_JSON_COLUMNS, 'data_json', 'snapshot_json', 'payload'):
+                    if column not in (*_JSON_COLUMNS, 'data_json', 'snapshot_json', 'payload', 'worker_json'):
                         rewritten = _rewrite_path(value, src, dest)
                     else:
                         try:

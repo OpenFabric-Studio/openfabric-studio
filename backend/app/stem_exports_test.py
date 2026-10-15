@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from app import audio_exports as exports, db
+from app import audio_exports as exports, db, stems
 from app import audio_exports_test as export_test_support
 
 
@@ -19,6 +20,128 @@ class StemExportTests(unittest.IsolatedAsyncioTestCase):
         path.write_bytes(self.source.read_bytes())
         db.update_track_stems(self.track_id, {'vocals': str(path)})
         return path
+
+    async def test_rerun_waits_for_export_capture_and_keeps_its_source(self) -> None:
+        source = db.stems_dir('ace_step', self.track_id) / 'vocals.wav'
+        source.parent.mkdir(parents=True)
+        source.write_bytes(self.source.read_bytes())
+        db.update_track_stems(self.track_id, {'vocals': str(source)})
+        entered, release = threading.Event(), threading.Event()
+        original_digest = exports._digest
+        def digest(path: Path) -> str:
+            if path == source and not release.is_set():
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError('Fixture digest was not released')
+            return original_digest(path)
+        async def worker(track_id: int) -> None:
+            raise AssertionError('A stem rerun must not launch during export')
+        with patch.dict(stems._jobs, {}, clear=True), patch.object(exports, '_digest', side_effect=digest), \
+             patch.object(stems, '_run', side_effect=worker) as run:
+            creating = asyncio.create_task(exports.create_stem_export(self.track_id, 'vocals', 'mp3'))
+            rerun: asyncio.Task[stems.StemJob] | None = None
+            try:
+                self.assertTrue(await asyncio.to_thread(entered.wait, 5))
+                rerun = asyncio.create_task(stems.start(self.track_id, force=True))
+                await asyncio.sleep(0)
+                self.assertFalse(rerun.done(), 'Rerun ignored the ongoing source capture')
+                release.set()
+                job = await creating
+                with self.assertRaises(exports.AudioExportError) as caught:
+                    await rerun
+                self.assertEqual(caught.exception.code, 'stem_busy')
+                run.assert_not_called()
+                self.assertEqual(source.read_bytes(), self.source.read_bytes())
+                await asyncio.wait_for(exports._tasks[job.id], 15)
+                self.assertEqual(exports.get_stem_export(self.track_id, 'vocals', job.id).status, 'done')
+            finally:
+                release.set()
+                await asyncio.gather(creating, *( [rerun] if rerun is not None else []), return_exceptions=True)
+                await stems.cancel(self.track_id)
+
+    async def test_waiting_starts_recheck_registry_and_publish_one_job(self) -> None:
+        entered = asyncio.Event()
+        async def worker(track_id: int) -> None:
+            entered.set()
+            await asyncio.Event().wait()
+        with patch.dict(stems._jobs, {}, clear=True), patch.object(stems, '_run', side_effect=worker) as run:
+            async with exports._lock:
+                first = asyncio.create_task(stems.start(self.track_id))
+                second = asyncio.create_task(stems.start(self.track_id))
+                await asyncio.sleep(0)
+                self.assertFalse(first.done())
+                self.assertFalse(second.done())
+            try:
+                first_job, second_job = await asyncio.gather(first, second)
+                await entered.wait()
+                self.assertIs(first_job, second_job)
+                run.assert_called_once_with(self.track_id)
+            finally:
+                await stems.cancel(self.track_id)
+
+    async def test_start_refuses_removal_but_keeps_existing_noop_jobs(self) -> None:
+        with patch.dict(stems._jobs, {}, clear=True), patch.object(stems, '_run', new=AsyncMock()):
+            async with exports.protect_stem_exports_removal(self.track_id):
+                with self.assertRaises(exports.AudioExportError) as caught:
+                    await stems.start(self.track_id, force=True)
+                self.assertEqual(caught.exception.code, 'stem_busy')
+                for state in ('queued', 'done'):
+                    existing = stems.StemJob(status='queued' if state == 'queued' else 'done')
+                    stems._jobs[self.track_id] = existing
+                    self.assertIs(await stems.start(self.track_id), existing)
+            stems._jobs.clear()
+
+    async def test_start_route_returns_stable_conflict_for_active_stem_export(self) -> None:
+        import httpx
+        from fastapi import FastAPI
+        from app.api import routes_stems
+        self.make_source()
+        app = FastAPI()
+        app.include_router(routes_stems.router)
+        with patch.object(exports, '_capacity', asyncio.Semaphore(0)), patch.dict(stems._jobs, {}, clear=True), \
+             patch.object(stems, '_run', new=AsyncMock()) as run:
+            job = await exports.create_stem_export(self.track_id, 'vocals', 'mp3')
+            try:
+                async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://fixture') as client:
+                    response = await client.post(f'/api/tracks/{self.track_id}/stems?force=true')
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(response.json(), {'detail': 'stem_busy'})
+                run.assert_not_called()
+            finally:
+                await exports.cancel_stem_export(self.track_id, 'vocals', job.id)
+                await stems.cancel(self.track_id)
+
+    async def test_delete_waiting_behind_start_keeps_worker_and_completed_export(self) -> None:
+        from fastapi import HTTPException
+        from app.api import routes_stems
+        from app.job_lifecycle import cancel_and_wait
+        self.make_source()
+        export = await exports.create_stem_export(self.track_id, 'vocals', 'mp3')
+        await asyncio.wait_for(exports._tasks[export.id], 15)
+        async def worker(track_id: int) -> None:
+            stems._jobs[track_id].status = 'running'
+            await asyncio.Event().wait()
+        with patch.dict(stems._jobs, {}, clear=True), patch.object(stems, '_run', side_effect=worker):
+            async with exports._lock:
+                starting = asyncio.create_task(stems.start(self.track_id, force=True))
+                await asyncio.sleep(0)
+                deleting = asyncio.create_task(routes_stems.delete_stems(self.track_id))
+                await asyncio.sleep(0)
+            job = await starting
+            try:
+                with self.assertRaises(HTTPException) as caught:
+                    await deleting
+                self.assertEqual(caught.exception.status_code, 409)
+                self.assertEqual(caught.exception.detail, 'stem_busy')
+                self.assertIs(stems._jobs[self.track_id], job)
+                self.assertIsNotNone(job.task)
+                if job.task is not None:
+                    self.assertFalse(job.task.done())
+                self.assertEqual(exports.get_stem_export(self.track_id, 'vocals', export.id).status, 'done')
+                self.assertIsNotNone(db.get_track(self.track_id)['stems_json'])
+            finally:
+                await asyncio.gather(deleting, return_exceptions=True)
+                await cancel_and_wait(job.task)
 
     async def test_advertised_stem_manifests_serve_exact_media_and_reject_wrong_owner(self) -> None:
         import httpx

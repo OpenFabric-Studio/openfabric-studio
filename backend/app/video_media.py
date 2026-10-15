@@ -6,10 +6,9 @@ from dataclasses import dataclass
 from fractions import Fraction
 from pathlib import Path
 from typing import Literal
-import asyncio
 from pydantic import BaseModel, Field, ValidationError
 from .config import FFMPEG_BIN_DIR
-from .job_lifecycle import spawn_process, communicate_process
+from .video_process import WorkerOutputError, run_owned_command
 
 
 class VideoMediaError(Exception):
@@ -86,24 +85,24 @@ def duration(value: str) -> float:
 async def probe_media(path: Path, *, input_format: Literal['mov', 'matroska', 'avi'] | None = None) -> MediaInfo:
     if not path.is_file() or path.stat().st_size == 0:
         raise VideoMediaError()
-    proc = await spawn_process(
-        tool("ffprobe"),
-        "-v",
-        "error",
-        *(['-f', input_format, '-protocol_whitelist', 'file,pipe'] if input_format is not None else []),
-        "-show_streams",
-        "-show_format",
-        "-of",
-        "json",
-        str(path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _ = await communicate_process(proc, 30)
-    if proc.returncode != 0:
+    try:
+        result = await run_owned_command([
+            tool("ffprobe"),
+            "-v",
+            "error",
+            *(['-f', input_format, '-protocol_whitelist', 'file,pipe'] if input_format is not None else []),
+            "-show_streams",
+            "-show_format",
+            "-of",
+            "json",
+            str(path),
+        ], timeout=30)
+    except (WorkerOutputError, TimeoutError) as exc:
+        raise VideoMediaError() from exc
+    if result.returncode != 0:
         raise VideoMediaError()
     try:
-        probe = Probe.model_validate_json(out)
+        probe = Probe.model_validate_json(result.stdout)
     except ValidationError as exc:
         raise VideoMediaError() from exc
     video = next((item for item in probe.streams if item.codec_type == "video"), None)
@@ -152,21 +151,21 @@ async def validate_media(
         raise VideoMediaError()
     if decode:
         maps = ["-map", "0:v:0"] + (["-map", "0:a:0"] if require_audio else [])
-        proc = await spawn_process(
-            tool("ffmpeg"),
-            "-v",
-            "error",
-            "-xerror",
-            "-i",
-            str(path),
-            *maps,
-            "-f",
-            "null",
-            "-",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, _ = await communicate_process(proc, 120)
-        if proc.returncode != 0:
+        try:
+            result = await run_owned_command([
+                tool("ffmpeg"),
+                "-v",
+                "error",
+                "-xerror",
+                "-i",
+                str(path),
+                *maps,
+                "-f",
+                "null",
+                "-",
+            ], timeout=120)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise VideoMediaError() from exc
+        if result.returncode != 0:
             raise VideoMediaError()
     return info

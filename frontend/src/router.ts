@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
-import { useOrchestratorStore } from './stores/orchestrator'
 
 export const appRoutes: RouteRecordRaw[] = [
     { path: '/', name: 'home', component: () => import('./views/HomeView.vue') },
@@ -7,10 +6,13 @@ export const appRoutes: RouteRecordRaw[] = [
     {
       path: '/music', component: () => import('./views/music/MusicPage.vue'),
       children: [
-        { path: '', name: 'music', redirect: () => ({ name: useOrchestratorStore().activeModel === 'yue2' ? 'yue2' : 'ace-step' }) },
+        { path: '', name: 'music', component: () => import('./views/music/MusicQueuePage.vue') },
         { path: 'ace-step', name: 'ace-step', component: () => import('./views/ace-step/AceStepPage.vue') },
         { path: 'openrouter', name: 'openrouter-music', component: () => import('./views/music/CloudMusicPanel.vue') },
         { path: 'yue2', name: 'yue2', component: () => import('./views/yue2/Yue2Page.vue') },
+        { path: 'heartmula', name: 'heartmula', component: () => import('./views/music/LocalMusicPanel.vue'), props: { engine: 'heartmula' } },
+        { path: 'stable-audio3', name: 'stable_audio3', component: () => import('./views/music/LocalMusicPanel.vue'), props: { engine: 'stable_audio3' } },
+        { path: 'lora', name: 'music-lora', component: () => import('./views/music/MusicLoraPage.vue') },
       ],
     },
     { path: '/ace-step', redirect: to => ({ name: 'ace-step', query: to.query, hash: to.hash }) },

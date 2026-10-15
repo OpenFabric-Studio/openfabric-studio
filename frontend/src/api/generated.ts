@@ -1171,7 +1171,7 @@ export type KokoroRequest = {
 
 export type LibraryFolderInfo = {
   "path": string
-  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers"
+  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers" | "localMusic" | "musicAdapters" | "musicTraining"
 }
 
 export type LibraryPickResponse = {
@@ -1217,6 +1217,45 @@ export type LocalEnginesStatus = {
 
 export type LocalInputResponse = {
   "path": string
+}
+
+export type LocalMusicEngineStatus = {
+  "id": "heartmula" | "stable_audio3"
+  "installed": boolean
+  "weights_ready": boolean
+  "supported": boolean
+  "runtime": string
+  "detail": string
+}
+
+export type LocalMusicEngines = {
+  "engines": Array<LocalMusicEngineStatus>
+}
+
+export type LocalMusicJob = {
+  "id": string
+  "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "created_at": string
+  "request": LocalMusicRequest
+  "track"?: (SavedTrack | null)
+  "adapter"?: (MusicAdapter | null)
+  "error_code"?: (string | null)
+}
+
+export type LocalMusicJobs = {
+  "jobs": Array<LocalMusicJob>
+  "history_incomplete"?: boolean
+}
+
+export type LocalMusicRequest = {
+  "engine": "heartmula" | "stable_audio3"
+  "title"?: string
+  "prompt": string
+  "lyrics"?: string
+  "duration_seconds": number
+  "seed"?: number
+  "variant"?: "small-music" | "medium"
+  "adapter"?: (MusicAdapterSelection | null)
 }
 
 export type LocalVideoProviderConfig = {
@@ -1329,14 +1368,14 @@ export type ModuleEvidence = {
 }
 
 export type ModuleInfo = {
-  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "id": "ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "description": string
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
   "automation": "automatic" | "manual" | "unsupported"
-  "dependencies": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "dependencies": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "capabilities": Array<string>
   "evidence": Array<ModuleEvidence>
   "actions": Array<ModuleAction>
@@ -1350,7 +1389,7 @@ export type ModuleInstallJob = {
   "state": "queued" | "running" | "completed" | "awaiting_manual" | "failed" | "cancelled" | "interrupted"
   "created_at": string
   "updated_at": string
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
   "steps": Array<ModuleJobStep>
   "current_step"?: (number | null)
@@ -1359,7 +1398,7 @@ export type ModuleInstallJob = {
 }
 
 export type ModuleInstallRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
   "plan_token": string
 }
@@ -1375,7 +1414,7 @@ export type ModuleInventory = {
 }
 
 export type ModuleJobStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "module_id": "ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "state": "queued" | "running" | "verified" | "manual" | "skipped" | "failed"
   "detail": string
@@ -1399,7 +1438,7 @@ export type ModuleLicenseDeclaration = {
 }
 
 export type ModulePlan = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
   "plan_token": string
   "steps": Array<ModulePlanStep>
@@ -1412,12 +1451,12 @@ export type ModulePlan = {
 }
 
 export type ModulePlanRequest = {
-  "features": Array<"ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
 }
 
 export type ModulePlanStep = {
-  "module_id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "module_id": "ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
   "operation": "install" | "verify" | "manual" | "unsupported"
   "estimated_download_bytes"?: (number | null)
@@ -1432,6 +1471,204 @@ export type Mp3EncodingSettings = {
   "vbr_quality"?: number
   "sample_rate"?: 44100 | 48000
   "channels"?: 1 | 2
+}
+
+export type MusicAdapter = {
+  "id": string
+  "engine": "stable_audio3" | "yue2"
+  "target": "small-music" | "medium" | "ar" | "nar"
+  "name": string
+  "sha256": string
+  "created_at": string
+  "source_job_id"?: (string | null)
+}
+
+export type MusicAdapterSelection = {
+  "id": string
+  "strength"?: number
+}
+
+export type MusicAdapters = {
+  "adapters": Array<MusicAdapter>
+  "history_incomplete"?: boolean
+}
+
+export type MusicLoraCapabilities = {
+  "engines": Array<MusicLoraCapability>
+}
+
+export type MusicLoraCapability = {
+  "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
+  "loading": boolean
+  "training": boolean
+  "reason": "native" | "inference_only" | "unsupported_runtime" | "upgrade_required"
+}
+
+export type MusicQueueAceRequest = {
+  "engine": "ace_step"
+  "request": AceGenerationSettings
+}
+
+export type MusicQueueAdjustment = {
+  "field": string
+  "code": string
+  "requested": string
+  "effective": string
+}
+
+export type MusicQueueBatch = {
+  "id": string
+  "created_at": string
+  "brief": MusicQueueBrief
+  "selections": Array<MusicQueueEngineSelection>
+  "models": Array<MusicQueueModelPlan>
+  "preview_fingerprint": string
+  "items": Array<MusicQueueItem>
+}
+
+export type MusicQueueBrief = {
+  "title"?: string
+  "description": string
+  "lyrics"?: string
+  "instrumental"?: boolean
+  "duration_seconds": number
+  "bpm"?: (number | null)
+  "key"?: string
+  "language"?: string
+}
+
+export type MusicQueueCancelRequest = {
+  "revision": number
+  "batch_id": string
+}
+
+export type MusicQueueCatalog = {
+  "engines": Array<MusicQueueReadiness>
+  "adapters"?: Array<MusicAdapter>
+}
+
+export type MusicQueueControlRequest = {
+  "revision": number
+  "action": "start" | "pause" | "cancel_active"
+}
+
+export type MusicQueueEngineSelection = {
+  "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
+  "variations"?: number
+  "variant"?: "small-music" | "medium"
+  "precision"?: "q8_0" | "q4_0"
+  "adapter"?: (MusicAdapterSelection | null)
+  "ar_adapter"?: (MusicAdapterSelection | null)
+  "nar_adapter"?: (MusicAdapterSelection | null)
+}
+
+export type MusicQueueEnqueueRequest = {
+  "brief": MusicQueueBrief
+  "selections": Array<MusicQueueEngineSelection>
+  "revision": number
+  "submission_key": string
+  "preview_fingerprint": string
+}
+
+export type MusicQueueErrorResponse = {
+  "detail": string
+}
+
+export type MusicQueueHeartRequest = {
+  "engine": "heartmula"
+  "request": LocalMusicRequest
+}
+
+export type MusicQueueItem = {
+  "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
+  "variation_index": number
+  "payload": ((MusicQueueAceRequest | MusicQueueYueRequest | MusicQueueHeartRequest | MusicQueueStableRequest) & { "engine": "ace_step" | "heartmula" | "stable_audio3" | "yue2" })
+  "adapters"?: Array<MusicAdapter>
+  "id": string
+  "batch_id": string
+  "resolved_seed": number
+  "child_job_id"?: (string | null)
+  "status"?: "queued" | "loading" | "submitting" | "running" | "saving" | "unloading" | "done" | "failed" | "cancelled" | "interrupted" | "blocked"
+  "tracks"?: Array<SavedTrack>
+  "error_code"?: string
+  "attempt"?: number
+  "retry_of_item_id"?: (string | null)
+}
+
+export type MusicQueueModelPlan = {
+  "selection": MusicQueueEngineSelection
+  "readiness": MusicQueueReadiness
+  "compatible": boolean
+  "error_code"?: string
+  "effective_duration_seconds"?: (number | null)
+  "duration_mode": "target" | "maximum" | "model_led"
+  "adjustments"?: Array<MusicQueueAdjustment>
+  "warnings"?: Array<string>
+  "adapters"?: Array<MusicAdapter>
+}
+
+export type MusicQueueNormalizedItem = {
+  "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
+  "variation_index": number
+  "payload": ((MusicQueueAceRequest | MusicQueueYueRequest | MusicQueueHeartRequest | MusicQueueStableRequest) & { "engine": "ace_step" | "heartmula" | "stable_audio3" | "yue2" })
+  "adapters"?: Array<MusicAdapter>
+}
+
+export type MusicQueuePreview = {
+  "brief": MusicQueueBrief
+  "selections": Array<MusicQueueEngineSelection>
+  "models": Array<MusicQueueModelPlan>
+  "items": Array<MusicQueueNormalizedItem>
+  "total_items": number
+  "can_enqueue": boolean
+  "fingerprint": string
+}
+
+export type MusicQueuePreviewRequest = {
+  "brief": MusicQueueBrief
+  "selections": Array<MusicQueueEngineSelection>
+}
+
+export type MusicQueueReadiness = {
+  "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
+  "supported": boolean
+  "installed": boolean
+  "weights_ready": boolean
+  "managed_status": "stopped" | "starting" | "running" | "stopping" | "error" | "one_shot"
+  "owned_instance"?: (string | null)
+  "ready": boolean
+  "error_code"?: string
+  "setup_href"?: string
+}
+
+export type MusicQueueReorderRequest = {
+  "revision": number
+  "batch_ids": Array<string>
+}
+
+export type MusicQueueRetryRequest = {
+  "revision": number
+  "item_id": string
+  "mode": "save" | "inference"
+}
+
+export type MusicQueueSnapshot = {
+  "revision": number
+  "status": "idle" | "running" | "pausing" | "paused" | "blocked"
+  "active_item_id"?: (string | null)
+  "error_code"?: string
+  "history_incomplete"?: boolean
+  "batches"?: Array<MusicQueueBatch>
+}
+
+export type MusicQueueStableRequest = {
+  "engine": "stable_audio3"
+  "request": LocalMusicRequest
+}
+
+export type MusicQueueYueRequest = {
+  "engine": "yue2"
+  "request": YueSubmitRequest
 }
 
 export type NarrationDurationGuidance = {
@@ -2209,7 +2446,7 @@ export type SavedTrack = {
   "id": number
   "short_id": (number | null)
   "is_favorite"?: boolean
-  "model": "ace_step" | "yue2" | "editor" | "upload" | "openrouter"
+  "model": "ace_step" | "yue2" | "editor" | "upload" | "openrouter" | "heartmula" | "stable_audio3"
   "created_at": string
   "title": string
   "lyrics": string
@@ -2471,6 +2708,43 @@ export type SpeechVoiceProfilesResponse = {
   "profiles": Array<SpeechVoiceProfile>
 }
 
+export type StableLoraSample = {
+  "track_id": number
+  "caption": string
+}
+
+export type StableLoraTrainingJob = {
+  "id": string
+  "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "stage"?: "preparing" | "encoding" | "training" | "publishing" | "done"
+  "created_at": string
+  "request": StableLoraTrainingRequest
+  "adapter"?: (MusicAdapter | null)
+  "error_code"?: (string | null)
+}
+
+export type StableLoraTrainingJobs = {
+  "jobs": Array<StableLoraTrainingJob>
+  "history_incomplete"?: boolean
+}
+
+export type StableLoraTrainingRequest = {
+  "name": string
+  "variant"?: "small-music" | "medium"
+  "samples": Array<StableLoraSample>
+  "max_steps"?: number
+  "rank"?: 8 | 16 | 32
+  "learning_rate"?: number
+  "seed"?: number
+}
+
+export type StableLoraTrainingStatus = {
+  "supported": boolean
+  "installed": boolean
+  "small_weights_ready": boolean
+  "medium_weights_ready": boolean
+}
+
 export type StarterSpeechVoice = {
   "id": string
   "name": string
@@ -2593,7 +2867,7 @@ export type SupportEngineState = {
 }
 
 export type SupportModuleState = {
-  "id": "ace_step" | "yue2" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "id": "ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
@@ -3534,6 +3808,8 @@ export type YueGenerationSettings = {
   "randomSeed": boolean
   "batchSize": number
   "voiceId": (string | null)
+  "arAdapter": (MusicAdapterSelection | null)
+  "narAdapter": (MusicAdapterSelection | null)
   "referenceRequiresReupload": boolean
 }
 
@@ -3554,6 +3830,8 @@ export type YueJobResponse = {
   "precision": "q8_0" | "q4_0"
   "options": YueOptions
   "voice_id": (string | null)
+  "ar_adapter": (MusicAdapterSelection | null)
+  "nar_adapter": (MusicAdapterSelection | null)
   "error_code": string
   "track": (SavedTrack | null)
 }
@@ -3601,6 +3879,8 @@ export type YueSubmitRequest = {
   "options": YueOptions
   "precision": "q8_0" | "q4_0"
   "voice_id": (string | null)
+  "ar_adapter": (MusicAdapterSelection | null)
+  "nar_adapter": (MusicAdapterSelection | null)
   "settings": (YueGenerationSettings | null)
 }
 
@@ -3659,7 +3939,9 @@ const schemas = {
           "yue2",
           "editor",
           "upload",
-          "openrouter"
+          "openrouter",
+          "heartmula",
+          "stable_audio3"
         ],
         "type": "string"
       },
@@ -11003,7 +11285,10 @@ const schemas = {
           "videoCharacters",
           "videoCharacterTraining",
           "videoCharacterTrainer",
-          "providers"
+          "providers",
+          "localMusic",
+          "musicAdapters",
+          "musicTraining"
         ],
         "type": "string"
       }
@@ -14191,6 +14476,24 @@ const schemas = {
     ],
     "type": "object"
   },
+  "MusicAdapterSelection": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "strength": {
+        "maximum": 2,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "id"
+    ],
+    "type": "object"
+  },
   "YueGenerationSettings": {
     "additionalProperties": false,
     "properties": {
@@ -14301,6 +14604,26 @@ const schemas = {
           }
         ]
       },
+      "arAdapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "narAdapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "referenceRequiresReupload": {
         "type": "boolean"
       }
@@ -14322,6 +14645,8 @@ const schemas = {
       "randomSeed",
       "batchSize",
       "voiceId",
+      "arAdapter",
+      "narAdapter",
       "referenceRequiresReupload"
     ],
     "type": "object"
@@ -15026,6 +15351,26 @@ const schemas = {
           }
         ]
       },
+      "ar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "nar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "settings": {
         "anyOf": [
           {
@@ -15044,6 +15389,8 @@ const schemas = {
       "options",
       "precision",
       "voice_id",
+      "ar_adapter",
+      "nar_adapter",
       "settings"
     ],
     "type": "object"
@@ -15206,6 +15553,26 @@ const schemas = {
           }
         ]
       },
+      "ar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "nar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "error_code": {
         "maxLength": 120,
         "type": "string"
@@ -15238,6 +15605,8 @@ const schemas = {
       "precision",
       "options",
       "voice_id",
+      "ar_adapter",
+      "nar_adapter",
       "error_code",
       "track"
     ],
@@ -16174,6 +16543,8 @@ const schemas = {
         "enum": [
           "ace_step",
           "yue2",
+          "heartmula",
+          "stable_audio3",
           "speech",
           "singing",
           "separation",
@@ -16227,6 +16598,8 @@ const schemas = {
           "enum": [
             "ace_step",
             "yue2",
+            "heartmula",
+            "stable_audio3",
             "speech",
             "singing",
             "separation",
@@ -16359,6 +16732,8 @@ const schemas = {
           "enum": [
             "ace_step",
             "yue2",
+            "heartmula",
+            "stable_audio3",
             "speech",
             "singing",
             "separation",
@@ -16375,7 +16750,7 @@ const schemas = {
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 17,
         "minItems": 1,
         "type": "array"
       },
@@ -16394,6 +16769,8 @@ const schemas = {
         "enum": [
           "ace_step",
           "yue2",
+          "heartmula",
+          "stable_audio3",
           "speech",
           "singing",
           "separation",
@@ -16466,6 +16843,8 @@ const schemas = {
           "enum": [
             "ace_step",
             "yue2",
+            "heartmula",
+            "stable_audio3",
             "speech",
             "singing",
             "separation",
@@ -16549,6 +16928,8 @@ const schemas = {
           "enum": [
             "ace_step",
             "yue2",
+            "heartmula",
+            "stable_audio3",
             "speech",
             "singing",
             "separation",
@@ -16565,7 +16946,7 @@ const schemas = {
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 17,
         "minItems": 1,
         "type": "array"
       },
@@ -16654,6 +17035,8 @@ const schemas = {
         "enum": [
           "ace_step",
           "yue2",
+          "heartmula",
+          "stable_audio3",
           "speech",
           "singing",
           "separation",
@@ -16745,6 +17128,8 @@ const schemas = {
           "enum": [
             "ace_step",
             "yue2",
+            "heartmula",
+            "stable_audio3",
             "speech",
             "singing",
             "separation",
@@ -18628,6 +19013,1375 @@ const schemas = {
     ],
     "type": "object"
   },
+  "LocalMusicRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 500,
+        "type": "string"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "lyrics": {
+        "maxLength": 20000,
+        "type": "string"
+      },
+      "duration_seconds": {
+        "maximum": 380,
+        "minimum": 5,
+        "type": "integer"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "variant": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "engine",
+      "prompt",
+      "duration_seconds"
+    ],
+    "type": "object"
+  },
+  "LocalMusicEngineStatus": {
+    "properties": {
+      "id": {
+        "enum": [
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "installed": {
+        "type": "boolean"
+      },
+      "weights_ready": {
+        "type": "boolean"
+      },
+      "supported": {
+        "type": "boolean"
+      },
+      "runtime": {
+        "type": "string"
+      },
+      "detail": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "installed",
+      "weights_ready",
+      "supported",
+      "runtime",
+      "detail"
+    ],
+    "type": "object"
+  },
+  "LocalMusicEngines": {
+    "properties": {
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/LocalMusicEngineStatus"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "engines"
+    ],
+    "type": "object"
+  },
+  "MusicAdapter": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "engine": {
+        "enum": [
+          "stable_audio3",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "enum": [
+          "small-music",
+          "medium",
+          "ar",
+          "nar"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source_job_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "engine",
+      "target",
+      "name",
+      "sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "LocalMusicJob": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/LocalMusicRequest"
+      },
+      "track": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SavedTrack"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapter"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "status",
+      "created_at",
+      "request"
+    ],
+    "type": "object"
+  },
+  "LocalMusicJobs": {
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/LocalMusicJob"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "history_incomplete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "MusicAdapters": {
+    "properties": {
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapter"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "history_incomplete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "adapters"
+    ],
+    "type": "object"
+  },
+  "MusicLoraCapability": {
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "loading": {
+        "type": "boolean"
+      },
+      "training": {
+        "type": "boolean"
+      },
+      "reason": {
+        "enum": [
+          "native",
+          "inference_only",
+          "unsupported_runtime",
+          "upgrade_required"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine",
+      "loading",
+      "training",
+      "reason"
+    ],
+    "type": "object"
+  },
+  "MusicLoraCapabilities": {
+    "properties": {
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/MusicLoraCapability"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "engines"
+    ],
+    "type": "object"
+  },
+  "StableLoraSample": {
+    "additionalProperties": false,
+    "properties": {
+      "track_id": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "caption": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "track_id",
+      "caption"
+    ],
+    "type": "object"
+  },
+  "StableLoraTrainingRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "variant": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "samples": {
+        "items": {
+          "$ref": "#/$defs/StableLoraSample"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "max_steps": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "rank": {
+        "enum": [
+          8,
+          16,
+          32
+        ],
+        "type": "integer"
+      },
+      "learning_rate": {
+        "maximum": 0.01,
+        "minimum": 1e-07,
+        "type": "number"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "name",
+      "samples"
+    ],
+    "type": "object"
+  },
+  "StableLoraTrainingJob": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "stage": {
+        "enum": [
+          "preparing",
+          "encoding",
+          "training",
+          "publishing",
+          "done"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/StableLoraTrainingRequest"
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapter"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "status",
+      "created_at",
+      "request"
+    ],
+    "type": "object"
+  },
+  "StableLoraTrainingJobs": {
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/StableLoraTrainingJob"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "history_incomplete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "StableLoraTrainingStatus": {
+    "properties": {
+      "supported": {
+        "type": "boolean"
+      },
+      "installed": {
+        "type": "boolean"
+      },
+      "small_weights_ready": {
+        "type": "boolean"
+      },
+      "medium_weights_ready": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "supported",
+      "installed",
+      "small_weights_ready",
+      "medium_weights_ready"
+    ],
+    "type": "object"
+  },
+  "MusicQueueErrorResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "detail": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "detail"
+    ],
+    "type": "object"
+  },
+  "MusicQueueBrief": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "description": {
+        "maxLength": 3500,
+        "minLength": 1,
+        "type": "string"
+      },
+      "lyrics": {
+        "maxLength": 20000,
+        "type": "string"
+      },
+      "instrumental": {
+        "type": "boolean"
+      },
+      "duration_seconds": {
+        "maximum": 380,
+        "minimum": 10,
+        "type": "integer"
+      },
+      "bpm": {
+        "anyOf": [
+          {
+            "maximum": 300,
+            "minimum": 20,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "key": {
+        "maxLength": 80,
+        "type": "string"
+      },
+      "language": {
+        "maxLength": 80,
+        "type": "string"
+      }
+    },
+    "required": [
+      "description",
+      "duration_seconds"
+    ],
+    "type": "object"
+  },
+  "MusicQueueEngineSelection": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "variations": {
+        "maximum": 8,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "variant": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "precision": {
+        "enum": [
+          "q8_0",
+          "q4_0"
+        ],
+        "type": "string"
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "nar_adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "engine"
+    ],
+    "type": "object"
+  },
+  "MusicQueuePreviewRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "brief": {
+        "$ref": "#/$defs/MusicQueueBrief"
+      },
+      "selections": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueEngineSelection"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "brief",
+      "selections"
+    ],
+    "type": "object"
+  },
+  "MusicQueueReadiness": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "supported": {
+        "type": "boolean"
+      },
+      "installed": {
+        "type": "boolean"
+      },
+      "weights_ready": {
+        "type": "boolean"
+      },
+      "managed_status": {
+        "enum": [
+          "stopped",
+          "starting",
+          "running",
+          "stopping",
+          "error",
+          "one_shot"
+        ],
+        "type": "string"
+      },
+      "owned_instance": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ready": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "setup_href": {
+        "maxLength": 200,
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine",
+      "supported",
+      "installed",
+      "weights_ready",
+      "managed_status",
+      "ready"
+    ],
+    "type": "object"
+  },
+  "MusicQueueCatalog": {
+    "additionalProperties": false,
+    "properties": {
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueReadiness"
+        },
+        "maxItems": 4,
+        "type": "array"
+      },
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapter"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "engines"
+    ],
+    "type": "object"
+  },
+  "MusicQueueAdjustment": {
+    "additionalProperties": false,
+    "properties": {
+      "field": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "code": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "requested": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "effective": {
+        "maxLength": 200,
+        "type": "string"
+      }
+    },
+    "required": [
+      "field",
+      "code",
+      "requested",
+      "effective"
+    ],
+    "type": "object"
+  },
+  "MusicQueueModelPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "selection": {
+        "$ref": "#/$defs/MusicQueueEngineSelection"
+      },
+      "readiness": {
+        "$ref": "#/$defs/MusicQueueReadiness"
+      },
+      "compatible": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "effective_duration_seconds": {
+        "anyOf": [
+          {
+            "maximum": 380,
+            "minimum": 10,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "duration_mode": {
+        "enum": [
+          "target",
+          "maximum",
+          "model_led"
+        ],
+        "type": "string"
+      },
+      "adjustments": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueAdjustment"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "maxLength": 120,
+          "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapter"
+        },
+        "maxItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "selection",
+      "readiness",
+      "compatible",
+      "duration_mode"
+    ],
+    "type": "object"
+  },
+  "MusicQueueAceRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "ace_step",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/AceGenerationSettings"
+      }
+    },
+    "required": [
+      "engine",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicQueueYueRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "yue2",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/YueSubmitRequest"
+      }
+    },
+    "required": [
+      "engine",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicQueueHeartRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "heartmula",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/LocalMusicRequest"
+      }
+    },
+    "required": [
+      "engine",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicQueueStableRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "stable_audio3",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/LocalMusicRequest"
+      }
+    },
+    "required": [
+      "engine",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicQueueNormalizedItem": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "variation_index": {
+        "maximum": 8,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "payload": {
+        "discriminator": {
+          "mapping": {
+            "ace_step": "#/$defs/MusicQueueAceRequest",
+            "heartmula": "#/$defs/MusicQueueHeartRequest",
+            "stable_audio3": "#/$defs/MusicQueueStableRequest",
+            "yue2": "#/$defs/MusicQueueYueRequest"
+          },
+          "propertyName": "engine"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/MusicQueueAceRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueYueRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueHeartRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueStableRequest"
+          }
+        ]
+      },
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapter"
+        },
+        "maxItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "engine",
+      "variation_index",
+      "payload"
+    ],
+    "type": "object"
+  },
+  "MusicQueuePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "brief": {
+        "$ref": "#/$defs/MusicQueueBrief"
+      },
+      "selections": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueEngineSelection"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "models": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueModelPlan"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueNormalizedItem"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "total_items": {
+        "maximum": 32,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "can_enqueue": {
+        "type": "boolean"
+      },
+      "fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "brief",
+      "selections",
+      "models",
+      "items",
+      "total_items",
+      "can_enqueue",
+      "fingerprint"
+    ],
+    "type": "object"
+  },
+  "MusicQueueItem": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "heartmula",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "variation_index": {
+        "maximum": 8,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "payload": {
+        "discriminator": {
+          "mapping": {
+            "ace_step": "#/$defs/MusicQueueAceRequest",
+            "heartmula": "#/$defs/MusicQueueHeartRequest",
+            "stable_audio3": "#/$defs/MusicQueueStableRequest",
+            "yue2": "#/$defs/MusicQueueYueRequest"
+          },
+          "propertyName": "engine"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/MusicQueueAceRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueYueRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueHeartRequest"
+          },
+          {
+            "$ref": "#/$defs/MusicQueueStableRequest"
+          }
+        ]
+      },
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapter"
+        },
+        "maxItems": 2,
+        "type": "array"
+      },
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "batch_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "resolved_seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "child_job_id": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "loading",
+          "submitting",
+          "running",
+          "saving",
+          "unloading",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "tracks": {
+        "items": {
+          "$ref": "#/$defs/SavedTrack"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "error_code": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "attempt": {
+        "maximum": 1000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "retry_of_item_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "engine",
+      "variation_index",
+      "payload",
+      "id",
+      "batch_id",
+      "resolved_seed"
+    ],
+    "type": "object"
+  },
+  "MusicQueueBatch": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "brief": {
+        "$ref": "#/$defs/MusicQueueBrief"
+      },
+      "selections": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueEngineSelection"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "models": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueModelPlan"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "preview_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueItem"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "created_at",
+      "brief",
+      "selections",
+      "models",
+      "preview_fingerprint",
+      "items"
+    ],
+    "type": "object"
+  },
+  "MusicQueueSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "status": {
+        "enum": [
+          "idle",
+          "running",
+          "pausing",
+          "paused",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "active_item_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "history_incomplete": {
+        "type": "boolean"
+      },
+      "batches": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueBatch"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "revision",
+      "status"
+    ],
+    "type": "object"
+  },
+  "MusicQueueEnqueueRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "brief": {
+        "$ref": "#/$defs/MusicQueueBrief"
+      },
+      "selections": {
+        "items": {
+          "$ref": "#/$defs/MusicQueueEngineSelection"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "submission_key": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "type": "string"
+      },
+      "preview_fingerprint": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "brief",
+      "selections",
+      "revision",
+      "submission_key",
+      "preview_fingerprint"
+    ],
+    "type": "object"
+  },
+  "MusicQueueControlRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "action": {
+        "enum": [
+          "start",
+          "pause",
+          "cancel_active"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "action"
+    ],
+    "type": "object"
+  },
+  "MusicQueueReorderRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "batch_ids": {
+        "items": {
+          "pattern": "^[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "revision",
+      "batch_ids"
+    ],
+    "type": "object"
+  },
+  "MusicQueueRetryRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "item_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "save",
+          "inference"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "item_id",
+      "mode"
+    ],
+    "type": "object"
+  },
+  "MusicQueueCancelRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "batch_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "batch_id"
+    ],
+    "type": "object"
+  },
   "EngineRuntime": {
     "additionalProperties": false,
     "properties": {
@@ -18774,6 +20528,8 @@ const schemas = {
         "enum": [
           "ace_step",
           "yue2",
+          "heartmula",
+          "stable_audio3",
           "speech",
           "singing",
           "separation",
@@ -18948,7 +20704,7 @@ const schemas = {
         "items": {
           "$ref": "#/$defs/SupportModuleState"
         },
-        "maxItems": 16,
+        "maxItems": 17,
         "type": "array"
       },
       "engines": {
@@ -24747,6 +26503,302 @@ function isRetainedAudioVideoRequest(value: unknown): value is RetainedAudioVide
 }
 export function parseRetainedAudioVideoRequest(value: unknown): RetainedAudioVideoRequest {
   if (!isRetainedAudioVideoRequest(value)) throw new TypeError("Invalid RetainedAudioVideoRequest response")
+  return value
+}
+
+function isLocalMusicRequest(value: unknown): value is LocalMusicRequest {
+  return decodeSchema(schemas.LocalMusicRequest, value, schemas)
+}
+export function parseLocalMusicRequest(value: unknown): LocalMusicRequest {
+  if (!isLocalMusicRequest(value)) throw new TypeError("Invalid LocalMusicRequest response")
+  return value
+}
+
+function isLocalMusicEngineStatus(value: unknown): value is LocalMusicEngineStatus {
+  return decodeSchema(schemas.LocalMusicEngineStatus, value, schemas)
+}
+export function parseLocalMusicEngineStatus(value: unknown): LocalMusicEngineStatus {
+  if (!isLocalMusicEngineStatus(value)) throw new TypeError("Invalid LocalMusicEngineStatus response")
+  return value
+}
+
+function isLocalMusicEngines(value: unknown): value is LocalMusicEngines {
+  return decodeSchema(schemas.LocalMusicEngines, value, schemas)
+}
+export function parseLocalMusicEngines(value: unknown): LocalMusicEngines {
+  if (!isLocalMusicEngines(value)) throw new TypeError("Invalid LocalMusicEngines response")
+  return value
+}
+
+function isLocalMusicJob(value: unknown): value is LocalMusicJob {
+  return decodeSchema(schemas.LocalMusicJob, value, schemas)
+}
+export function parseLocalMusicJob(value: unknown): LocalMusicJob {
+  if (!isLocalMusicJob(value)) throw new TypeError("Invalid LocalMusicJob response")
+  return value
+}
+
+function isLocalMusicJobs(value: unknown): value is LocalMusicJobs {
+  return decodeSchema(schemas.LocalMusicJobs, value, schemas)
+}
+export function parseLocalMusicJobs(value: unknown): LocalMusicJobs {
+  if (!isLocalMusicJobs(value)) throw new TypeError("Invalid LocalMusicJobs response")
+  return value
+}
+
+function isMusicAdapterSelection(value: unknown): value is MusicAdapterSelection {
+  return decodeSchema(schemas.MusicAdapterSelection, value, schemas)
+}
+export function parseMusicAdapterSelection(value: unknown): MusicAdapterSelection {
+  if (!isMusicAdapterSelection(value)) throw new TypeError("Invalid MusicAdapterSelection response")
+  return value
+}
+
+function isMusicAdapter(value: unknown): value is MusicAdapter {
+  return decodeSchema(schemas.MusicAdapter, value, schemas)
+}
+export function parseMusicAdapter(value: unknown): MusicAdapter {
+  if (!isMusicAdapter(value)) throw new TypeError("Invalid MusicAdapter response")
+  return value
+}
+
+function isMusicAdapters(value: unknown): value is MusicAdapters {
+  return decodeSchema(schemas.MusicAdapters, value, schemas)
+}
+export function parseMusicAdapters(value: unknown): MusicAdapters {
+  if (!isMusicAdapters(value)) throw new TypeError("Invalid MusicAdapters response")
+  return value
+}
+
+function isMusicLoraCapability(value: unknown): value is MusicLoraCapability {
+  return decodeSchema(schemas.MusicLoraCapability, value, schemas)
+}
+export function parseMusicLoraCapability(value: unknown): MusicLoraCapability {
+  if (!isMusicLoraCapability(value)) throw new TypeError("Invalid MusicLoraCapability response")
+  return value
+}
+
+function isMusicLoraCapabilities(value: unknown): value is MusicLoraCapabilities {
+  return decodeSchema(schemas.MusicLoraCapabilities, value, schemas)
+}
+export function parseMusicLoraCapabilities(value: unknown): MusicLoraCapabilities {
+  if (!isMusicLoraCapabilities(value)) throw new TypeError("Invalid MusicLoraCapabilities response")
+  return value
+}
+
+function isStableLoraSample(value: unknown): value is StableLoraSample {
+  return decodeSchema(schemas.StableLoraSample, value, schemas)
+}
+export function parseStableLoraSample(value: unknown): StableLoraSample {
+  if (!isStableLoraSample(value)) throw new TypeError("Invalid StableLoraSample response")
+  return value
+}
+
+function isStableLoraTrainingRequest(value: unknown): value is StableLoraTrainingRequest {
+  return decodeSchema(schemas.StableLoraTrainingRequest, value, schemas)
+}
+export function parseStableLoraTrainingRequest(value: unknown): StableLoraTrainingRequest {
+  if (!isStableLoraTrainingRequest(value)) throw new TypeError("Invalid StableLoraTrainingRequest response")
+  return value
+}
+
+function isStableLoraTrainingJob(value: unknown): value is StableLoraTrainingJob {
+  return decodeSchema(schemas.StableLoraTrainingJob, value, schemas)
+}
+export function parseStableLoraTrainingJob(value: unknown): StableLoraTrainingJob {
+  if (!isStableLoraTrainingJob(value)) throw new TypeError("Invalid StableLoraTrainingJob response")
+  return value
+}
+
+function isStableLoraTrainingJobs(value: unknown): value is StableLoraTrainingJobs {
+  return decodeSchema(schemas.StableLoraTrainingJobs, value, schemas)
+}
+export function parseStableLoraTrainingJobs(value: unknown): StableLoraTrainingJobs {
+  if (!isStableLoraTrainingJobs(value)) throw new TypeError("Invalid StableLoraTrainingJobs response")
+  return value
+}
+
+function isStableLoraTrainingStatus(value: unknown): value is StableLoraTrainingStatus {
+  return decodeSchema(schemas.StableLoraTrainingStatus, value, schemas)
+}
+export function parseStableLoraTrainingStatus(value: unknown): StableLoraTrainingStatus {
+  if (!isStableLoraTrainingStatus(value)) throw new TypeError("Invalid StableLoraTrainingStatus response")
+  return value
+}
+
+function isMusicQueueErrorResponse(value: unknown): value is MusicQueueErrorResponse {
+  return decodeSchema(schemas.MusicQueueErrorResponse, value, schemas)
+}
+export function parseMusicQueueErrorResponse(value: unknown): MusicQueueErrorResponse {
+  if (!isMusicQueueErrorResponse(value)) throw new TypeError("Invalid MusicQueueErrorResponse response")
+  return value
+}
+
+function isMusicQueueBrief(value: unknown): value is MusicQueueBrief {
+  return decodeSchema(schemas.MusicQueueBrief, value, schemas)
+}
+export function parseMusicQueueBrief(value: unknown): MusicQueueBrief {
+  if (!isMusicQueueBrief(value)) throw new TypeError("Invalid MusicQueueBrief response")
+  return value
+}
+
+function isMusicQueueEngineSelection(value: unknown): value is MusicQueueEngineSelection {
+  return decodeSchema(schemas.MusicQueueEngineSelection, value, schemas)
+}
+export function parseMusicQueueEngineSelection(value: unknown): MusicQueueEngineSelection {
+  if (!isMusicQueueEngineSelection(value)) throw new TypeError("Invalid MusicQueueEngineSelection response")
+  return value
+}
+
+function isMusicQueuePreviewRequest(value: unknown): value is MusicQueuePreviewRequest {
+  return decodeSchema(schemas.MusicQueuePreviewRequest, value, schemas)
+}
+export function parseMusicQueuePreviewRequest(value: unknown): MusicQueuePreviewRequest {
+  if (!isMusicQueuePreviewRequest(value)) throw new TypeError("Invalid MusicQueuePreviewRequest response")
+  return value
+}
+
+function isMusicQueueReadiness(value: unknown): value is MusicQueueReadiness {
+  return decodeSchema(schemas.MusicQueueReadiness, value, schemas)
+}
+export function parseMusicQueueReadiness(value: unknown): MusicQueueReadiness {
+  if (!isMusicQueueReadiness(value)) throw new TypeError("Invalid MusicQueueReadiness response")
+  return value
+}
+
+function isMusicQueueCatalog(value: unknown): value is MusicQueueCatalog {
+  return decodeSchema(schemas.MusicQueueCatalog, value, schemas)
+}
+export function parseMusicQueueCatalog(value: unknown): MusicQueueCatalog {
+  if (!isMusicQueueCatalog(value)) throw new TypeError("Invalid MusicQueueCatalog response")
+  return value
+}
+
+function isMusicQueueAdjustment(value: unknown): value is MusicQueueAdjustment {
+  return decodeSchema(schemas.MusicQueueAdjustment, value, schemas)
+}
+export function parseMusicQueueAdjustment(value: unknown): MusicQueueAdjustment {
+  if (!isMusicQueueAdjustment(value)) throw new TypeError("Invalid MusicQueueAdjustment response")
+  return value
+}
+
+function isMusicQueueModelPlan(value: unknown): value is MusicQueueModelPlan {
+  return decodeSchema(schemas.MusicQueueModelPlan, value, schemas)
+}
+export function parseMusicQueueModelPlan(value: unknown): MusicQueueModelPlan {
+  if (!isMusicQueueModelPlan(value)) throw new TypeError("Invalid MusicQueueModelPlan response")
+  return value
+}
+
+function isMusicQueueAceRequest(value: unknown): value is MusicQueueAceRequest {
+  return decodeSchema(schemas.MusicQueueAceRequest, value, schemas)
+}
+export function parseMusicQueueAceRequest(value: unknown): MusicQueueAceRequest {
+  if (!isMusicQueueAceRequest(value)) throw new TypeError("Invalid MusicQueueAceRequest response")
+  return value
+}
+
+function isMusicQueueYueRequest(value: unknown): value is MusicQueueYueRequest {
+  return decodeSchema(schemas.MusicQueueYueRequest, value, schemas)
+}
+export function parseMusicQueueYueRequest(value: unknown): MusicQueueYueRequest {
+  if (!isMusicQueueYueRequest(value)) throw new TypeError("Invalid MusicQueueYueRequest response")
+  return value
+}
+
+function isMusicQueueHeartRequest(value: unknown): value is MusicQueueHeartRequest {
+  return decodeSchema(schemas.MusicQueueHeartRequest, value, schemas)
+}
+export function parseMusicQueueHeartRequest(value: unknown): MusicQueueHeartRequest {
+  if (!isMusicQueueHeartRequest(value)) throw new TypeError("Invalid MusicQueueHeartRequest response")
+  return value
+}
+
+function isMusicQueueStableRequest(value: unknown): value is MusicQueueStableRequest {
+  return decodeSchema(schemas.MusicQueueStableRequest, value, schemas)
+}
+export function parseMusicQueueStableRequest(value: unknown): MusicQueueStableRequest {
+  if (!isMusicQueueStableRequest(value)) throw new TypeError("Invalid MusicQueueStableRequest response")
+  return value
+}
+
+function isMusicQueueNormalizedItem(value: unknown): value is MusicQueueNormalizedItem {
+  return decodeSchema(schemas.MusicQueueNormalizedItem, value, schemas)
+}
+export function parseMusicQueueNormalizedItem(value: unknown): MusicQueueNormalizedItem {
+  if (!isMusicQueueNormalizedItem(value)) throw new TypeError("Invalid MusicQueueNormalizedItem response")
+  return value
+}
+
+function isMusicQueuePreview(value: unknown): value is MusicQueuePreview {
+  return decodeSchema(schemas.MusicQueuePreview, value, schemas)
+}
+export function parseMusicQueuePreview(value: unknown): MusicQueuePreview {
+  if (!isMusicQueuePreview(value)) throw new TypeError("Invalid MusicQueuePreview response")
+  return value
+}
+
+function isMusicQueueItem(value: unknown): value is MusicQueueItem {
+  return decodeSchema(schemas.MusicQueueItem, value, schemas)
+}
+export function parseMusicQueueItem(value: unknown): MusicQueueItem {
+  if (!isMusicQueueItem(value)) throw new TypeError("Invalid MusicQueueItem response")
+  return value
+}
+
+function isMusicQueueBatch(value: unknown): value is MusicQueueBatch {
+  return decodeSchema(schemas.MusicQueueBatch, value, schemas)
+}
+export function parseMusicQueueBatch(value: unknown): MusicQueueBatch {
+  if (!isMusicQueueBatch(value)) throw new TypeError("Invalid MusicQueueBatch response")
+  return value
+}
+
+function isMusicQueueSnapshot(value: unknown): value is MusicQueueSnapshot {
+  return decodeSchema(schemas.MusicQueueSnapshot, value, schemas)
+}
+export function parseMusicQueueSnapshot(value: unknown): MusicQueueSnapshot {
+  if (!isMusicQueueSnapshot(value)) throw new TypeError("Invalid MusicQueueSnapshot response")
+  return value
+}
+
+function isMusicQueueEnqueueRequest(value: unknown): value is MusicQueueEnqueueRequest {
+  return decodeSchema(schemas.MusicQueueEnqueueRequest, value, schemas)
+}
+export function parseMusicQueueEnqueueRequest(value: unknown): MusicQueueEnqueueRequest {
+  if (!isMusicQueueEnqueueRequest(value)) throw new TypeError("Invalid MusicQueueEnqueueRequest response")
+  return value
+}
+
+function isMusicQueueControlRequest(value: unknown): value is MusicQueueControlRequest {
+  return decodeSchema(schemas.MusicQueueControlRequest, value, schemas)
+}
+export function parseMusicQueueControlRequest(value: unknown): MusicQueueControlRequest {
+  if (!isMusicQueueControlRequest(value)) throw new TypeError("Invalid MusicQueueControlRequest response")
+  return value
+}
+
+function isMusicQueueReorderRequest(value: unknown): value is MusicQueueReorderRequest {
+  return decodeSchema(schemas.MusicQueueReorderRequest, value, schemas)
+}
+export function parseMusicQueueReorderRequest(value: unknown): MusicQueueReorderRequest {
+  if (!isMusicQueueReorderRequest(value)) throw new TypeError("Invalid MusicQueueReorderRequest response")
+  return value
+}
+
+function isMusicQueueRetryRequest(value: unknown): value is MusicQueueRetryRequest {
+  return decodeSchema(schemas.MusicQueueRetryRequest, value, schemas)
+}
+export function parseMusicQueueRetryRequest(value: unknown): MusicQueueRetryRequest {
+  if (!isMusicQueueRetryRequest(value)) throw new TypeError("Invalid MusicQueueRetryRequest response")
+  return value
+}
+
+function isMusicQueueCancelRequest(value: unknown): value is MusicQueueCancelRequest {
+  return decodeSchema(schemas.MusicQueueCancelRequest, value, schemas)
+}
+export function parseMusicQueueCancelRequest(value: unknown): MusicQueueCancelRequest {
+  if (!isMusicQueueCancelRequest(value)) throw new TypeError("Invalid MusicQueueCancelRequest response")
   return value
 }
 

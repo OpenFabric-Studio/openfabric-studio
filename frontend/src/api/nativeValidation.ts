@@ -1,3 +1,5 @@
+import { ApiError } from './http'
+
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -45,6 +47,12 @@ export function stringArray(value: unknown): string[] {
 }
 
 export function nativePayload(value: unknown): unknown {
-  if (isRecord(value) && 'data' in value && typeof value.code === 'number') return value.data
+  if (isRecord(value) && 'data' in value && 'code' in value) {
+    if (value.code !== 200) {
+      const status = typeof value.code === 'number' && Number.isInteger(value.code) && value.code >= 400 && value.code <= 599 ? value.code : 502
+      throw new ApiError('native_operation_failed', status)
+    }
+    return value.data
+  }
   return value
 }

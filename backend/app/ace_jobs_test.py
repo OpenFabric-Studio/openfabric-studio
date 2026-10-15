@@ -13,7 +13,7 @@ import httpx
 from pydantic import TypeAdapter
 from fastapi import HTTPException, UploadFile
 from app.contracts import JsonObject
-from app import db, ace_jobs
+from app import db, ace_jobs, stems, midi
 from app import audio_versions
 
 class AceJobsTests(unittest.IsolatedAsyncioTestCase):
@@ -110,6 +110,79 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
 
     def create_job(self, task_id='job1', voice_id=None):
         ace_jobs.record_job(task_id, {'batch_size': 2, 'audio_format': 'wav', 'lyrics': 'test'}, 'Batch', voice_id)
+
+    def completed_batch_tracks(self) -> list[int]:
+        self.create_job()
+        tracks: list[int] = []
+        for index in range(2):
+            audio = db.model_dir('ace_step') / f'fixture-{index}.wav'
+            audio.write_bytes(b'audio fixture')
+            tracks.append(db.insert_track(model='ace_step', title='Batch', lyrics='', seed=None,
+                duration_ms=1000, wall_ms=None, params={}, audio_path=audio, abc_path=None, ace_candidate=('job1', index)))
+        job = ace_jobs.get_job('job1')
+        job.status, job.stage = 'done', 'done'
+        ace_jobs._store(job)
+        return tracks
+
+    async def test_batch_delete_rejects_any_active_derivative_before_removing_tracks(self) -> None:
+        tracks = self.completed_batch_tracks()
+        for kind in ('stems', 'midi'):
+            for state in ('queued', 'running'):
+                with self.subTest(kind=kind, state=state):
+                    entered = asyncio.Event()
+                    async def worker(track_id: int, source: str = 'full') -> None:
+                        job = stems._jobs[track_id] if kind == 'stems' else midi._jobs[(track_id, source)]
+                        job.status = 'running' if state == 'running' else 'queued'
+                        entered.set()
+                        await asyncio.Event().wait()
+                    with patch.dict(stems._jobs, {}, clear=True), patch.dict(midi._jobs, {}, clear=True), \
+                         patch.object(stems, '_run', side_effect=worker), patch.object(midi, '_run', side_effect=worker):
+                        if kind == 'stems':
+                            await stems.start(tracks[1])
+                        else:
+                            await midi.start(tracks[1], 'full')
+                        await entered.wait()
+                        try:
+                            with self.assertRaises(HTTPException) as caught:
+                                await ace_jobs.delete('job1')
+                            self.assertEqual(caught.exception.status_code, 409)
+                            self.assertEqual(caught.exception.detail, 'job_busy')
+                            self.assertEqual([track.id for track in ace_jobs.get_job('job1').tracks], tracks)
+                            self.assertTrue(all(db.get_track(track_id) is not None for track_id in tracks))
+                        finally:
+                            if kind == 'stems':
+                                await stems.cancel(tracks[1])
+                            else:
+                                await midi.cancel(tracks[1], 'full')
+
+    async def test_batch_delete_rechecks_all_tracks_after_awaited_drain(self) -> None:
+        tracks = self.completed_batch_tracks()
+        entered, release = asyncio.Event(), asyncio.Event()
+        original = audio_versions.protect_track_versions_removal
+        @asynccontextmanager
+        async def held_guard(track_id: int) -> AsyncIterator[None]:
+            if track_id == tracks[1]:
+                entered.set()
+                await release.wait()
+            async with original(track_id):
+                yield
+        async def worker(track_id: int) -> None:
+            await asyncio.Event().wait()
+        with patch.dict(stems._jobs, {}, clear=True), patch.object(stems, '_run', side_effect=worker), \
+             patch.object(audio_versions, 'protect_track_versions_removal', side_effect=held_guard):
+            deletion = asyncio.create_task(ace_jobs.delete('job1'))
+            await entered.wait()
+            try:
+                await stems.start(tracks[1])
+                release.set()
+                with self.assertRaises(HTTPException) as caught:
+                    await deletion
+                self.assertEqual(caught.exception.status_code, 409)
+                self.assertEqual([track.id for track in ace_jobs.get_job('job1').tracks], tracks)
+            finally:
+                release.set()
+                await asyncio.gather(deletion, return_exceptions=True)
+                await stems.cancel(tracks[1])
 
     async def test_admission_reports_persisted_work_without_a_live_monitor(self):
         self.assertFalse(ace_jobs.work_busy())

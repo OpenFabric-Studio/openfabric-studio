@@ -4,7 +4,7 @@ import { yueJobResponse } from '../stores/yueJobFixtures'
 afterEach(() => vi.unstubAllGlobals())
 it('submits the selected voice and complete settings to server-owned generation', async () => {
   const response = yueJobResponse(); const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(new Response(JSON.stringify(response))); vi.stubGlobal('fetch', fetch)
-  const request = { title: 'Jazz', lyrics: 'lyrics', seed: 1, options: api.completeYueOptions({ style: 'jazz', cot: 'off' }), precision: 'q8_0' as const, voice_id: null, settings: null }
+  const request = { title: 'Jazz', lyrics: 'lyrics', seed: 1, options: api.completeYueOptions({ style: 'jazz', cot: 'off' }), precision: 'q8_0' as const, voice_id: null, settings: null, ar_adapter: null, nar_adapter: null }
   expect(await api.submit(request)).toEqual(response)
   expect(fetch).toHaveBeenCalledWith('/api/yue-jobs', expect.objectContaining({ method: 'POST', body: JSON.stringify(request) }))
 })

@@ -11,7 +11,7 @@ The shell runs the same FastAPI backend and built Vue UI. First-run setup instal
 | Platform | Snapshot status |
 | --- | --- |
 | Windows x64 | Minimal setup/NSIS packaging implemented; no NVIDIA requirement for opening the studio. Fork clean installation and GPU workflows unverified. |
-| macOS, Apple Silicon | Setup/DMG packaging implemented; fork clean installation and GPU workflows unverified. Upstream reported a manual Mac run. |
+| macOS, Apple Silicon | Local ARM64 DMG, isolated minimal bootstrap and packaged startup/restart verified on an M4 Max. Downloaded-build Gatekeeper behavior and GPU workflows remain unverified. |
 | Linux | Packaging configuration exists; desktop first-run setup reports unsupported. Use the repository’s Linux source scripts. |
 
 The optional Windows prebuilt YuE engine requires CUDA-capable hardware and driver 580 or newer. Those requirements do not block the minimal backend bootstrap. Setup estimates space from pending components with a 50% staging/cache allowance; completed components do not inflate update progress or space requirements. CPU tests and a successful installer build do not establish GPU or platform support. See [platform setup](../docs/platform-setup.md) for module boundaries and manual steps.
@@ -98,12 +98,14 @@ Startup accepts the backend only after a bounded readiness response matches its 
 
 The npm override pins `global-agent` to 4.1.3 only beneath `@electron/get`. The older downloader chain brought in vulnerable `sprintf-js` through its logger; global-agent 4 removes that chain while retaining the CommonJS `bootstrap` API the downloader calls. The proxy regression exercises the builder's actual downloader with local proxy and `NO_PROXY` servers. Keep electron-builder at its reviewed version; remove the override when its downloader dependency adopts the corrected chain, after repeating the proxy test and dependency audit. Installer creation and HTTPS proxy behavior still need platform release checks.
 
-[test/e2e/full.js](test/e2e/full.js) is a legacy Windows/NVIDIA full-install/generation harness. It assumes the old all-model first run and needs adaptation to the module wizard before use. Do not treat it as current platform evidence. Unsigned-install behavior, clean installation, copied-library migration and GPU generation remain release checks, not claims made by CPU CI.
+[test/e2e/full.js](test/e2e/full.js) is a legacy Windows/NVIDIA full-install/generation harness. It assumes the old all-model first run and needs adaptation to the module wizard before use. Do not treat it as current platform evidence. Unsigned-install behavior, copied-library migration and GPU generation remain release checks, not claims made by CPU CI.
+
+On 14 October 2026, the local working-tree ARM64 DMG was built with `--publish never`, checksum-verified, mounted read-only and copied into a temporary Applications folder. The shipped installer completed a fresh uv/Python 3.12/backend bootstrap in a separate temporary root without engine weights. The actual packaged app served its frontend and isolated library, retained its loopback port across restart, and stopped its backend on quit. Deep strict ad-hoc signature verification passed before and after both launches. Resource preparation excludes the local mypy cache, and desktop Python imports disable bytecode writes to preserve the signed bundle. The setup screen's button flow, downloaded quarantine prompts, native Windows installation and GPU inference still need platform verification.
 
 ## Known gaps
 
 - No Developer ID certificate, notarization, or automatic updater. macOS uses ad-hoc signing only.
 - Desktop Linux first-run installation is not implemented.
-- Current fork installer/downloaded-build behavior is not yet verified on Windows or macOS.
+- Windows installation and downloaded-build quarantine behavior on macOS are not yet verified.
 - Model download progress can be estimated rather than exact.
 - Windows setup uses built-in `tar.exe` (Windows 10 1803 or newer).

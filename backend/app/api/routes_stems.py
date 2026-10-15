@@ -32,7 +32,10 @@ async def start_stems(track_id: int, force: bool = False):
     row = db.get_track(track_id)
     if not row or not Path(row["audio_path"]).exists():
         raise HTTPException(status_code=404, detail="track or audio not found")
-    job = await stems.start(track_id, force=force)
+    try:
+        job = await stems.start(track_id, force=force)
+    except audio_exports.AudioExportError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
     return {"status": job.status, "error": job.error}
 
 

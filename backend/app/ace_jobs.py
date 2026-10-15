@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import time
+from contextlib import AsyncExitStack
 from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import parse_qsl, urlencode, urlsplit
@@ -441,9 +442,17 @@ async def _delete_inner(task_id: str) -> None:
         await asyncio.gather(task, return_exceptions=True)
     job = get_job(task_id)
     # Deleting a generation card deletes its tracks, matching the existing UI.
-    for track in job.tracks:
-        from .voice_build import protect_track_removal
-        async with audio_versions.protect_track_versions_removal(track.id), protect_track_removal(track.id), audio_exports.protect_track_exports_removal(track.id):
+    from . import midi, stems
+    from .voice_build import protect_track_removal
+    async with AsyncExitStack() as guards:
+        for track in job.tracks:
+            await guards.enter_async_context(audio_versions.protect_track_versions_removal(track.id))
+            await guards.enter_async_context(protect_track_removal(track.id))
+            await guards.enter_async_context(audio_exports.protect_track_exports_removal(track.id))
+        # No await between checking the whole batch and removing its tracks.
+        if any(stems.is_active(track.id) or midi.any_active(track.id) for track in job.tracks):
+            raise HTTPException(status_code=409, detail='job_busy')
+        for track in job.tracks:
             audio_exports.delete_track_exports(track.id)
             db.delete_track(track.id)
     row = db.get_db().execute('SELECT results_json FROM ace_jobs WHERE task_id=?', (task_id,)).fetchone()

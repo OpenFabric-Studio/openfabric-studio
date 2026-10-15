@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from .contracts import SavedTrack
 from .generation_contracts import GenerationContract, YueGenerationSettings
+from .music_lora_contracts import MusicAdapterSelection
 
 YueRunId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 
@@ -53,6 +54,8 @@ class YueSubmitRequest(GenerationContract):
     options: YueOptions
     precision: Literal['q8_0', 'q4_0'] = 'q8_0'
     voice_id: YueRunId | None = None
+    ar_adapter: MusicAdapterSelection | None = None
+    nar_adapter: MusicAdapterSelection | None = None
     settings: YueGenerationSettings | None = None
 
 
@@ -91,6 +94,8 @@ class YueJobResponse(GenerationContract):
     precision: Literal['q8_0', 'q4_0']
     options: YueOptions
     voice_id: YueRunId | None
+    ar_adapter: MusicAdapterSelection | None = None
+    nar_adapter: MusicAdapterSelection | None = None
     error_code: str = Field(default='', max_length=120)
     track: SavedTrack | None = None
 

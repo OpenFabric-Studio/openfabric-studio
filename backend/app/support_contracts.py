@@ -69,7 +69,7 @@ class SupportReport(SupportContract):
     acceleration: Literal['apple_silicon', 'nvidia_unverified', 'cpu', 'unknown']
     physical_memory_bytes: int | None = Field(default=None, ge=1, le=17_592_186_044_416)
     backend_connection: Literal['reachable', 'unreachable', 'unverified']
-    modules: list[SupportModuleState] = Field(default_factory=list, max_length=16)
+    modules: list[SupportModuleState] = Field(default_factory=list, max_length=17)
     engines: list[SupportEngineState] = Field(default_factory=list, max_length=2)
     recent_actions: list[SupportAction] = Field(default_factory=list, max_length=20)
 

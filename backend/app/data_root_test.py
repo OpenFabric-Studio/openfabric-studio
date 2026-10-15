@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import errno
+import hashlib
+import io
 import os
 import sqlite3
 import tempfile
@@ -30,6 +32,47 @@ from app.data_root import (
 
 
 class DataRootTests(unittest.TestCase):
+    def test_music_worker_receipts_follow_the_relocated_library(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            dest.mkdir()
+            database = dest / 'aicollector.db'
+            with sqlite3.connect(database) as connection:
+                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training')):
+                    connection.execute(f'CREATE TABLE {table}(worker_json TEXT)')
+                    connection.execute(f'INSERT INTO {table} VALUES(?)',
+                        (json.dumps({'pid': 100, 'token': 'a' * 32, 'receipt': str(src / directory / ('b' * 32) / 'worker.json')}),))
+            rewrite_library_paths(database, src, dest)
+            with sqlite3.connect(database) as connection:
+                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training')):
+                    worker = json.loads(connection.execute(f'SELECT worker_json FROM {table}').fetchone()[0])
+                    self.assertEqual(worker['receipt'], str(dest / directory / ('b' * 32) / 'worker.json'))
+                    self.assertEqual(worker['token'], 'a' * 32)
+
+    def test_failed_music_metadata_rewrite_restores_all_originals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            originals: dict[Path, bytes] = {}
+            for name in ('local-music', 'music-lora', 'stable-lora-training'):
+                folder = src / name
+                folder.mkdir(parents=True)
+                metadata = folder / 'request.json'
+                metadata.write_text(json.dumps({'source': str(src / 'files' / 'source.wav')}))
+                originals[metadata] = metadata.read_bytes()
+                (folder / 'checkpoint.bin').write_bytes(b'preserved checkpoint')
+            rewrite = data_root.rewrite_text_prefixes
+            def fail_training(path: Path, old: Path, new: Path) -> None:
+                rewrite(path, old, new)
+                if path.name == 'stable-lora-training':
+                    raise OSError('injected metadata failure')
+            with patch.object(data_root, 'rewrite_text_prefixes', side_effect=fail_training):
+                with self.assertRaises(OSError):
+                    migrate_library(src, dest)
+            for metadata, original in originals.items():
+                self.assertEqual(metadata.read_bytes(), original)
+                self.assertEqual((metadata.parent / 'checkpoint.bin').read_bytes(), b'preserved checkpoint')
+            self.assertFalse(has_library(dest))
+
     def test_library_move_rewrites_repair_exports_and_captured_reference_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
@@ -702,9 +745,74 @@ class DataRootTests(unittest.TestCase):
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
                 ["tracks", "voices", "videos", "videoProjects", "videoCharacters", "videoCharacterTraining", "videoCharacterTrainer", "providers",
-                 "audiobooks", "speechProfiles", "speechTrials", "models", "logs", "database"],
+                 "audiobooks", "speechProfiles", "speechTrials", "localMusic", "musicAdapters", "musicTraining", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:
         self.assertEqual(parse_chosen_folder("/Users/example/Music/OpenFabric/\n"), "/Users/example/Music/OpenFabric")
         self.assertEqual(parse_chosen_folder("/"), "/")
+
+
+class MusicLibraryRelocationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_adapters_and_unpublished_music_survive_move_and_reopen(self) -> None:
+        from app import db, local_music, music_lora, stable_lora
+        from app.local_music_contracts import LocalMusicJob, LocalMusicRequest
+        from app.local_music_test import audio_bytes
+        from app.music_lora_contracts import MusicAdapterSelection
+        from app.music_lora_test import adapter_bytes
+        from app.stable_lora_contracts import StableLoraCompletion, StableLoraSample, StableLoraTrainingJob, StableLoraTrainingRequest
+        from app.stable_lora_test import checkpoint_bytes
+
+        root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
+        src, dest = root / 'old', root / 'new'
+        for name, value in (('_db', None), ('DATA_DIR', src), ('DB_PATH', src / 'aicollector.db'), ('FILES_DIR', src / 'files')):
+            self.enterContext(patch.object(db, name, value))
+        for service in (local_music, stable_lora):
+            self.enterContext(patch.object(service, '_tasks', {}))
+            self.enterContext(patch.object(service, '_unverified', set()))
+            self.enterContext(patch.object(service, '_closing', False))
+        self.addCleanup(lambda: db._db.close() if db._db is not None else None)
+        connection = db.get_db()
+        imported = music_lora.import_stream(io.BytesIO(adapter_bytes()), filename='style.safetensors',
+            name='Imported style', engine='stable_audio3', target='small-music')
+        training = StableLoraTrainingJob(id='a' * 32, status='failed', created_at='2026-10-14',
+            request=StableLoraTrainingRequest(name='Retained training', samples=[StableLoraSample(track_id=1, caption='Jazz')], max_steps=3, rank=8))
+        training_dir = stable_lora._directory(training.id, create=True)
+        checkpoint = checkpoint_bytes()
+        (training_dir / 'final.safetensors').write_bytes(checkpoint)
+        (training_dir / 'dataset.json').write_bytes(b'{}')
+        completion = StableLoraCompletion(job_id=training.id, request_sha256=stable_lora.fingerprint(training.request),
+            checkpoint='final.safetensors', sha256=hashlib.sha256(checkpoint).hexdigest(),
+            dataset_sha256=hashlib.sha256(b'{}').hexdigest(), variant='small-music', max_steps=3)
+        (training_dir / 'completion.json').write_text(completion.model_dump_json())
+        connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (training.id, training.model_dump_json(), training.created_at))
+        generated = LocalMusicJob(id='b' * 32, status='running', created_at='2026-10-14',
+            request=LocalMusicRequest(engine='heartmula', prompt='Jazz', duration_seconds=5))
+        local_music._artifact(generated.id, 'output.wav', create=True).write_bytes(audio_bytes())
+        connection.execute('INSERT INTO local_music_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (generated.id, generated.model_dump_json(), generated.created_at))
+        connection.commit()
+        connection.close()
+        db._db = None
+
+        migrate_library(src, dest)
+        db.DATA_DIR, db.DB_PATH, db.FILES_DIR = dest, dest / 'aicollector.db', dest / 'files'
+        self.assertEqual(music_lora.list_adapters().adapters, [imported])
+        selection = MusicAdapterSelection(id=imported.id)
+        self.assertEqual(music_lora.resolve(selection, engine='stable_audio3', target='small-music').read_bytes(), adapter_bytes())
+        self.assertEqual(stable_lora._artifact(training.id, 'final.safetensors').read_bytes(), checkpoint)
+        self.assertEqual(StableLoraCompletion.model_validate_json(stable_lora._artifact(training.id, 'completion.json').read_bytes()), completion)
+        with patch.object(stable_lora, 'prepare_worker') as train, patch.object(local_music, 'prepare_worker') as generate:
+            await stable_lora.recover()
+            await local_music.recover()
+        train.assert_not_called()
+        generate.assert_not_called()
+        self.assertEqual(stable_lora.get(training.id).status, 'done')
+        self.assertIsNotNone(music_lora.find_by_job(training.id))
+        saved = local_music.get(generated.id)
+        self.assertEqual(saved.status, 'done')
+        self.assertIsNotNone(saved.track)
+        self.assertEqual(local_music._output(saved).read_bytes(), audio_bytes())
+        for name in ('local-music', 'music-lora', 'stable-lora-training'):
+            self.assertFalse((src / name).exists())

@@ -19,6 +19,27 @@ it('restores active server jobs on reload and does not duplicate saved audio', a
   const store = useYue2Store(); await store.loadHistory()
   expect(store.jobs).toHaveLength(2); expect(store.jobs.find(job => job.dbId === 7)?.id).toBe('b'.repeat(32)); expect(tracks.saveTrack).not.toHaveBeenCalled()
 })
+it('sends adapter selections as job fields and keeps them in restored job parameters', async () => {
+  const ar = { id: 'c'.repeat(32), strength: 0.5 }, nar = { id: 'd'.repeat(32), strength: 0 }
+  vi.mocked(api.submit).mockResolvedValue(yueJobResponse({ ar_adapter: ar, nar_adapter: nar }))
+  const store = useYue2Store()
+  await store.generateBatch({ lyrics: 'lyrics', style: 'jazz', cot: 'off', precision: 'q8_0', baseSeed: 1, randomSeed: false, batchSize: 1, options: { style: 'jazz', cot: 'off' }, arAdapter: ar, narAdapter: nar })
+  expect(api.submit).toHaveBeenCalledWith(expect.objectContaining({ ar_adapter: ar, nar_adapter: nar, options: expect.not.objectContaining({ ar_adapter: expect.anything(), nar_adapter: expect.anything() }) }))
+  expect(store.jobs[0]?.params).toMatchObject({ ar_adapter: ar, nar_adapter: nar })
+})
+it('shows a useful adapter verification error without exposing the backend code', async () => {
+  vi.mocked(api.list).mockResolvedValue([yueJobResponse({ status: 'failed', error_code: 'music_lora_adapter_changed' })])
+  const store = useYue2Store(); await store.loadHistory()
+  expect(store.jobs[0]?.error).toContain('adapter file changed')
+  expect(store.jobs[0]?.error).not.toContain('music_lora_adapter_changed')
+})
+
+it('explains an older runtime that cannot load the adapter format without exposing its code', async () => {
+  vi.mocked(api.list).mockResolvedValue([yueJobResponse({ status: 'failed', error_code: 'music_lora_runtime_unsupported' })])
+  const store = useYue2Store(); await store.loadHistory()
+  expect(store.jobs[0]?.error).toContain('Update the native engine before using this adapter format')
+  expect(store.jobs[0]?.error).not.toContain('music_lora_runtime_unsupported')
+})
 it('keeps stopping jobs active until the backend confirms cancellation', async () => {
   vi.mocked(api.list).mockResolvedValue([yueJobResponse({ status: 'running' })]); const store = useYue2Store(); await store.loadHistory()
   const request = deferred<YueJobResponse>(); vi.mocked(api.cancel).mockReturnValue(request.promise)

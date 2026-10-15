@@ -367,8 +367,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
             receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\OpenFabricNative_' + 'b' * 32 + '"}')
             identity = video_process.WorkerIdentity(pid=42, token='a' * 32, receipt=str(receipt))
             with patch('app.video_process.sys.platform', 'win32'), \
-                 patch('app.job_lifecycle.spawn_process', new=AsyncMock()), \
-                 patch('app.job_lifecycle.communicate_process', new=AsyncMock(return_value=(b'', b''))), \
+                 patch('app.video_process.run_owned_command', new=AsyncMock(return_value=subprocess.CompletedProcess([], 0, b''))), \
                  patch('app.orchestrator.windows_job.WindowsJob.open', return_value=job):
                 self.assertTrue(await video_process.terminate_verified(identity))
         job.terminate.assert_called_once_with()
@@ -385,8 +384,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
                 error.winerror = error_code
                 with self.subTest(error_code=error_code), \
                      patch('app.video_process.sys.platform', 'win32'), \
-                     patch('app.job_lifecycle.spawn_process', new=AsyncMock()), \
-                     patch('app.job_lifecycle.communicate_process', new=AsyncMock(return_value=(b'', b''))), \
+                     patch('app.video_process.run_owned_command', new=AsyncMock(return_value=subprocess.CompletedProcess([], 0, b''))), \
                      patch('app.orchestrator.windows_job.WindowsJob.open', side_effect=error) as opener:
                     self.assertEqual(await video_process.terminate_verified(identity), expected)
                     opener.assert_called_once()
@@ -400,8 +398,7 @@ class WindowsToolRecoveryTests(unittest.IsolatedAsyncioTestCase):
             receipt.write_text('{"pid":42,"token":"' + 'a' * 32 + '","job_name":"Local\\\\OpenFabricNative_' + 'c' * 32 + '"}')
             identity = video_process.WorkerIdentity(pid=42, token='a' * 32, receipt=str(receipt))
             with patch('app.video_process.sys.platform', 'win32'), \
-                 patch('app.job_lifecycle.spawn_process', new=AsyncMock()), \
-                 patch('app.job_lifecycle.communicate_process', new=AsyncMock(return_value=(b'', b''))), \
+                 patch('app.video_process.run_owned_command', new=AsyncMock(return_value=subprocess.CompletedProcess([], 0, b''))), \
                  patch('app.orchestrator.windows_job.WindowsJob.open', return_value=job) as opener:
                 self.assertFalse(await video_process.terminate_verified(identity))
                 job.close.assert_not_called()

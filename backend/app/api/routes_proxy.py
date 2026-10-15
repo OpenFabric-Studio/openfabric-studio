@@ -18,7 +18,7 @@ from ..orchestrator.manager import manager
 from ..orchestrator.state import ModelStatus
 from .. import video_jobs, native_yue
 from ..job_lifecycle import await_cleanup
-from ..resource_admission import NativeLease, ResourceBusyError, reserve_native
+from ..resource_admission import NativeLease, ResourceBusyError, reserve_native, reserve_native_control
 
 router = APIRouter(prefix="/api")
 
@@ -33,8 +33,9 @@ logger = logging.getLogger(__name__)
 
 
 class _ProxyOwnership:
-    def __init__(self, model_id: str, lease: NativeLease) -> None:
+    def __init__(self, model_id: str, lease: NativeLease, *, reset_on_disconnect: bool = True) -> None:
         self.model_id, self.lease = model_id, lease
+        self.reset_on_disconnect = reset_on_disconnect
         self.requested = False
         self.completed = False
         self.finished = False
@@ -45,7 +46,7 @@ class _ProxyOwnership:
         # All cleanup calls are drained by their caller; there is one stream
         # owner and its background fallback, never two concurrent resets.
         self.finished = True
-        if self.model_id == 'yue2' and self.requested and not self.completed:
+        if self.model_id == 'yue2' and self.reset_on_disconnect and self.requested and not self.completed:
             try:
                 await manager.restart_model('yue2')
             except BaseException:
@@ -98,7 +99,7 @@ def _accelerator_mutation(model_id: str, path: str, method: str) -> bool:
     endpoint = path.strip('/')
     if model_id == 'ace_step':
         return endpoint in {'release_task', 'v1/init', 'v1/training/start', 'v1/dataset/auto_label_async',
-            'v1/dataset/preprocess_async', 'v1/lora/load', 'v1/lora/toggle', 'v1/lora/scale'}
+            'v1/dataset/preprocess_async', 'v1/lora/load', 'v1/lora/unload', 'v1/lora/toggle', 'v1/lora/scale'}
     return model_id == 'yue2' and endpoint in {'v1/tasks/run', 'v1/models/load', 'v1/models/unload'}
 
 
@@ -109,11 +110,17 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
             return JSONResponse({"error": f"model '{model_id}' is not active"}, status_code=503)
         owner: _ProxyOwnership | None = None
         try:
-            if _accelerator_mutation(model_id, path, request.method):
-                if model_id == 'yue2':
+            accelerator = _accelerator_mutation(model_id, path, request.method)
+            mutation = request.method.upper() not in {'GET', 'HEAD', 'OPTIONS'} and not (
+                model_id == 'ace_step' and request.method.upper() == 'POST' and path.strip('/') == 'query_result')
+            if mutation:
+                from ..music_queue_ownership import require_access
+                require_access()
+                if model_id == 'yue2' and accelerator:
                     await native_yue.recover_quarantined()
-                lease = await reserve_native(video_jobs.work_busy, model_id=model_id, exclusive=model_id == 'yue2')
-                owner = _ProxyOwnership(model_id, lease)
+                lease = await reserve_native(video_jobs.work_busy, model_id=model_id,
+                    exclusive=model_id == 'yue2') if accelerator else await reserve_native_control()
+                owner = _ProxyOwnership(model_id, lease, reset_on_disconnect=accelerator)
                 # Stop may have drained the engine while this request waited
                 # for admission. Never forward its earlier RUNNING snapshot.
                 if rs.status != ModelStatus.RUNNING:

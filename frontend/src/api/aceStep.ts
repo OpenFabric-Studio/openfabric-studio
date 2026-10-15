@@ -1,4 +1,4 @@
-import { apiFetch, apiJson } from './http'
+import { apiFetch, apiJson, ApiError } from './http'
 import * as v from './nativeValidation'
 import { parseAceGenerationSettings, parseAceJobResponse, parseAceJobsResponse, parseAceJobQueryResponse, parseAceJobReleaseResponse } from './contracts'
 import type { AceGenerationSettings, AceJobResponse, AceJobReleaseResponse, AceAdoptRequest } from './contracts'
@@ -173,19 +173,20 @@ export async function deleteJob(taskId: string): Promise<void> {
 }
 
 export async function loraLoad(loraPath: string, adapterName?: string): Promise<void> {
-  await apiJson(`${BASE}/v1/lora/load`, { lora_path: loraPath, adapter_name: adapterName })
+  v.string(v.record(v.nativePayload(await apiJson(`${BASE}/v1/lora/load`, { lora_path: loraPath, adapter_name: adapterName }))).message)
 }
 
 export async function loraUnload(): Promise<void> {
-  await apiJson(`${BASE}/v1/lora/unload`, {})
+  v.string(v.record(v.nativePayload(await apiJson(`${BASE}/v1/lora/unload`, {}))).message)
 }
 
 export async function loraToggle(useLora: boolean): Promise<void> {
-  await apiJson(`${BASE}/v1/lora/toggle`, { use_lora: useLora })
+  v.string(v.record(v.nativePayload(await apiJson(`${BASE}/v1/lora/toggle`, { use_lora: useLora }))).message)
 }
 
 export async function loraScale(scale: number): Promise<void> {
-  await apiJson(`${BASE}/v1/lora/scale`, { scale })
+  if (!Number.isFinite(scale) || scale < 0 || scale > 1) throw new ApiError('native_lora_scale_invalid', 400)
+  v.string(v.record(v.nativePayload(await apiJson(`${BASE}/v1/lora/scale`, { scale }))).message)
 }
 
 export function audioUrl(path: string): string {

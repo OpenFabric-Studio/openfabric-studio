@@ -93,6 +93,9 @@ class SourcePin:
 
 
 SOURCE_PINS: dict[ModuleId, SourcePin] = {
+    # Music pins reviewed 14 Oct 2026; install dependencies only, never weights.
+    'heartmula': SourcePin('https://github.com/Acelogic/heartlib-mlx.git', '02dd2e22f6a1bf1a2f769a13f8af952a7a4e9cee', '3.11'),
+    'stable_audio3': SourcePin('https://github.com/Stability-AI/stable-audio-3.git', '77e0398c26f7d22d801ec1bb036307e8b231f741', '3.11'),
     'speech': SourcePin('https://github.com/RVC-Boss/GPT-SoVITS.git', '48b1a0169a28582a8984402f82cf438d3bfa6aca', '3.11'),
     'singing': SourcePin('https://github.com/Plachtaa/seed-vc.git', '51383efd921027683c89e5348211d93ff12ac2a8', '3.12'),
     'video': SourcePin('https://github.com/dgrauet/ltx-2-mlx.git', '1724ca673d59f023a8a95efee06e5d36d61c2765', '3.12'),
@@ -542,7 +545,7 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
         if target.is_dir():
             _record_owned(context, identifier, target, version)
         return result
-    if identifier not in ('ace_step', 'singing', 'speech', 'separation', 'video', 'kokoro', 'chatterbox', 'wan22', 'rvc'):
+    if identifier not in ('ace_step', 'singing', 'speech', 'separation', 'video', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'heartmula', 'stable_audio3'):
         return InstallOutcome('manual', 'Complete this tool installation using the reviewed instructions.')
     if env.uv is None or identifier != 'separation' and shutil.which('git') is None:
         return InstallOutcome('manual', 'Managed setup requires uv and Git. Install these tools before resuming; source and weights have not been changed.')
@@ -579,6 +582,13 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
             await context.run([uv, 'venv', '--python', SOURCE_PINS[identifier].python, str(target / '.venv')], env=child_env)
         # Editable or CPU package install only. Never pass a weight repo or from_pretrained.
         await context.run(install_command(uv, identifier, python, target), env=child_env)
+    elif identifier in ('heartmula', 'stable_audio3'):
+        python = venv_python(target, env.platform)
+        if not python.is_file():
+            await context.run([uv, 'venv', '--python', SOURCE_PINS[identifier].python, str(target / '.venv')], env=child_env)
+        # Upstream bootstrap wrappers can auto-download weights or publish a UI.
+        arguments = ['-e', str(target)] if identifier == 'heartmula' else ['-r', str(target / 'optimized/mlx/requirements.txt')]
+        await context.run([uv, 'pip', 'install', '--python', str(python), *arguments], env=child_env)
     else:
         python = venv_python(target, env.platform)
         if not python.is_file():
@@ -593,6 +603,8 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
         detail += ' Complete upstream pretrained weights and start the loopback speech API manually.'
     elif identifier == 'singing':
         detail += ' CPU training is unsupported; weights remain a separate reviewed step.'
+    elif identifier in ('heartmula', 'stable_audio3'):
+        detail += ' No weights were downloaded, even when model downloads were selected. Complete the explicit local model layout in docs/local-music.md, then generate in Music.'
     elif identifier == 'kokoro':
         detail = 'Pinned Kokoro checkout checked. No voices were downloaded. Install espeak-ng yourself. Narration is POST /api/local-engines/kokoro after config.json, kokoro-v1_0.pth, and a preset voice file are in place. Kokoro does not clone a person and does not replace GPT-SoVITS. The runner uses PyTorch with PYTORCH_ENABLE_MPS_FALLBACK=1.'
     elif identifier == 'chatterbox':

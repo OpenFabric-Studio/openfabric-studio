@@ -6,12 +6,31 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const http = require('node:http');
+const { execFileSync } = require('node:child_process');
 const manifest = require('../manifest.json');
 const { layout } = require('../src/paths');
-const { BackendServer, verifyReadiness } = require('../src/server');
+const { BackendServer, backendEnv, verifyReadiness } = require('../src/server');
 
 const nonce = 'a'.repeat(64);
 const ready = { service: 'openfabric-studio', nonce, pid: 123 };
+
+test('backend imports leave signed application resources unchanged', async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'openfabric-signed-import-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  await fs.writeFile(path.join(root, 'packaged_module.py'), 'VALUE = 42\n');
+  const previous = process.env.PYTHONDONTWRITEBYTECODE;
+  let env;
+  try {
+    process.env.PYTHONDONTWRITEBYTECODE = '0';
+    env = backendEnv({ L: layout(root, 'darwin-arm64', manifest), manifest, platform: 'darwin-arm64' });
+  } finally {
+    if (previous === undefined) delete process.env.PYTHONDONTWRITEBYTECODE;
+    else process.env.PYTHONDONTWRITEBYTECODE = previous;
+  }
+  execFileSync(process.env.PYTHON_BIN || (process.platform === 'win32' ? 'python' : 'python3'),
+    ['-c', 'import packaged_module; assert packaged_module.VALUE == 42'], { cwd: root, env, timeout: 10000 });
+  await assert.rejects(fs.stat(path.join(root, '__pycache__')), { code: 'ENOENT' });
+});
 
 test('readiness requires bounded JSON for this exact service, nonce and PID', async () => {
   assert.equal(await verifyReadiness(new Response(JSON.stringify(ready)), nonce, 123), true);

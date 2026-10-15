@@ -37,7 +37,7 @@ class LibrarySettingsApiTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(
                 [folder.key for folder in status.folders],
                 ["tracks", "voices", "videos", "videoProjects", "videoCharacters", "videoCharacterTraining", "videoCharacterTrainer", "providers", "audiobooks", "speechProfiles",
-                 "speechTrials", "models", "logs", "database"],
+                 "speechTrials", "localMusic", "musicAdapters", "musicTraining", "models", "logs", "database"],
             )
             self.assertFalse((root / "absent-engine").exists())
 

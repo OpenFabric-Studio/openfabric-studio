@@ -12,15 +12,14 @@ import shutil
 import sqlite3
 import time
 from pathlib import Path
-from typing import Annotated, Optional
+from typing import Annotated, Optional, get_args
 
 from fastapi import APIRouter, Body, File, Form, Depends, HTTPException, Request, Path as ApiPath, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import TypeAdapter, ValidationError
 
 from .. import db
-from ..config import MODELS
-from ..contracts import JsonObject, SavedTrack, SetTrackFavoriteRequest, TracksResponse
+from ..contracts import JsonObject, SavedTrack, SetTrackFavoriteRequest, TrackOrigin, TracksResponse
 from ..track_view import track_response as _row_to_dict
 
 from ..client_contracts import MixSettingsResponse
@@ -31,7 +30,7 @@ from .tagged_download_response import download_options, tagged_download_response
 router = APIRouter(prefix="/api/tracks", tags=["tracks"])
 
 ALLOWED_AUDIO_EXT = {"wav", "mp3", "flac"}
-ALLOWED_TRACK_MODELS = set(MODELS.keys()) | {"editor", "upload", "openrouter"}
+ALLOWED_TRACK_MODELS = {origin for origin in get_args(TrackOrigin) if isinstance(origin, str)}
 
 
 @router.get("/activity", response_model=TrackActivityResponse)
@@ -247,6 +246,7 @@ async def put_mix_settings(track_id: int, settings: JsonObject = Body(...)):
 
 @router.delete("/{track_id}")
 async def delete_track(track_id: int):
+    from .. import midi, stems
     from ..yue_jobs import ensure_track_removable
     from ..reference_imports import ReferenceImportError, protect_track_removal as protect_track_references
     from ..voice_build import protect_track_removal
@@ -255,6 +255,8 @@ async def delete_track(track_id: int):
     try:
         async with protect_track_references(track_id), protect_track_versions_removal(track_id), protect_track_removal(track_id), protect_track_exports_removal(track_id):
             ensure_track_removable(track_id)
+            if stems.is_active(track_id) or midi.any_active(track_id):
+                raise HTTPException(status_code=409, detail='job_busy')
             delete_track_exports(track_id)
             if not db.delete_track(track_id):
                 return JSONResponse({"error": "not found"}, status_code=404)

@@ -11,7 +11,7 @@ from .job_lifecycle import await_cleanup
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .support_contracts import EngineRuntime, EngineRuntimeResponse, IdleState, OwnedEngineId, SupportErrorCode
-from . import resource_admission
+from . import music_queue_ownership, resource_admission
 
 logger = logging.getLogger(__name__)
 ENGINE_IDS: tuple[OwnedEngineId, ...] = ('ace_step', 'yue2')
@@ -80,12 +80,21 @@ async def engine_status() -> EngineRuntimeResponse:
         state = manager.state.models[model_id].status
         instance = manager.owned_instance(model_id)
         engines.append(EngineRuntime(id=model_id, state=state.value, owned=instance is not None,
-            instance_id=instance, idle_state=idle_state, can_stop=instance is not None and idle_state == 'idle'))
+            instance_id=instance, idle_state=idle_state,
+            can_stop=instance is not None and (idle_state == 'idle' or music_queue_ownership.busy())))
     return EngineRuntimeResponse(engines=engines)
 
 
 async def _stop_engine(model_id: OwnedEngineId, instance_id: str) -> None:
+    try:
+        queue_stopped = await music_queue_ownership.stop_for_manual_control()
+    except resource_admission.ResourceBusyError as exc:
+        raise EngineControlError('engine_busy') from exc
     async with resource_admission.admission_lock:
+        if music_queue_ownership.blocked():
+            raise EngineControlError('engine_busy')
+        if queue_stopped and model_id not in manager._instances and manager.state.models[model_id].status == ModelStatus.STOPPED:
+            return
         if resource_admission.native_work_inflight():
             raise EngineControlError('engine_busy')
         idle = await _idle_state()

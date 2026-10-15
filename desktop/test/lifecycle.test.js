@@ -31,4 +31,9 @@ test('fixed optional setup wrappers preserve operator flags and the video CLI co
   assert.deepEqual(kokoro.args.slice(1), ['--feature', 'kokoro', '--install']);
   const wan = setupCommand('/repo', 'wan22', ['--download-models'], { PYTHON_BIN: '/python' });
   assert.deepEqual(wan.args.slice(1), ['--feature', 'wan22', '--install', '--download-models']);
+  for (const feature of ['heartmula', 'stable_audio3']) {
+    const music = setupCommand('/repo', feature, ['--root', '/selected'], { PYTHON_BIN: '/python' });
+    assert.match(music.args[0], /setup_modules\.py$/);
+    assert.deepEqual(music.args.slice(1), ['--feature', feature, '--install', '--root', '/selected']);
+  }
 });

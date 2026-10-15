@@ -246,10 +246,10 @@ def _inventory_production_sources(voice_id: str, items: list[VoiceDeletionItem])
 
 
 def _save_plan(plan: VoiceDeletionPlan) -> None:
-    connection = db.get_db()
-    connection.execute('INSERT INTO voice_deletion_plans(id,voice_id,status,plan_json) VALUES(?,?,?,?) ON CONFLICT(voice_id) DO UPDATE SET status=excluded.status,plan_json=excluded.plan_json',
-        (plan.id, plan.voice_id, plan.status, plan.model_dump_json()))
-    connection.commit()
+    from .artist_production import transaction
+    with transaction() as connection:
+        connection.execute('INSERT INTO voice_deletion_plans(id,voice_id,status,plan_json) VALUES(?,?,?,?) ON CONFLICT(voice_id) DO UPDATE SET status=excluded.status,plan_json=excluded.plan_json',
+            (plan.id, plan.voice_id, plan.status, plan.model_dump_json()))
 
 
 def get_plan(plan_id: str) -> VoiceDeletionPlan:
@@ -350,10 +350,10 @@ def _record(plan: VoiceDeletionPlan, items: list[VoiceDeletionItem], *, reserve_
             created_at=_now(), sequence=previous.sequence + 1 if previous else 1, items=items, voice_assets_deleted=plan.status == 'deleted',
             previous_receipt_sha256=previous.receipt_sha256 if previous else None, receipt_sha256='0' * 64)
         receipt.receipt_sha256 = _digest(_JSON.validate_python(receipt.model_dump(mode='json', exclude={'receipt_sha256'})))
-        connection = db.get_db()
-        connection.execute('INSERT INTO voice_deletion_receipts(plan_id,sequence,receipt_json) VALUES(?,?,?)', (plan.id, receipt.sequence, receipt.model_dump_json()))
-        connection.execute('UPDATE voice_deletion_plans SET status=?,plan_json=? WHERE id=?', (plan.status, plan.model_dump_json(), plan.id))
-        connection.commit()
+        from .artist_production import transaction
+        with transaction() as connection:
+            connection.execute('INSERT INTO voice_deletion_receipts(plan_id,sequence,receipt_json) VALUES(?,?,?)', (plan.id, receipt.sequence, receipt.model_dump_json()))
+            connection.execute('UPDATE voice_deletion_plans SET status=?,plan_json=? WHERE id=?', (plan.status, plan.model_dump_json(), plan.id))
         return receipt
 
 

@@ -103,7 +103,7 @@ jobs:
           Experimental OpenFabric Studio installers for Windows (NVIDIA GPU) and macOS (Apple Silicon).
 
           - Windows shows a SmartScreen warning ("More info" → "Run anyway"). The macOS app is ad-hoc signed only (no Developer ID), so allow it once via System Settings → Privacy & Security → "Open Anyway".
-          - First launch downloads the baseline music engines and models into a folder you choose. Voice and generated-video engines require their separately documented setup.
+          - First launch installs the shared backend into a folder you choose. Music, voice and video engines are installed separately in Settings; model weights require their documented setup.
           - SHA-256 sums of every file are in `SHA256SUMS.txt`.
           - Application license: AGPL-3.0-only. Derived from Remiqora under MIT; inherited copyright and permission notices are preserved in LICENSE-MIT and NOTICE, also included in the installers.
           - Corresponding Source, including build and installation scripts, is available through this release's Source code (.zip / .tar.gz) downloads for the exact release tag.

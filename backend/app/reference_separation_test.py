@@ -48,7 +48,7 @@ class ReferenceSeparationSpawnTests(unittest.IsolatedAsyncioTestCase):
             process = AsyncMock(spec=asyncio.subprocess.Process)
             process.wait.return_value = 0
             return process
-        with patch.object(separation, 'spawn_process', AsyncMock(side_effect=AssertionError('Unowned spawn forbidden'))):
+        with patch.object(separation, 'spawn_owned', AsyncMock(side_effect=AssertionError('Default spawn forbidden'))):
             result = await separation.separate_vocal(self.source, self.root / 'out', quality='roformer', log_name='owned', spawn=owner)
         self.assertEqual(result.read_bytes(), b'vocal')
         self.assertEqual(self.source.read_bytes(), b'original')

@@ -8,9 +8,10 @@ import { useOrchestratorStore } from '../../stores/orchestrator'
 import * as api from '../../api/aceStepTraining'
 import * as ace from '../../api/aceStep'
 import { i18n } from '../../i18n'
+import { ApiError } from '../../api/http'
 
 vi.mock('../../api/aceStepTraining', async original => ({ ...await original<typeof import('../../api/aceStepTraining')>(), trainingStatus: vi.fn(), autoLabelStatus: vi.fn(), preprocessStatus: vi.fn(), startAutoLabel: vi.fn(), startLoraTraining: vi.fn() }))
-vi.mock('../../api/aceStep', async original => ({ ...await original<typeof import('../../api/aceStep')>(), health: vi.fn() }))
+vi.mock('../../api/aceStep', async original => ({ ...await original<typeof import('../../api/aceStep')>(), health: vi.fn(), initModel: vi.fn() }))
 let app: App | undefined, pinia: Pinia
 const training: api.TrainingStatus = { is_training: true, should_stop: false, current_step: 1, current_loss: 0.2, status: 'Running', config: { epochs: 3 }, tensor_dir: 'tensors', loss_history: [], tensorboard_url: null, tensorboard_logdir: null, training_log: '', start_time: 1, current_epoch: 1, steps_per_second: 1, estimated_time_remaining: 30, error: null }
 function deferred<T>() {
@@ -28,6 +29,23 @@ beforeEach(() => {
   vi.mocked(api.trainingStatus).mockResolvedValue({ ...training, is_training: false })
 })
 afterEach(() => { unmount(); useLoraTrainingStore(pinia).stopBackgroundTasks(); vi.clearAllTimers(); vi.useRealTimers(); localStorage.clear() })
+
+it('translates a native operation failure in the training store', async () => {
+  vi.mocked(api.startAutoLabel).mockRejectedValueOnce(new ApiError('native_operation_failed', 500))
+  await useLoraTrainingStore(pinia).startAutoLabel({})
+  expect(useLoraTrainingStore(pinia).autoLabelError).toBe('The native model could not complete this operation. Check the engine and try again.')
+})
+
+it('translates a native initialization failure instead of displaying its internal code', async () => {
+  vi.mocked(ace.health).mockResolvedValue({ status: 'ok', service: 'ACE', version: '1', models_initialized: false, llm_initialized: false, loaded_model: null, loaded_lm_model: null })
+  vi.mocked(ace.initModel).mockRejectedValueOnce(new ApiError('native_operation_failed', 500))
+  await mount()
+  const initialize = [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === i18n.global.t('lora.initModel'))
+  if (!initialize) throw new Error('Missing initialization action')
+  initialize.click(); await settle()
+  expect(document.body.textContent).toContain('The native model could not complete this operation')
+  expect(document.body.textContent).not.toContain('native_operation_failed')
+})
 
 it('resumes observation of active training on re-entry without submitting new work', async () => {
   vi.mocked(api.trainingStatus).mockResolvedValue(training)

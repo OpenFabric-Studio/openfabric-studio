@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -39,3 +40,12 @@ class UnsupportedListenerTests(unittest.IsolatedAsyncioTestCase):
         with patch('app.orchestrator.listener.sys.platform', 'unknown'):
             with self.assertRaises(OSError):
                 await listener_pids(9000)
+
+    async def test_listener_query_rejects_output_overflow(self) -> None:
+        from app.orchestrator.listener import _query_pids
+        with self.assertRaises(OSError):
+            await _query_pids([sys.executable, '-c', "import sys;sys.stdout.write('123\\n'*20000)"], '', False)
+
+    async def test_successful_listener_query_preserves_pid_decoding(self) -> None:
+        from app.orchestrator.listener import _query_pids
+        self.assertEqual(await _query_pids([sys.executable, '-c', "print('123');print('456')"], '', False), frozenset({123, 456}))

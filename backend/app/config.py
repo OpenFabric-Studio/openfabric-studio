@@ -107,6 +107,10 @@ CHATTERBOX_DIR = _env_path("OPENFABRIC_CHATTERBOX_DIR", engine_default('chatterb
 WAN22_DIR = _env_path("OPENFABRIC_WAN22_DIR", engine_default('mlx-video', str(_REPO_ROOT / "external" / "mlx-video")))
 RVC_DIR = _env_path("OPENFABRIC_RVC_DIR", engine_default('rvc', str(_REPO_ROOT / "external" / "rvc")))
 
+# Optional music engines run in their own checkout environments and local caches.
+HEARTMULA_DIR = _env_path_prefer("OPENFABRIC_HEARTMULA_DIR", "HEARTMULA_DIR", default=engine_default('heartlib-mlx', str(_REPO_ROOT / 'external/heartlib-mlx')))
+STABLE_AUDIO3_DIR = _env_path_prefer("OPENFABRIC_STABLE_AUDIO3_DIR", "STABLE_AUDIO3_DIR", default=engine_default('stable-audio-3', str(_REPO_ROOT / 'external/stable-audio-3')))
+
 # MuScriptor (audio -> MIDI) is loaded into YuE2's own audiocpp_server rather
 # than being launched separately, so it gets no MODELS entry - only the spec
 # that server needs to resolve the weights.
@@ -177,14 +181,17 @@ YUE2_DEVICE = os.getenv("YUE2_DEVICE", "").strip()
 # binary identities. A foreign binary without that proof is never substituted.
 _YUE2_CUSTOM_BINARY = os.getenv('YUE2_SERVER_BIN', '').strip()
 YUE2_PROGRESS_AVAILABLE = False
+# The default installer pins v0.8.1; the older custom build uses incompatible LoRA keys.
+YUE2_LORA_AVAILABLE = True
 _YUE2_CUSTOM_BACKEND: str | None = None
 if _YUE2_CUSTOM_BINARY:
-    from scripts.setup_yue_native import read_build_manifest
+    from scripts.setup_yue_native import RELEASE_COMMIT, read_build_manifest
     _custom_path = Path(_YUE2_CUSTOM_BINARY).expanduser().resolve()
     _build_manifest = read_build_manifest(_custom_path)
     _YUE2_CUSTOM_BINARY = str(_custom_path)
     _YUE2_CUSTOM_BACKEND = _build_manifest.backend
     YUE2_PROGRESS_AVAILABLE = _build_manifest.progress_schema == 1
+    YUE2_LORA_AVAILABLE = _build_manifest.source_commit == RELEASE_COMMIT
 ALLOW_CONCURRENT_MODELS = bool(ACE_STEP_DEVICE and YUE2_DEVICE and ACE_STEP_DEVICE != YUE2_DEVICE)
 CUDA_LIB_DIR = _env_path("CUDA_LIB_DIR", str(CUDA_BIN_DIR.parent / "lib"))
 

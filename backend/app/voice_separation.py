@@ -10,7 +10,8 @@ from typing import Callable
 
 from .config import DEMUCS_DIR, LOG_DIR
 from .managed_layout import engine_default
-from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process
+from .job_lifecycle import await_cleanup, kill_process_tree
+from .video_process import spawn_owned
 from .stems import SpawnProcess, gpu_lock, separate_file
 from .gpu_lease import gpu_lease
 from .voice_contracts import SeparationQuality, VoiceSeparationOption, VoiceSeparationOptionsResponse
@@ -83,12 +84,15 @@ async def separate_vocal(
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             with (LOG_DIR / f"{log_name}.log").open("w", encoding="utf-8") as log:
                 if spawn is None:
-                    proc = await spawn_process(*command, cwd=str(ROFORMER_DIR), stdout=log, stderr=asyncio.subprocess.STDOUT)
+                    proc = await spawn_owned(command, receipt_path=out_dir / 'worker.json', cwd=ROFORMER_DIR,
+                                             env=os.environ.copy(), stdout=log.fileno())
                 else:
                     proc = await spawn(command, ROFORMER_DIR, os.environ.copy(), log.fileno())
                 if on_proc:
                     on_proc(proc)
                 code = await proc.wait()
+                if spawn is None:
+                    await await_cleanup(kill_process_tree(proc))
             if code != 0:
                 raise VoiceSeparationError("separation_failed")
             try:

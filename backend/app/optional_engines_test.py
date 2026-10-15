@@ -12,7 +12,7 @@ import wave
 import io
 from contextlib import redirect_stdout
 from types import ModuleType
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -56,6 +56,24 @@ class OptionalEngineTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         from app import optional_engines
         await optional_engines.shutdown()
+
+    async def test_bounded_video_validation_uses_safe_engine_errors(self) -> None:
+        from app import optional_engines
+        from app.video_media import MediaInfo
+        from app.video_process import WorkerOutputError
+
+        output = self.root / 'fixture.mp4'
+        for failure in (WorkerOutputError('private output'), TimeoutError('private timeout')):
+            with self.subTest(failure=type(failure).__name__), patch.object(optional_engines, 'probe_media', AsyncMock(return_value=MediaInfo(96, 64, 24, 2, 2))), \
+                 patch('app.video_process.run_owned_command', AsyncMock(side_effect=failure)):
+                with self.assertRaises(OptionalEngineError) as error:
+                    await optional_engines._validate_output(output)
+                self.assertEqual(error.exception.code, 'engine_failed')
+                self.assertNotIn('private', error.exception.detail)
+        with patch.object(optional_engines, 'probe_media', AsyncMock(return_value=MediaInfo(96, 64, 24, 2, 2))), \
+             patch('app.video_process.run_owned_command', AsyncMock(side_effect=OSError('fixture drain failed'))):
+            with self.assertRaises(OSError):
+                await optional_engines._validate_output(output)
 
     async def test_install_commands_do_not_fetch_weights_or_forbidden_variants(self) -> None:
         for identifier in ('kokoro', 'chatterbox', 'wan22', 'rvc'):

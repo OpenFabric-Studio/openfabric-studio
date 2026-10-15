@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sqlite3
 import tempfile
 import unittest
@@ -47,6 +48,36 @@ class GenerationLibraryTests(unittest.IsolatedAsyncioTestCase):
         client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
         self.clients.append(client)
         return client
+
+    def test_pre_adapter_legacy_import_fingerprint_remains_idempotent(self) -> None:
+        from app import generation_library as library
+        from app.generation_contracts import ImportGenerationPreset, ImportGenerationPresetsRequest, YueGenerationSettings
+        from app.music_lora_contracts import MusicAdapterSelection
+        connection = db.get_db()
+        settings = YueGenerationSettings(engine='yue2', lyrics='Lyrics', style='jazz', seed=831001)
+        legacy = ImportGenerationPreset(legacy_key='yue2_presets:Jazz:1d857a16682b3733', name='Jazz', settings=settings)
+        request = ImportGenerationPresetsRequest(presets=[legacy])
+        initial = library.import_presets(connection, request)
+        old_settings = settings.model_dump(mode='json', exclude={'arAdapter', 'narAdapter'})
+        old_fingerprint = hashlib.sha256(json.dumps({'name': legacy.name, 'settings': old_settings},
+            sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        connection.execute('UPDATE generation_preset_imports SET fingerprint=? WHERE legacy_key=?',
+            (old_fingerprint, legacy.legacy_key))
+        connection.commit()
+        try:
+            again = library.import_presets(connection, request)
+        except library.GenerationLibraryError as error:
+            self.fail(f'An unchanged old import was rejected after adding default adapter fields: {error.code}')
+        self.assertEqual(again.imported, 0)
+        self.assertEqual(again.data[0].id, initial.data[0].id)
+        self.assertEqual(library.list_presets(connection).total, 1)
+        settings.arAdapter = MusicAdapterSelection(id='a' * 32, strength=0.5)
+        with self.assertRaises(library.GenerationLibraryError) as caught:
+            library.import_presets(connection, request)
+        self.assertEqual(caught.exception.code, 'generation_legacy_key_conflict')
+        saved = library.get_preset(connection, initial.data[0].id).settings
+        assert isinstance(saved, YueGenerationSettings)
+        self.assertIsNone(saved.arAdapter)
 
     async def test_presets_are_paginated_without_losing_management_access(self) -> None:
         from app import generation_library as library

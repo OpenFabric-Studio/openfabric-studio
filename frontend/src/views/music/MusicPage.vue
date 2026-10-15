@@ -11,6 +11,7 @@ import type { ModelId } from '../../types'
 const { t } = useI18n(), route = useRoute()
 const orchestrator = useOrchestratorStore(), { selectModel } = useModelSwitch()
 const models: ModelId[] = ['ace_step', 'yue2']
+const localModels = [{ id: 'heartmula', path: 'heartmula' }, { id: 'stable_audio3', path: 'stable-audio3' }] as const
 const selected = computed(() => models.find(id => route.name === MODEL_ROUTES[id]))
 const selecting = ref<ModelId | null>(null), navigationFailed = ref(false)
 const busy = computed(() => selecting.value !== null || orchestrator.switching || orchestrator.isBusy)
@@ -34,16 +35,22 @@ async function select(id: ModelId) {
   <div class="min-w-0 space-y-5">
     <header class="space-y-3 border-b border-border pb-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
-        <div><h1 class="text-2xl font-semibold text-text">{{ t('musicWorkspace.title') }}</h1><p class="mt-2 text-sm text-text-dim">{{ t('musicWorkspace.intro') }}</p></div>
-        <div role="group" :aria-label="t('musicWorkspace.model')" aria-describedby="music-switch-hint" class="flex min-w-0 flex-wrap gap-2">
+        <div><h1 class="text-2xl font-semibold text-text">{{ t('musicWorkspace.title') }}</h1><p class="mt-2 text-sm text-text-dim">{{ t('musicQueue.intro') }}</p></div>
+        <RouterLink v-if="route.name !== 'music'" to="/music" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicQueue.backToQueue') }}</RouterLink>
+      </div>
+      <details class="rounded-xl border border-border bg-panel p-3">
+        <summary class="cursor-pointer rounded-lg py-2 text-sm text-text-dim focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicQueue.advancedGenerators') }}</summary>
+        <div role="group" :aria-label="t('musicWorkspace.model')" aria-describedby="music-switch-hint" class="mt-3 flex min-w-0 flex-wrap gap-2">
           <button v-for="id in models" :key="id" type="button" :data-model="id" :aria-label="MODEL_LABELS[id]" :aria-pressed="selected === id" :disabled="busy" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent2 disabled:cursor-wait disabled:opacity-60" :class="selected === id ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim hover:bg-panel-2 hover:text-text'" @click="select(id)">
             <AppIcon :name="id" />
             <span><span class="block text-sm font-medium">{{ MODEL_LABELS[id] }}</span><span class="mt-1 flex items-center gap-1.5 text-xs text-text-dim"><span aria-hidden="true" class="h-1.5 w-1.5 rounded-full" :class="ENGINE_STATUS_CLASSES[statusOf(id)]" />{{ t(ENGINE_STATUS_KEYS[statusOf(id)]) }}</span></span>
           </button>
+          <RouterLink v-for="model in localModels" :key="model.id" :to="`/music/${model.path}`" :data-model="model.id" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent2" :class="route.name === model.id ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim hover:bg-panel-2 hover:text-text'"><AppIcon name="yue2" /><span>{{ t(`localMusic.engines.${model.id}`) }}<span class="mt-1 block text-xs text-text-dim">{{ t('localMusic.experimental') }}</span></span></RouterLink>
           <RouterLink to="/music/openrouter" data-model="openrouter" :aria-pressed="route.name === 'openrouter-music'" class="flex min-h-11 items-center gap-3 rounded-xl border px-4 py-3 text-sm font-medium focus-visible:outline-2 focus-visible:outline-accent2" :class="route.name === 'openrouter-music' ? 'border-accent2 bg-accent1/15 text-text' : 'border-border bg-panel text-text-dim'"><AppIcon name="yue2" /><span>{{ t('cloudMusic.title') }}<span class="mt-1 block text-xs text-text-dim">OpenRouter · {{ t('cloudMusic.experimental') }}</span></span></RouterLink>
+          <RouterLink to="/music/lora" class="flex min-h-11 items-center rounded-xl border border-border px-4 py-3 text-sm text-text-dim focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicLora.manage') }}</RouterLink>
         </div>
-      </div>
-      <p id="music-switch-hint" class="text-xs leading-relaxed text-text-dim">{{ t('musicWorkspace.switchHint') }}</p>
+        <p id="music-switch-hint" class="mt-3 text-xs leading-relaxed text-text-dim">{{ t('musicWorkspace.switchHint') }}</p>
+      </details>
       <p v-if="busy" role="status" class="text-sm text-text-dim">{{ t('musicWorkspace.switching') }}</p>
       <p v-if="navigationFailed || orchestrator.switchError" role="alert" class="text-sm text-status-failed">{{ t('appNavigation.switchFailed') }}</p>
     </header>

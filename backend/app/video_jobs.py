@@ -26,9 +26,7 @@ from pathlib import Path
 from . import db
 from .job_lifecycle import (
     cancel_and_wait,
-    communicate_process,
     kill_process_tree,
-    spawn_process,
 )
 from .config import DATA_DIR, FFMPEG_BIN_DIR, LOG_DIR, LTX_DIR
 from .stems import gpu_lock
@@ -38,10 +36,12 @@ from .video_process import (
     WorkerIdentity,
     WorkerOutputError,
     read_owned_output,
+    run_owned_command,
     spawn_owned,
     terminate_verified,
 )
 from .video_media import VideoMediaError, validate_media
+from .video_analysis import MAX_SECONDS, DECODE_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
@@ -1138,21 +1138,23 @@ async def _ffmpeg(
 
 
 async def _probe_duration(path: Path) -> float:
-    proc = await spawn_process(
-        _tool("ffprobe"),
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        str(path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await communicate_process(proc, 30)
     try:
-        return float(out.decode().strip())
+        result = await run_owned_command([
+            _tool("ffprobe"),
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
+            str(path),
+        ], timeout=30)
+    except (WorkerOutputError, TimeoutError) as exc:
+        raise VideoJobError("processing_failed") from exc
+    if result.returncode != 0:
+        return 0.0
+    try:
+        return float(result.stdout.decode().strip())
     except ValueError:
         return 0.0
 
@@ -1313,22 +1315,24 @@ async def _excerpt(
 
 
 async def _video_size(path: Path) -> tuple[int, int]:
-    proc = await spawn_process(
-        _tool("ffprobe"),
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=width,height",
-        "-of",
-        "csv=p=0:s=x",
-        str(path),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    out, _err = await communicate_process(proc)
-    text = out.decode().strip()
+    try:
+        result = await run_owned_command([
+            _tool("ffprobe"),
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "csv=p=0:s=x",
+            str(path),
+        ], timeout=30)
+    except (WorkerOutputError, TimeoutError) as exc:
+        raise VideoJobError("processing_failed") from exc
+    if result.returncode != 0:
+        return WIDTH, HEIGHT
+    text = result.stdout.decode().strip()
     if "x" not in text:
         return WIDTH, HEIGHT
     width, height = text.split("x", 1)
@@ -1347,24 +1351,25 @@ def _concat_list(paths: list[Path]) -> str:
 
 
 async def _energy_levels(path: Path) -> list[float]:
-    proc = await spawn_process(
-        _tool("ffmpeg"),
-        "-v",
-        "error",
-        "-i",
-        str(path),
-        "-ac",
-        "1",
-        "-ar",
-        "8000",
-        "-f",
-        "s16le",
-        "-",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.DEVNULL,
-    )
-    raw, _err = await communicate_process(proc)
-    if not raw:
+    try:
+        result = await run_owned_command([
+            _tool("ffmpeg"),
+            "-v",
+            "error",
+            "-i",
+            str(path),
+            "-ac",
+            "1",
+            "-ar",
+            "8000",
+            "-f",
+            "s16le",
+            "-",
+        ], timeout=DECODE_TIMEOUT, max_bytes=8000 * 2 * MAX_SECONDS)
+    except (WorkerOutputError, TimeoutError) as exc:
+        raise VideoJobError("processing_failed") from exc
+    raw = result.stdout
+    if result.returncode != 0 or not raw:
         return []
     hop = 8000
     levels: list[float] = []

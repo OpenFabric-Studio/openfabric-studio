@@ -431,6 +431,23 @@ it.each(['Mute clip', 'Solo clip'])('reschedules playback once when %s changes t
   expect(engine.play).toHaveBeenCalledTimes(2)
 })
 
+it.each(['timelineStart', 'trimStart', 'trimEnd', 'fadeInDuration', 'fadeOutDuration'] as const)('reschedules a changed %s from the current playhead during playback', async field => {
+  const { store, container } = await mountEditor()
+  vi.mocked(decodeStem).mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 80000, sampleRate: 8000 }))
+  store.project.lanes[0]?.clips.push({ id: 'timing', sourceUrl: '/audio.wav', sourceLabel: 'Audio', timelineStart: 0, trimStart: 0, trimEnd: 10 })
+  for (let index = 0; index < 12; index++) await nextTick()
+  transportButton(container).click()
+  await settlePlayback()
+  expect(engine.play).toHaveBeenCalledOnce()
+  runFrame(2.05)
+
+  store.updateClip('timing', { [field]: field === 'trimEnd' ? 9 : 1 }, true)
+  for (let index = 0; index < 12; index++) await nextTick()
+
+  expect(engine.play).toHaveBeenCalledTimes(2)
+  expect(engine.play.mock.lastCall?.[2]).toBeCloseTo(2)
+})
+
 it('adopts each completed warp while another source is still stretching', async () => {
   const second = deferred<AudioBuffer>()
   const { store, container, base, warped, stretching } = await pendingWarp()

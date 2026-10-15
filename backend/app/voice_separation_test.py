@@ -8,9 +8,24 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from app import stems
+from app.stems_test import assert_worker_stops_after_parent_crash
 
 
 class VoiceSeparationTests(unittest.TestCase):
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX hard-parent-death fixture')
+    def test_default_roformer_stops_with_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            assert_worker_stops_after_parent_crash(self, Path(temporary).resolve(),
+                "from app import voice_separation as separation\n"
+                "engine=root/'engine'; (engine/'utils').mkdir(parents=True)\n"
+                "(engine/'inference.py').write_text(worker_script)\n"
+                "(engine/'utils/settings.py').write_text('--model_type --config_path --start_check_point --input_folder --store_dir --pcm_type --filename_template')\n"
+                "config=root/'config.yaml'; config.write_text('fixture'); checkpoint=root/'weights.ckpt'; checkpoint.write_bytes(b'fixture')\n"
+                "source=root/'source.wav'; source.write_bytes(b'fixture')\n"
+                "separation.ROFORMER_DIR=engine; separation.ROFORMER_CONFIG=config; separation.ROFORMER_CHECKPOINT=checkpoint\n"
+                "separation.LOG_DIR=root/'logs'; separation.roformer_python=lambda:Path(sys.executable)\n"
+                "await separation.separate_vocal(source,root/'output',quality='roformer',log_name='crash')")
+
     def test_high_mode_selects_fine_tuned_demucs(self) -> None:
         command = stems._demucs_cmd(Path('song.wav'), Path('out'), quality='high')
         self.assertEqual(command[command.index('-n') + 1], 'htdemucs_ft')
@@ -70,13 +85,13 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
         from app import voice_separation as separation
         process = AsyncMock()
         process.wait.return_value = 0
-        def create_output(*command: str, **options: object) -> AsyncMock:
+        def create_output(command: list[str], **options: object) -> AsyncMock:
             output = Path(command[command.index('--store_dir') + 1])
             (output / 'source_vocals.wav').write_bytes(b'vocal output')
             return process
-        with patch.object(separation, 'spawn_process', new=AsyncMock(side_effect=create_output)) as spawn:
+        with patch.object(separation, 'spawn_owned', new=AsyncMock(side_effect=create_output)) as spawn, patch.object(separation, 'kill_process_tree', new=AsyncMock()):
             result = await separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='trial')
-        command = spawn.call_args.args
+        command = spawn.call_args.args[0]
         self.assertEqual(command[command.index('--pcm_type') + 1], 'FLOAT')
         self.assertEqual(command[command.index('--filename_template') + 1], '{file_name}_{instr}')
         self.assertEqual(list((self.output / 'input').iterdir()), [self.output / 'input/source.wav'])
@@ -89,12 +104,12 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
         started = asyncio.Event()
         children: list[asyncio.subprocess.Process] = []
         tracked: list[asyncio.subprocess.Process | None] = []
-        async def launch(*command: str, **options: object) -> asyncio.subprocess.Process:
+        async def launch(command: list[str], **options: object) -> asyncio.subprocess.Process:
             child = await spawn_process(sys.executable, '-c', 'import time; time.sleep(60)')
             children.append(child)
             started.set()
             return child
-        with patch.object(separation, 'spawn_process', new=AsyncMock(side_effect=launch)):
+        with patch.object(separation, 'spawn_owned', new=AsyncMock(side_effect=launch)):
             task = asyncio.create_task(separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='cancel', on_proc=tracked.append))
             await asyncio.wait_for(started.wait(), timeout=3)
             task.cancel()
@@ -108,7 +123,7 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
     async def test_unknown_cli_signature_fails_before_spawn(self) -> None:
         from app import voice_separation as separation
         (self.engine / 'utils/settings.py').write_text('--some_new_api')
-        with patch.object(separation, 'spawn_process', new=AsyncMock()) as spawn:
+        with patch.object(separation, 'spawn_owned', new=AsyncMock()) as spawn:
             with self.assertRaises(separation.VoiceSeparationError) as failure:
                 await separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='invalid')
         self.assertEqual(failure.exception.code, 'roformer_incompatible')
@@ -118,11 +133,11 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
         from app import voice_separation as separation
         process = AsyncMock()
         process.wait.return_value = 1
-        def create_partial(*command, **options):
+        def create_partial(command: list[str], **options: object) -> AsyncMock:
             destination = Path(command[command.index('--store_dir') + 1])
             (destination / 'source_vocals.wav').write_bytes(b'partial output')
             return process
-        with patch.object(separation, 'spawn_process', new=AsyncMock(side_effect=create_partial)), patch.object(separation, 'kill_process_tree', new=AsyncMock()):
+        with patch.object(separation, 'spawn_owned', new=AsyncMock(side_effect=create_partial)), patch.object(separation, 'kill_process_tree', new=AsyncMock()):
             with self.assertRaises(separation.VoiceSeparationError) as raised:
                 await separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='failure')
         self.assertEqual(raised.exception.code, 'separation_failed')
@@ -134,7 +149,7 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
         from app import voice_separation as separation
         process = AsyncMock()
         process.wait.return_value = 0
-        with patch.object(separation, 'spawn_process', new=AsyncMock(return_value=process)), patch.object(separation, 'kill_process_tree', new=AsyncMock()):
+        with patch.object(separation, 'spawn_owned', new=AsyncMock(return_value=process)), patch.object(separation, 'kill_process_tree', new=AsyncMock()):
             with self.assertRaises(separation.VoiceSeparationError) as raised:
                 await separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='missing')
         self.assertEqual(raised.exception.code, 'no_vocal')
@@ -152,7 +167,7 @@ class OptionalSeparationProcessTests(unittest.IsolatedAsyncioTestCase):
             cleaning.set()
             await finish.wait()
         process.wait.side_effect = wait
-        with patch.object(separation, 'spawn_process', new=AsyncMock(return_value=process)), patch.object(separation, 'kill_process_tree', new=AsyncMock(side_effect=drain)):
+        with patch.object(separation, 'spawn_owned', new=AsyncMock(return_value=process)), patch.object(separation, 'kill_process_tree', new=AsyncMock(side_effect=drain)):
             task = asyncio.create_task(separation.separate_vocal(self.audio, self.output, quality='roformer', log_name='repeat', on_proc=tracked.append))
             await running.wait()
             task.cancel()

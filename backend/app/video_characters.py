@@ -18,7 +18,8 @@ from pydantic import ValidationError
 from . import voice_profiles
 from .voice_profile_contracts import SpeechVoiceProfile
 from .config import DATA_DIR
-from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
+from .job_lifecycle import await_cleanup, kill_process_tree
+from .video_process import WorkerOutputError, drain_receipt, read_owned_output, spawn_owned
 from .image_normalization import normalization_argv
 from .video_contracts import VideoCharacter
 from .video_media import probe_media, tool
@@ -143,6 +144,7 @@ async def create_character(
     output = root / "still.png"
     proc: asyncio.subprocess.Process | None = None
     published = False
+    spawn_attempted = False
     try:
         root.mkdir(parents=True, exist_ok=False)
         count = 0
@@ -165,12 +167,16 @@ async def create_character(
             or info.width * info.height > 16777216
         ):
             raise VideoProjectError("reference_too_large")
-        proc = await spawn_process(
-            *normalization_argv(temporary, output),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        spawn_attempted = True
+        proc = await spawn_owned(
+            normalization_argv(temporary, output),
+            receipt_path=temporary.with_suffix('.worker.json'),
+            stdout=asyncio.subprocess.PIPE,
         )
-        await communicate_process(proc, 30)
+        try:
+            await read_owned_output(proc, max_bytes=1024 * 1024, timeout=30)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise VideoProjectError('invalid_reference') from exc
         if proc.returncode != 0 or not output.is_file():
             raise VideoProjectError("invalid_reference")
         info = await probe_media(output)
@@ -195,7 +201,7 @@ async def create_character(
         published = True
         return character
     finally:
-        await await_cleanup(_cleanup(proc, temporary, root, published, upload))
+        await await_cleanup(_cleanup(proc, temporary, root, published, upload, spawn_attempted=spawn_attempted))
 
 
 async def _cleanup(
@@ -204,11 +210,16 @@ async def _cleanup(
     root: Path,
     published: bool,
     upload: UploadFile,
+    *, spawn_attempted: bool = False,
 ) -> None:
     try:
         try:
             await kill_process_tree(proc)
             if temporary is not None:
+                receipt = temporary.with_suffix('.worker.json')
+                if proc is None and (spawn_attempted or receipt.exists() or receipt.is_symlink()):
+                    await drain_receipt(receipt)
+                receipt.unlink(missing_ok=True)
                 temporary.unlink(missing_ok=True)
             if not published:
                 import shutil

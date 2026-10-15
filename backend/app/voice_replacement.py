@@ -16,7 +16,8 @@ from starlette.types import Message
 
 from . import db, voice_build
 from .client_contracts import ApplyStatusResponse, VoiceReplacementResponse
-from .job_lifecycle import await_cleanup, communicate_process, spawn_process
+from .job_lifecycle import await_cleanup
+from .video_process import WorkerOutputError, run_owned_command
 from .track_view import track_response
 
 logger = logging.getLogger(__name__)
@@ -98,15 +99,13 @@ async def _copy_upload(upload: UploadFile, destination: Path) -> None:
 
 
 async def _duration(path: Path) -> float:
-    proc = await spawn_process(voice_build._tool('ffprobe'), '-v', 'error', *_INPUT_OPTIONS, '-show_entries', 'format=duration',
-                               '-of', 'default=noprint_wrappers=1:nokey=1', str(path),
-                               stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    out, _ = await communicate_process(proc, 30)
+    result = await run_owned_command([voice_build._tool('ffprobe'), '-v', 'error', *_INPUT_OPTIONS, '-show_entries', 'format=duration',
+                                      '-of', 'default=noprint_wrappers=1:nokey=1', str(path)], timeout=30)
     try:
-        seconds = float(out.decode().strip())
+        seconds = float(result.stdout.decode().strip())
     except (ValueError, UnicodeDecodeError) as exc:
         raise HTTPException(status_code=400, detail='invalid_audio') from exc
-    if proc.returncode != 0 or not math.isfinite(seconds) or seconds <= 0:
+    if result.returncode != 0 or not math.isfinite(seconds) or seconds <= 0:
         raise HTTPException(status_code=400, detail='invalid_audio')
     if seconds > MAX_DURATION_SECONDS:
         raise HTTPException(status_code=400, detail='audio_too_long')
@@ -115,12 +114,10 @@ async def _duration(path: Path) -> float:
 
 async def _decode(source: Path, destination: Path) -> float:
     await _duration(source)
-    proc = await spawn_process(voice_build._tool('ffmpeg'), '-v', 'error', '-xerror', '-n', *_INPUT_OPTIONS, '-i', str(source),
+    result = await run_owned_command([voice_build._tool('ffmpeg'), '-v', 'error', '-xerror', '-n', *_INPUT_OPTIONS, '-i', str(source),
                                '-map', '0:a:0', '-vn', '-sn', '-dn', '-t', str(MAX_DURATION_SECONDS + 1),
-                               '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', '-f', 'wav', str(destination),
-                               stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-    await communicate_process(proc, 300)
-    if proc.returncode != 0:
+                               '-ar', '44100', '-ac', '2', '-c:a', 'pcm_s16le', '-f', 'wav', str(destination)], timeout=300)
+    if result.returncode != 0:
         raise HTTPException(status_code=400, detail='invalid_audio')
     return await _duration(destination)
 
@@ -183,6 +180,8 @@ async def replace_voice(upload: UploadFile, voice_id: str) -> VoiceReplacementRe
         return response
     except HTTPException:
         raise
+    except WorkerOutputError as exc:
+        raise HTTPException(status_code=400, detail='invalid_audio') from exc
     except TimeoutError as exc:
         raise HTTPException(status_code=400, detail='audio_validation_timeout') from exc
     except voice_build.VoiceBuildError as exc:

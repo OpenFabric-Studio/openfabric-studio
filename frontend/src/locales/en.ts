@@ -9,6 +9,9 @@ import { clipHostEn } from './clipHost'
 import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
+import { musicQueueEn } from './musicQueue'
+import { localMusicEn } from './localMusic'
+import { musicLoraEn } from './musicLora'
 import { videoExperienceEn } from './videoExperience'
 import { videoDirectionEn } from './videoDirection'
 import { videoLibraryEn } from './videoLibrary'
@@ -51,6 +54,9 @@ export default {
   appNavigation: appNavigationEn,
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,
+  musicQueue: musicQueueEn,
+  localMusic: localMusicEn,
+  musicLora: musicLoraEn,
   videoExperience: videoExperienceEn,
   videoDirection: videoDirectionEn,
   videoLibrary: videoLibraryEn,
@@ -578,6 +584,9 @@ voiceProfiles: {
     videoCharacterTraining: 'character training inputs and local adapters',
     videoCharacterTrainer: 'local character trainer configuration',
     providers: 'provider settings, model catalogs and request history',
+    localMusic: 'local music worker logs and recovery files',
+    musicAdapters: 'managed music adapters and their metadata',
+    musicTraining: 'music training inputs, checkpoints and worker logs',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',
@@ -678,6 +687,8 @@ voiceProfiles: {
     lora: 'LoRA',
     noLora: 'no LoRA',
     loraStrength: 'LoRA strength: {value}',
+    loraScaleAdjusted: 'ACE-Step supports LoRA strength up to 1. The restored strength was adjusted to 1 for new generations; the saved preset or history entry is unchanged.',
+    loraOperationFailed: 'Could not apply these LoRA settings. Check the adapter and try again.',
     loraNamePlaceholder: 'name',
     loraPathPlaceholder: 'adapter path',
     removeLora: 'remove',
@@ -792,7 +803,7 @@ voiceProfiles: {
           { param: 'Guidance scale', what: 'How strictly the model follows your description (prompt). Higher follows style tags more precisely, but at very high values the sound can become "over-compressed"/artifacted; lower is more natural but less predictable. Not used for turbo models (they have their own built-in logic). Default is 7.0, a reasonable range is usually 3–12.' },
           { param: 'Seed', what: 'A number that determines generation randomness. Empty = a new random result each time. The same seed plus the same other parameters nearly reproduces the same result — useful when you want to tweak one style tag and compare.' },
           { param: 'Model', what: 'Different models are trained differently: turbo versions generate faster at some cost to quality and don\'t support some remix scenarios; regular versions are slower but more accurate and flexible. The list is pulled from the server, which also shows what\'s already loaded into memory.' },
-          { param: 'LoRA', what: 'A fine-tuned add-on over the base model (e.g. for a specific vocal timbre or subgenre). LoRA strength (0–2) — how strongly it affects the result on top of the base model; 1.0 is as intended by the adapter\'s author, higher gives a more pronounced effect but a higher risk of distortion.' },
+          { param: 'LoRA', what: 'A fine-tuned add-on over the base model (e.g. for a specific vocal timbre or subgenre). ACE-Step supports LoRA strength from 0 to 1; 0 removes the adapter\'s influence and 1 applies its full strength.' },
         ],
         footer: 'Every numeric field left empty means "use the default" — you don\'t have to fill them all in to get a good result.',
       },
@@ -1261,6 +1272,7 @@ voiceProfiles: {
     downloadVariant: 'Download variant #{n}',
   },
   storeErrors: {
+    nativeOperationFailed: 'The native model could not complete this operation. Check the engine and try again.',
     historyRestoreFailed: 'This undo step could not be restored. The current project has been preserved.',
     invalidLegacyHistory: 'Saved generation history is damaged. Its original records have been preserved.',
     noSamplesToLabel: 'No samples to label',

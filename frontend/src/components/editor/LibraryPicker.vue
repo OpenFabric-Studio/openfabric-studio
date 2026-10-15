@@ -6,9 +6,10 @@ import * as tracksApi from '../../api/tracks'
 import type { SavedTrack } from '../../api/tracks'
 
 const { t } = useI18n()
+const props = withDefaults(defineProps<{ trackOnly?: boolean }>(), { trackOnly: false })
 
 const emit = defineEmits<{
-  pick: [payload: { sourceUrl: string; sourceLabel: string }]
+  pick: [payload: { sourceUrl: string; sourceLabel: string; trackId?: number }]
   close: []
 }>()
 
@@ -39,8 +40,8 @@ const STEM_LABELS = computed<Record<string, string>>(() => ({
   other: t('library.stems.other'),
 }))
 
-function pick(sourceUrl: string, sourceLabel: string) {
-  if (active) emit('pick', { sourceUrl, sourceLabel })
+function pick(sourceUrl: string, sourceLabel: string, trackId?: number) {
+  if (active) emit('pick', { sourceUrl, sourceLabel, ...(trackId === undefined ? {} : { trackId }) })
 }
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -53,15 +54,14 @@ async function onFileSelected(event: Event) {
   uploading.value = true
   error.value = null
   try {
-    const uploaded = await tracksApi.uploadTrack(file)
+    const uploaded = await tracksApi.uploadTrack(file, undefined, controller.signal)
     if (!active) return
     tracks.value.unshift(uploaded)
-    pick(uploaded.audio_url, uploaded.title || file.name)
+    pick(uploaded.audio_url, uploaded.title || file.name, uploaded.id)
   } catch {
     if (active) error.value = t('upstreamWorkspace.uploadFailed')
   } finally {
-    uploading.value = false
-    if (fileInput.value) fileInput.value.value = ''
+    if (active) { uploading.value = false; if (fileInput.value) fileInput.value.value = '' }
   }
 }
 </script>
@@ -107,12 +107,12 @@ async function onFileSelected(event: Event) {
               <button
                 type="button"
                 class="accent-gradient rounded px-2 py-1 text-[11px] font-medium text-white"
-                @click="pick(trk.audio_url, trk.title || t('library.trackFallback'))"
+                @click="pick(trk.audio_url, trk.title || t('library.trackFallback'), trk.id)"
               >
                 {{ t('library.fullMix') }}
               </button>
               <button
-                v-for="name in Object.keys(trk.stems || {})"
+                v-for="name in props.trackOnly ? [] : Object.keys(trk.stems || {})"
                 :key="name"
                 type="button"
                 class="rounded border border-border px-2 py-1 text-[11px] text-text"

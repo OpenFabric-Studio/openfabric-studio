@@ -13,6 +13,8 @@ vi.mock('../../api/orchestrator', () => ({ getStatus: vi.fn(), switchModel: vi.f
 vi.mock('../ace-step/AceStepPage.vue', () => ({ default: defineComponent({ render: () => h('h2', 'ACE generator') }) }))
 vi.mock('../yue2/Yue2Page.vue', () => ({ default: defineComponent({ render: () => h('h2', 'YuE generator') }) }))
 vi.mock('./CloudMusicPanel.vue', () => ({ default: defineComponent({ render: () => h('h2', 'Cloud generator') }) }))
+vi.mock('./MusicQueuePage.vue', () => ({ default: defineComponent({ render: () => h('h2', 'Create & queue') }) }))
+vi.mock('./LocalMusicPanel.vue', () => ({ default: defineComponent({ props: { engine: { type: String, required: true } }, setup: props => () => h('h2', `${props.engine} generator`) }) }))
 vi.mock('../settings/SettingsPage.vue', () => ({ default: defineComponent({ render: () => h('h1', 'Settings') }) }))
 
 let app: App | undefined
@@ -44,19 +46,22 @@ function modelButton(node: HTMLElement, id: ModelId): HTMLButtonElement {
   return button
 }
 
-it('opens a Music workspace with both models and no automatic startup', async () => {
+it('opens the queue at Music without automatically starting an engine', async () => {
   const { node } = await mount('/music')
   expect(node.querySelector('h1')?.textContent).toBe('Music')
-  expect(modelButton(node, 'ace_step').getAttribute('aria-pressed')).toBe('true')
+  expect(modelButton(node, 'ace_step').getAttribute('aria-pressed')).toBe('false')
   expect(modelButton(node, 'yue2').getAttribute('aria-pressed')).toBe('false')
   expect(node.textContent).toContain('starts it and stops the other music engine')
-  expect(node.textContent).toContain('ACE generator')
+  expect(node.textContent).toContain('Create & queue')
+  expect(node.querySelector('details')?.open).toBe(false)
+  expect(node.querySelector('details summary')?.textContent).toContain('Advanced generators')
   expect(api.switchModel).not.toHaveBeenCalled()
 })
-it('opens the active model when entering Music without switching it', async () => {
+it('keeps Music on the queue when a model is already active', async () => {
   const { node, router } = await mount('/music', 'yue2')
-  expect(router.currentRoute.value.name).toBe('yue2')
-  expect(modelButton(node, 'yue2').getAttribute('aria-pressed')).toBe('true')
+  expect(router.currentRoute.value.name).toBe('music')
+  expect(modelButton(node, 'yue2').getAttribute('aria-pressed')).toBe('false')
+  expect(node.textContent).toContain('Create & queue')
   expect(api.switchModel).not.toHaveBeenCalled()
 })
 it('switches the model through an explicit selection and preserves the Music selector', async () => {
@@ -151,4 +156,15 @@ it('opens cloud music without switching or stopping a running local model', asyn
   expect(router.currentRoute.value.name).toBe('openrouter-music')
   expect(node.textContent).toContain('Cloud generator')
   expect(api.switchModel).not.toHaveBeenCalled(); expect(api.stopActive).not.toHaveBeenCalled()
+})
+
+it.each(['heartmula', 'stable-audio3'])('opens %s without starting or stopping another engine', async slug => {
+  const { node, router } = await mount('/music/ace-step', 'ace_step')
+  const link = node.querySelector(`a[href="/music/${slug}"]`)
+  if (!(link instanceof HTMLAnchorElement)) throw new Error(`Missing ${slug} selector`)
+  link.click(); await settle()
+  expect(router.currentRoute.value.path).toBe(`/music/${slug}`)
+  expect(node.textContent).toContain(`${slug.replace('-', '_')} generator`)
+  expect(api.switchModel).not.toHaveBeenCalled()
+  expect(api.stopActive).not.toHaveBeenCalled()
 })

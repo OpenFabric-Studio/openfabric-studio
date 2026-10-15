@@ -3,9 +3,37 @@
 from __future__ import annotations
 import shutil, subprocess, tempfile, unittest
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 
 class VideoMediaTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_probe_and_decode_failures_use_media_errors(self) -> None:
+        from app import video_media
+        from app.video_process import WorkerOutputError
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'fixture.mp4'
+            path.write_bytes(b'temporary fixture')
+            for failure in (WorkerOutputError('private output'), TimeoutError('private timeout')):
+                with self.subTest(failure=type(failure).__name__), patch.object(video_media, 'run_owned_command', AsyncMock(side_effect=failure)):
+                    with self.assertRaises(video_media.VideoMediaError) as probe:
+                        await video_media.probe_media(path)
+                    self.assertEqual(probe.exception.code, 'invalid_media')
+                    with patch.object(video_media, 'probe_media', AsyncMock(return_value=video_media.MediaInfo(96, 64, 24, 2, 2))):
+                        with self.assertRaises(video_media.VideoMediaError) as decode:
+                            await video_media.validate_media(path, 2, (96, 64))
+                    self.assertEqual(decode.exception.code, 'invalid_media')
+
+    async def test_failed_worker_drain_is_not_hidden_as_invalid_media(self) -> None:
+        from app import video_media
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / 'fixture.mp4'
+            path.write_bytes(b'temporary fixture')
+            with patch.object(video_media, 'run_owned_command', AsyncMock(side_effect=OSError('fixture drain failed'))):
+                with self.assertRaises(OSError):
+                    await video_media.probe_media(path)
+
     async def test_display_size_accounts_for_rotation_and_anamorphic_pixels(self) -> None:
         from app.video_media import probe_media, MediaInfo, VideoMediaError
         with tempfile.TemporaryDirectory() as tmp:

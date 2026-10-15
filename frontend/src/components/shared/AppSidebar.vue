@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute, useRouter } from 'vue-router'
-import { useOrchestratorStore } from '../../stores/orchestrator'
+import { useRoute } from 'vue-router'
 import type { AppIconName } from './appIcons'
 import AppIcon from './AppIcon.vue'
 import AppTooltip from './AppTooltip.vue'
@@ -10,10 +9,8 @@ import HelpModal from './HelpModal.vue'
 
 const props = defineProps<{ collapsed: boolean; mobile: boolean; active: boolean }>()
 const emit = defineEmits<{ toggle: []; navigate: [] }>()
-const { t } = useI18n(), route = useRoute(), router = useRouter()
-const orchestrator = useOrchestratorStore()
+const { t } = useI18n(), route = useRoute()
 const helpOpen = ref(false)
-const trainingAvailable = computed(() => orchestrator.statuses.ace_step?.status === 'running')
 
 interface RouteItem { path: string; key: string; icon: AppIconName }
 interface NavigationGroup { key: string; items: RouteItem[] }
@@ -29,10 +26,6 @@ const groups: NavigationGroup[] = [
   ] },
 ]
 function activePath(path: string) { return path === '/' ? route.path === '/' : route.path === path || route.path.startsWith(`${path}/`) }
-function openTraining() {
-  if (!trainingAvailable.value) return
-  emit('navigate'); void router.push({ name: 'ace-step-lora' })
-}
 </script>
 
 <template>
@@ -54,8 +47,8 @@ function openTraining() {
       </section>
       <section class="navigation-group" :aria-label="t('appNavigation.tools')">
         <h2 class="navigation-heading" :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.tools') }}</h2>
-        <AppTooltip v-slot="{ describedBy }" :text="trainingAvailable ? t('appNavigation.training') : t('appNavigation.startTraining')" :enabled="props.active && (props.collapsed || !trainingAvailable)" :press="!trainingAvailable">
-          <button type="button" class="navigation-item w-full" :aria-label="t('appNavigation.training')" :aria-disabled="!trainingAvailable" :aria-current="route.name === 'ace-step-lora' ? 'page' : undefined" :aria-describedby="describedBy" @click="openTraining"><AppIcon name="training" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.training') }}</span></button>
+        <AppTooltip v-slot="{ describedBy }" :text="t('musicLora.navigationHint')" :enabled="props.active" press>
+          <router-link to="/music/lora" class="navigation-item" :aria-label="t('appNavigation.training')" :aria-current="route.name === 'music-lora' || route.name === 'ace-step-lora' ? 'page' : undefined" :aria-describedby="describedBy" @click="emit('navigate')"><AppIcon name="training" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('appNavigation.training') }}</span></router-link>
         </AppTooltip>
         <AppTooltip v-slot="{ describedBy }" :text="t('header.voiceClone')" :enabled="props.active && props.collapsed">
           <router-link to="/voice-clone" class="navigation-item" :aria-label="t('header.voiceClone')" :aria-current="activePath('/voice-clone') ? 'page' : undefined" :aria-describedby="describedBy" @click="emit('navigate')"><AppIcon name="voice" /><span :class="props.collapsed ? 'sr-only' : ''">{{ t('header.voiceClone') }}</span></router-link>

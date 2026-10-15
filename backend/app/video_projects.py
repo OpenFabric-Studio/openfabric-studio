@@ -28,8 +28,8 @@ from .video_contracts import (
     ApplyVideoCharacterAdapterRequest,
 )
 from .video_media import tool, probe_media
-from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process, communicate_process
-from .video_process import WorkerIdentity
+from .job_lifecycle import await_cleanup, kill_process_tree
+from .video_process import WorkerIdentity, WorkerOutputError, drain_receipt, read_owned_output, spawn_owned
 from .export_provenance_contracts import ExportProvenance
 from .reading_media_contracts import RetainedAudioIdentity, RetainedAudioVideoRequest
 
@@ -51,6 +51,7 @@ class VideoProjectError(Exception):
 class _ReferenceUploadState:
     started: bool = False
     cancel_requested: bool = False
+    spawn_attempted: bool = False
 
 
 class SourceIdentity(VideoContract):
@@ -953,11 +954,16 @@ async def _cleanup_reference(
     output: Path | None,
     published: bool,
     upload: UploadFile,
+    *, spawn_attempted: bool = False,
 ) -> None:
     try:
         try:
             await kill_process_tree(proc)
             if temporary is not None:
+                receipt = temporary.with_suffix('.worker.json')
+                if proc is None and (spawn_attempted or receipt.exists() or receipt.is_symlink()):
+                    await drain_receipt(receipt)
+                receipt.unlink(missing_ok=True)
                 temporary.unlink(missing_ok=True)
             if not published and output is not None:
                 output.unlink(missing_ok=True)
@@ -1013,12 +1019,16 @@ async def _upload_reference(
             raise VideoProjectError("reference_too_large")
         output.parent.mkdir(parents=True, exist_ok=True)
         from .image_normalization import normalization_argv
-        proc = await spawn_process(
-            *normalization_argv(temporary, output),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        state.spawn_attempted = True
+        proc = await spawn_owned(
+            normalization_argv(temporary, output),
+            receipt_path=temporary.with_suffix('.worker.json'),
+            stdout=asyncio.subprocess.PIPE,
         )
-        await communicate_process(proc, 30)
+        try:
+            await read_owned_output(proc, max_bytes=1024 * 1024, timeout=30)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise VideoProjectError('invalid_reference') from exc
         if proc.returncode != 0:
             raise VideoProjectError("invalid_reference")
         info = await probe_media(output)
@@ -1043,7 +1053,7 @@ async def _upload_reference(
         published = True
         return result
     finally:
-        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload))
+        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload, spawn_attempted=state.spawn_attempted))
 
 
 def reference_file(project_id: str, reference_id: str) -> Path:
@@ -1163,7 +1173,8 @@ async def _upload_speech(
         if not _looks_like_speech(header):
             raise VideoProjectError("invalid_speech")
         output.parent.mkdir(parents=True, exist_ok=True)
-        proc = await spawn_process(
+        state.spawn_attempted = True
+        proc = await spawn_owned([
             tool("ffmpeg"),
             "-v",
             "error",
@@ -1178,10 +1189,14 @@ async def _upload_speech(
             "-c:a",
             "pcm_s16le",
             str(output),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        ],
+            receipt_path=temporary.with_suffix('.worker.json'),
+            stdout=asyncio.subprocess.PIPE,
         )
-        await communicate_process(proc, 120)
+        try:
+            await read_owned_output(proc, max_bytes=1024 * 1024, timeout=120)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise VideoProjectError('invalid_speech') from exc
         if proc.returncode != 0 or not output.is_file():
             raise VideoProjectError("invalid_speech")
         with wave.open(str(output), "rb") as decoded:
@@ -1224,7 +1239,7 @@ async def _upload_speech(
             _remove_unreferenced_speech(project_id, old)
         return result
     finally:
-        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload))
+        await await_cleanup(_cleanup_reference(proc, temporary, output, published, upload, spawn_attempted=state.spawn_attempted))
 
 
 def clear_speech(project_id: str, body: VideoRevisionRequest) -> VideoProject:
@@ -1285,6 +1300,7 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
     proc: asyncio.subprocess.Process | None = None
     published = False
     removed: list[str] = []
+    spawn_attempted = False
     try:
         try:
             outcome = await asyncio.to_thread(
@@ -1305,14 +1321,19 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
             )
             raise VideoProjectError(code)
         output.parent.mkdir(parents=True, exist_ok=True)
-        proc = await spawn_process(
+        spawn_attempted = True
+        proc = await spawn_owned([
             tool("ffmpeg"),
             "-v", "error", "-y", "-i", str(temporary),
             "-vn", "-ac", "2", "-ar", "44100", "-c:a", "pcm_s16le", str(output),
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+        ],
+            receipt_path=temporary.with_suffix('.worker.json'),
+            stdout=asyncio.subprocess.PIPE,
         )
-        await communicate_process(proc, 120)
+        try:
+            await read_owned_output(proc, max_bytes=1024 * 1024, timeout=120)
+        except (WorkerOutputError, TimeoutError) as exc:
+            raise VideoProjectError('speech_failed') from exc
         if proc.returncode != 0 or not output.is_file():
             raise VideoProjectError("speech_failed")
         import wave
@@ -1356,9 +1377,18 @@ async def speak_line(project_id: str, body: VideoSpeechLineRequest) -> VideoProj
             _remove_unreferenced_speech(project_id, old)
         return result
     finally:
-        temporary.unlink(missing_ok=True)
         if proc is not None:
-            await await_cleanup(kill_process_tree(proc))
+            try:
+                await await_cleanup(kill_process_tree(proc))
+            except (OSError, TimeoutError) as exc:
+                raise VideoProjectError('cleanup_failed') from exc
+        elif spawn_attempted:
+            try:
+                await await_cleanup(drain_receipt(temporary.with_suffix('.worker.json')))
+            except (OSError, TimeoutError) as exc:
+                raise VideoProjectError('cleanup_failed') from exc
+        temporary.with_suffix('.worker.json').unlink(missing_ok=True)
+        temporary.unlink(missing_ok=True)
         if not published:
             output.unlink(missing_ok=True)
 

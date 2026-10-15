@@ -9,7 +9,7 @@ export const homeOverviewEn = {
   workspaces: {
     music: {
       title: 'Music',
-      description: 'Create songs with ACE-Step 1.5 or YuE2-3B using lyrics, style descriptions or reference audio.',
+      description: 'Choose a music engine, then create from style descriptions, lyrics or reference audio.',
       destination: 'Music',
     },
     voices: {

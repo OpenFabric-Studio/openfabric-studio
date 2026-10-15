@@ -26,7 +26,7 @@ for (const name of ['LICENSE', 'LICENSE-MIT', 'NOTICE']) {
 }
 
 // Top-level backend entries that are local state, not source.
-const LOCAL_ONLY = new Set(['.venv', 'data', 'logs', 'run.bat', 'run.sh']);
+const LOCAL_ONLY = new Set(['.venv', '.mypy_cache', 'data', 'logs', 'run.bat', 'run.sh']);
 const backendSrc = path.join(root, 'backend');
 fs.cpSync(backendSrc, path.join(out, 'backend'), {
   recursive: true,
