@@ -6,16 +6,33 @@ import GenerateForm from './GenerateForm.vue'
 import { i18n, setLocale } from '../../i18n'
 import type { JsonObject } from '../../api/contracts'
 import { ApiError } from '../../api/http'
+import { pendingMusicAdapter } from '../../composables/generationDrafts'
 const state = reactive<{ pendingParamsInsert: JsonObject | null; pendingAbcInsert: string | null }>({ pendingParamsInsert: null, pendingAbcInsert: null })
 const generateBatch = vi.fn()
 vi.mock('../../stores/yue2', () => ({ useYue2Store: () => ({ ...state, get pendingParamsInsert() { return state.pendingParamsInsert }, generateBatch, clearPendingParamsInsert: () => { state.pendingParamsInsert = null }, clearPendingAbcInsert: () => { state.pendingAbcInsert = null } }) }))
 vi.mock('../../components/shared/VoiceSelect.vue', () => ({ default: defineComponent({ render: () => h('div') }) }))
 vi.mock('../../api/musicLora', () => ({ listMusicAdapters: vi.fn(async () => ({ adapters: [{ id: 'a'.repeat(32), engine: 'yue2', target: 'ar', name: 'AR', sha256: 'c'.repeat(64), created_at: 'now', source_job_id: null }, { id: 'b'.repeat(32), engine: 'yue2', target: 'nar', name: 'NAR', sha256: 'd'.repeat(64), created_at: 'now', source_job_id: null }], history_incomplete: false })) }))
 let app: App | undefined
-afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); localStorage.clear(); state.pendingParamsInsert = null; generateBatch.mockReset() })
+afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); localStorage.clear(); state.pendingParamsInsert = null; pendingMusicAdapter.value = null; generateBatch.mockReset() })
 async function settle() { for (let index = 0; index < 5; index++) await nextTick() }
 async function mount() { setLocale('en'); const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: GenerateForm }] }); await router.push('/'); const container = document.body.appendChild(document.createElement('div')); app = createApp(GenerateForm).use(i18n).use(router); app.mount(container); await settle(); return container }
 function button(container: HTMLElement, label: string) { const found = [...container.querySelectorAll('button')].find(node => node.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
+it('applies trained acoustic adapter previews and clears both adapters for the base comparison', async () => {
+  pendingMusicAdapter.value = { engine: 'yue2', target: 'nar', selection: { id: 'b'.repeat(32), strength: 1 } }
+  const container = await mount()
+  expect(generateBatch).not.toHaveBeenCalled()
+  const lyrics = container.querySelector('#yue-lyrics')
+  if (!(lyrics instanceof HTMLTextAreaElement)) throw new Error('Missing lyrics')
+  lyrics.value = 'Words'; lyrics.dispatchEvent(new Event('input', { bubbles: true })); await settle()
+  const style = [...container.querySelectorAll('input')].find(input => input.placeholder === i18n.global.t('aceGen.stylePlaceholder'))
+  if (!(style instanceof HTMLInputElement)) throw new Error('Missing style')
+  style.value = 'Jazz'; style.dispatchEvent(new Event('input', { bubbles: true })); style.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); await settle()
+  button(container, '✨ Create music').click(); await settle()
+  expect(generateBatch).toHaveBeenLastCalledWith(expect.objectContaining({ arAdapter: null, narAdapter: { id: 'b'.repeat(32), strength: 1 } }))
+  pendingMusicAdapter.value = { engine: 'yue2', target: 'nar', selection: null }; await settle()
+  button(container, '✨ Create music').click(); await settle()
+  expect(generateBatch).toHaveBeenLastCalledWith(expect.objectContaining({ arAdapter: null, narAdapter: null }))
+})
 it('uses translated song title labels, placeholder and help text', async () => {
   const container = await mount()
   expect(container.querySelector('label[for="yue-song-title"]')?.textContent).toBe('Song title')

@@ -381,7 +381,7 @@ index b7df2ba..e03a496 100644
  
  def parse_description_hints(description: str) -> tuple[Optional[str], bool]:
 diff --git a/acestep/api/train_api_lokr_start_route.py b/acestep/api/train_api_lokr_start_route.py
-index fe39a6d..7ff81ec 100644
+index fe39a6d..bfdc304 100644
 --- a/acestep/api/train_api_lokr_start_route.py
 +++ b/acestep/api/train_api_lokr_start_route.py
 @@ -2,6 +2,7 @@
@@ -400,7 +400,24 @@ index fe39a6d..7ff81ec 100644
  from fastapi import Depends, FastAPI, HTTPException
  from loguru import logger
  
-@@ -160,6 +162,14 @@ def register_lokr_training_start_route(
+@@ -76,6 +78,7 @@ def register_lokr_training_start_route(
+                 learning_rate=request.learning_rate,
+                 batch_size=request.train_batch_size,
+                 gradient_accumulation_steps=request.gradient_accumulation,
++                log_every_n_steps=1,
+                 max_epochs=request.train_epochs,
+                 save_every_n_epochs=request.save_every_n_epochs,
+                 seed=request.training_seed,
+@@ -135,7 +138,7 @@ def register_lokr_training_start_route(
+                     if training_state.get("run_id") != local_run_id:
+                         break
+                     training_state["current_step"] = step
+-                    training_state["current_loss"] = loss
++                    training_state["current_loss"] = loss if step > 0 else None
+                     training_state["status"] = status
+                     text = str(status)
+                     match = re.search(r"Epoch (\d+)/(\d+)", text)
+@@ -160,6 +163,14 @@ def register_lokr_training_start_route(
                  cm = training_state.pop("_component_manager", None)
                  if cm is not None:
                      cm.restore()
@@ -416,7 +433,7 @@ index fe39a6d..7ff81ec 100644
          threading.Thread(target=_runner, daemon=True).start()
          return wrap_response(
 diff --git a/acestep/api/train_api_lora_start_route.py b/acestep/api/train_api_lora_start_route.py
-index 0c84fa9..da17bae 100644
+index 0c84fa9..c991c5d 100644
 --- a/acestep/api/train_api_lora_start_route.py
 +++ b/acestep/api/train_api_lora_start_route.py
 @@ -2,6 +2,7 @@
@@ -435,7 +452,24 @@ index 0c84fa9..da17bae 100644
  from fastapi import Depends, FastAPI, HTTPException
  from loguru import logger
  
-@@ -140,6 +142,17 @@ def register_lora_training_start_route(
+@@ -61,6 +63,7 @@ def register_lora_training_start_route(
+                 learning_rate=request.learning_rate,
+                 batch_size=request.train_batch_size,
+                 gradient_accumulation_steps=request.gradient_accumulation,
++                log_every_n_steps=1,
+                 max_epochs=request.train_epochs,
+                 save_every_n_epochs=request.save_every_n_epochs,
+                 seed=request.training_seed,
+@@ -115,7 +118,7 @@ def register_lora_training_start_route(
+                     if training_state.get("run_id") != local_run_id:
+                         break
+                     training_state["current_step"] = step
+-                    training_state["current_loss"] = loss
++                    training_state["current_loss"] = loss if step > 0 else None
+                     training_state["status"] = status
+                     text = str(status)
+                     match = re.search(r"Epoch (\d+)/(\d+)", text)
+@@ -140,6 +143,17 @@ def register_lora_training_start_route(
                  cm = training_state.pop("_component_manager", None)
                  if cm is not None:
                      cm.restore()
@@ -739,3 +773,351 @@ index 0000000..0071d9e
 +echo.
 +pause
 +endlocal
+diff --git a/acestep/training/trainer.py b/acestep/training/trainer.py
+index 9900f97..23f68ff 100644
+--- a/acestep/training/trainer.py
++++ b/acestep/training/trainer.py
+@@ -941,7 +941,7 @@ class LoRATrainer:
+             num_updates = 0
+             epoch_start_time = time.time()
+ 
+-            for _batch_idx, batch in enumerate(train_loader):
++            for batch_idx, batch in enumerate(train_loader):
+                 # Check for stop signal
+                 if training_state and training_state.get("should_stop", False):
+                     yield (
+@@ -952,10 +952,21 @@ class LoRATrainer:
+                     return
+ 
+                 # Forward pass
++                if training_state is not None:
++                    training_state["current_epoch"] = epoch + 1
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: forward pass"
++                    )
+                 loss = self.module.training_step(batch)
+                 loss = loss / self.training_config.gradient_accumulation_steps
+ 
+                 # Backward pass
++                if training_state is not None:
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: backward pass"
++                    )
+                 self.fabric.backward(loss)
+                 accumulated_loss += loss.item()
+                 accumulation_step += 1
+@@ -1227,7 +1238,7 @@ class LoRATrainer:
+             num_updates = 0
+             epoch_start_time = time.time()
+ 
+-            for batch in train_loader:
++            for batch_idx, batch in enumerate(train_loader):
+                 if training_state and training_state.get("should_stop", False):
+                     yield (
+                         global_step,
+@@ -1236,8 +1247,19 @@ class LoRATrainer:
+                     )
+                     return
+ 
++                if training_state is not None:
++                    training_state["current_epoch"] = epoch + 1
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: forward pass"
++                    )
+                 loss = self.module.training_step(batch)
+                 loss = loss / self.training_config.gradient_accumulation_steps
++                if training_state is not None:
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: backward pass"
++                    )
+                 loss.backward()
+                 accumulated_loss += loss.item()
+                 accumulation_step += 1
+@@ -1714,7 +1736,7 @@ class LoKRTrainer:
+             num_updates = 0
+             epoch_start_time = time.time()
+ 
+-            for batch in train_loader:
++            for batch_idx, batch in enumerate(train_loader):
+                 if training_state and training_state.get("should_stop", False):
+                     yield (
+                         global_step,
+@@ -1723,9 +1745,20 @@ class LoKRTrainer:
+                     )
+                     return
+ 
++                if training_state is not None:
++                    training_state["current_epoch"] = epoch + 1
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: forward pass"
++                    )
+                 loss = self.module.training_step(batch)
+                 loss = loss / self.training_config.gradient_accumulation_steps
+ 
++                if training_state is not None:
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: backward pass"
++                    )
+                 self.fabric.backward(loss)
+                 accumulated_loss += loss.item()
+                 accumulation_step += 1
+@@ -1962,7 +1995,7 @@ class LoKRTrainer:
+             num_updates = 0
+             epoch_start_time = time.time()
+ 
+-            for batch in train_loader:
++            for batch_idx, batch in enumerate(train_loader):
+                 if training_state and training_state.get("should_stop", False):
+                     yield (
+                         global_step,
+@@ -1971,8 +2004,19 @@ class LoKRTrainer:
+                     )
+                     return
+ 
++                if training_state is not None:
++                    training_state["current_epoch"] = epoch + 1
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: forward pass"
++                    )
+                 loss = self.module.training_step(batch)
+                 loss = loss / self.training_config.gradient_accumulation_steps
++                if training_state is not None:
++                    training_state["status"] = (
++                        f"Epoch {epoch + 1}/{self.training_config.max_epochs}, "
++                        f"Batch {batch_idx + 1}/{len(train_loader)}: backward pass"
++                    )
+                 loss.backward()
+                 accumulated_loss += loss.item()
+                 accumulation_step += 1
+diff --git a/acestep/api/train_api_service.py b/acestep/api/train_api_service.py
+--- a/acestep/api/train_api_service.py
++++ b/acestep/api/train_api_service.py
+@@ -4,7 +4,6 @@
+ 
+ import json
+ import os
+-import shutil
+ from typing import Any, Callable, Dict, Optional
+ 
+ from fastapi import Depends, FastAPI, HTTPException
+@@ -14,6 +13,7 @@
+ from acestep.api.train_api_lokr_start_route import register_lokr_training_start_route
+ from acestep.api.train_api_lora_start_route import register_lora_training_start_route
+ from acestep.api.train_api_models import ExportLoRARequest, initialize_training_state
++from acestep.training.export_safety import ExportPathError, export_directory_safely
+ 
+ 
+ def register_training_api_routes(
+@@ -173,11 +173,12 @@
+             raise HTTPException(status_code=404, detail=f"No trained model found in {request.lora_output_dir}")
+ 
+         try:
+-            export_path = request.export_path.strip()
+-            os.makedirs(os.path.dirname(export_path) if os.path.dirname(export_path) else ".", exist_ok=True)
+-            if os.path.exists(export_path):
+-                shutil.rmtree(export_path)
+-            shutil.copytree(source_path, export_path)
++            export_path = export_directory_safely(source_path, request.export_path, request.lora_output_dir)
+             return wrap_response({"message": "LoRA exported successfully", "export_path": export_path, "source": source_path})
+-        except Exception as exc:
+-            return wrap_response(None, code=500, error=f"Export failed: {exc}")
++        except FileExistsError:
++            return wrap_response(None, code=409, error="Export destination already exists; choose a new path.")
++        except ExportPathError as exc:
++            return wrap_response(None, code=400, error=str(exc))
++        except Exception:
++            logger.exception("Adapter export failed")
++            return wrap_response(None, code=500, error="Export failed. A partial new export may remain; choose a new path before retrying.")
+diff --git a/acestep/ui/gradio/events/training/lora_training.py b/acestep/ui/gradio/events/training/lora_training.py
+--- a/acestep/ui/gradio/events/training/lora_training.py
++++ b/acestep/ui/gradio/events/training/lora_training.py
+@@ -12,7 +12,8 @@
+ from loguru import logger
+ 
+ from acestep.gpu_config import get_global_gpu_config
+-from acestep.training.path_safety import safe_path
++from acestep.training.path_safety import get_safe_root, safe_path
++from acestep.training.export_safety import ExportPathError, export_directory_safely
+ from acestep.ui.gradio.i18n import t
+ from .training_utils import (
+     _format_duration,
+@@ -283,22 +284,18 @@
+         return t("training.no_trained_model_found", path=lora_output_dir)
+ 
+     try:
+-        safe_export = safe_path(export_path.strip())
++        safe_export = os.path.join(get_safe_root(), export_path.strip())
++        safe_path(safe_export)
+     except ValueError:
+         return t("training.invalid_export_path")
+ 
+     try:
+-        import shutil
+-
+-        parent_dir = os.path.dirname(safe_export) or "."
+-        os.makedirs(parent_dir, exist_ok=True)
+-
+-        if os.path.exists(safe_export):
+-            shutil.rmtree(safe_export)
+-
+-        shutil.copytree(source_path, safe_export)
++        safe_export = export_directory_safely(source_path, safe_export, safe_lora_dir)
+         return t("training.lora_exported", path=safe_export)
+-
+-    except Exception as e:
++    except FileExistsError:
++        return t("training.export_failed", error="Export destination already exists; choose a new path.")
++    except ExportPathError as exc:
++        return t("training.export_failed", error=str(exc))
++    except Exception:
+         logger.exception("Export error")
+-        return t("training.export_failed", error=str(e))
++        return t("training.export_failed", error="Export failed. A partial new export may remain; choose a new path before retrying.")
+diff --git a/acestep/ui/gradio/events/training/lokr_training.py b/acestep/ui/gradio/events/training/lokr_training.py
+--- a/acestep/ui/gradio/events/training/lokr_training.py
++++ b/acestep/ui/gradio/events/training/lokr_training.py
+@@ -12,7 +12,8 @@
+ import gradio as gr
+ from loguru import logger
+ 
+-from acestep.training.path_safety import safe_path
++from acestep.training.path_safety import get_safe_root, safe_path
++from acestep.training.export_safety import ExportPathError, export_lokr_file_safely
+ from acestep.ui.gradio.i18n import t
+ from .training_utils import _format_duration, _training_loss_figure
+ 
+@@ -269,7 +270,8 @@
+ 
+     try:
+         lokr_output_dir = safe_path(lokr_output_dir)
+-        export_path = safe_path(export_path.strip())
++        export_path = os.path.join(get_safe_root(), export_path.strip())
++        safe_path(export_path)
+     except ValueError:
+         return "❌ Rejected unsafe path"
+ 
+@@ -322,21 +324,12 @@
+         return t("training.lokr_no_trained_weights_found", path=lokr_output_dir)
+ 
+     try:
+-        import shutil
+-
+-        if export_path.lower().endswith(".safetensors"):
+-            os.makedirs(
+-                os.path.dirname(export_path) if os.path.dirname(export_path) else ".",
+-                exist_ok=True,
+-            )
+-            shutil.copy2(source_file, export_path)
+-            return t("training.lokr_exported", path=export_path)
+-
+-        os.makedirs(export_path, exist_ok=True)
+-        dst_file = os.path.join(export_path, "lokr_weights.safetensors")
+-        shutil.copy2(source_file, dst_file)
++        dst_file = export_lokr_file_safely(source_file, export_path, lokr_output_dir)
+         return t("training.lokr_exported", path=dst_file)
+-
+-    except Exception as e:
++    except FileExistsError:
++        return t("training.export_failed", error="Export destination already exists; choose a new path.")
++    except ExportPathError as exc:
++        return t("training.export_failed", error=str(exc))
++    except Exception:
+         logger.exception("LoKr export error")
+-        return t("training.export_failed", error=str(e))
++        return t("training.export_failed", error="Export failed. A partial new export may remain; choose a new path before retrying.")
+diff --git a/acestep/training/export_safety.py b/acestep/training/export_safety.py
+new file mode 100644
+--- /dev/null
++++ b/acestep/training/export_safety.py
+@@ -0,0 +1,84 @@
++"""Exclusive adapter exports: existing files and training data are never replaced."""
++
++from __future__ import annotations
++
++import os
++import shutil
++import stat
++from pathlib import Path
++
++
++class ExportPathError(ValueError):
++    """A rejected export path, with a safe message for the user."""
++
++
++def _export_paths(source_path: str, export_path: str, output_dir: str) -> tuple[Path, Path]:
++    if not export_path.strip() or not output_dir.strip():
++        raise ExportPathError("Training output and a new export destination are required.")
++    source_input = Path(source_path)
++    root = Path(output_dir).resolve(strict=True)
++    source = source_input.resolve(strict=True)
++    if source_input.is_symlink() or not source.is_relative_to(root):
++        raise ExportPathError("Export source must remain inside the training output without symbolic links.")
++    requested = Path(export_path.strip())
++    if os.path.lexists(requested):
++        raise FileExistsError
++    destination = requested.resolve()
++    if destination == root or destination.is_relative_to(root) or root.is_relative_to(destination):
++        raise ExportPathError("Choose an export destination outside the training output folder.")
++    if os.path.lexists(destination):
++        raise FileExistsError
++    return source, destination
++
++
++def _copy_file(source: Path, destination: Path) -> None:
++    if source.resolve(strict=True) != source or not stat.S_ISREG(source.lstat().st_mode):
++        raise ExportPathError("Adapter exports require regular source files without symbolic links.")
++    if destination.parent.resolve(strict=True) != destination.parent or not destination.parent.is_dir():
++        raise ExportPathError("The export destination changed; choose a new path.")
++    with os.fdopen(os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)), "rb") as reader:
++        if not stat.S_ISREG(os.fstat(reader.fileno()).st_mode):
++            raise ExportPathError("Adapter exports require regular source files.")
++        with destination.open("xb") as writer:
++            shutil.copyfileobj(reader, writer)
++
++
++def _copy_tree(source: Path, destination: Path) -> None:
++    if source.resolve(strict=True) != source or not stat.S_ISDIR(source.lstat().st_mode):
++        raise ExportPathError("Adapter exports require source directories without symbolic links.")
++    if destination.parent.resolve(strict=True) != destination.parent or not destination.parent.is_dir():
++        raise ExportPathError("The export destination changed; choose a new path.")
++    destination.mkdir()
++    for child in source.iterdir():
++        mode = child.lstat().st_mode
++        if stat.S_ISDIR(mode):
++            _copy_tree(child, destination / child.name)
++        elif stat.S_ISREG(mode):
++            _copy_file(child, destination / child.name)
++        else:
++            raise ExportPathError("Adapter exports cannot contain symbolic links or special files.")
++
++
++def export_directory_safely(source_path: str, export_path: str, output_dir: str) -> str:
++    """Copy weights into a new directory, retaining partial output on failure."""
++    source, destination = _export_paths(source_path, export_path, output_dir)
++    if not source.is_dir():
++        raise ExportPathError("The trained adapter directory is unavailable.")
++    if any(path.is_symlink() for path in source.rglob("*")):
++        raise ExportPathError("Adapter exports cannot contain symbolic links.")
++    destination.parent.mkdir(parents=True, exist_ok=True)
++    _copy_tree(source, destination)
++    return str(destination)
++
++
++def export_lokr_file_safely(source_path: str, export_path: str, output_dir: str) -> str:
++    """Copy one LoKr file to a new file or a new export directory."""
++    source, destination = _export_paths(source_path, export_path, output_dir)
++    if not source.is_file():
++        raise ExportPathError("The trained adapter file is unavailable.")
++    destination.parent.mkdir(parents=True, exist_ok=True)
++    if not str(destination).lower().endswith(".safetensors"):
++        destination.mkdir()
++        destination = destination / "lokr_weights.safetensors"
++    _copy_file(source, destination)
++    return str(destination)

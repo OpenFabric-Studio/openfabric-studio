@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import * as music from '../../api/localMusic'
 import type { LocalMusicEngineId } from '../../api/localMusic'
 import type { LocalMusicEngines, LocalMusicJob, LocalMusicRequest, MusicAdapterSelection } from '../../api/generated'
 import { ApiError } from '../../api/http'
+import { pendingMusicAdapter } from '../../composables/generationDrafts'
 import { createPollingLoop } from '../../composables/polling'
 import StemsPanel from '../../components/shared/StemsPanel.vue'
 import MusicAdapterSelect from '../../components/shared/MusicAdapterSelect.vue'
@@ -20,14 +21,15 @@ const adapter = ref<MusicAdapterSelection | null>(null)
 const adapterValid = ref(true)
 const selectedJobs = computed(() => jobs.value.filter(job => job.request.engine === props.engine))
 const active = computed(() => selectedJobs.value.some(job => ongoing(job)))
-const ready = computed(() => engineStatus.value?.supported && engineStatus.value.installed && engineStatus.value.weights_ready)
+const heartAdapter = computed(() => props.engine === 'heartmula' && adapter.value !== null)
+const ready = computed(() => heartAdapter.value ? engineStatus.value?.adapter_runtime_ready : engineStatus.value?.supported && engineStatus.value.installed && engineStatus.value.weights_ready)
 const minDuration = 5
 const maxDuration = computed(() => props.engine === 'heartmula' ? 240 : variant.value === 'medium' ? 380 : 120)
 const valid = computed(() => ready.value && !active.value && adapterValid.value && prompt.value.trim().length > 0 && prompt.value.length <= 4000
   && title.value.length <= 500 && lyrics.value.length <= 20000
   && Number.isInteger(duration.value) && duration.value >= minDuration && duration.value <= maxDuration.value
   && Number.isInteger(seed.value) && seed.value >= 0 && seed.value <= 2147483647)
-const readinessKey = computed(() => !engineStatus.value?.supported ? 'unsupported' : !engineStatus.value.installed ? 'missingEngine' : !engineStatus.value.weights_ready ? 'missingWeights' : 'ready')
+const readinessKey = computed(() => heartAdapter.value ? ready.value ? 'ready' : 'missingAdapterRuntime' : !engineStatus.value?.supported ? 'unsupported' : !engineStatus.value.installed ? 'missingEngine' : !engineStatus.value.weights_ready ? 'missingWeights' : 'ready')
 let alive = true, generation = 0, controller: AbortController | undefined
 function ongoing(job: LocalMusicJob): boolean { return job.status === 'queued' || job.status === 'running' }
 function errorText(code: string | null | undefined, fallback: string): string {
@@ -88,7 +90,7 @@ function generate() {
   if (!valid.value) return
   const request: LocalMusicRequest = { engine: props.engine, title: title.value.trim(), prompt: prompt.value.trim(),
     lyrics: props.engine === 'stable_audio3' ? '' : lyrics.value, duration_seconds: duration.value, seed: seed.value, variant: variant.value,
-    ...(props.engine === 'stable_audio3' ? { adapter: adapter.value } : {}) }
+    ...(adapter.value || props.engine === 'stable_audio3' ? { adapter: adapter.value } : {}) }
   return action(async (signal, isCurrent) => {
     const response = await music.submitLocalMusic(request, signal)
     if (isCurrent()) jobs.value = [response, ...jobs.value.filter(job => job.id !== response.id)]
@@ -107,6 +109,19 @@ watch(() => props.engine, () => {
   void load()
 })
 watch(variant, () => { adapter.value = null; adapterValid.value = true }, { flush: 'sync' })
+watch(() => [pendingMusicAdapter.value, props.engine], async (_value, _previous, onCleanup) => {
+  const selection = pendingMusicAdapter.value
+  if (!selection || selection.engine !== props.engine) return
+  let current = true
+  onCleanup(() => { current = false })
+  if (props.engine === 'stable_audio3' && (selection.target === 'small-music' || selection.target === 'medium') && variant.value !== selection.target) {
+    variant.value = selection.target
+    await nextTick()
+    if (!alive || !current) return
+  }
+  adapter.value = selection.selection
+  pendingMusicAdapter.value = null
+}, { immediate: true })
 onMounted(() => { void load() })
 onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.stop() })
 </script>
@@ -116,7 +131,8 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
     <header class="space-y-2 rounded-xl border border-accent1/30 bg-accent1/5 p-5">
       <div class="flex flex-wrap items-center gap-3"><h2 class="text-lg font-semibold text-text">{{ t(`localMusic.engines.${engine}`) }}</h2><span class="rounded-full border border-accent1/30 px-2 py-1 text-xs text-accent2">{{ t('localMusic.experimental') }}</span></div>
       <p class="text-sm text-text-dim">{{ t('localMusic.intro') }}</p>
-      <p v-if="engineStatus" class="text-sm text-text-dim">{{ t(`localMusic.${readinessKey}`) }}<span v-if="ready"> · {{ engineStatus.runtime }}</span></p>
+      <p v-if="engineStatus" class="text-sm text-text-dim">{{ t(`localMusic.${readinessKey}`) }}<span v-if="ready"> · {{ heartAdapter ? t('localMusic.heartAdapterRuntime') : engineStatus.runtime }}</span></p>
+      <RouterLink v-if="heartAdapter && !ready" to="/music/lora/heartmula" class="inline-flex min-h-11 items-center text-sm text-accent2 underline">{{ t('musicLora.prepare.review') }}</RouterLink>
       <div class="flex flex-wrap items-center gap-3"><RouterLink :to="`/settings#module-${engine}`" class="inline-flex min-h-11 items-center text-sm text-accent2 underline focus-visible:outline-2 focus-visible:outline-accent2">{{ t('localMusic.setup') }}</RouterLink><button type="button" class="music-button" :disabled="busy" @click="load">{{ t('localMusic.refresh') }}</button></div>
     </header>
     <p v-if="busy" role="status" class="text-sm text-text-dim">{{ t('localMusic.working') }}</p>
@@ -135,7 +151,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
         <label class="music-label">{{ t('localMusic.seed') }}<input v-model.number="seed" name="seed" type="number" min="0" max="2147483647" step="1" required class="music-input" :disabled="busy" /></label>
       </div>
       <template v-if="engine === 'stable_audio3'"><label class="music-label">{{ t('localMusic.variant') }}<select v-model="variant" name="variant" class="music-input" :disabled="busy" aria-describedby="local-music-variant-hint"><option value="small-music">{{ t('localMusic.small') }}</option><option value="medium">{{ t('localMusic.medium') }}</option></select></label><p id="local-music-variant-hint" class="text-xs text-text-dim">{{ t('localMusic.variantHint') }}</p></template>
-      <div v-if="engine === 'stable_audio3'" class="space-y-2"><MusicAdapterSelect v-model="adapter" engine="stable_audio3" :target="variant" :disabled="busy" @validity="adapterValid = $event" /><RouterLink to="/music/lora" class="inline-flex min-h-11 items-center text-xs text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.manage') }}</RouterLink></div>
+      <div class="space-y-2"><MusicAdapterSelect v-model="adapter" :engine="engine" :target="engine === 'heartmula' ? 'heartmula-3b' : variant" :disabled="busy" @validity="adapterValid = $event" /><RouterLink to="/music/lora" class="inline-flex min-h-11 items-center text-xs text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.manage') }}</RouterLink></div>
       <p id="local-music-duration-hint" class="text-xs text-text-dim">{{ t('localMusic.durationHint', { min: minDuration, max: maxDuration }) }}</p>
       <button type="submit" class="music-button accent-gradient text-white" :disabled="busy || !valid">{{ t('localMusic.generate') }}</button>
       <p v-if="active" class="text-xs text-text-dim">{{ t('localMusic.ongoing') }}</p>

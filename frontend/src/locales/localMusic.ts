@@ -3,6 +3,7 @@ export const localMusicEn = {
   intro: 'Generate on this computer. Completed audio is saved by the backend and survives navigation or closing this tab.',
   setup: 'Open engine setup in Settings', refresh: 'Refresh setup and history', refreshJobs: 'Refresh history',
   ready: 'Engine and model weights are available', missingEngine: 'Engine runtime is not installed', missingWeights: 'Model weights are missing', unsupported: 'This engine is not supported on the current platform',
+  heartAdapterRuntime: 'Corrected HeartMuLa PyTorch adapter runtime', missingAdapterRuntime: 'Prepare the HeartMuLa training runtime to generate with this adapter.',
   missingSelectedWeights: 'Model weights for the selected model are missing. Open engine setup in Settings.', busy: 'Another generation or setup operation is running. Wait for it to finish or cancel it before trying again.',
   loadFailed: 'Could not refresh local music. Check engine setup and refresh history.',
   actionFailed: 'Could not confirm the generation action. Refresh history before trying again.',

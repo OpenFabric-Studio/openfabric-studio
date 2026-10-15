@@ -22,4 +22,6 @@ export const loraRecoveryEn = {
   reuseHint: 'Reuse is allowed only for tensors prepared from the same saved dataset, base model and preprocessing settings.',
   reuseMismatch: 'Saved tensors do not match this dataset or model. Choose a new output folder and preprocess again.',
   trainingOutputExists: 'This output folder already contains a run. Choose a new folder to preserve its checkpoints.',
+  firstUpdate: 'Waiting for the first completed training step. The engine may be preparing data or running its first forward/backward passes; the current phase appears below.',
+  tensorboardPending: 'TensorBoard metrics appear after the first optimizer update.',
 }

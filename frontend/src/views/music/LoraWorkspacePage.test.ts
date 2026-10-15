@@ -11,10 +11,12 @@ import type { StableLoraTrainingJob } from '../../api/generated'
 const aceUnmounted = vi.hoisted(() => vi.fn())
 vi.mock('./MusicPage.vue', () => ({ default: defineComponent({ render: () => h(RouterView) }) }))
 vi.mock('../ace-step/LoraTrainingPage.vue', () => ({ default: defineComponent({ setup() { onBeforeUnmount(aceUnmounted); return () => h('h2', 'ACE training controls') } }) }))
+vi.mock('./ModelLoraTraining.vue', () => ({ default: { template: '<section data-model-training></section>' } }))
 vi.mock('../../api/musicLora', async original => ({ ...await original<typeof import('../../api/musicLora')>(), musicLoraCapabilities: vi.fn(), listMusicAdapters: vi.fn() }))
+vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(async () => []) }))
 vi.mock('../../api/stableLora', () => ({ stableLoraStatus: vi.fn().mockResolvedValue({ supported: false, installed: false }), listStableLora: vi.fn().mockResolvedValue({ jobs: [], history_incomplete: false }), cancelStableLora: vi.fn() }))
 let app: App | undefined
-async function settle() { for (let n = 0; n < 12; n++) await nextTick(); await new Promise<void>(resolve => setTimeout(resolve, 0)); await nextTick() }
+async function settle() { for (let n = 0; n < 12; n++) await nextTick(); if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0); else await new Promise<void>(resolve => setTimeout(resolve, 0)); await nextTick() }
 async function mount(path = '/music/lora') {
   const router = createRouter({ history: createMemoryHistory(), routes: appRoutes })
   await router.push(path); await router.isReady()
@@ -45,8 +47,14 @@ it('moves between routed tabs with arrow keys and preserves the visited ACE work
   const { node, router } = await mount('/music/lora/ace-step')
   expect(node.textContent).toContain('ACE training controls')
   const ace = node.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+  const navigated = new Promise<void>(resolve => {
+    const stop = router.afterEach(to => {
+      if (to.path === '/music/lora/stable-audio3') { stop(); resolve() }
+    })
+  })
   ace?.focus(); ace?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })); await settle()
-  await vi.waitFor(() => expect(router.currentRoute.value.path).toBe('/music/lora/stable-audio3')); await settle()
+  await navigated; await settle()
+  expect(router.currentRoute.value.path).toBe('/music/lora/stable-audio3')
   expect(document.activeElement?.getAttribute('aria-selected')).toBe('true')
   expect(aceUnmounted).not.toHaveBeenCalled()
   await router.push('/music/lora/ace-step'); await settle()
@@ -65,15 +73,12 @@ it('preserves the legacy ACE training bookmark, query and anchor', async () => {
 
 
 it('observes an active Stable Audio job while another model tab is open', async () => {
+  vi.useFakeTimers()
   const request = { name: 'Evening piano', variant: 'small-music', samples: [{ track_id: 42, caption: 'Solo piano' }], max_steps: 1000, rank: 16, learning_rate: 0.0001, seed: 42 } as const
   const job: StableLoraTrainingJob = { id: 'a'.repeat(32), status: 'running', stage: 'training', created_at: 'now', request: { ...request, samples: [...request.samples] }, adapter: null, error_code: null }
   vi.mocked(training.listStableLora).mockResolvedValue({ jobs: [job], history_incomplete: false })
   const { node, router } = await mount('/music/lora/stable-audio3')
   expect(node.textContent).toContain('Evening piano')
-  vi.useFakeTimers()
-  // Restart observation on the fake clock through the existing explicit refresh action.
-  const refresh = [...node.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Refresh')
-  refresh?.click(); for (let n = 0; n < 12; n++) await nextTick()
   await router.push('/music/lora/heartmula'); for (let n = 0; n < 12; n++) await nextTick()
   const before = vi.mocked(training.listStableLora).mock.calls.length
   await vi.advanceTimersByTimeAsync(2500)

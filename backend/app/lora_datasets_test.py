@@ -43,6 +43,17 @@ class DatasetLibraryTests(unittest.TestCase):
         self.assertEqual(library.list_datasets().datasets[0].id, entry.id)
         self.assertEqual(path.read_bytes(), original)
 
+    def test_saved_snapshot_reads_without_native_builder_and_checks_revision(self) -> None:
+        path = self.legacy()
+        original = path.read_bytes()
+        entry = library.list_datasets().datasets[0]
+        with patch.object(library, 'load_dataset', side_effect=AssertionError('native builder must remain untouched')):
+            snapshot = library.read_saved_dataset(entry.id, entry.revision)
+        self.assertEqual(snapshot.samples[0].caption, 'carefully edited')
+        self.assertEqual(path.read_bytes(), original)
+        with self.assertRaises(library.LoraDatasetError):
+            library.read_saved_dataset(entry.id, entry.revision + 1)
+
     def test_rename_revision_and_trash_restore_never_move_originals(self) -> None:
         path = self.legacy()
         original = path.read_bytes()

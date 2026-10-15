@@ -216,6 +216,8 @@ def _open_db() -> sqlite3.Connection:
             migrate_local_music(_db)
             from .stable_lora import migrate as migrate_stable_lora
             migrate_stable_lora(_db)
+            from .music_training import migrate as migrate_music_training
+            migrate_music_training(_db)
         except BaseException:
             # Do not retain a partly initialized connection after a migration
             # interruption. Additive migrations are safe to retry on next open.

@@ -7,10 +7,11 @@ controls, and save completed WAVs into the library. Reloading Music does not
 abandon an active job. Supported generation is new audio from a prompt; HeartMuLa
 also accepts lyrics. Stable Audio 3's app integration is instrumental only.
 
-These are source integrations verified with mocked model boundaries. No real
-inference, quality, speed or memory benchmark is established by those tests.
-Installed dependencies and present files are reported separately; neither is
-evidence of successful audio generation.
+These integrations remain experimental. Short synthetic train/load/preview runs
+have passed on this M4 Max Mac for Stable Small Music, HeartMuLa and YuE2
+acoustic adapters. This establishes the tested pipeline, not musical quality or
+performance on another machine. See [training evidence](music-lora-training-proof.md).
+Installed dependencies and present files are reported separately from execution.
 
 ## Music generation queue
 
@@ -45,7 +46,8 @@ Concurrent controls use revisions, so stale requests return a conflict.
 
 YuE AR/NAR and Stable adapters use the managed adapter registry. The queue uses
 the ACE base model and explicitly clears any native session adapter; custom ACE
-adapters remain in Advanced generators. HeartMuLa has no supported adapter API.
+adapters remain in Advanced generators. HeartMuLa adapters are available in its
+advanced generator through the separate corrected PyTorch runtime.
 Direct generators, advanced reference/conversion workflows, cloud music and
 training remain available through their existing routes.
 
@@ -57,20 +59,55 @@ that an unseen model fits memory or produces usable music.
 
 ## Source and dependency setup
 
+**Settings → Setup & modules → Automatic setup** performs music installation,
+required downloads and supported conversions as one saved job. ACE-Step reuses
+the configured model selection; automatic downloads currently cover Turbo or XL
+SFT with the 1.7B or 4B language model. Other custom selections are preserved and
+reported as requiring a reviewed model manifest. YuE setup reuses existing native
+files or downloads missing pinned packages. Existing model files are never
+replaced to make a setup pass. A completed setup means its components passed the
+reported checks; it does not claim an inference benchmark or audible quality.
+
+Installed features show their status and cannot be selected for ordinary setup.
+Missing required music files keep the feature marked Setup incomplete so setup
+can finish them while reusing a verified environment. Existing dependencies are
+reused. For supported app-managed Python engines, **Reinstall dependencies** is a
+separate explicit choice reviewed before starting: it replaces isolated packages
+and preserves source, models, datasets, checkpoints and configuration. External
+checkouts and system/native tools cannot be reinstalled through this action.
+An interrupted reinstall leaves environment verification incomplete; retry keeps
+the unfinished reinstall intent and reuses engines that already completed.
+
+Setup activity keeps the active or most recently updated run visible, with older
+attempts under Previous setups. A failed step shows its recovery action;
+Technical details contains the error code and saved phase history. The installer
+output time reflects actual process output, not an estimated percentage. Older
+jobs may have no saved phase history. Retry setup rechecks the reviewed scope and
+reuses verified downloads and completed HeartMuLa conversion components. A
+changed download plan requires a new review; an unverified worker blocks retry
+until its process is confirmed stopped.
+
 Open **Settings → Setup & modules** and select HeartMuLa or Stable Audio 3, or run
 the matching wrapper from the repository root:
 
 ```sh
-./setup_heartmula.sh
-./setup_stable_audio3.sh
+./setup_heartmula.sh --download-models
+./setup_stable_audio3.sh --download-models
 ```
 
 Managed setup needs Git and uv. It installs source and dependencies into each
-checkout's `.venv` using Python 3.11. It **does not download weights**, including
-when the general model-download checkbox is selected. It does not run upstream
-bootstrap or web UI scripts. Existing external or modified installations are
-preserved. For an external checkout, configure its path in `backend/.env`, restart
-the backend, then review its environment through Settings:
+checkout's `.venv` using Python 3.11. Automatic setup includes required model files
+by default; review download sizes, disk allowance and licence declarations before
+starting. Customize allows a dependency-only install. CLI wrappers require
+`--download-models` explicitly. Setup downloads pinned public artifacts with
+SHA256 and size checks, resumes interrupted transfers, converts HeartMuLa models
+for MLX, and installs Stable Audio's Small Music bundle. A complete existing Small
+Music or Medium bundle is reused. Conflicting files stop setup instead of being
+overwritten.
+
+For an external checkout, configure its path in `backend/.env`, restart the
+backend, then run Automatic setup to check its environment and complete missing
+model files without replacing its source:
 
 ```dotenv
 OPENFABRIC_HEARTMULA_DIR=/absolute/path/heartlib-mlx
@@ -87,7 +124,9 @@ use the same catalog, which reports these engines unsupported on Windows.
 
 ## HeartMuLa local weights
 
-Choose the model downloads explicitly. The reviewed public artifacts are
+Automatic setup downloads and converts these files when required models are
+included. The layout and conversion commands below also support operator-managed
+installations. The reviewed public artifacts are
 [HeartMuLa-oss-3B](https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B/tree/d12ac79c6b3387d5c9eee456323495d8f08bb09d),
 [HeartCodec-oss-20260123](https://huggingface.co/HeartMuLa/HeartCodec-oss-20260123/tree/f889dab0532cfa4bf459f2a3367eb6d346b8eeda),
 and `tokenizer.json` from
@@ -125,7 +164,7 @@ The app offers 5–240 seconds; use a short test first.
 
 ## Stable Audio 3 local weights
 
-Download the selected files explicitly from the reviewed
+Automatic setup installs the Small Music files from the reviewed
 [optimized model repository](https://huggingface.co/stabilityai/stable-audio-3-optimized/tree/08b17423649b5714b22eab20f96bf00751f2358a/MLX).
 Place the files directly in
 `OPENFABRIC_STABLE_AUDIO3_DIR/optimized/mlx/models/mlx/`:
@@ -137,10 +176,10 @@ Place the files directly in
 | Medium | `dit_medium_f16.npz`, `same_l_decoder_f32.npz` |
 
 Text-to-music generation does not require the encoder bundles. Small Music
-accepts 5–120 seconds and Medium 5–380 seconds in the app. The official upstream
-wrapper can automatically download missing files; OpenFabric instead checks the
-local bundle and runs the CLI with Hugging Face offline mode enabled. Missing
-models produce a setup error.
+accepts 5–120 seconds and Medium 5–380 seconds in the app. Generation runs with Hugging
+Face offline mode enabled; downloads happen in the saved setup job. Medium remains
+an explicit operator choice; setup reuses a complete local Medium bundle without
+also downloading Small Music. Missing models produce a setup error.
 
 Source is MIT; music/codec weights use the
 [Stability AI Community License](https://stability.ai/license). The model publisher
@@ -159,83 +198,106 @@ and caches outside Git.
 
 ## Music LoRA adapters and training
 
-Open **Tools → LoRA training** to reach `/music/lora`. It remains available when
-ACE-Step is stopped. Capabilities refer to the selected runtimes:
+Open **Tools → LoRA training** (`/music/lora`), then choose a model tab. Each
+adapter belongs to one model and base; it cannot be exchanged between engines.
 
 | Engine | Loading | Training |
 | --- | --- | --- |
 | ACE-Step | Existing native adapter controls | Existing dataset/training/export workflow |
-| Stable Audio 3 | Native SA3 safetensors, matching Small Music or Medium | Native MLX fresh runs on Apple Silicon |
-| YuE2-3B | Separate unfused AR and NAR safetensors | No trainer in the selected audio.cpp runtime |
-| HeartMuLa | No adapter API in the selected MLX port | No trainer in the selected MLX port |
+| Stable Audio 3 | Native safetensors for matching Small Music or Medium | Official MLX fresh runs on Apple Silicon |
+| YuE2-3B | Separate native AR and NAR safetensors | Experimental compact acoustic/NAR training on Mac; AR composition stays frozen |
+| HeartMuLa-3B | Reviewed native OpenFabric safetensors through the corrected PyTorch runtime | Experimental Mac training with official HeartCodec tokens |
 
-ACE-Step's installed native handler limits adapter strength to 0–1. The generator
-uses that range and shows a notice when an older preset requests more than 1;
-the original saved preset remains unchanged. Native operation failures are
-reported even when the engine returns HTTP 200 with a failure envelope.
+### Prepare and train on this Mac
 
-The managed adapter library imports `.safetensors` files up to 512 MiB. Stable
-imports require native `lora_config` metadata with `base_model` set to
-`sa3-sm-music` or `sa3-medium`, paired tensors and compatible layer dimensions.
-PEFT files requiring a companion `adapter_config.json` are not imported by this
-integration. YuE accepts the unfused 3B AR/NAR naming and shapes used by
-[audio.cpp v0.8.1](https://github.com/0xShug0/audio.cpp/blob/f2b4937306daa25f5c78520f3c626ed31495a37a/src/models/yue2/lora.cpp),
-not ComfyUI fused weights. Pick the engine and target during import, then select
-the adapter and strength in the corresponding generator. Export returns a copy
-of the original checkpoint. Adapters retain their own licensing terms.
+Use **Prepare training** in the selected tab, review its downloads and model
+terms, then start the saved setup job. It installs pinned, isolated training
+sources and dependencies and downloads missing model files. Verified files are
+reused; generation environments, recordings and existing checkpoints are
+preserved. Training starts offline only after preparation succeeds.
 
-Adapter files are copied into private UUID directories under the library's
-`music-lora/` folder. Runtime requests use managed IDs; paths are constrained and
-checksums verified. Saved tracks record adapter identities, names, checksums and
-strengths. YuE adapter loading requires the pinned v0.8.1 runtime. The older custom native
-build is rejected for adapters and continues to support base generation. Turning
-YuE adapters off clears both modern and legacy resident session adapter options. YuE strength scales its A/B deltas; any NAR full projection replacements
-remain at full strength for a nonzero setting, and zero disables the adapter.
+Stable Small Music needs about 1.13 GB of additional base/encoder weights when
+its generation conditioner is already present. Medium requires its own matching
+base and encoder. HeartMuLa preparation reuses the original 3B model, decoder and
+tokenizer where available, and adds the official encoder. YuE2 preparation uses
+the reviewed 7.80 GB BF16 training checkpoint; a quantized generation GGUF cannot
+replace it. The review reports actual missing bytes separately from unknown
+Python dependency download sizes. Model terms remain separate from source terms.
 
-### Stable training prerequisites
+Name the adapter, add recordings from the library or a saved labeled dataset,
+and review each description. Saved dataset references bind its revision; changing
+or deleting it before the worker takes a snapshot stops the job safely. Existing
+ACE tensors are not reused by another model: each prepares its own audio/tokens.
+Original recordings remain unchanged. Advanced settings are collapsed.
 
-Training needs the following additional files under the same
-`optimized/mlx/models/mlx/` directory. Inference ARC weights cannot substitute
-for the rectified-flow base checkpoint:
+Stable uses private 44.1 kHz stereo copies of at most the first 600 seconds,
+plain LoRA, batch size one and gradient checkpointing. Its text/seconds
+conditioners remain frozen. HeartMuLa and YuE2 use the first selected 6–30 seconds
+(default 12). HeartMuLa supports an instrumental checkbox and lyrics that match
+the selected clip. A vocal recording longer than the selected excerpt with
+nonempty lyrics must be trimmed first; silently pairing full-song lyrics with a
+short clip would train the wrong thing. YuE2 trains acoustic style, without lyric
+or AR training, semantic auxiliaries or acoustic-head replacement.
 
-| Selection | Training files |
-| --- | --- |
-| Both variants | `t5gemma_f16.npz` |
-| Small Music | `dit_sm-music-base_f16.npz`, `same_s_encoder_f32.npz` |
-| Medium | `dit_medium-base_f16.npz`, `same_l_encoder_f32.npz` |
+Progress reports actual preparation/encoding/loading/training/publication stages,
+completed steps, loss, elapsed time and measured time per step for all three
+trainers. Training ETA appears after enough step measurements; it excludes
+loading, encoding and saving and is withheld while disconnected or measurements
+are stale. Finished runs retain their recorded duration and final measurements.
+**Run details** shows the submitted settings; the info icon beside **Train**
+explains every option. An already running older backend keeps its job running:
+elapsed time is available immediately, and detailed reporting becomes available
+after restarting the app once that run has finished.
 
-Obtain the matching base/encoder NPZs from the optimized model publisher. The
-pinned upstream also supplies `scripts/export_base_npz.py` to convert a reviewed
-base repository containing `model.safetensors` and `model_config.json`:
+Reloading or a network outage reattaches to the backend job. Cancellation drains
+its process tree. A completed,
+validated checkpoint is registered automatically; **Preview with this adapter**
+opens the matching generator. **Compare base model** opens it with adapters
+off; HeartMuLa keeps its adapter selected at strength zero so the comparison uses
+the same corrected PyTorch base runtime. Generation still requires an explicit action. Compare the same prompt and
+seed, and keep evaluation recordings outside the training set.
 
-```sh
-# From OPENFABRIC_STABLE_AUDIO3_DIR/optimized/mlx, using the engine's Python:
-../../.venv/bin/python scripts/export_base_npz.py \
-  --base-dir /absolute/path/to/stable-audio-3-sm-music-base \
-  --output models/mlx/dit_sm-music-base_f16.npz
-```
+Training snapshots/checkpoints remain under `stable-lora-training/` or
+`music-lora-training/` in the library. New runs consume disk space. Completed
+publication can recover after an interrupted save without retraining. Engine or
+app crashes do **not** resume optimizer/random state: starting again creates a
+separate run. Do not mistake reconnecting to a live job for full-state resume.
 
-See the pinned [MLX training workflow](https://github.com/Stability-AI/stable-audio-3/blob/77e0398c26f7d22d801ec1bb036307e8b231f741/optimized/mlx/README.md).
-OpenFabric checks files first and executes offline; it does not download them
-when training starts. Generation with the completed adapter still requires its
-usual inference bundle.
+### Optional NVIDIA fallback
 
-Choose or upload tracks through the library picker, give each a caption, choose
-the base variant, name the adapter and set steps, rank, learning rate and seed.
-The app makes private 44.1 kHz stereo copies, using at most the first 600 seconds
-of each track, and runs the real SAME encoder before native training. It trains
-plain LoRA with batch size one and gradient checkpointing; the text/seconds
-conditioners remain frozen. A completed, validated final-step checkpoint is
-registered automatically and can be exported or selected for generation.
+HeartMuLa and YuE2 tabs offer **Use an NVIDIA machine instead**. After reviewing
+the same recordings/settings, create and download a portable ZIP. It contains
+original audio, descriptions, settings, pinned worker code/dependencies, model
+identities and notices. It does not include weights, upload files, connect to a
+remote machine or spend money. Cancelled preparation removes private staging and
+partial ZIPs; completed archives remain downloadable after reload.
 
-Jobs continue after navigation and expose preparation, encoding, training and
-publication stages. Cancel stops the owned process tree. Source tracks are never
-modified. Training copies, metadata, latents and checkpoints remain under
-`stable-lora-training/` for recovery and inspection, so successive runs consume
-disk space. Interrupted training does not restart. No resume option is exposed:
-upstream adapter reload does not restore the complete optimizer and random state.
-Completed publication can recover from an interrupted save without retraining.
+On the NVIDIA machine, read the included README and run `python bootstrap.py
+--check` before `python bootstrap.py`. The latter prepares pinned dependencies,
+downloads hash-verified model files and starts a fresh CUDA run. Import the returned
+native `adapter.safetensors` through the matching model tab. **CUDA execution has
+not been verified**; the package is an optional experimental fallback, not a
+claim that every NVIDIA card fits these models.
 
-These integration and lifecycle checks use synthetic checkpoints and mocked model
-boundaries. Adapter inference, training speed, memory use and audible quality
-still require tests with real weights on the intended machine.
+### Adapter library and compatibility
+
+The managed library imports `.safetensors` up to 512 MiB into new private UUID
+folders. It validates tensor pairs, dimensions, finite values, metadata, target
+and base identity. Generation uses managed IDs and verifies checksums. Export
+returns a copy, and saved audio records the adapter identity and strength.
+
+Stable requires native `lora_config` metadata with `base_model` set to
+`sa3-sm-music` or `sa3-medium`. YuE accepts unfused 3B AR/NAR names used by
+[audio.cpp v0.8.1](https://github.com/0xShug0/audio.cpp/blob/f2b4937306daa25f5c78520f3c626ed31495a37a/src/models/yue2/lora.cpp);
+the integrated trainer converts its fused NAR factors with numerical delta checks.
+HeartMuLa imports the reviewed complete 31-layer projection layout with embedded
+base/tokenizer identities; generic PEFT plus a companion JSON is unsupported.
+See [HeartMuLa numerical evidence](heartmula-training-proof.md) for why adapters
+use a separate corrected runtime rather than the existing MLX port.
+
+ACE-Step strength is 0–1, matching the native handler. Other managed strengths
+are 0–2. Turning YuE adapters off clears modern and legacy resident options. NAR
+full projection replacements in third-party imports remain full-strength when
+nonzero; the integrated trainer produces plain LoRA factors only. Adapters and
+recordings retain their own terms. Short synthetic tests establish execution;
+use held-out listening comparisons before trusting a trained style.

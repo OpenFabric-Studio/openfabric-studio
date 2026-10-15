@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import GenerateForm from './GenerateForm.vue'
 import { i18n, setLocale } from '../../i18n'
 import * as voices from '../../api/voices'
+import * as aceApi from '../../api/aceStep'
 import type { ModelInventory } from '../../api/aceStep'
 import { voiceProfile } from '../voice/voiceTestFixtures'
 
@@ -18,12 +19,14 @@ const actions = vi.hoisted(() => {
 const initialInventory = actions.inventory
 vi.mock('../../stores/aceStep', () => ({ useAceStepStore: () => actions }))
 vi.mock('../../api/voices', async (original) => ({ ...await original<typeof import('../../api/voices')>(), listVoices: vi.fn(), getActiveVoiceId: vi.fn() }))
+vi.mock('../../api/aceStep', async original => ({ ...await original<typeof import('../../api/aceStep')>(), loraStatus: vi.fn() }))
 
 let app: App | undefined
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); localStorage.clear(); setLocale('en')
   vi.mocked(voices.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true }])
   vi.mocked(voices.getActiveVoiceId).mockReturnValue(voiceProfile().id)
+  vi.mocked(aceApi.loraStatus).mockResolvedValue({ lora_loaded: false, use_lora: false, lora_scale: 1, active_adapter: null, adapters: [] })
   actions.submit.mockResolvedValue(undefined); actions.submitVoiceReplacement.mockResolvedValue(undefined)
   actions.inventory = initialInventory; actions.inventoryLoading = false; actions.inventoryError = ''
 })

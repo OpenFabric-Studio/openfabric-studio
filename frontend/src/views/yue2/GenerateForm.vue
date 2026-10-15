@@ -15,7 +15,7 @@ import { setActiveVoiceId } from '../../api/voices'
 import { parseMusicAdapterSelection } from '../../api/contracts'
 import { ApiError } from '../../api/http'
 import type { MusicAdapterSelection, YueGenerationSettings } from '../../api/contracts'
-import { pendingYueDraft, pendingYueReference } from '../../composables/generationDrafts'
+import { pendingYueDraft, pendingYueReference, pendingMusicAdapter } from '../../composables/generationDrafts'
 import { samplingSettings, finiteNumber, SAMPLING_KEYS, type SamplingKey, type SamplingSettings } from '../../composables/generationPresets'
 
 const props = withDefaults(defineProps<{ generationAvailable?: boolean }>(), { generationAvailable: true })
@@ -102,6 +102,13 @@ watch(pendingYueReference, edit => {
   if (edit.lyrics !== undefined) lyrics.value = edit.lyrics
   if (edit.abc !== undefined) { abc.value = edit.abc; if (cot.value === 'off') cot.value = 'melody' }
   referenceImportId.value = edit.referenceImportId ?? null; referenceNotice.value = false; pendingYueReference.value = null
+}, { immediate: true })
+
+watch(pendingMusicAdapter, selection => {
+  if (!selection || selection.engine !== 'yue2') return
+  arAdapter.value = null
+  narAdapter.value = selection.target === 'nar' ? selection.selection : null
+  pendingMusicAdapter.value = null
 }, { immediate: true })
 
 const submitting = ref(false)

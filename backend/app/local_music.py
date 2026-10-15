@@ -190,6 +190,13 @@ def _clean_pending(identifier: str, *, keep_output: bool = False) -> None:
 
 
 def _require_ready(request: LocalMusicRequest) -> None:
+    if request.engine == 'heartmula' and request.adapter is not None:
+        from .heart_lora_runtime import status as heart_status
+        ready = heart_status()
+        if not ready.supported or not ready.installed or not ready.weights_ready:
+            raise LocalMusicError('music_training_environment_missing', 409)
+        music_lora.resolve(request.adapter, engine='heartmula', target='heartmula-3b')
+        return
     status = next((item for item in engine_status().engines if item.id == request.engine), None)
     if status is None or not status.supported:
         raise LocalMusicError('local_music_runtime_unsupported', 409)

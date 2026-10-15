@@ -75,11 +75,17 @@ def environment_fingerprint(environment: ModuleEnvironment, identifier: ModuleId
             if not site.is_dir():
                 return None
             for child in sorted(site.iterdir()):
+                if child.name == '__pycache__' or child.suffix == '.pyc':
+                    continue
                 count += 1
                 if count > 5000:
                     return None
-                stat = child.stat()
-                digest.update(f'{child.name}:{stat.st_size}:{stat.st_mtime_ns}'.encode())
+                if child.is_dir():
+                    # Imports create bytecode caches and change package directory stamps.
+                    digest.update(f'{child.name}:directory'.encode())
+                else:
+                    stat = child.stat()
+                    digest.update(f'{child.name}:{stat.st_size}:{stat.st_mtime_ns}'.encode())
                 if child.name.endswith('.dist-info') and child.is_dir():
                     for name in ('METADATA', 'RECORD', 'INSTALLER', 'direct_url.json'):
                         metadata = child / name

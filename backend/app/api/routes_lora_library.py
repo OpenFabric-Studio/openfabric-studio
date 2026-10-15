@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 import logging
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
@@ -79,6 +79,11 @@ async def save_workspace(body: LoraWorkspace) -> LoraWorkspace:
         if previous.selected_dataset_id != body.selected_dataset_id:
             await library.require_native_idle()
         return library.save_workspace(body)
+
+
+@router.get('/{identifier}/saved', response_model=LoraDatasetOperationResponse)
+async def saved_dataset(identifier: str, revision: int = Query(ge=0, le=9007199254740991)) -> LoraDatasetOperationResponse:
+    return library.read_saved_dataset(identifier, revision)
 
 
 @router.post('/{identifier}/rename', response_model=LoraDatasetEntry)

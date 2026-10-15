@@ -189,7 +189,7 @@ function copyParamsToForm() {
         <FavoriteTrackButton v-if="job.dbId != null" :track-id="job.dbId" :label="job.title || t('yueTrack.noStyle')" />
         <StatusBadge :status="shownStatus" :label="voiceRunning && shownStatus !== 'queued' ? t('voiceClone.applyingBadge') : undefined" />
         <button v-if="!voiceRunning && (job.status === 'queued' || job.status === 'running' || job.status === 'stopping' || job.errorCode === 'engine_recovery_required')" type="button" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :disabled="actionPending" :aria-label="t('aceJob.cancel')" :title="t('aceJob.cancel')" @click="cancel">⏹</button>
-        <button v-else type="button" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :disabled="actionPending" :aria-label="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :title="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" @blur="disarmDelete" @click="remove"><span v-if="deleteArmed">{{ t('upstreamLibrary.confirmDelete') }}</span><span v-else aria-hidden="true">✕</span></button>
+        <button v-else type="button" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :disabled="actionPending" :aria-label="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :title="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :aria-describedby="deleteArmed ? `yue-delete-warning-${job.id}` : undefined" @blur="disarmDelete" @click="remove"><span v-if="deleteArmed">{{ t('upstreamLibrary.confirmDelete') }}</span><span v-else aria-hidden="true">✕</span></button>
       </div>
     </div>
 
@@ -208,6 +208,7 @@ function copyParamsToForm() {
     <div v-else-if="job.status === 'failed'" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ job.error }}</div>
     <div v-else-if="job.status === 'cancelled'" class="rounded-lg bg-panel-2 p-2 text-xs text-text-dim">{{ t('aceJob.cancelled') }}</div>
 
+    <p v-if="deleteArmed" :id="`yue-delete-warning-${job.id}`" data-delete-warning role="alert" class="text-xs text-status-failed">{{ t('common.trackFileDeletionWarning', { name: job.title || t('yueTrack.noStyle') }) }}</p>
     <p v-if="actionError" role="alert" class="text-xs text-status-failed">{{ actionError }}</p>
     <div v-if="job.status === 'done' && (job.audioUrl || job.dbId != null)" class="space-y-2">
       <p v-if="job.voiceApply === 'failed'" class="text-xs text-status-failed">{{ voiceErrorText(job.voiceErrorCode || '', job.voiceError || '') }}</p>
@@ -246,7 +247,7 @@ function copyParamsToForm() {
         {{ copied ? t('aceJob.copied') : t('aceJob.copyParams') }}
       </button>
       <button v-if="view === 'list' && !voiceRunning && (job.status === 'queued' || job.status === 'running' || job.status === 'stopping' || job.errorCode === 'engine_recovery_required')" type="button" class="text-xs text-text-dim hover:text-status-failed" @click="cancel">{{ t('aceJob.cancel') }}</button>
-      <button v-else-if="view === 'list'" type="button" class="text-xs text-text-dim hover:text-status-failed" @blur="disarmDelete" @click="remove">{{ t(deleteArmed ? 'upstreamLibrary.confirmDelete' : 'aceJob.delete') }}</button>
+      <button v-else-if="view === 'list'" type="button" class="text-xs text-text-dim hover:text-status-failed" :aria-describedby="deleteArmed ? `yue-delete-warning-${job.id}` : undefined" @blur="disarmDelete" @click="remove">{{ t(deleteArmed ? 'upstreamLibrary.confirmDelete' : 'aceJob.delete') }}</button>
       <button v-if="view === 'cards' && (job.lyrics || detailRows.length)" type="button" class="text-xs text-text-dim hover:underline" @click="showDetails = !showDetails">
         {{ showDetails ? t('aceJob.hideDetails') : t('aceJob.showDetails') }}
       </button>

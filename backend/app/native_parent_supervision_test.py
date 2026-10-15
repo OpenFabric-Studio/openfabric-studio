@@ -54,7 +54,8 @@ class NativeParentSupervisionTests(unittest.IsolatedAsyncioTestCase):
             script = root / 'engine.py'
             script.write_text("import subprocess,sys,time\nfrom pathlib import Path\n"
                               "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'])\n"
-                              "Path(sys.argv[1]).write_text(str(child.pid))\ntime.sleep(120)\n")
+                              "marker=Path(sys.argv[1]); partial=marker.with_suffix('.partial')\n"
+                              "partial.write_text(str(child.pid)); partial.replace(marker)\ntime.sleep(120)\n")
             process = ManagedProcess(ProcessSpec(name='fixture', cwd=root, cmd=[sys.executable, str(script), str(marker)], shutdown_timeout=1))
             with patch('app.orchestrator.process.LOG_DIR', root):
                 process.start()
@@ -79,7 +80,8 @@ class NativeParentSupervisionTests(unittest.IsolatedAsyncioTestCase):
             script = root / 'engine.py'
             script.write_text("import subprocess,sys\nfrom pathlib import Path\n"
                               "child=subprocess.Popen([sys.executable,'-c','import time;time.sleep(120)'])\n"
-                              "Path(sys.argv[1]).write_text(str(child.pid))\n")
+                              "marker=Path(sys.argv[1]); partial=marker.with_suffix('.partial')\n"
+                              "partial.write_text(str(child.pid)); partial.replace(marker)\n")
             process = ManagedProcess(ProcessSpec(name='fixture', cwd=root, cmd=[sys.executable, str(script), str(marker)], shutdown_timeout=1))
             with patch('app.orchestrator.process.LOG_DIR', root):
                 process.start()

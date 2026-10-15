@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm", "video_character_trainer.json")
 LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials",
                 "video_projects", "video_characters", "video_character_training", "providers",
-                "local-music", "music-lora", "stable-lora-training")
+                "local-music", "music-lora", "stable-lora-training", "music-lora-training")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
 _METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'),
                    Path('videos'), Path('video_projects'), Path('video_characters'), Path('video_character_training'),
                    Path('providers'), Path('video_character_trainer.json'), Path('local-music'),
-                   Path('music-lora'), Path('stable-lora-training'))
+                   Path('music-lora'), Path('stable-lora-training'), Path('music-lora-training'))
 _DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -58,6 +58,7 @@ _LAYOUT = (
     ("local-music", "localMusic"),
     ("music-lora", "musicAdapters"),
     ("stable-lora-training", "musicTraining"),
+    ("music-lora-training", "musicTrainingRuns"),
     ("models/seed-vc", "models"),
     ("logs", "logs"),
     ("aicollector.db", "database"),
@@ -240,7 +241,8 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                                   ('audiobook_sections', ('output_path', 'snapshot_json')),
                                   ('audiobook_workflows', ('payload',)),
                                   ('local_music_jobs', ('worker_json',)),
-                                  ('stable_lora_jobs', ('worker_json',))):
+                                  ('stable_lora_jobs', ('worker_json',)),
+                                  ('music_training_jobs', ('worker_json',))):
             if table not in tables:
                 continue
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}

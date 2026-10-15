@@ -39,6 +39,11 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
     async def test_internal_generation_snapshot_does_not_reach_native_engine(self) -> None:
         requests: list[JsonObject] = []
         async def engine(request: httpx.Request) -> httpx.Response:
+            if request.method == 'GET':
+                return httpx.Response(200, json={'code': 200, 'data': {
+                    'lora_loaded': False, 'use_lora': False, 'lora_scale': 1.0,
+                    'active_adapter': None, 'adapters': [],
+                }})
             requests.append(TypeAdapter(JsonObject).validate_json(await request.aread()))
             return httpx.Response(200, json={'code': 200, 'data': {'task_id': 'snapshot-job', 'status': 'queued', 'queue_position': 0}})
         client = httpx.AsyncClient(transport=httpx.MockTransport(engine))

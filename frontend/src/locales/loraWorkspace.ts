@@ -8,7 +8,7 @@ export const loraWorkspaceEn = {
   workflow: {
     dataset: { title: '1. Choose a focused dataset', body: 'Use recordings you have permission to train on. Choose clean, consistent examples of the sound you want. Remove mistakes, unrelated material and duplicates. Keep some examples aside for listening checks instead of training on everything.' },
     captions: { title: '2. Describe and review each recording', body: 'Captions tell the model what is audible: instruments, style, mood and vocals. Lyrics are the words being sung. ACE-Step can suggest labels, metadata and transcriptions; review these before training. A confident wrong caption is still a wrong caption.' },
-    preprocess: { title: '3. Prepare the training data', body: 'ACE-Step preprocessing encodes the reviewed dataset into training tensors. Stable Audio copies selected library tracks and encodes them inside its training job. Preparation takes time and storage; keep your source recordings and reviewed dataset.' },
+    preprocess: { title: '3. Prepare the training data', body: 'Each trainer encodes the reviewed recordings into its own format. Choose library tracks or a saved labeled dataset; tensors from another model cannot be reused. Preparation takes time and storage; keep your source recordings and reviewed dataset.' },
     train: { title: '4. Train a small first experiment', body: 'Start with the model defaults and a short run. Watch the recorded status and loss, then compare generated examples with and without the adapter using the same prompts and seed. A falling training loss alone does not prove the result sounds better.' },
     export: { title: '5. Keep and test a checkpoint', body: 'Export a successful adapter and load it with its matching base model. Keep the dataset and settings beside your experiment notes. Compare checkpoints on material held out from training before investing in a longer run.' },
   },
@@ -16,8 +16,8 @@ export const loraWorkspaceEn = {
   models: {
     ace_step: 'Dataset upload, caption review, optional auto-labeling, preprocessing, training and export use the existing ACE-Step workflow. Start its runtime explicitly when you are ready.',
     stable_audio3: 'Train a fresh native adapter from captioned library tracks on the supported Apple Silicon MLX runtime. Small Music and Medium need their matching training and encoder weights. Only the controls supported by this trainer are shown.',
-    yue2: 'This runtime supports compatible native AR and NAR adapter loading when available. It has no integrated LoRA trainer. Import an existing compatible adapter and select it in the YuE generator; training controls are unavailable.',
-    heartmula: 'The selected HeartMuLa runtime exposes no adapter loading API or LoRA trainer. There is no supported adapter import or training workflow in this app for this model.',
+    yue2: 'Experimental acoustic/NAR adapter training learns sound, production and timbre on the supported Apple Silicon setup; the composition planner stays unchanged. Compatible native AR and NAR adapters load in the YuE generator. An optional package prepares reviewed recordings and settings for a separate NVIDIA environment; CUDA training is untested.',
+    heartmula: 'Experimental training uses short recordings, reviewed captions and matching lyrics in a separate corrected PyTorch runtime. Finished adapters load in that runtime through the HeartMuLa generator. An optional package prepares recordings and settings for a separate NVIDIA environment; CUDA training is untested.',
   },
   controlsTitle: 'What the training controls mean',
   controlsIntro: 'These are explanations, not a promise that every model exposes every control. Use the controls available in the selected model tab.',

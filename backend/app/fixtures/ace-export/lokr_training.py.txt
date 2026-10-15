@@ -1,0 +1,105 @@
+"""LoKr training handlers for the training UI.
+
+Contains functions for starting LoKr training, listing available
+checkpoint epochs, and exporting trained LoKr weights.
+"""
+
+import os
+import re
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
+import gradio as gr
+from loguru import logger
+
+from acestep.training.path_safety import safe_path
+from acestep.ui.gradio.i18n import t
+from .training_utils import _format_duration, _training_loss_figure
+
+
+def export_lokr(
+    export_path: str,
+    lokr_output_dir: str,
+    selected_epoch: Optional[str] = None,
+) -> str:
+    """Export trained LoKr weights.
+
+    Returns:
+        Status message.
+    """
+    if not export_path or not export_path.strip():
+        return t("training.export_path_required")
+
+    try:
+        lokr_output_dir = safe_path(lokr_output_dir)
+        export_path = safe_path(export_path.strip())
+    except ValueError:
+        return "❌ Rejected unsafe path"
+
+    final_dir = os.path.join(lokr_output_dir, "final")
+    checkpoint_dir = os.path.join(lokr_output_dir, "checkpoints")
+    default_epoch_choice = t("training.latest_auto")
+
+    chosen_epoch = (selected_epoch or "").strip()
+    if not chosen_epoch:
+        chosen_epoch = default_epoch_choice
+
+    checkpoint_names: List[str] = []
+    if os.path.isdir(checkpoint_dir):
+        for d in os.listdir(checkpoint_dir):
+            if not d.startswith("epoch_"):
+                continue
+            try:
+                int(d.split("_")[1])
+            except Exception:
+                continue
+            checkpoint_names.append(d)
+        checkpoint_names.sort(key=lambda x: int(x.split("_")[1]))
+
+    explicit_epoch = chosen_epoch not in {
+        default_epoch_choice, "latest", "Latest", "auto", "Auto",
+    }
+    if explicit_epoch:
+        requested = chosen_epoch
+        if requested.isdigit():
+            requested = f"epoch_{requested}"
+        if requested not in checkpoint_names:
+            return t(
+                "training.lokr_selected_epoch_not_found",
+                chosen=chosen_epoch,
+                available=(", ".join(checkpoint_names) if checkpoint_names else "(none)"),
+            )
+        source_file = os.path.join(checkpoint_dir, requested, "lokr_weights.safetensors")
+        if not os.path.exists(source_file):
+            return t("training.lokr_no_weights_selected_epoch", epoch=requested)
+    elif os.path.exists(os.path.join(final_dir, "lokr_weights.safetensors")):
+        source_file = os.path.join(final_dir, "lokr_weights.safetensors")
+    elif checkpoint_names:
+        latest_checkpoint = checkpoint_names[-1]
+        source_file = os.path.join(
+            checkpoint_dir, latest_checkpoint, "lokr_weights.safetensors",
+        )
+        if not os.path.exists(source_file):
+            return t("training.lokr_no_weights_latest_checkpoint", checkpoint=latest_checkpoint)
+    else:
+        return t("training.lokr_no_trained_weights_found", path=lokr_output_dir)
+
+    try:
+        import shutil
+
+        if export_path.lower().endswith(".safetensors"):
+            os.makedirs(
+                os.path.dirname(export_path) if os.path.dirname(export_path) else ".",
+                exist_ok=True,
+            )
+            shutil.copy2(source_file, export_path)
+            return t("training.lokr_exported", path=export_path)
+
+        os.makedirs(export_path, exist_ok=True)
+        dst_file = os.path.join(export_path, "lokr_weights.safetensors")
+        shutil.copy2(source_file, dst_file)
+        return t("training.lokr_exported", path=dst_file)
+
+    except Exception as e:
+        logger.exception("LoKr export error")
+        return t("training.export_failed", error=str(e))

@@ -72,6 +72,9 @@ const request = computed<MusicQueuePreviewRequest | null>(() => {
 const canEnqueue = computed(() => !!request.value && !!preview.value?.can_enqueue && !previewLoading.value && !busy.value && snapshot.value !== null)
 function errorText(code: string | undefined, fallback = 'musicQueue.errors.action'): string {
   switch (code) {
+    case 'ace_lora_selection_mismatch':
+    case 'ace_lora_status_unavailable':
+    case 'ace_lora_model_inactive': return t(`aceGen.loraErrors.${code}`)
     case 'music_queue_revision_conflict': return t('musicQueue.errors.stale')
     case 'music_queue_preview_changed': return t('musicQueue.errors.planChanged')
     case 'music_queue_yue_lyrics_required': return t('musicQueue.errors.lyrics')

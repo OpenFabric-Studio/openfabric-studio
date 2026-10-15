@@ -70,13 +70,17 @@ class MusicLoraApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 503)
         self.assertNotIn('private', response.text)
 
-    async def test_capabilities_never_claim_unavailable_trainers(self) -> None:
-        response = await self.client.get('/api/music-lora/capabilities')
+    async def test_capabilities_identify_integrated_experimental_trainers(self) -> None:
+        with patch.object(music_lora, 'YUE2_LORA_AVAILABLE', True):
+            response = await self.client.get('/api/music-lora/capabilities')
         capabilities = {item['engine']: item for item in response.json()['engines']}
         self.assertTrue(capabilities['stable_audio3']['training'])
         self.assertTrue(capabilities['yue2']['loading'])
-        self.assertFalse(capabilities['yue2']['training'])
-        self.assertFalse(capabilities['heartmula']['loading'])
+        self.assertTrue(capabilities['yue2']['training'])
+        self.assertTrue(capabilities['heartmula']['loading'])
+        self.assertTrue(capabilities['heartmula']['training'])
+        self.assertEqual(capabilities['yue2']['reason'], 'experimental')
+        self.assertEqual(capabilities['heartmula']['reason'], 'experimental')
 
     async def test_upload_cancellation_drains_import_before_closing_input(self) -> None:
         started, released = threading.Event(), threading.Event()

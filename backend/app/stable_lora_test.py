@@ -27,6 +27,18 @@ def checkpoint_bytes() -> bytes:
 
 
 class StableLoraContractTests(unittest.TestCase):
+    def test_legacy_job_defaults_and_bounded_training_rate(self) -> None:
+        from app.stable_lora_contracts import StableLoraProgress, StableLoraTrainingJob
+        job = StableLoraTrainingJob.model_validate({'id': 'a' * 32, 'status': 'running', 'stage': 'training',
+            'created_at': '2026-10-15T00:00:00Z', 'request': {'name': 'Test', 'samples': [{'track_id': 1, 'caption': 'Jazz'}]}})
+        self.assertIsNone(job.started_at)
+        self.assertIsNone(job.finished_at)
+        self.assertEqual(job.progress.stage, 'training')
+        self.assertEqual(StableLoraProgress(stage='training', seconds_per_step=12.5).seconds_per_step, 12.5)
+        for value in (0, -1, float('inf'), float('nan'), True, 86401):
+            with self.subTest(value=value), self.assertRaises(ValidationError):
+                StableLoraProgress(stage='training', seconds_per_step=value)
+
     def test_training_bounds_and_duplicate_tracks_are_checked(self) -> None:
         body = {'name': 'Test', 'samples': [{'track_id': 1, 'caption': 'Jazz'}]}
         for change in ({'name': ' '}, {'samples': []}, {'samples': [{'track_id': True, 'caption': 'Jazz'}]},
@@ -100,6 +112,97 @@ class StableLoraJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.source.read_bytes(), b'preserve original')
         await stable_lora.recover()
         self.assertEqual(stable_lora.get(identifier).adapter, self.adapter)
+
+    async def test_native_progress_retains_latest_valid_step_across_polling_and_reload(self) -> None:
+        from app.stable_lora_contracts import StableLoraTrainingJob
+        identifier = 'b' * 32
+        directory = stable_lora._directory(identifier, create=True)
+        job = StableLoraTrainingJob(id=identifier, status='running', stage='training',
+            created_at='2026-10-15T00:00:00Z', request=self.body())
+        self.connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (identifier, job.model_dump_json(), job.created_at))
+        self.connection.commit()
+        (directory / 'stage.json').write_text('{"stage":"training"}')
+        log = directory / 'worker.log'
+        # Large logs, carriage-return bars, and reversed/bogus observations are native boundary inputs.
+        log.write_bytes(b'x' * (256 * 1024) + b'\rStep 1, Epoch 0: 100%|#| 1/1 [00:20<00:00, 20.00s/it, train/loss=0.8]\r'
+            b'Step 2, Epoch 1: 100%|#| 1/1 [00:04<00:00, 2.00it/s, train/loss=0.7]\r'
+            b'Step 1, Epoch 0: 100%|#| 1/1 [00:20<00:00, 20.00s/it, train/loss=0.9]\r'
+            b'Step 4, Epoch 2: 100%|#| 1/1 [00:20<00:00, 20.00s/it, train/loss=0.6]\r'
+            b'Step 3, Epoch 2: 100%|#| 1/1 [00:20<00:00, 20.00s/it, train/loss=nan]\r'
+            b'Step 3, Epoch 2: 100%|#| 1/1 [00:20<00:00, 0it/s, train/loss=0.2]\r'
+            b'Step 3, Epoch 2: 100%|#| 1/1 [00:20<00:00, 1e99s/it, train/loss=0.2]\r'
+            b'Step 3, Epoch 2: 100%|#| 1/1 [00:20<00:00, 10s/it, train/loss=inf]\r')
+        os.utime(log, (1700000000, 1700000000))
+        observed = stable_lora.get(identifier)
+        self.assertEqual(observed.progress.step, 2)
+        self.assertEqual(observed.progress.total_steps, 3)
+        self.assertEqual(observed.progress.loss, .7)
+        self.assertEqual(observed.progress.seconds_per_step, .5)
+        with log.open('ab') as handle:
+            handle.write(b'\n/private/path unrelated diagnostic\n')
+        os.utime(log, (1700000100, 1700000100))
+        self.assertEqual(stable_lora.get(identifier).progress.updated_at, observed.progress.updated_at)
+        stored = self.connection.execute('SELECT payload_json FROM stable_lora_jobs WHERE id=?', (identifier,)).fetchone()
+        persisted = StableLoraTrainingJob.model_validate_json(stored['payload_json'])
+        self.assertEqual(persisted.progress, observed.progress)
+        self.assertNotIn('/private/path', observed.model_dump_json())
+        legacy = job.model_dump(exclude={'progress', 'started_at', 'finished_at'})
+        legacy['status'] = 'failed'
+        self.connection.execute('UPDATE stable_lora_jobs SET payload_json=? WHERE id=?', (json.dumps(legacy), identifier))
+        self.connection.commit()
+        recovered = stable_lora.get(identifier)
+        self.assertEqual(recovered.progress.step, 2)
+        self.assertEqual(recovered.progress.loss, .7)
+        self.assertIsNone(recovered.finished_at)
+
+    async def test_completed_run_persists_native_metrics_and_timing_without_polling(self) -> None:
+        with self.worker.open('a') as worker:
+            worker.write('print("Step 3, Epoch 2: 100%|#| 1/1 [00:05<00:00, 5.00s/it, train/loss=0.25]", flush=True)\n')
+        with patch.object(stable_lora, 'prepare_worker', side_effect=self.command):
+            identifier = await self.finish()
+        job = stable_lora.get(identifier)
+        self.assertEqual(job.status, 'done')
+        self.assertEqual(job.progress.stage, 'done')
+        self.assertEqual(job.progress.step, 3)
+        self.assertEqual(job.progress.loss, .25)
+        self.assertEqual(job.progress.seconds_per_step, 5)
+        self.assertIsNotNone(job.started_at)
+        self.assertIsNotNone(job.finished_at)
+        self.assertEqual(stable_lora.get(identifier).finished_at, job.finished_at)
+
+    async def test_native_initial_bar_marks_training_without_inventing_progress(self) -> None:
+        from app.stable_lora_contracts import StableLoraTrainingJob
+        identifier = 'b' * 32
+        directory = stable_lora._directory(identifier, create=True)
+        job = StableLoraTrainingJob(id=identifier, status='running', stage='loading',
+            created_at='2026-10-15T00:00:00Z', request=self.body())
+        self.connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (identifier, job.model_dump_json(), job.created_at))
+        self.connection.commit()
+        (directory / 'stage.json').write_text('{"stage":"loading"}')
+        log = directory / 'worker.log'
+        log.write_bytes(b'\rStep 0, Epoch 0:   0%|          | 0/1 [00:00<?, ?it/s]')
+        observed = stable_lora.get(identifier)
+        self.assertEqual(observed.stage, 'training')
+        self.assertEqual(observed.progress.stage, 'training')
+        self.assertIsNone(observed.progress.step)
+        self.assertIsNone(observed.progress.loss)
+        self.assertIsNone(observed.progress.seconds_per_step)
+        with log.open('ab') as handle:
+            handle.write(b'\nUnrelated diagnostic\n')
+        self.assertEqual(stable_lora.get(identifier).progress.updated_at, observed.progress.updated_at)
+
+    async def test_failed_run_persists_final_progress_without_polling(self) -> None:
+        self.worker.write_text('import sys\nfrom pathlib import Path\n(Path(sys.argv[1])/"stage.json").write_text("invalid")\n'
+            'print("Step 2, Epoch 1: 100%|#| 1/1 [00:05<00:00, 5.00s/it, train/loss=0.4]", flush=True)\nraise SystemExit(1)\n')
+        with patch.object(stable_lora, 'prepare_worker', side_effect=self.command):
+            identifier = await self.finish()
+        job = stable_lora.get(identifier)
+        self.assertEqual(job.status, 'failed')
+        self.assertEqual(job.progress.step, 2)
+        self.assertEqual(job.progress.loss, .4)
+        self.assertIsNotNone(job.finished_at)
 
     async def test_final_checkpoint_registers_in_real_managed_adapter_library(self) -> None:
         with patch.object(stable_lora, 'prepare_worker', side_effect=self.command), \
@@ -200,6 +303,7 @@ class StableLoraJobsTests(unittest.IsolatedAsyncioTestCase):
         started = self.root / 'started'
         self.worker.write_text('import sys,time\nfrom pathlib import Path\n'
             '(Path(sys.argv[1])/"stage.json").write_text("invalid progress")\n'
+            'print("Step 2, Epoch 1: 100%|#| 1/1 [00:05<00:00, 5.00s/it, train/loss=0.4]", flush=True)\n'
             f'Path({str(started)!r}).write_text("ready")\ntime.sleep(60)\n')
         with patch.object(stable_lora, 'prepare_worker', side_effect=self.command):
             job = await stable_lora.submit(self.body())
@@ -209,6 +313,8 @@ class StableLoraJobsTests(unittest.IsolatedAsyncioTestCase):
             try:
                 await stable_lora.cancel(job.id)
                 self.assertEqual(stable_lora.get(job.id).status, 'cancelled')
+                self.assertEqual(stable_lora.get(job.id).progress.step, 2)
+                self.assertIsNotNone(stable_lora.get(job.id).finished_at)
                 self.assertFalse(stable_lora.work_busy())
             finally:
                 from app.job_lifecycle import cancel_and_wait

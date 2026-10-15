@@ -82,6 +82,32 @@ export type AceJobsResponse = {
   "jobs": Array<AceJobResponse>
 }
 
+export type AceLoraFailure = {
+  "error": "ace_lora_path_missing" | "ace_lora_invalid_adapter" | "ace_lora_already_loaded" | "ace_lora_quantized_unsupported" | "ace_lora_not_loaded" | "ace_lora_busy" | "ace_lora_model_inactive" | "ace_lora_operation_failed" | "ace_lora_status_unavailable" | "ace_lora_selection_mismatch"
+}
+
+export type AceLoraLoadRequest = {
+  "lora_path": string
+  "adapter_name"?: (string | null)
+}
+
+export type AceLoraScaleRequest = {
+  "scale": number
+  "adapter_name"?: (string | null)
+}
+
+export type AceLoraStatus = {
+  "lora_loaded": boolean
+  "use_lora": boolean
+  "lora_scale": number
+  "active_adapter": (string | null)
+  "adapters": Array<string>
+}
+
+export type AceLoraToggleRequest = {
+  "use_lora": boolean
+}
+
 export type Adjustment = {
   "release_id": string
   "amount": string
@@ -1183,7 +1209,7 @@ export type KokoroRequest = {
 
 export type LibraryFolderInfo = {
   "path": string
-  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers" | "localMusic" | "musicAdapters" | "musicTraining"
+  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers" | "localMusic" | "musicAdapters" | "musicTraining" | "musicTrainingRuns"
 }
 
 export type LibraryPickResponse = {
@@ -1237,6 +1263,7 @@ export type LocalMusicEngineStatus = {
   "weights_ready": boolean
   "supported": boolean
   "runtime": string
+  "adapter_runtime_ready"?: boolean
   "detail": string
 }
 
@@ -1342,6 +1369,26 @@ export type LoraDatasetsResponse = {
   "issues"?: Array<LoraDatasetIssue>
 }
 
+export type LoraExportOptionsResponse = {
+  "can_pick": boolean
+}
+
+export type LoraExportPickResponse = {
+  "path": (string | null)
+}
+
+export type LoraExportRequest = {
+  "lora_output_dir": string
+  "export_path": string
+}
+
+export type LoraExportResponse = {
+  "export_path": string
+  "adapter_path": string
+  "source": string
+  "message": string
+}
+
 export type LoraObservedTask = {
   "task_id"?: string
   "dataset_id": string
@@ -1355,6 +1402,20 @@ export type LoraPreprocessReceipt = {
   "model_identity": string
   "output_dir": string
   "task_id"?: string
+}
+
+export type LoraTrainedCheckpoint = {
+  "source": string
+  "adapter_path": string
+  "kind": "final" | "checkpoint"
+}
+
+export type LoraTrainedFilesRequest = {
+  "lora_output_dir": string
+}
+
+export type LoraTrainedFilesResponse = {
+  "checkpoint": (LoraTrainedCheckpoint | null)
 }
 
 export type LoraWorkspace = {
@@ -1393,6 +1454,7 @@ export type LoraWorkspaceForm = {
   "use_fp8"?: boolean
   "gradient_checkpointing"?: boolean
   "export_path"?: string
+  "export_parent_dir"?: string
   "registry_name"?: string
 }
 
@@ -1515,6 +1577,7 @@ export type ModuleInfo = {
   "actions": Array<ModuleAction>
   "estimated_download_bytes"?: (number | null)
   "restart_required"?: boolean
+  "can_reinstall"?: boolean
   "licenses"?: Array<ModuleLicenseDeclaration>
 }
 
@@ -1525,6 +1588,9 @@ export type ModuleInstallJob = {
   "updated_at": string
   "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
+  "reinstall"?: Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "stable_training_variant"?: ("small-music" | "medium" | null)
+  "music_training_engine"?: ("heartmula" | "yue2" | null)
   "steps": Array<ModuleJobStep>
   "current_step"?: (number | null)
   "error_code"?: (string | null)
@@ -1534,6 +1600,9 @@ export type ModuleInstallJob = {
 export type ModuleInstallRequest = {
   "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
+  "reinstall"?: Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "stable_training_variant"?: ("small-music" | "medium" | null)
+  "music_training_engine"?: ("heartmula" | "yue2" | null)
   "plan_token": string
 }
 
@@ -1545,6 +1614,7 @@ export type ModuleInventory = {
   "free_bytes"?: (number | null)
   "checked_at": string
   "modules": Array<ModuleInfo>
+  "recommended_features"?: Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
 }
 
 export type ModuleJobStep = {
@@ -1554,6 +1624,9 @@ export type ModuleJobStep = {
   "detail": string
   "error_code"?: (string | null)
   "download"?: (ModuleDownloadProgress | null)
+  "failure"?: (ModuleSetupFailure | null)
+  "events"?: Array<ModuleSetupEvent>
+  "last_output_at"?: (string | null)
 }
 
 export type ModuleJobsResponse = {
@@ -1574,6 +1647,9 @@ export type ModuleLicenseDeclaration = {
 export type ModulePlan = {
   "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models": boolean
+  "reinstall"?: Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "stable_training_variant"?: ("small-music" | "medium" | null)
+  "music_training_engine"?: ("heartmula" | "yue2" | null)
   "plan_token": string
   "steps": Array<ModulePlanStep>
   "estimated_download_bytes": number
@@ -1587,16 +1663,32 @@ export type ModulePlan = {
 export type ModulePlanRequest = {
   "features": Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
   "download_models"?: boolean
+  "reinstall"?: Array<"ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "stable_training_variant"?: ("small-music" | "medium" | null)
+  "music_training_engine"?: ("heartmula" | "yue2" | null)
 }
 
 export type ModulePlanStep = {
   "module_id": "ace_step" | "yue2" | "heartmula" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
   "name": string
-  "operation": "install" | "verify" | "manual" | "unsupported"
+  "operation": "install" | "verify" | "reuse" | "manual" | "unsupported"
   "estimated_download_bytes"?: (number | null)
   "detail": string
   "actions": Array<ModuleAction>
   "licenses"?: Array<ModuleLicenseDeclaration>
+}
+
+export type ModuleSetupEvent = {
+  "at": string
+  "detail": string
+}
+
+export type ModuleSetupFailure = {
+  "code": "plan_changed" | "setup_busy" | "insufficient_disk" | "job_missing" | "invalid_job" | "job_corrupt" | "installation_failed" | "installer_failed" | "installer_output_limit" | "installer_timeout" | "worker_unverified" | "unsafe_install_path" | "not_managed" | "unsupported_platform" | "artifact_integrity" | "archive_unsafe" | "installation_conflict" | "environment_unverified" | "setup_not_resumable" | "download_failed" | "download_stalled" | "already_installed" | "reinstall_unavailable"
+  "summary": string
+  "recovery": string
+  "phase"?: (string | null)
+  "retryable": boolean
 }
 
 export type Mp3EncodingSettings = {
@@ -1609,8 +1701,8 @@ export type Mp3EncodingSettings = {
 
 export type MusicAdapter = {
   "id": string
-  "engine": "stable_audio3" | "yue2"
-  "target": "small-music" | "medium" | "ar" | "nar"
+  "engine": "stable_audio3" | "yue2" | "heartmula"
+  "target": "small-music" | "medium" | "ar" | "nar" | "heartmula-3b"
   "name": string
   "sha256": string
   "created_at": string
@@ -1635,7 +1727,79 @@ export type MusicLoraCapability = {
   "engine": "ace_step" | "yue2" | "heartmula" | "stable_audio3"
   "loading": boolean
   "training": boolean
-  "reason": "native" | "inference_only" | "unsupported_runtime" | "upgrade_required"
+  "reason": "native" | "inference_only" | "unsupported_runtime" | "upgrade_required" | "experimental"
+}
+
+export type MusicLoraDatasetSource = {
+  "dataset_id": string
+  "revision": number
+  "sample_id": string
+}
+
+export type MusicLoraSource = {
+  "track_id"?: (number | null)
+  "dataset"?: (MusicLoraDatasetSource | null)
+}
+
+export type MusicLoraTrainingJob = {
+  "id": string
+  "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
+  "request": MusicLoraTrainingRequest
+  "kind"?: "training" | "nvidia-package"
+  "progress"?: MusicLoraTrainingProgress
+  "adapter"?: (MusicAdapter | null)
+  "package_sha256"?: (string | null)
+  "error_code"?: (string | null)
+}
+
+export type MusicLoraTrainingJobs = {
+  "jobs": Array<MusicLoraTrainingJob>
+  "history_incomplete"?: boolean
+}
+
+export type MusicLoraTrainingProgress = {
+  "stage"?: "preparing" | "encoding" | "loading" | "training" | "publishing" | "done"
+  "step"?: (number | null)
+  "total_steps"?: (number | null)
+  "loss"?: (number | null)
+  "seconds_per_step"?: (number | null)
+  "updated_at"?: (string | null)
+}
+
+export type MusicLoraTrainingRequest = {
+  "engine": "heartmula" | "yue2"
+  "name": string
+  "samples": Array<MusicLoraTrainingSample>
+  "max_steps"?: number
+  "rank"?: 8 | 16 | 32
+  "learning_rate"?: number
+  "seed"?: number
+  "segment_seconds"?: number
+}
+
+export type MusicLoraTrainingSample = {
+  "track_id"?: (number | null)
+  "dataset"?: (MusicLoraDatasetSource | null)
+  "caption": string
+  "lyrics"?: string
+  "instrumental"?: boolean
+}
+
+export type MusicLoraTrainingStatus = {
+  "engine": "heartmula" | "yue2"
+  "supported": boolean
+  "installed": boolean
+  "weights_ready": boolean
+  "device"?: ("mps" | "cuda" | null)
+  "validation"?: "experimental" | "verified"
+  "error_code"?: (string | null)
+}
+
+export type MusicLoraTrainingStatuses = {
+  "engines": Array<MusicLoraTrainingStatus>
 }
 
 export type MusicQueueAceRequest = {
@@ -2869,17 +3033,30 @@ export type SpeechVoiceProfilesResponse = {
   "profiles": Array<SpeechVoiceProfile>
 }
 
+export type StableLoraProgress = {
+  "stage"?: "preparing" | "encoding" | "loading" | "training" | "publishing" | "done"
+  "step"?: (number | null)
+  "total_steps"?: (number | null)
+  "loss"?: (number | null)
+  "seconds_per_step"?: (number | null)
+  "updated_at"?: (string | null)
+}
+
 export type StableLoraSample = {
-  "track_id": number
+  "track_id"?: (number | null)
+  "dataset"?: (MusicLoraDatasetSource | null)
   "caption": string
 }
 
 export type StableLoraTrainingJob = {
   "id": string
   "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
-  "stage"?: "preparing" | "encoding" | "training" | "publishing" | "done"
+  "stage"?: "preparing" | "encoding" | "loading" | "training" | "publishing" | "done"
   "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
   "request": StableLoraTrainingRequest
+  "progress"?: StableLoraProgress
   "adapter"?: (MusicAdapter | null)
   "error_code"?: (string | null)
 }
@@ -11462,7 +11639,8 @@ const schemas = {
           "providers",
           "localMusic",
           "musicAdapters",
-          "musicTraining"
+          "musicTraining",
+          "musicTrainingRuns"
         ],
         "type": "string"
       }
@@ -16824,6 +17002,9 @@ const schemas = {
       "restart_required": {
         "type": "boolean"
       },
+      "can_reinstall": {
+        "type": "boolean"
+      },
       "licenses": {
         "items": {
           "$ref": "#/$defs/ModuleLicenseDeclaration"
@@ -16886,6 +17067,32 @@ const schemas = {
           "$ref": "#/$defs/ModuleInfo"
         },
         "type": "array"
+      },
+      "recommended_features": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "heartmula",
+            "stable_audio3",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc",
+            "speaker_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 17,
+        "type": "array"
       }
     },
     "required": [
@@ -16930,6 +17137,60 @@ const schemas = {
       },
       "download_models": {
         "type": "boolean"
+      },
+      "reinstall": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "heartmula",
+            "stable_audio3",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc",
+            "speaker_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 17,
+        "type": "array"
+      },
+      "stable_training_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "music_training_engine": {
+        "anyOf": [
+          {
+            "enum": [
+              "heartmula",
+              "yue2"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -16968,6 +17229,7 @@ const schemas = {
         "enum": [
           "install",
           "verify",
+          "reuse",
           "manual",
           "unsupported"
         ],
@@ -17039,6 +17301,60 @@ const schemas = {
       },
       "download_models": {
         "type": "boolean"
+      },
+      "reinstall": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "heartmula",
+            "stable_audio3",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc",
+            "speaker_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 17,
+        "type": "array"
+      },
+      "stable_training_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "music_training_engine": {
+        "anyOf": [
+          {
+            "enum": [
+              "heartmula",
+              "yue2"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "plan_token": {
         "type": "string"
@@ -17127,6 +17443,60 @@ const schemas = {
       "download_models": {
         "type": "boolean"
       },
+      "reinstall": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "heartmula",
+            "stable_audio3",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc",
+            "speaker_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 17,
+        "type": "array"
+      },
+      "stable_training_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "music_training_engine": {
+        "anyOf": [
+          {
+            "enum": [
+              "heartmula",
+              "yue2"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "plan_token": {
         "pattern": "^[0-9a-f]{64}$",
         "type": "string"
@@ -17203,6 +17573,88 @@ const schemas = {
     ],
     "type": "object"
   },
+  "ModuleSetupFailure": {
+    "properties": {
+      "code": {
+        "enum": [
+          "plan_changed",
+          "setup_busy",
+          "insufficient_disk",
+          "job_missing",
+          "invalid_job",
+          "job_corrupt",
+          "installation_failed",
+          "installer_failed",
+          "installer_output_limit",
+          "installer_timeout",
+          "worker_unverified",
+          "unsafe_install_path",
+          "not_managed",
+          "unsupported_platform",
+          "artifact_integrity",
+          "archive_unsafe",
+          "installation_conflict",
+          "environment_unverified",
+          "setup_not_resumable",
+          "download_failed",
+          "download_stalled",
+          "already_installed",
+          "reinstall_unavailable"
+        ],
+        "type": "string"
+      },
+      "summary": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      },
+      "recovery": {
+        "maxLength": 600,
+        "minLength": 1,
+        "type": "string"
+      },
+      "phase": {
+        "anyOf": [
+          {
+            "maxLength": 1000,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "retryable": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "code",
+      "summary",
+      "recovery",
+      "retryable"
+    ],
+    "type": "object"
+  },
+  "ModuleSetupEvent": {
+    "properties": {
+      "at": {
+        "maxLength": 60,
+        "minLength": 1,
+        "type": "string"
+      },
+      "detail": {
+        "maxLength": 500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "at",
+      "detail"
+    ],
+    "type": "object"
+  },
   "ModuleJobStep": {
     "properties": {
       "module_id": {
@@ -17258,6 +17710,34 @@ const schemas = {
         "anyOf": [
           {
             "$ref": "#/$defs/ModuleDownloadProgress"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "failure": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ModuleSetupFailure"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "events": {
+        "items": {
+          "$ref": "#/$defs/ModuleSetupEvent"
+        },
+        "maxItems": 40,
+        "type": "array"
+      },
+      "last_output_at": {
+        "anyOf": [
+          {
+            "maxLength": 60,
+            "type": "string"
           },
           {
             "type": "null"
@@ -17324,6 +17804,60 @@ const schemas = {
       },
       "download_models": {
         "type": "boolean"
+      },
+      "reinstall": {
+        "items": {
+          "enum": [
+            "ace_step",
+            "yue2",
+            "heartmula",
+            "stable_audio3",
+            "speech",
+            "singing",
+            "separation",
+            "video",
+            "media",
+            "transcription",
+            "source_import",
+            "ebooks",
+            "kokoro",
+            "chatterbox",
+            "wan22",
+            "rvc",
+            "speaker_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 17,
+        "type": "array"
+      },
+      "stable_training_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "music_training_engine": {
+        "anyOf": [
+          {
+            "enum": [
+              "heartmula",
+              "yue2"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "steps": {
         "items": {
@@ -18862,6 +19396,141 @@ const schemas = {
     },
     "type": "object"
   },
+  "AceLoraStatus": {
+    "properties": {
+      "lora_loaded": {
+        "type": "boolean"
+      },
+      "use_lora": {
+        "type": "boolean"
+      },
+      "lora_scale": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "active_adapter": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "adapters": {
+        "items": {
+          "maxLength": 500,
+          "minLength": 1,
+          "pattern": "\\S",
+          "type": "string"
+        },
+        "maxItems": 64,
+        "type": "array"
+      }
+    },
+    "required": [
+      "lora_loaded",
+      "use_lora",
+      "lora_scale",
+      "active_adapter",
+      "adapters"
+    ],
+    "type": "object"
+  },
+  "AceLoraFailure": {
+    "properties": {
+      "error": {
+        "enum": [
+          "ace_lora_path_missing",
+          "ace_lora_invalid_adapter",
+          "ace_lora_already_loaded",
+          "ace_lora_quantized_unsupported",
+          "ace_lora_not_loaded",
+          "ace_lora_busy",
+          "ace_lora_model_inactive",
+          "ace_lora_operation_failed",
+          "ace_lora_status_unavailable",
+          "ace_lora_selection_mismatch"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "error"
+    ],
+    "type": "object"
+  },
+  "AceLoraLoadRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "lora_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "adapter_name": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "lora_path"
+    ],
+    "type": "object"
+  },
+  "AceLoraScaleRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "scale": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "adapter_name": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "scale"
+    ],
+    "type": "object"
+  },
+  "AceLoraToggleRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "use_lora": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "use_lora"
+    ],
+    "type": "object"
+  },
   "ReadingCue": {
     "properties": {
       "passage_id": {
@@ -19266,6 +19935,9 @@ const schemas = {
       "runtime": {
         "type": "string"
       },
+      "adapter_runtime_ready": {
+        "type": "boolean"
+      },
       "detail": {
         "type": "string"
       }
@@ -19304,7 +19976,8 @@ const schemas = {
       "engine": {
         "enum": [
           "stable_audio3",
-          "yue2"
+          "yue2",
+          "heartmula"
         ],
         "type": "string"
       },
@@ -19313,7 +19986,8 @@ const schemas = {
           "small-music",
           "medium",
           "ar",
-          "nar"
+          "nar",
+          "heartmula-3b"
         ],
         "type": "string"
       },
@@ -19474,7 +20148,8 @@ const schemas = {
           "native",
           "inference_only",
           "unsupported_runtime",
-          "upgrade_required"
+          "upgrade_required",
+          "experimental"
         ],
         "type": "string"
       }
@@ -19501,12 +20176,55 @@ const schemas = {
     ],
     "type": "object"
   },
+  "MusicLoraDatasetSource": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_id": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "revision",
+      "sample_id"
+    ],
+    "type": "object"
+  },
   "StableLoraSample": {
     "additionalProperties": false,
     "properties": {
       "track_id": {
-        "minimum": 1,
-        "type": "integer"
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dataset": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraDatasetSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
       },
       "caption": {
         "maxLength": 4000,
@@ -19515,7 +20233,6 @@ const schemas = {
       }
     },
     "required": [
-      "track_id",
       "caption"
     ],
     "type": "object"
@@ -19573,6 +20290,80 @@ const schemas = {
     ],
     "type": "object"
   },
+  "StableLoraProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "stage": {
+        "enum": [
+          "preparing",
+          "encoding",
+          "loading",
+          "training",
+          "publishing",
+          "done"
+        ],
+        "type": "string"
+      },
+      "step": {
+        "anyOf": [
+          {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "total_steps": {
+        "anyOf": [
+          {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loss": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "seconds_per_step": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 86400,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "updated_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
   "StableLoraTrainingJob": {
     "properties": {
       "id": {
@@ -19594,6 +20385,7 @@ const schemas = {
         "enum": [
           "preparing",
           "encoding",
+          "loading",
           "training",
           "publishing",
           "done"
@@ -19603,8 +20395,33 @@ const schemas = {
       "created_at": {
         "type": "string"
       },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
       "request": {
         "$ref": "#/$defs/StableLoraTrainingRequest"
+      },
+      "progress": {
+        "$ref": "#/$defs/StableLoraProgress"
       },
       "adapter": {
         "anyOf": [
@@ -19675,6 +20492,396 @@ const schemas = {
       "small_weights_ready",
       "medium_weights_ready"
     ],
+    "type": "object"
+  },
+  "MusicLoraTrainingSample": {
+    "additionalProperties": false,
+    "properties": {
+      "track_id": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dataset": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraDatasetSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "caption": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "lyrics": {
+        "maxLength": 20000,
+        "type": "string"
+      },
+      "instrumental": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "caption"
+    ],
+    "type": "object"
+  },
+  "MusicLoraTrainingRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "heartmula",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "samples": {
+        "items": {
+          "$ref": "#/$defs/MusicLoraTrainingSample"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "max_steps": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "rank": {
+        "enum": [
+          8,
+          16,
+          32
+        ],
+        "type": "integer"
+      },
+      "learning_rate": {
+        "maximum": 0.01,
+        "minimum": 1e-07,
+        "type": "number"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "segment_seconds": {
+        "maximum": 30,
+        "minimum": 6,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "engine",
+      "name",
+      "samples"
+    ],
+    "type": "object"
+  },
+  "MusicLoraTrainingProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "stage": {
+        "enum": [
+          "preparing",
+          "encoding",
+          "loading",
+          "training",
+          "publishing",
+          "done"
+        ],
+        "type": "string"
+      },
+      "step": {
+        "anyOf": [
+          {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "total_steps": {
+        "anyOf": [
+          {
+            "maximum": 100000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loss": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "seconds_per_step": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 86400,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "updated_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "MusicLoraTrainingStatus": {
+    "properties": {
+      "engine": {
+        "enum": [
+          "heartmula",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "supported": {
+        "type": "boolean"
+      },
+      "installed": {
+        "type": "boolean"
+      },
+      "weights_ready": {
+        "type": "boolean"
+      },
+      "device": {
+        "anyOf": [
+          {
+            "enum": [
+              "mps",
+              "cuda"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "validation": {
+        "enum": [
+          "experimental",
+          "verified"
+        ],
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "engine",
+      "supported",
+      "installed",
+      "weights_ready"
+    ],
+    "type": "object"
+  },
+  "MusicLoraTrainingStatuses": {
+    "properties": {
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/MusicLoraTrainingStatus"
+        },
+        "maxItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "engines"
+    ],
+    "type": "object"
+  },
+  "MusicLoraTrainingJob": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "request": {
+        "$ref": "#/$defs/MusicLoraTrainingRequest"
+      },
+      "kind": {
+        "enum": [
+          "training",
+          "nvidia-package"
+        ],
+        "type": "string"
+      },
+      "progress": {
+        "$ref": "#/$defs/MusicLoraTrainingProgress"
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapter"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "package_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "status",
+      "created_at",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicLoraTrainingJobs": {
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/MusicLoraTrainingJob"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "history_incomplete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "MusicLoraSource": {
+    "additionalProperties": false,
+    "properties": {
+      "track_id": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dataset": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraDatasetSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
     "type": "object"
   },
   "MusicQueueErrorResponse": {
@@ -20817,6 +22024,10 @@ const schemas = {
         "maxLength": 4096,
         "type": "string"
       },
+      "export_parent_dir": {
+        "maxLength": 4096,
+        "type": "string"
+      },
       "registry_name": {
         "maxLength": 120,
         "type": "string"
@@ -21306,6 +22517,146 @@ const schemas = {
     },
     "required": [
       "revision"
+    ],
+    "type": "object"
+  },
+  "LoraExportRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "lora_output_dir": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "export_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "lora_output_dir",
+      "export_path"
+    ],
+    "type": "object"
+  },
+  "LoraExportResponse": {
+    "properties": {
+      "export_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "adapter_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "message": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "export_path",
+      "adapter_path",
+      "source",
+      "message"
+    ],
+    "type": "object"
+  },
+  "LoraExportOptionsResponse": {
+    "properties": {
+      "can_pick": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "can_pick"
+    ],
+    "type": "object"
+  },
+  "LoraExportPickResponse": {
+    "properties": {
+      "path": {
+        "anyOf": [
+          {
+            "maxLength": 4096,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "LoraTrainedFilesRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "lora_output_dir": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "lora_output_dir"
+    ],
+    "type": "object"
+  },
+  "LoraTrainedCheckpoint": {
+    "properties": {
+      "source": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "adapter_path": {
+        "maxLength": 4096,
+        "minLength": 1,
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "final",
+          "checkpoint"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "adapter_path",
+      "kind"
+    ],
+    "type": "object"
+  },
+  "LoraTrainedFilesResponse": {
+    "properties": {
+      "checkpoint": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LoraTrainedCheckpoint"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "checkpoint"
     ],
     "type": "object"
   },
@@ -27065,6 +28416,22 @@ export function parseModuleDownloadProgress(value: unknown): ModuleDownloadProgr
   return value
 }
 
+function isModuleSetupFailure(value: unknown): value is ModuleSetupFailure {
+  return decodeSchema(schemas.ModuleSetupFailure, value, schemas)
+}
+export function parseModuleSetupFailure(value: unknown): ModuleSetupFailure {
+  if (!isModuleSetupFailure(value)) throw new TypeError("Invalid ModuleSetupFailure response")
+  return value
+}
+
+function isModuleSetupEvent(value: unknown): value is ModuleSetupEvent {
+  return decodeSchema(schemas.ModuleSetupEvent, value, schemas)
+}
+export function parseModuleSetupEvent(value: unknown): ModuleSetupEvent {
+  if (!isModuleSetupEvent(value)) throw new TypeError("Invalid ModuleSetupEvent response")
+  return value
+}
+
 function isModuleJobStep(value: unknown): value is ModuleJobStep {
   return decodeSchema(schemas.ModuleJobStep, value, schemas)
 }
@@ -27377,6 +28744,46 @@ export function parseProvenanceComponent(value: unknown): ProvenanceComponent {
   return value
 }
 
+function isAceLoraStatus(value: unknown): value is AceLoraStatus {
+  return decodeSchema(schemas.AceLoraStatus, value, schemas)
+}
+export function parseAceLoraStatus(value: unknown): AceLoraStatus {
+  if (!isAceLoraStatus(value)) throw new TypeError("Invalid AceLoraStatus response")
+  return value
+}
+
+function isAceLoraFailure(value: unknown): value is AceLoraFailure {
+  return decodeSchema(schemas.AceLoraFailure, value, schemas)
+}
+export function parseAceLoraFailure(value: unknown): AceLoraFailure {
+  if (!isAceLoraFailure(value)) throw new TypeError("Invalid AceLoraFailure response")
+  return value
+}
+
+function isAceLoraLoadRequest(value: unknown): value is AceLoraLoadRequest {
+  return decodeSchema(schemas.AceLoraLoadRequest, value, schemas)
+}
+export function parseAceLoraLoadRequest(value: unknown): AceLoraLoadRequest {
+  if (!isAceLoraLoadRequest(value)) throw new TypeError("Invalid AceLoraLoadRequest response")
+  return value
+}
+
+function isAceLoraScaleRequest(value: unknown): value is AceLoraScaleRequest {
+  return decodeSchema(schemas.AceLoraScaleRequest, value, schemas)
+}
+export function parseAceLoraScaleRequest(value: unknown): AceLoraScaleRequest {
+  if (!isAceLoraScaleRequest(value)) throw new TypeError("Invalid AceLoraScaleRequest response")
+  return value
+}
+
+function isAceLoraToggleRequest(value: unknown): value is AceLoraToggleRequest {
+  return decodeSchema(schemas.AceLoraToggleRequest, value, schemas)
+}
+export function parseAceLoraToggleRequest(value: unknown): AceLoraToggleRequest {
+  if (!isAceLoraToggleRequest(value)) throw new TypeError("Invalid AceLoraToggleRequest response")
+  return value
+}
+
 function isReadingCue(value: unknown): value is ReadingCue {
   return decodeSchema(schemas.ReadingCue, value, schemas)
 }
@@ -27529,6 +28936,14 @@ export function parseStableLoraTrainingRequest(value: unknown): StableLoraTraini
   return value
 }
 
+function isStableLoraProgress(value: unknown): value is StableLoraProgress {
+  return decodeSchema(schemas.StableLoraProgress, value, schemas)
+}
+export function parseStableLoraProgress(value: unknown): StableLoraProgress {
+  if (!isStableLoraProgress(value)) throw new TypeError("Invalid StableLoraProgress response")
+  return value
+}
+
 function isStableLoraTrainingJob(value: unknown): value is StableLoraTrainingJob {
   return decodeSchema(schemas.StableLoraTrainingJob, value, schemas)
 }
@@ -27550,6 +28965,78 @@ function isStableLoraTrainingStatus(value: unknown): value is StableLoraTraining
 }
 export function parseStableLoraTrainingStatus(value: unknown): StableLoraTrainingStatus {
   if (!isStableLoraTrainingStatus(value)) throw new TypeError("Invalid StableLoraTrainingStatus response")
+  return value
+}
+
+function isMusicLoraTrainingSample(value: unknown): value is MusicLoraTrainingSample {
+  return decodeSchema(schemas.MusicLoraTrainingSample, value, schemas)
+}
+export function parseMusicLoraTrainingSample(value: unknown): MusicLoraTrainingSample {
+  if (!isMusicLoraTrainingSample(value)) throw new TypeError("Invalid MusicLoraTrainingSample response")
+  return value
+}
+
+function isMusicLoraTrainingRequest(value: unknown): value is MusicLoraTrainingRequest {
+  return decodeSchema(schemas.MusicLoraTrainingRequest, value, schemas)
+}
+export function parseMusicLoraTrainingRequest(value: unknown): MusicLoraTrainingRequest {
+  if (!isMusicLoraTrainingRequest(value)) throw new TypeError("Invalid MusicLoraTrainingRequest response")
+  return value
+}
+
+function isMusicLoraTrainingProgress(value: unknown): value is MusicLoraTrainingProgress {
+  return decodeSchema(schemas.MusicLoraTrainingProgress, value, schemas)
+}
+export function parseMusicLoraTrainingProgress(value: unknown): MusicLoraTrainingProgress {
+  if (!isMusicLoraTrainingProgress(value)) throw new TypeError("Invalid MusicLoraTrainingProgress response")
+  return value
+}
+
+function isMusicLoraTrainingStatus(value: unknown): value is MusicLoraTrainingStatus {
+  return decodeSchema(schemas.MusicLoraTrainingStatus, value, schemas)
+}
+export function parseMusicLoraTrainingStatus(value: unknown): MusicLoraTrainingStatus {
+  if (!isMusicLoraTrainingStatus(value)) throw new TypeError("Invalid MusicLoraTrainingStatus response")
+  return value
+}
+
+function isMusicLoraTrainingStatuses(value: unknown): value is MusicLoraTrainingStatuses {
+  return decodeSchema(schemas.MusicLoraTrainingStatuses, value, schemas)
+}
+export function parseMusicLoraTrainingStatuses(value: unknown): MusicLoraTrainingStatuses {
+  if (!isMusicLoraTrainingStatuses(value)) throw new TypeError("Invalid MusicLoraTrainingStatuses response")
+  return value
+}
+
+function isMusicLoraTrainingJob(value: unknown): value is MusicLoraTrainingJob {
+  return decodeSchema(schemas.MusicLoraTrainingJob, value, schemas)
+}
+export function parseMusicLoraTrainingJob(value: unknown): MusicLoraTrainingJob {
+  if (!isMusicLoraTrainingJob(value)) throw new TypeError("Invalid MusicLoraTrainingJob response")
+  return value
+}
+
+function isMusicLoraTrainingJobs(value: unknown): value is MusicLoraTrainingJobs {
+  return decodeSchema(schemas.MusicLoraTrainingJobs, value, schemas)
+}
+export function parseMusicLoraTrainingJobs(value: unknown): MusicLoraTrainingJobs {
+  if (!isMusicLoraTrainingJobs(value)) throw new TypeError("Invalid MusicLoraTrainingJobs response")
+  return value
+}
+
+function isMusicLoraSource(value: unknown): value is MusicLoraSource {
+  return decodeSchema(schemas.MusicLoraSource, value, schemas)
+}
+export function parseMusicLoraSource(value: unknown): MusicLoraSource {
+  if (!isMusicLoraSource(value)) throw new TypeError("Invalid MusicLoraSource response")
+  return value
+}
+
+function isMusicLoraDatasetSource(value: unknown): value is MusicLoraDatasetSource {
+  return decodeSchema(schemas.MusicLoraDatasetSource, value, schemas)
+}
+export function parseMusicLoraDatasetSource(value: unknown): MusicLoraDatasetSource {
+  if (!isMusicLoraDatasetSource(value)) throw new TypeError("Invalid MusicLoraDatasetSource response")
   return value
 }
 
@@ -27878,6 +29365,62 @@ function isUpdateLoraDatasetSampleRequest(value: unknown): value is UpdateLoraDa
 }
 export function parseUpdateLoraDatasetSampleRequest(value: unknown): UpdateLoraDatasetSampleRequest {
   if (!isUpdateLoraDatasetSampleRequest(value)) throw new TypeError("Invalid UpdateLoraDatasetSampleRequest response")
+  return value
+}
+
+function isLoraExportRequest(value: unknown): value is LoraExportRequest {
+  return decodeSchema(schemas.LoraExportRequest, value, schemas)
+}
+export function parseLoraExportRequest(value: unknown): LoraExportRequest {
+  if (!isLoraExportRequest(value)) throw new TypeError("Invalid LoraExportRequest response")
+  return value
+}
+
+function isLoraExportResponse(value: unknown): value is LoraExportResponse {
+  return decodeSchema(schemas.LoraExportResponse, value, schemas)
+}
+export function parseLoraExportResponse(value: unknown): LoraExportResponse {
+  if (!isLoraExportResponse(value)) throw new TypeError("Invalid LoraExportResponse response")
+  return value
+}
+
+function isLoraExportOptionsResponse(value: unknown): value is LoraExportOptionsResponse {
+  return decodeSchema(schemas.LoraExportOptionsResponse, value, schemas)
+}
+export function parseLoraExportOptionsResponse(value: unknown): LoraExportOptionsResponse {
+  if (!isLoraExportOptionsResponse(value)) throw new TypeError("Invalid LoraExportOptionsResponse response")
+  return value
+}
+
+function isLoraExportPickResponse(value: unknown): value is LoraExportPickResponse {
+  return decodeSchema(schemas.LoraExportPickResponse, value, schemas)
+}
+export function parseLoraExportPickResponse(value: unknown): LoraExportPickResponse {
+  if (!isLoraExportPickResponse(value)) throw new TypeError("Invalid LoraExportPickResponse response")
+  return value
+}
+
+function isLoraTrainedFilesRequest(value: unknown): value is LoraTrainedFilesRequest {
+  return decodeSchema(schemas.LoraTrainedFilesRequest, value, schemas)
+}
+export function parseLoraTrainedFilesRequest(value: unknown): LoraTrainedFilesRequest {
+  if (!isLoraTrainedFilesRequest(value)) throw new TypeError("Invalid LoraTrainedFilesRequest response")
+  return value
+}
+
+function isLoraTrainedCheckpoint(value: unknown): value is LoraTrainedCheckpoint {
+  return decodeSchema(schemas.LoraTrainedCheckpoint, value, schemas)
+}
+export function parseLoraTrainedCheckpoint(value: unknown): LoraTrainedCheckpoint {
+  if (!isLoraTrainedCheckpoint(value)) throw new TypeError("Invalid LoraTrainedCheckpoint response")
+  return value
+}
+
+function isLoraTrainedFilesResponse(value: unknown): value is LoraTrainedFilesResponse {
+  return decodeSchema(schemas.LoraTrainedFilesResponse, value, schemas)
+}
+export function parseLoraTrainedFilesResponse(value: unknown): LoraTrainedFilesResponse {
+  if (!isLoraTrainedFilesResponse(value)) throw new TypeError("Invalid LoraTrainedFilesResponse response")
   return value
 }
 

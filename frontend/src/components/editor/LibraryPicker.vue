@@ -6,7 +6,7 @@ import * as tracksApi from '../../api/tracks'
 import type { SavedTrack } from '../../api/tracks'
 
 const { t } = useI18n()
-const props = withDefaults(defineProps<{ trackOnly?: boolean }>(), { trackOnly: false })
+const props = withDefaults(defineProps<{ trackOnly?: boolean; selectedTrackIds?: readonly number[] }>(), { trackOnly: false, selectedTrackIds: () => [] })
 
 const emit = defineEmits<{
   pick: [payload: { sourceUrl: string; sourceLabel: string; trackId?: number }]
@@ -41,7 +41,7 @@ const STEM_LABELS = computed<Record<string, string>>(() => ({
 }))
 
 function pick(sourceUrl: string, sourceLabel: string, trackId?: number) {
-  if (active) emit('pick', { sourceUrl, sourceLabel, ...(trackId === undefined ? {} : { trackId }) })
+  if (active && !(props.trackOnly && trackId !== undefined && props.selectedTrackIds.includes(trackId))) emit('pick', { sourceUrl, sourceLabel, ...(trackId === undefined ? {} : { trackId }) })
 }
 const uploading = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
@@ -106,10 +106,12 @@ async function onFileSelected(event: Event) {
             <div class="mt-1 flex flex-wrap gap-1.5">
               <button
                 type="button"
-                class="accent-gradient rounded px-2 py-1 text-[11px] font-medium text-white"
+                class="rounded font-medium disabled:cursor-default"
+                :class="[props.trackOnly ? 'min-h-11 px-3 py-2 text-xs' : 'px-2 py-1 text-[11px]', props.trackOnly && props.selectedTrackIds.includes(trk.id) ? 'border border-status-done/40 bg-status-done/10 text-status-done' : 'accent-gradient text-white']"
+                :disabled="props.trackOnly && props.selectedTrackIds.includes(trk.id)"
                 @click="pick(trk.audio_url, trk.title || t('library.trackFallback'), trk.id)"
               >
-                {{ t('library.fullMix') }}
+                {{ t(props.trackOnly ? props.selectedTrackIds.includes(trk.id) ? 'library.alreadyAdded' : 'library.addToTraining' : 'library.fullMix') }}
               </button>
               <button
                 v-for="name in props.trackOnly ? [] : Object.keys(trk.stems || {})"

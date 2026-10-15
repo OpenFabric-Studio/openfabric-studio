@@ -300,7 +300,8 @@ class HumanGuidePipelineTests(unittest.IsolatedAsyncioTestCase):
                 voice_id=self.voice_id, model_revision_id='fixture-v1', guide_asset_id=guide,
                 accompaniment_asset_id=backing, title='Independent fixture', guide_singer_confirmed=True, guide_isolated=True))
             job = voice_build._applies[run.track_id]
-            await asyncio.wait_for(asyncio.shield(job.task), 10)
+            # Real CPU probes have their own 20s/10s deadlines before publication.
+            await asyncio.wait_for(asyncio.shield(job.task), 60)
         stored = get_run(run.id)
         self.assertEqual(stored.status, 'done', stored.error_code)
         self.assertIsNotNone(stored.audio_version_id)

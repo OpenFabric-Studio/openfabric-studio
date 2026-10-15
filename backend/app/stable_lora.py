@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import logging
+import math
 from pathlib import Path, PureWindowsPath
 import re
 import sqlite3
@@ -26,6 +28,10 @@ logger = logging.getLogger(__name__)
 _tasks: dict[str, asyncio.Task[None]] = {}
 _unverified: set[str] = set()
 _closing = False
+_NATIVE_STEP = re.compile(r'^Step ([0-9]{1,6}), Epoch [0-9]+:.*\]$')
+_NATIVE_LOSS = re.compile(r'train/loss=([^,\]\s]+)')
+_NATIVE_RATE = re.compile(r'([0-9.eE+\-]+)\s*(s/it|it/s)')
+_STAGES = ('preparing', 'encoding', 'loading', 'training', 'publishing', 'done')
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -76,6 +82,59 @@ def _artifact(identifier: str, name: str) -> Path:
     return current
 
 
+def _refresh_progress(job: StableLoraTrainingJob) -> None:
+    previous = job.progress.model_copy(deep=True)
+    try:
+        path = _artifact(job.id, 'stage.json')
+        if path.is_file() and path.stat().st_size <= 4096:
+            stage = StableLoraProgress.model_validate_json(path.read_bytes()).stage
+            if stage == 'training' and job.progress.step is None:
+                stage = 'loading'
+            if _STAGES.index(stage) > _STAGES.index(job.progress.stage):
+                job.progress.stage = stage
+                job.progress.updated_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+    except (ValidationError, OSError, MusicLoraError):
+        logger.warning('Stable training stage unavailable; retained job state used')
+    try:
+        log = _artifact(job.id, 'worker.log')
+        if log.is_file():
+            reported_at = datetime.fromtimestamp(log.stat().st_mtime, timezone.utc).isoformat()
+            with log.open('rb') as handle:
+                handle.seek(max(0, log.stat().st_size - 65536))
+                tail = handle.read(65536).decode('utf-8', errors='replace')
+            latest = job.progress.step or 0
+            for line in tail.splitlines():
+                match = _NATIVE_STEP.fullmatch(line.strip())
+                if match is not None and int(match[1]) == 0 and job.progress.stage in {'preparing', 'encoding', 'loading'}:
+                    job.progress.stage = 'training'
+                    job.progress.updated_at = reported_at
+                loss_match, rate_match = _NATIVE_LOSS.search(line), _NATIVE_RATE.search(line)
+                if match is None or loss_match is None or rate_match is None:
+                    continue
+                step = int(match[1])
+                try:
+                    loss, rate = float(loss_match[1]), float(rate_match[1])
+                    seconds = rate if rate_match[2] == 's/it' else 1 / rate
+                except (ValueError, ZeroDivisionError, OverflowError):
+                    continue
+                if not latest < step <= job.request.max_steps or not math.isfinite(loss) or not math.isfinite(seconds) or not 0 < seconds <= 86400:
+                    continue
+                latest = step
+                job.progress.step = step
+                job.progress.total_steps = job.request.max_steps
+                job.progress.loss = loss
+                job.progress.seconds_per_step = seconds
+                # Native bars have no timestamp; retain this log time until a newer step.
+                job.progress.updated_at = reported_at
+            if latest and job.progress.stage in {'preparing', 'encoding', 'loading', 'training'}:
+                job.progress.stage = 'publishing' if latest == job.request.max_steps else 'training'
+    except (ValidationError, OSError, MusicLoraError):
+        logger.warning('Stable training progress unavailable; retained job state used')
+    job.stage = job.progress.stage
+    if job.progress != previous:
+        _store(job)
+
+
 def get(identifier: str) -> StableLoraTrainingJob:
     if re.fullmatch(r'[0-9a-f]{32}', identifier) is None:
         raise MusicLoraError('stable_lora_job_not_found', 404)
@@ -86,13 +145,8 @@ def get(identifier: str) -> StableLoraTrainingJob:
         job = StableLoraTrainingJob.model_validate_json(row['payload_json'])
         if job.id != identifier:
             raise ValueError('mismatched_job')
-        if job.status == 'running':
-            try:
-                progress = _artifact(identifier, 'stage.json')
-                if progress.is_file() and progress.stat().st_size <= 4096:
-                    job.stage = StableLoraProgress.model_validate_json(progress.read_bytes()).stage
-            except (ValidationError, OSError, MusicLoraError):
-                logger.warning('Stable training progress unavailable; retained job state used')
+        if job.status == 'running' or 'progress' not in job.model_fields_set:
+            _refresh_progress(job)
         return job
     except (ValidationError, ValueError, OSError) as error:
         raise MusicLoraError('stable_lora_storage_unavailable', 503) from error
@@ -111,25 +165,8 @@ def list_jobs() -> StableLoraTrainingJobs:
 
 
 def _sources(request: StableLoraTrainingRequest) -> list[Path]:
-    if db.FILES_DIR.is_symlink():
-        raise MusicLoraError('stable_lora_dataset_invalid', 422)
-    root = db.FILES_DIR.resolve()
-    sources: list[Path] = []
-    for sample in request.samples:
-        row = db.get_track(sample.track_id)
-        value: object = row['audio_path'] if row is not None else None
-        if not isinstance(value, str):
-            raise MusicLoraError('stable_lora_track_not_found', 404)
-        path = Path(value)
-        if not path.is_absolute() or path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file() or path.stat().st_size > 512 * 1024 * 1024 or path.suffix.lower() not in ('.wav', '.mp3', '.flac'):
-            raise MusicLoraError('stable_lora_dataset_invalid', 422)
-        current = path.parent
-        while current != db.FILES_DIR:
-            if current.is_symlink() or current.parent == current:
-                raise MusicLoraError('stable_lora_dataset_invalid', 422)
-            current = current.parent
-        sources.append(path.resolve())
-    return sources
+    from .music_training_sources import source_path
+    return [source_path(sample, prefix='stable_lora') for sample in request.samples]
 
 
 def _require_ready(request: StableLoraTrainingRequest) -> None:
@@ -175,6 +212,7 @@ async def _run(identifier: str) -> None:
             sources = _sources(job.request)
             argv, cwd, env = prepare_worker(job.request, _directory(identifier), sources)
             job.status = 'running'
+            job.started_at = datetime.now(timezone.utc).isoformat()
             _store(job)
             process: asyncio.subprocess.Process | None = None
             with _artifact(identifier, 'worker.log').open('xb') as log:
@@ -191,16 +229,20 @@ async def _run(identifier: str) -> None:
                         raise MusicLoraError('stable_lora_worker_unverified', 503)
                     if process is not None:
                         _store_identity(identifier, None)
-            job.stage = 'publishing'
+            job = get(identifier)
+            job.stage = job.progress.stage = 'publishing'
             _store(job)
             _publish(job)
             job.status = 'done'
-            job.stage = 'done'
+            job.stage = job.progress.stage = 'done'
+            job.progress.step = job.progress.total_steps = job.request.max_steps
+            job.finished_at = datetime.now(timezone.utc).isoformat()
             job.error_code = None
             _store(job)
     except asyncio.CancelledError:
         job = get(identifier)
         job.status = 'cancelled'
+        job.finished_at = datetime.now(timezone.utc).isoformat()
         job.error_code = None
         _store(job)
         raise
@@ -208,6 +250,7 @@ async def _run(identifier: str) -> None:
         logger.exception('Stable adapter training failed')
         job = get(identifier)
         job.status = 'failed'
+        job.finished_at = datetime.now(timezone.utc).isoformat()
         job.error_code = error.code if isinstance(error, MusicLoraError) else 'stable_lora_training_failed'
         _store(job)
     finally:
@@ -253,6 +296,7 @@ async def cancel(identifier: str) -> StableLoraTrainingJob:
     job = get(identifier)
     if task is not None and job.status in {'queued', 'running'}:
         job.status = 'cancelled'
+        job.finished_at = datetime.now(timezone.utc).isoformat()
         _store(job)
         _cleanup(identifier)
     return get(identifier)
@@ -279,6 +323,7 @@ async def recover() -> None:
             try:
                 job = get(identifier)
                 job.status = 'failed'
+                job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
                 job.error_code = 'stable_lora_worker_unverified'
                 _store(job)
             except MusicLoraError:
@@ -291,10 +336,13 @@ async def recover() -> None:
             if job.adapter is not None or find_by_job(identifier) is not None or _artifact(identifier, 'completion.json').is_file():
                 _publish(job)
                 job.status = 'done'
-                job.stage = 'done'
+                job.stage = job.progress.stage = 'done'
+                job.progress.step = job.progress.total_steps = job.request.max_steps
+                job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
                 job.error_code = None
             elif job.status in {'queued', 'running'}:
                 job.status = 'interrupted'
+                job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
                 job.error_code = 'stable_lora_interrupted'
             _store(job)
             _cleanup(identifier)
@@ -303,6 +351,7 @@ async def recover() -> None:
             try:
                 job = get(identifier)
                 job.status = 'failed'
+                job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
                 job.error_code = error.code if isinstance(error, MusicLoraError) else 'stable_lora_completion_invalid' if isinstance(error, (ValueError, ValidationError)) else 'stable_lora_recovery_failed'
                 _store(job)
             except (MusicLoraError, sqlite3.Error):

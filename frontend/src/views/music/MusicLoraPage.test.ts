@@ -6,22 +6,30 @@ import { i18n } from '../../i18n'
 import * as adapters from '../../api/musicLora'
 import * as training from '../../api/stableLora'
 import * as tracks from '../../api/tracks'
+import * as modules from '../../api/modules'
+import * as datasets from '../../api/loraDataset'
+import { parseLoraDatasetOperationResponse } from '../../api/generated'
 import { ApiError } from '../../api/http'
 import type { MusicAdapter, StableLoraTrainingJob, StableLoraTrainingJobs } from '../../api/generated'
 import MusicLoraPage from './MusicLoraPage.vue'
+vi.mock('./ModelLoraTraining.vue', () => ({ default: { template: '<section data-model-training></section>' } }))
 vi.mock('../../api/musicLora', async original => ({ ...await original<typeof import('../../api/musicLora')>(), listMusicAdapters: vi.fn(), importMusicAdapter: vi.fn(), musicLoraCapabilities: vi.fn() }))
 vi.mock('../../api/stableLora', () => ({ stableLoraStatus: vi.fn(), listStableLora: vi.fn(), submitStableLora: vi.fn(), cancelStableLora: vi.fn() }))
+vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(async () => []), planModules: vi.fn(), installModules: vi.fn(), controlModuleJob: vi.fn() }))
 vi.mock('../../api/tracks', () => ({ listTracks: vi.fn(), uploadTrack: vi.fn() }))
+vi.mock('../../api/loraDataset', () => ({ listLoraDatasets: vi.fn(), readSavedLoraDataset: vi.fn() }))
 let app: App | undefined
 const adapter: MusicAdapter = { id: 'a'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Piano', sha256: 'b'.repeat(64), created_at: 'now', source_job_id: null }
 const request = { name: 'Piano', variant: 'small-music', samples: [{ track_id: 42, caption: 'Solo piano' }], max_steps: 1000, rank: 16, learning_rate: 0.0001, seed: 42 } as const
 function job(status: StableLoraTrainingJob['status'] = 'running'): StableLoraTrainingJob { return { id: 'c'.repeat(32), status, stage: status === 'done' ? 'done' : 'training', created_at: 'now', request: { ...request, samples: [...request.samples] }, adapter: status === 'done' ? adapter : null, error_code: null } }
 async function settle() { for (let index = 0; index < 14; index++) await nextTick() }
 async function mount(engine: 'stable_audio3' | 'yue2' | 'heartmula' = 'stable_audio3') { const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicLoraPage }, { path: '/ace-step/lora', component: { render: () => null } }, { path: '/settings', component: { render: () => null } }] }); await router.push('/'); const node = document.body.appendChild(document.createElement('div')); app = createApp(MusicLoraPage, { engine }).use(router).use(i18n); app.mount(node); await settle(); return node }
-function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
+function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label || item.getAttribute('aria-label') === label); if (!found) throw new Error(`Missing ${label}`); return found }
 async function input(node: ParentNode, name: string, value: string) { const element = node.querySelector(`[name="${name}"]`); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error(`Missing ${name}`); element.value = value; element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); await settle() }
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(modules.listModuleJobs).mockResolvedValue([])
+  vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [], issues: [] })
   vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }, { engine: 'heartmula', loading: false, training: false, reason: 'unsupported_runtime' }] })
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [], history_incomplete: false })
   vi.mocked(adapters.importMusicAdapter).mockResolvedValue(adapter)
@@ -31,12 +39,137 @@ beforeEach(() => {
   vi.mocked(tracks.listTracks).mockResolvedValue([{ id: 42, short_id: 42, model: 'upload', title: 'Piano recording', created_at: 'now', lyrics: '', seed: null, duration_ms: 30000, wall_ms: null, params: {}, filename: 'piano.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }])
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
+it('opens the training options guide without submitting and restores focus on Escape', async () => {
+  const node = await mount()
+  const info = button(node, 'About training options')
+  info.focus(); info.click(); await settle()
+  const dialog = document.querySelector('[role="dialog"]')
+  expect(dialog?.getAttribute('aria-label')).toBe('Training options explained')
+  for (const label of ['Adapter name', 'Base model', 'Training music and captions', 'Training steps', 'Rank', 'Learning rate', 'Seed', 'Progress and stopping']) expect(dialog?.textContent).toContain(label)
+  expect(dialog?.textContent).toContain('Higher values are not automatically better')
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.activeElement).toBe(info)
+  expect(training.submitStableLora).not.toHaveBeenCalled()
+})
+it('confirms a picked track, marks it selected, and makes its picker state follow removal', async () => {
+  const node = await mount()
+  button(node, 'Add or upload a library track').click(); await settle()
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  const confirmation = node.querySelector('[data-training-selection-status]')
+  expect(confirmation?.getAttribute('role')).toBe('status')
+  expect(confirmation?.textContent).toContain('Added “Piano recording” to training.')
+  expect(node.textContent).toContain('Selected for training')
+  expect(node.textContent).toContain('Selected tracks: 1')
+  button(node, 'Add or upload a library track').click(); await settle()
+  expect(button(document, 'Already added').disabled).toBe(true)
+  button(document, i18n.global.t('common.close')).click(); await settle()
+  button(node, 'Remove track').click(); await settle()
+  expect(node.textContent).not.toContain('Added “Piano recording” to training.')
+  expect(node.textContent).toContain('Selected tracks: 0')
+})
+
+it('confirms dataset recordings only after adding them and reports duplicate additions', async () => {
+  const dataset = { id: 'a'.repeat(32), name: 'Piano set', dataset_path: 'datasets/piano/dataset.json', audio_dir: 'datasets/piano', sample_count: 1, labeled_count: 1, revision: 7, available: true, trashed: false }
+  const snapshot = parseLoraDatasetOperationResponse({ dataset, samples: [{ id: 'piano', filename: 'piano.wav', caption: 'Warm piano', labeled: true }], metadata: {} })
+  vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [dataset], issues: [] })
+  vi.mocked(datasets.readSavedLoraDataset).mockResolvedValue(snapshot)
+  const node = await mount()
+  button(node, 'Add a saved dataset').click(); await settle()
+  expect(node.textContent).toContain('Selected tracks: 0')
+  expect(node.querySelector('[name="caption-' + dataset.id + '-piano"]')).toBeNull()
+  button(node, 'Add up to 1 recordings').click(); await settle()
+  expect(node.querySelector('[data-training-selection-status]')?.textContent).toContain('Added recordings from “Piano set”: 1.')
+  expect(node.textContent).toContain('Selected tracks: 1')
+  button(node, 'Add a saved dataset').click(); await settle()
+  button(node, 'Add up to 1 recordings').click(); await settle()
+  expect(node.querySelector('[data-training-selection-status]')?.textContent).toContain('These recordings are already selected.')
+  expect(node.querySelectorAll('textarea[name^="caption-"]')).toHaveLength(1)
+})
 it('shows only the selected model capabilities without automatically starting jobs', async () => {
   const node = await mount()
-  expect(node.querySelector('[data-engine="stable_audio3"]')?.textContent).toContain('Native runtime support')
+  expect(node.querySelector('[data-engine="stable_audio3"]')?.textContent).toContain('Ready to train')
   expect(node.querySelector('[data-engine="heartmula"]')).toBeNull()
   expect(node.textContent).toContain('PEFT checkpoints with a companion JSON are not supported')
   expect(training.submitStableLora).not.toHaveBeenCalled(); expect(adapters.importMusicAdapter).not.toHaveBeenCalled()
+})
+it('puts the three-step training flow before collapsed adapter tools', async () => {
+  const node = await mount()
+  const form = node.querySelector('form[data-training]')
+  if (!(form instanceof HTMLFormElement)) throw new Error('Missing training form')
+  expect([...form.querySelectorAll('legend')].map(legend => legend.textContent?.trim())).toEqual(['1. Name your LoRA', '2. Add your music', '3. Train'])
+  const advanced = form.querySelector('[name="training-rank"]')?.closest('details')
+  expect(advanced).toBeInstanceOf(HTMLDetailsElement)
+  expect(advanced?.open).toBe(false)
+  expect(form.querySelector('[name="training-steps"]')?.closest('details')).toBe(advanced)
+  const tools = node.querySelector('[name="import-name"]')?.closest('details')
+  expect(tools).toBeInstanceOf(HTMLDetailsElement)
+  expect(tools?.open).toBe(false)
+  if (!tools) throw new Error('Missing adapter tools')
+  expect(form.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(node.querySelector('table')).toBeNull()
+  expect(form.textContent).toContain('first 10 minutes')
+  expect(form.textContent).toContain('cannot resume')
+})
+it('explains the next required input until training is ready', async () => {
+  const node = await mount()
+  expect(node.querySelector('[data-training-requirement]')?.textContent).toContain('Enter a name')
+  await input(node, 'training-name', 'Piano')
+  expect(node.querySelector('[data-training-requirement]')?.textContent).toContain('Add at least one track')
+  button(node, 'Add or upload a library track').click(); await settle()
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  expect(node.querySelector('[data-training-requirement]')?.textContent).toContain('Add a caption')
+  await input(node, 'caption-42', 'Solo piano')
+  expect(node.querySelector('[data-training-requirement]')).toBeNull()
+  expect(button(node, 'Start training').disabled).toBe(false)
+})
+it('retains edited training settings after their section is closed', async () => {
+  const node = await mount()
+  await input(node, 'training-name', 'Piano')
+  button(node, 'Add or upload a library track').click(); await settle()
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'caption-42', 'Solo piano')
+  const advanced = node.querySelector('[name="training-rank"]')?.closest('details')
+  if (!(advanced instanceof HTMLDetailsElement)) throw new Error('Missing training settings')
+  advanced.open = true
+  await input(node, 'training-steps', '200')
+  await input(node, 'training-rank', '8')
+  await input(node, 'training-learning-rate', '0.00005')
+  await input(node, 'training-seed', '7')
+  advanced.open = false
+  button(node, 'Start training').click(); await settle()
+  expect(training.submitStableLora).toHaveBeenCalledExactlyOnceWith({ ...request, samples: [...request.samples], max_steps: 200, rank: 8, learning_rate: 0.00005, seed: 7 }, expect.any(AbortSignal))
+})
+it('explains invalid advanced settings instead of leaving an unexplained disabled button', async () => {
+  const node = await mount()
+  await input(node, 'training-name', 'Piano')
+  button(node, 'Add or upload a library track').click(); await settle()
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'caption-42', 'Solo piano')
+  await input(node, 'training-steps', '0')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(node.querySelector('[data-training-requirement]')?.textContent).toContain('Check the advanced training settings')
+  expect(training.submitStableLora).not.toHaveBeenCalled()
+})
+it('shows a setup action when the selected model is unavailable', async () => {
+  const node = await mount()
+  await input(node, 'training-variant', 'medium')
+  const readiness = node.querySelector('[data-stable-readiness]')
+  expect(readiness?.textContent).toContain('Training weights for the selected base model are missing')
+  expect(readiness?.querySelector('a[href="/settings#module-stable_audio3"]')).not.toBeNull()
+  expect(readiness?.textContent).not.toContain('Ready to train')
+  expect(training.submitStableLora).not.toHaveBeenCalled()
+})
+it('reports a failed capability check as unknown rather than unsupported training', async () => {
+  vi.mocked(adapters.musicLoraCapabilities).mockRejectedValue(new Error('/private/token'))
+  const node = await mount()
+  const readiness = node.querySelector('[data-stable-readiness]')
+  expect(readiness?.textContent).toContain('Training setup could not be confirmed')
+  expect(readiness?.textContent).not.toContain('Training is unavailable')
+  expect(readiness?.querySelector('a[href="/settings#module-stable_audio3"]')).toBeNull()
+  expect(node.querySelector('[data-training-requirement]')?.textContent).toContain('Refresh the setup check')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(training.submitStableLora).not.toHaveBeenCalled()
 })
 it('imports only through a chosen file and matching native target and offers export', async () => {
   const node = await mount(); await input(node, 'import-name', 'Piano')
@@ -51,7 +184,7 @@ it('imports only through a chosen file and matching native target and offers exp
 it('selects whole library tracks with required captions and submits a bounded fresh training job', async () => {
   const node = await mount(); await input(node, 'training-name', 'Piano')
   button(node, 'Add or upload a library track').click(); await settle()
-  button(document, i18n.global.t('library.fullMix')).click(); await settle()
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle()
   expect(button(node, 'Start training').disabled).toBe(true)
   await input(node, 'caption-42', 'Solo piano')
   const form = node.querySelector('form[data-training]'); if (!(form instanceof HTMLFormElement)) throw new Error('Missing training form')
@@ -66,7 +199,7 @@ it('requires weights for the selected training variant and enforces sample remov
   expect(node.textContent).toContain('Training weights for the selected base model are missing')
   expect(button(node, 'Start training').disabled).toBe(true)
   await input(node, 'training-variant', 'small-music')
-  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.fullMix')).click(); await settle()
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
   expect(node.textContent).toContain('Piano recording')
   button(node, 'Remove track').click(); await settle()
   expect(node.querySelector('[name="caption-42"]')).toBeNull()
@@ -132,7 +265,7 @@ it('confirms history after an uncertain submission before allowing another train
   vi.mocked(training.submitStableLora).mockRejectedValueOnce(new Error('/private/token'))
   const node = await mount(); await input(node, 'training-name', 'Piano')
   button(node, 'Add or upload a library track').click(); await settle()
-  button(document, i18n.global.t('library.fullMix')).click(); await settle(); await input(node, 'caption-42', 'Solo piano')
+  button(document, i18n.global.t('library.addToTraining')).click(); await settle(); await input(node, 'caption-42', 'Solo piano')
   button(node, 'Start training').click(); await settle()
   expect(button(node, 'Start training').disabled).toBe(true)
   button(node, 'Start training').click(); await settle()
@@ -153,9 +286,23 @@ it('offers YuE native imports without Stable Audio training controls or requests
   expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
 })
 
-it('explains HeartMuLa limitations without offering unsupported training or adapter import', async () => {
+it('imports a HeartMuLa fallback result through its matching validated adapter target', async () => {
+  const heartAdapter: MusicAdapter = { ...adapter, engine: 'heartmula', target: 'heartmula-3b', name: 'Vocal style' }
+  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'heartmula', loading: true, training: true, reason: 'experimental' }] })
+  vi.mocked(adapters.importMusicAdapter).mockResolvedValue(heartAdapter)
   const node = await mount('heartmula')
-  expect(node.querySelector('[data-engine="heartmula"]')?.textContent).toContain('no adapter API or trainer')
-  expect(node.querySelector('form')).toBeNull()
+  expect(node.querySelector('[data-model-training]')).not.toBeNull()
+  await input(node, 'import-name', 'Vocal style')
+  const target = node.querySelector('[name="import-target"]')
+  if (!(target instanceof HTMLSelectElement)) throw new Error('Missing HeartMuLa import target')
+  expect([...target.options].map(option => option.value)).toEqual(['heartmula-3b'])
+  const file = new File(['native checkpoint'], 'adapter.safetensors')
+  const picker = node.querySelector('input[type="file"]')
+  if (!(picker instanceof HTMLInputElement)) throw new Error('Missing HeartMuLa adapter upload')
+  const transfer = new DataTransfer(); transfer.items.add(file); picker.files = transfer.files; picker.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  button(node, 'Import adapter').click(); await settle()
+  expect(adapters.importMusicAdapter).toHaveBeenCalledExactlyOnceWith(file, { engine: 'heartmula', target: 'heartmula-3b', name: 'Vocal style' }, expect.any(AbortSignal))
+  expect(node.querySelector(`a[href="/api/music-lora/adapters/${heartAdapter.id}/file"]`)).not.toBeNull()
+  expect(node.querySelector('form[data-training]')).toBeNull()
   expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
 })

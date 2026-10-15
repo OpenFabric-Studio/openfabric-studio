@@ -13,6 +13,7 @@ import { musicQueueEn } from './musicQueue'
 import { localMusicEn } from './localMusic'
 import { musicLoraEn } from './musicLora'
 import { loraRecoveryEn } from './loraRecovery'
+import { loraExportEn } from './loraExport'
 import { loraWorkspaceEn } from './loraWorkspace'
 import { videoExperienceEn } from './videoExperience'
 import { videoDirectionEn } from './videoDirection'
@@ -60,6 +61,7 @@ export default {
   localMusic: localMusicEn,
   musicLora: musicLoraEn,
   loraRecovery: loraRecoveryEn,
+  loraExport: loraExportEn,
   loraWorkspace: loraWorkspaceEn,
   videoExperience: videoExperienceEn,
   videoDirection: videoDirectionEn,
@@ -91,6 +93,7 @@ export default {
     redo: 'Redo',
     download: 'Download',
     delete: 'Delete',
+    trackFileDeletionWarning: 'Deleting “{name}” permanently removes its tracks, saved audio versions, stems, MIDI and exports from disk. This cannot be undone.',
     cancel: 'Cancel',
     rename: 'Rename',
     reset: 'Reset',
@@ -464,7 +467,7 @@ voiceProfiles: {
     cancelled: 'Cancelled',
     cancel: 'Cancel',
     delete: 'Delete',
-    confirmDelete: 'Delete this video?',
+    confirmDelete: 'Delete this video and all files in its saved video folder? This cannot be undone.',
     err: {
       ...videoCloudErrorsEn,
       ...videoErrorsEn,
@@ -590,7 +593,8 @@ voiceProfiles: {
     providers: 'provider settings, model catalogs and request history',
     localMusic: 'local music worker logs and recovery files',
     musicAdapters: 'managed music adapters and their metadata',
-    musicTraining: 'music training inputs, checkpoints and worker logs',
+    musicTraining: 'Stable Audio training inputs, checkpoints and worker logs',
+    musicTrainingRuns: 'HeartMuLa and YuE training inputs, checkpoints and worker logs',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',
@@ -693,6 +697,23 @@ voiceProfiles: {
     loraStrength: 'LoRA strength: {value}',
     loraScaleAdjusted: 'ACE-Step supports LoRA strength up to 1. The restored strength was adjusted to 1 for new generations; the saved preset or history entry is unchanged.',
     loraOperationFailed: 'Could not apply these LoRA settings. Check the adapter and try again.',
+    chooseLora: 'Choose the adapter to use', currentLora: 'Use currently loaded: {name}',
+    savedLora: 'Saved adapter: {name}.', loraBaseModel: 'LoRA applies to the current primary model. Choose No LoRA before switching the base model, or select the current primary model.',
+    activeLora: 'Confirmed active adapter: {name} · strength {scale}', disabledLora: 'Loaded but disabled: {name} · strength {scale}', noActiveLora: 'Confirmed: no active LoRA.',
+    checkingLora: 'Checking or applying LoRA settings… Loading the base model can take a few minutes.', confirmLora: 'Confirm the currently loaded adapter or choose No LoRA before generating.',
+    retryLora: 'Retry LoRA settings', recheckLora: 'Recheck LoRA status',
+    loraErrors: {
+      ace_lora_path_missing: 'The adapter folder was not found. Check the registered path and retry.',
+      ace_lora_invalid_adapter: 'This folder does not contain a supported LoRA adapter. Check its files and retry.',
+      ace_lora_already_loaded: 'An adapter is already loaded. Choose the currently loaded adapter to reuse it, or choose No LoRA before loading another.',
+      ace_lora_quantized_unsupported: 'This quantized model does not support LoRA. Start a compatible model before loading the adapter.',
+      ace_lora_not_loaded: 'No adapter is loaded. Select an adapter before changing its strength.',
+      ace_lora_busy: 'ACE-Step is busy. Wait for its current work to finish, then retry these LoRA settings.',
+      ace_lora_model_inactive: 'Start ACE-Step before checking or changing its LoRA settings.',
+      ace_lora_operation_failed: 'Could not apply these LoRA settings. Check the adapter and try again.',
+      ace_lora_status_unavailable: 'Could not check the active LoRA. Recheck its status before generating.',
+      ace_lora_selection_mismatch: 'The active LoRA no longer matches this selection. Review the adapter and strength in the ACE generator, or choose No LoRA before retrying.',
+    },
     loraNamePlaceholder: 'name',
     loraPathPlaceholder: 'adapter path',
     removeLora: 'remove',
@@ -967,7 +988,7 @@ voiceProfiles: {
     floatingHint: 'Drag the title or use arrow keys to move (Shift: 50 px). Escape hides this panel. Your draft is kept.',
   },
   lora: {
-    serverNotice: 'Dataset and training are shared ACE-Step server state (not tied to the browser tab). During training the server unloads the LLM and occupies the GPU with the decoder — music generation won\'t work during that time. Audio/dataset/tensor paths must live inside the ACE-Step project folder (e.g. {example}); the export path for the finished LoRA can be anywhere on disk.',
+    serverNotice: 'Dataset and training are shared ACE-Step server state (not tied to the browser tab). During training the server unloads the LLM and occupies the GPU with the decoder — music generation won\'t work during that time. Audio/dataset/tensor paths must live inside the ACE-Step project folder (e.g. {example}); finished LoRA exports use a new folder outside the engine and application library.',
     llmNotReady: 'The ACE-Step model isn\'t loaded into memory yet (LLM not initialized) — auto-labeling and training won\'t work until it is. This usually happens automatically on first generation, or you can load it manually now — it can take a couple of minutes.',
     loading: 'Loading…',
     initModel: 'Initialize model',
@@ -1173,6 +1194,8 @@ voiceProfiles: {
     noTracks: 'No tracks yet.',
     untitled: '(untitled)',
     fullMix: 'Full mix',
+    addToTraining: 'Add to training',
+    alreadyAdded: 'Already added',
     trackFallback: 'Track',
     stems: {
       vocals: 'Vocals',
@@ -1193,6 +1216,7 @@ voiceProfiles: {
     mixer: 'Mixer',
     delete: 'Delete',
     confirmDelete: 'Delete the separated stems? Files will be removed from disk.',
+    confirmRecreate: 'Replace the separated stems for “{name}”? Old stem files may be removed from disk after recreation. Download any files you want to keep first.',
   },
   midiPanel: {
     intro: 'Note recognition via MuScriptor. Stems appear here once the track has been split.',
@@ -1211,6 +1235,7 @@ voiceProfiles: {
     notesCount: 'Notes: {count} · Tempo: {bpm} BPM',
     deleteAll: 'Delete all MIDI',
     confirmDeleteAll: 'Delete all MIDI for this track? Files will be removed from disk.',
+    confirmRecreate: 'Replace the {source} MIDI file? The current file will be overwritten. Download it first if you want to keep it.',
   },
   mixer: {
     title: 'Mixer · {title}',

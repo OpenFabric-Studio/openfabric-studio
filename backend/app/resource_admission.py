@@ -91,7 +91,8 @@ async def reserve_native(video_busy: Callable[[], bool], *, model_id: str | None
         from .video_character_comparison import work_busy as character_comparison_busy
         from .local_music import work_busy as local_music_busy
         from .stable_lora import work_busy as stable_lora_busy
-        if local_music_busy() or stable_lora_busy() or video_busy() or optional_busy() or character_training_busy() or character_comparison_busy() or asr_busy() or speaker_busy() or audiobook_workflows_busy():
+        from .music_training import work_busy as music_training_busy
+        if local_music_busy() or stable_lora_busy() or music_training_busy() or video_busy() or optional_busy() or character_training_busy() or character_comparison_busy() or asr_busy() or speaker_busy() or audiobook_workflows_busy():
             raise ResourceBusyError("video_work_busy")
         if exclusive and model_id is not None and _native_models.get(model_id, 0):
             raise ResourceBusyError('native_model_busy')

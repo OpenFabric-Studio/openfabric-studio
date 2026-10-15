@@ -7,19 +7,23 @@ so both frontends can be written against a single same-origin API surface.
 from __future__ import annotations
 
 import logging
+import posixpath
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
+from typing import Literal
+from urllib.parse import unquote
 import httpx
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
-from pydantic import TypeAdapter
+from pydantic import TypeAdapter, ValidationError
 from ..config import MODELS, ACE_STEP_DIR
-from ..contracts import JsonValue
+from ..contracts import JsonObject, JsonValue
 from ..orchestrator.manager import manager
 from ..orchestrator.state import ModelStatus
-from .. import video_jobs, native_yue
+from .. import ace_jobs, ace_lora, video_jobs, native_yue
+from ..ace_lora_contracts import AceLoraLoadRequest, AceLoraScaleRequest, AceLoraToggleRequest
 from .. import lora_datasets
 from ..job_lifecycle import await_cleanup
 from ..resource_admission import NativeLease, ResourceBusyError, reserve_native, reserve_native_control
@@ -43,6 +47,7 @@ class _ProxyOwnership:
         self.requested = False
         self.completed = False
         self.finished = False
+        self.lora_control = False
 
     async def close(self) -> None:
         if self.finished:
@@ -50,14 +55,19 @@ class _ProxyOwnership:
         # All cleanup calls are drained by their caller; there is one stream
         # owner and its background fallback, never two concurrent resets.
         self.finished = True
-        if self.model_id == 'yue2' and self.reset_on_disconnect and self.requested and not self.completed:
-            try:
-                await manager.restart_model('yue2')
-            except BaseException:
-                native_yue.quarantine(self.lease)
-                logger.exception('Native proxy stop failed; reservation retained')
-                raise
-        await self.lease.release()
+        try:
+            if self.model_id == 'yue2' and self.reset_on_disconnect and self.requested and not self.completed:
+                try:
+                    await manager.restart_model('yue2')
+                except BaseException:
+                    native_yue.quarantine(self.lease)
+                    logger.exception('Native proxy stop failed; reservation retained')
+                    raise
+            await self.lease.release()
+        finally:
+            if self.lora_control:
+                self.lora_control = False
+                ace_lora.control_lock.release()
 
 
 async def _proxy_to(base_url: str, request: Request, path: str, owner: _ProxyOwnership | None = None) -> Response:
@@ -137,14 +147,78 @@ async def _training_proxy(base_url: str, request: Request, path: str, owner: _Pr
         return await _proxy_to(base_url, request, path, owner)
 
 
+_ACE_LORA_OPERATIONS: dict[str, Literal['load', 'unload', 'toggle', 'scale']] = {
+    'v1/lora/load': 'load', 'v1/lora/unload': 'unload',
+    'v1/lora/toggle': 'toggle', 'v1/lora/scale': 'scale'}
+_ACE_LORA_ENDPOINTS = {'v1/lora/status', *_ACE_LORA_OPERATIONS}
+
+
+async def _ace_lora_proxy(request: Request, endpoint: str) -> Response:
+    if endpoint == 'v1/lora/status':
+        if request.method != 'GET':
+            raise ace_lora.AceLoraError('ace_lora_operation_failed', 405)
+        status = await ace_lora.fetch_status(_client)
+        return JSONResponse({'data': status.model_dump(mode='json'), 'code': 200})
+    if request.method != 'POST':
+        raise ace_lora.AceLoraError('ace_lora_operation_failed', 405)
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > 65536:
+            raise ace_lora.AceLoraError('ace_lora_invalid_adapter', 413)
+        raw.extend(chunk)
+    try:
+        content = bytes(raw) or b'{}'
+        if endpoint == 'v1/lora/load':
+            command = AceLoraLoadRequest.model_validate_json(content)
+            body: JsonObject = {'lora_path': command.lora_path, 'adapter_name': command.adapter_name}
+        elif endpoint == 'v1/lora/scale':
+            scale = AceLoraScaleRequest.model_validate_json(content)
+            body = {'scale': scale.scale, 'adapter_name': scale.adapter_name}
+        elif endpoint == 'v1/lora/toggle':
+            toggle = AceLoraToggleRequest.model_validate_json(content)
+            body = {'use_lora': toggle.use_lora}
+        else:
+            empty: JsonValue = TypeAdapter(JsonValue).validate_json(content)
+            if empty != {}:
+                raise ValueError('Unexpected unload body')
+            body = {}
+    except (ValidationError, ValueError) as exc:
+        raise ace_lora.AceLoraError('ace_lora_invalid_adapter', 422) from exc
+    async with ace_lora.control_lock:
+        if manager.state.models['ace_step'].status != ModelStatus.RUNNING:
+            raise ace_lora.AceLoraError('ace_lora_model_inactive', 503)
+        if ace_jobs.work_busy():
+            raise ace_lora.AceLoraError('ace_lora_busy')
+        operation = _ACE_LORA_OPERATIONS[endpoint]
+        try:
+            result = await ace_lora.mutate(_client, operation, body)
+        except ace_lora.AceLoraError as exc:
+            if operation != 'load' or exc.code != 'ace_lora_model_inactive':
+                raise
+            async with lora_datasets.native_lock:
+                await lora_datasets.require_native_idle(require_running=True)
+                if ace_jobs.work_busy():
+                    raise ace_lora.AceLoraError('ace_lora_busy')
+                await await_cleanup(ace_lora.initialize_primary(_client))
+                result = await ace_lora.mutate(_client, operation, body)
+        return JSONResponse(result)
+
+
 def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
     async def _route(request: Request, path: str = "") -> Response:
+        endpoint = posixpath.normpath('/' + unquote(path).replace('\\', '/').split('?', 1)[0].split('#', 1)[0]).strip('/')
+        if model_id == 'ace_step' and endpoint == 'v1/training/export':
+            return JSONResponse({'error': 'lora_export_safe_endpoint_required'}, status_code=410)
+        is_ace_lora = model_id == 'ace_step' and endpoint in _ACE_LORA_ENDPOINTS
+        is_ace_init = model_id == 'ace_step' and endpoint == 'v1/init'
         rs = manager.state.models[model_id]
+        if rs.status != ModelStatus.RUNNING and is_ace_lora:
+            return JSONResponse({'error': 'ace_lora_model_inactive'}, status_code=503)
         if rs.status != ModelStatus.RUNNING:
             return JSONResponse({"error": f"model '{model_id}' is not active"}, status_code=503)
         owner: _ProxyOwnership | None = None
         try:
-            accelerator = _accelerator_mutation(model_id, path, request.method)
+            accelerator = _accelerator_mutation(model_id, endpoint if is_ace_lora or is_ace_init else path, request.method)
             mutation = request.method.upper() not in {'GET', 'HEAD', 'OPTIONS'} and not (
                 model_id == 'ace_step' and request.method.upper() == 'POST' and path.strip('/') == 'query_result')
             if mutation:
@@ -159,10 +233,21 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
                 # for admission. Never forward its earlier RUNNING snapshot.
                 if rs.status != ModelStatus.RUNNING:
                     await await_cleanup(owner.close())
-                    return JSONResponse({'error': 'model_inactive'}, status_code=503)
-            endpoint = path.strip('/')
+                    return JSONResponse({'error': 'ace_lora_model_inactive' if is_ace_lora else 'model_inactive'}, status_code=503)
+            if owner is not None and is_ace_init:
+                await ace_lora.control_lock.acquire()
+                owner.lora_control = True
+                if ace_jobs.work_busy():
+                    raise ace_lora.AceLoraError('ace_lora_busy')
+                if rs.status != ModelStatus.RUNNING:
+                    raise ace_lora.AceLoraError('ace_lora_model_inactive', 503)
+            if not is_ace_lora and not is_ace_init:
+                endpoint = path.strip('/')
             guarded = mutation and model_id == 'ace_step' and (endpoint.startswith('v1/dataset/') or endpoint in {'v1/training/start', 'v1/init'})
-            response = await _training_proxy(MODELS[model_id].proxy_target, request, endpoint, owner) if guarded else await _proxy_to(MODELS[model_id].proxy_target, request, path, owner)
+            if is_ace_lora:
+                response = await _ace_lora_proxy(request, endpoint)
+            else:
+                response = await _training_proxy(MODELS[model_id].proxy_target, request, endpoint, owner) if guarded else await _proxy_to(MODELS[model_id].proxy_target, request, path, owner)
             if owner:
                 previous = response.background
                 async def cleanup() -> None:
@@ -174,6 +259,10 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
                             await await_cleanup(owner.close())
                 response.background = BackgroundTask(cleanup)
             return response
+        except ace_lora.AceLoraError as exc:
+            if owner:
+                await await_cleanup(owner.close())
+            return JSONResponse({'error': exc.code}, status_code=exc.status)
         except ResourceBusyError as exc:
             return JSONResponse({'error': str(exc)}, status_code=409)
         except lora_datasets.LoraDatasetError as exc:

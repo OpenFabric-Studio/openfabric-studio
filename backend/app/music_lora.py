@@ -1,6 +1,8 @@
 """Immutable, validated native safetensors adapters in the user's library."""
 from __future__ import annotations
 
+from array import array
+import sys
 import hashlib
 import json
 import logging
@@ -60,6 +62,8 @@ def _target(engine: str, target: str) -> tuple[AdapterEngine, AdapterTarget]:
         return 'stable_audio3', 'small-music' if target == 'small-music' else 'medium'
     if engine == 'yue2' and target in ('ar', 'nar'):
         return 'yue2', 'ar' if target == 'ar' else 'nar'
+    if engine == 'heartmula' and target == 'heartmula-3b':
+        return 'heartmula', 'heartmula-3b'
     raise MusicLoraError('music_lora_target_mismatch', 422)
 
 
@@ -87,6 +91,10 @@ def _pairs(tensors: dict[str, _Tensor], prefix: str) -> None:
 
 
 def _validate_native(tensors: dict[str, _Tensor], metadata: JsonObject, engine: AdapterEngine, target: AdapterTarget) -> None:
+    if engine == 'heartmula':
+        from .heart_lora_contracts import validate_heart_adapter
+        validate_heart_adapter({name: tensor.shape for name, tensor in tensors.items()}, metadata)
+        return
     if engine == 'yue2':
         nar = 'nar_' if target == 'nar' else ''
         pattern = r'layers\.([0-9]+)\.' + nar + r'(self_attn\.[qkvo]_proj|mlp\.(gate|up|down)_proj)\.lora_[AB]'
@@ -159,6 +167,25 @@ def _validate_native(tensors: dict[str, _Tensor], metadata: JsonObject, engine: 
     validate_stable({name: tensor.shape for name, tensor in tensors.items()}, cfg, target)
 
 
+def _validate_finite(path: Path, header_bytes: int, tensors: dict[str, _Tensor]) -> None:
+    with path.open('rb') as source:
+        for tensor in tensors.values():
+            source.seek(8 + header_bytes + tensor.data_offsets[0])
+            remaining = tensor.data_offsets[1] - tensor.data_offsets[0]
+            mask = 0x7f800000 if tensor.dtype == 'F32' else 0x7f80 if tensor.dtype == 'BF16' else 0x7c00
+            while remaining:
+                block = source.read(min(65536, remaining))
+                if not block:
+                    raise ValueError('Truncated tensor data')
+                words = array('I' if tensor.dtype == 'F32' else 'H')
+                words.frombytes(block)
+                if sys.byteorder != 'little':
+                    words.byteswap()
+                if any(word & mask == mask for word in words):
+                    raise ValueError('Non-finite adapter weights')
+                remaining -= len(block)
+
+
 def _validate(path: Path, engine: AdapterEngine, target: AdapterTarget) -> None:
     try:
         size = path.stat().st_size
@@ -184,6 +211,7 @@ def _validate(path: Path, engine: AdapterEngine, target: AdapterTarget) -> None:
         if offset != size - 8 - length:
             raise ValueError('Truncated or extra data')
         _validate_native(tensors, metadata, engine, target)
+        _validate_finite(path, length, tensors)
     except (ValueError, ValidationError, struct.error, OverflowError, RecursionError) as error:
         raise MusicLoraError('music_lora_format_invalid', 422) from error
 
@@ -316,6 +344,6 @@ def register_file(path: Path, *, name: str, engine: str, target: str, source_job
 def capabilities() -> MusicLoraCapabilities:
     return MusicLoraCapabilities(engines=[
         MusicLoraCapability(engine='ace_step', loading=True, training=True, reason='native'),
-        MusicLoraCapability(engine='yue2', loading=YUE2_LORA_AVAILABLE, training=False, reason='inference_only' if YUE2_LORA_AVAILABLE else 'upgrade_required'),
-        MusicLoraCapability(engine='heartmula', loading=False, training=False, reason='unsupported_runtime'),
+        MusicLoraCapability(engine='yue2', loading=YUE2_LORA_AVAILABLE, training=True, reason='experimental' if YUE2_LORA_AVAILABLE else 'upgrade_required'),
+        MusicLoraCapability(engine='heartmula', loading=True, training=True, reason='experimental'),
         MusicLoraCapability(engine='stable_audio3', loading=True, training=True, reason='native')])

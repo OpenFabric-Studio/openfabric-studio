@@ -8,6 +8,8 @@ from pathlib import Path
 
 from .module_catalog import ModuleEnvironment, configured_environment, engine_python, supported
 from .module_evidence import environment_verified
+from .module_jobs import ModuleSetupError
+from .module_music_models import _path, _valid_file
 from .music_lora_contracts import MusicLoraError
 from .stable_lora_contracts import StableLoraTrainingRequest, StableLoraTrainingStatus
 from .video_media import tool
@@ -15,21 +17,22 @@ from .video_projects import atomic_text
 
 
 def fingerprint(request: StableLoraTrainingRequest) -> str:
-    return hashlib.sha256(request.model_dump_json().encode('utf-8')).hexdigest()
+    return hashlib.sha256(request.model_dump_json(exclude_none=True).encode('utf-8')).hexdigest()
 
 
 def training_weights(environment: ModuleEnvironment, variant: str) -> tuple[Path, ...]:
     if variant not in ('small-music', 'medium'):
         raise MusicLoraError('stable_lora_variant_invalid', 422)
-    root = environment.paths['stable_audio3'] / 'optimized/mlx/models/mlx'
-    return (root / 't5gemma_f16.npz', root / ('dit_medium-base_f16.npz' if variant == 'medium' else 'dit_sm-music-base_f16.npz'),
-        root / ('same_l_encoder_f32.npz' if variant == 'medium' else 'same_s_encoder_f32.npz'))
+    root = environment.paths['stable_audio3']
+    names = ('t5gemma_f16.npz', 'dit_medium-base_f16.npz' if variant == 'medium' else 'dit_sm-music-base_f16.npz',
+        'same_l_encoder_f32.npz' if variant == 'medium' else 'same_s_encoder_f32.npz')
+    return tuple(_path(root, 'optimized/mlx/models/mlx/' + name) for name in names)
 
 
-def _present(paths: tuple[Path, ...]) -> bool:
+def _weights_ready(environment: ModuleEnvironment, variant: str) -> bool:
     try:
-        return all(path.is_file() and path.stat().st_size > 0 for path in paths)
-    except OSError:
+        return all(_valid_file(path) for path in training_weights(environment, variant))
+    except (OSError, ModuleSetupError):
         return False
 
 
@@ -39,7 +42,7 @@ def status(environment: ModuleEnvironment | None = None) -> StableLoraTrainingSt
     support = supported('stable_audio3', env)
     installed = support and environment_verified(env, 'stable_audio3') and (source / 'lora_train_mlx.py').is_file() and (source / 'pre_encode_mlx.py').is_file()
     return StableLoraTrainingStatus(supported=support, installed=installed,
-        small_weights_ready=_present(training_weights(env, 'small-music')), medium_weights_ready=_present(training_weights(env, 'medium')))
+        small_weights_ready=_weights_ready(env, 'small-music'), medium_weights_ready=_weights_ready(env, 'medium'))
 
 
 def prepare_worker(request: StableLoraTrainingRequest, run_dir: Path, sources: list[Path]) -> tuple[list[str], Path, dict[str, str]]:
@@ -48,7 +51,7 @@ def prepare_worker(request: StableLoraTrainingRequest, run_dir: Path, sources: l
         raise MusicLoraError('stable_lora_runtime_unsupported')
     if not environment_verified(env, 'stable_audio3'):
         raise MusicLoraError('stable_lora_engine_not_installed')
-    if not _present(training_weights(env, request.variant)):
+    if not _weights_ready(env, request.variant):
         raise MusicLoraError('stable_lora_training_weights_missing')
     if len(sources) != len(request.samples):
         raise MusicLoraError('stable_lora_dataset_invalid', 422)

@@ -23,10 +23,11 @@ from .module_contracts import (
     ModuleId, ModuleInstallJob, ModuleInstallRequest, ModuleJobsResponse, ModuleJobStep, ModulePlan,
     ModulePlanRequest, ModuleStepState, ModuleDownloadProgress,
 )
+from .module_contracts import ModuleErrorCode as ModuleErrorCode
+from .module_diagnostics import append_event, failure_for, public_job
 from .video_process import spawn_owned, terminate_verified, WorkerIdentity
 
 logger = logging.getLogger(__name__)
-ModuleErrorCode = Literal['plan_changed', 'setup_busy', 'insufficient_disk', 'job_missing', 'invalid_job', 'job_corrupt', 'installation_failed', 'installer_failed', 'installer_output_limit', 'installer_timeout', 'worker_unverified', 'unsafe_install_path', 'not_managed', 'unsupported_platform', 'artifact_integrity', 'archive_unsafe', 'installation_conflict', 'environment_unverified', 'setup_not_resumable', 'download_failed', 'download_stalled']
 
 
 class ModuleSetupError(Exception):
@@ -136,6 +137,32 @@ class InstallContext:
         self.workspace = self.environment.root / '.setup' / 'staging' / identifier
         self._download_at = 0.0
         self._download_phase = ''
+        self._output_at = 0.0
+
+    def update_detail(self, detail: str) -> None:
+        """Persist the actual phase before a long download, install or conversion."""
+        stored = self.service.store.read(self.identifier)
+        if stored.job.state != 'running' or stored.job.current_step is None:
+            return
+        step = stored.job.steps[stored.job.current_step]
+        step.detail = detail[:1000]
+        step.download = None
+        stored.job.updated_at = now()
+        append_event(step, detail, stored.job.updated_at)
+        self.service.store.write(stored)
+
+    def record_output(self) -> None:
+        """Record real process activity without exposing or persisting its contents."""
+        current = time.monotonic()
+        if current - self._output_at < 1:
+            return
+        stored = self.service.store.read(self.identifier)
+        if stored.job.state != 'running' or stored.job.current_step is None:
+            return
+        stored.job.updated_at = now()
+        stored.job.steps[stored.job.current_step].last_output_at = stored.job.updated_at
+        self.service.store.write(stored)
+        self._output_at = current
 
     def update_download(self, progress: ModuleDownloadProgress) -> None:
         """Event-loop-only: fresh read/write has no await or cancellation gap."""
@@ -193,6 +220,7 @@ class InstallContext:
                 discarding = False
                 async with asyncio.timeout(timeout):
                     while chunk := await proc.stdout.read(16384):
+                        self.record_output()
                         written += len(chunk)
                         if written > 20 * 1024**2:
                             raise ModuleSetupError('installer_output_limit')
@@ -332,14 +360,20 @@ class ModuleJobService:
         self.installer: Installer = installer or _install
 
     def get(self, identifier: str) -> ModuleInstallJob:
-        return self.store.read(identifier).job
+        return public_job(self.store.read(identifier).job)
 
     def list(self) -> ModuleJobsResponse:
-        return ModuleJobsResponse(jobs=[record.job for record in self.store.records()])
+        return ModuleJobsResponse(jobs=[public_job(record.job) for record in self.store.records()])
 
-    async def _review(self, request: ModulePlanRequest) -> ModulePlan:
+    async def _review(self, request: ModulePlanRequest, *, allow_reuse: bool = False) -> ModulePlan:
         current = await plan(request, self.environment)
+        if allow_reuse and current.steps and all(step.operation == 'reuse' for step in current.steps):
+            return current
         if not current.can_install:
+            if request.stable_training_variant is not None and any(step.operation == 'manual' for step in current.steps):
+                raise ModuleSetupError('environment_unverified')
+            if current.steps and all(step.operation in ('reuse', 'unsupported') for step in current.steps) and any(step.operation == 'reuse' for step in current.steps):
+                raise ModuleSetupError('already_installed')
             raise ModuleSetupError('insufficient_disk' if current.free_bytes is None or current.free_bytes < current.required_free_bytes else 'unsupported_platform')
         return current
 
@@ -352,7 +386,9 @@ class ModuleJobService:
                 raise ModuleSetupError('plan_changed')
             stamp = now()
             job = ModuleInstallJob(id=uuid.uuid4().hex, state='queued', created_at=stamp, updated_at=stamp,
-                features=request.features, download_models=request.download_models,
+                features=request.features, download_models=request.download_models, reinstall=request.reinstall,
+                stable_training_variant=request.stable_training_variant,
+                music_training_engine=request.music_training_engine,
                 steps=[ModuleJobStep(module_id=step.module_id, name=step.name, state='queued', detail=step.detail) for step in current.steps])
             stored = StoredModuleJob(job=job, plan=current, review_scope=approval_scope(request, self.environment))
             from .resource_admission import admission_lock
@@ -386,21 +422,37 @@ class ModuleJobService:
                 stored.job.current_step = index
                 step.state = 'running'
                 stored.job.updated_at = now()
+                append_event(step, f'Starting {step.name} setup.', stored.job.updated_at)
                 self.store.write(stored)
                 dependency_manual = any(other.module_id in DEFINITIONS[step.module_id].dependencies and other.state in ('manual', 'failed', 'skipped') for other in stored.job.steps[:index])
-                if planned.operation == 'unsupported':
+                if planned.operation == 'reuse':
+                    result = InstallOutcome('verified', planned.detail)
+                elif planned.operation == 'unsupported':
                     result = InstallOutcome('manual', 'Unsupported on this platform. No installation was attempted.')
                 elif planned.operation == 'manual' or dependency_manual:
                     result = InstallOutcome('manual', planned.detail if not dependency_manual else 'Complete the preceding manual dependency setup, then review this feature again.')
+                elif stored.plan.stable_training_variant is not None:
+                    from .stable_lora_setup import prepare
+                    result = await prepare(context, stored.plan.stable_training_variant)
+                elif stored.plan.music_training_engine is not None:
+                    from .music_training_setup import plan as music_training_plan
+                    from .music_training_setup import prepare as prepare_music_training
+                    current = music_training_plan(ModulePlanRequest(features=stored.plan.features, download_models=True,
+                        music_training_engine=stored.plan.music_training_engine), self.environment)
+                    if current.estimated_download_bytes > stored.plan.estimated_download_bytes or current.required_free_bytes > stored.plan.required_free_bytes:
+                        raise ModuleSetupError('plan_changed')
+                    result = await prepare_music_training(context, stored.plan.music_training_engine)
                 elif planned.operation == 'verify':
                     from .module_install import verify
-                    result = await verify(context, step.module_id)
+                    result = await verify(context, step.module_id, download_models=stored.job.download_models)
                 else:
                     result = await self.installer(context, step.module_id, stored.job.download_models)
                 stored = self.store.read(identifier)
                 stored.job.steps[index].state = result.state
                 stored.job.steps[index].detail = result.detail[:1000]
                 stored.job.restart_required |= result.restart_required
+                stored.job.updated_at = now()
+                append_event(stored.job.steps[index], result.detail, stored.job.updated_at)
                 self.store.write(stored)
             stored = self.store.read(identifier)
             stored.job.state = 'awaiting_manual' if any(step.state in ('manual', 'skipped') for step in stored.job.steps) else 'completed'
@@ -423,8 +475,9 @@ class ModuleJobService:
             if stored.job.current_step is not None:
                 step = stored.job.steps[stored.job.current_step]
                 step.state = 'failed'
-                step.detail = 'Installation failed. Review the stable error code and local setup log before retrying.'
                 step.error_code = code
+                step.failure = failure_for(code, phase=step.detail)
+                append_event(step, step.failure.summary, stored.job.updated_at)
             self.store.write(stored)
         finally:
             self.tasks.pop(identifier, None)
@@ -462,6 +515,7 @@ class ModuleJobService:
                 self._claim_lease()
                 self._quarantine(identifier)
             await cancel_and_wait(self.tasks.get(identifier))
+            self.tasks.pop(identifier, None)
             stored = self.store.read(identifier)
             if stored.worker is not None:
                 await self._recover_worker(stored)
@@ -479,18 +533,26 @@ class ModuleJobService:
                 raise ModuleSetupError('setup_not_resumable')
             if stored.worker is not None or self.tasks or self.stopping:
                 raise ModuleSetupError('setup_busy')
-            current = await self._review(ModulePlanRequest(features=stored.job.features, download_models=stored.job.download_models))
-            request = ModulePlanRequest(features=stored.job.features, download_models=stored.job.download_models)
+            request = ModulePlanRequest(features=stored.job.features, download_models=stored.job.download_models, reinstall=stored.job.reinstall,
+                stable_training_variant=stored.job.stable_training_variant, music_training_engine=stored.job.music_training_engine)
+            completed = {step.module_id for step in stored.job.steps if step.state == 'verified'}
+            remaining = ModulePlanRequest(features=request.features, download_models=request.download_models,
+                stable_training_variant=request.stable_training_variant,
+                music_training_engine=request.music_training_engine,
+                reinstall=[identifier for identifier in stored.plan.reinstall if identifier in request.reinstall and identifier not in completed])
+            current = await self._review(remaining, allow_reuse=True)
             previous = {step.module_id: step for step in stored.plan.steps}
             if stored.review_scope != approval_scope(request, self.environment) or any(
-                step.operation == 'install' and (step.module_id not in previous or previous[step.module_id].operation != 'install'
+                step.operation in ('install', 'verify') and (step.module_id not in previous or step.operation == 'install' and previous[step.module_id].operation != 'install'
                     or step.estimated_download_bytes is None and previous[step.module_id].estimated_download_bytes is not None
                     or (step.estimated_download_bytes or 0) > (previous[step.module_id].estimated_download_bytes or 0))
                 for step in current.steps):
                 raise ModuleSetupError('plan_changed')
             stored.plan = current
-            stored.job.steps = [ModuleJobStep(module_id=step.module_id, name=step.name, state='queued', detail=step.detail) for step in current.steps]
+            events = {step.module_id: step.events for step in stored.job.steps}
+            stored.job.steps = [ModuleJobStep(module_id=step.module_id, name=step.name, state='queued', detail=step.detail, events=events.get(step.module_id, [])) for step in current.steps]
             stored.job.state = 'queued'
+            stored.job.current_step = None
             stored.job.error_code = None
             stored.job.updated_at = now()
             from .resource_admission import admission_lock
@@ -523,6 +585,14 @@ class ModuleJobService:
         if not verified:
             stored.job.state = 'failed'
             stored.job.error_code = 'worker_unverified'
+            stored.job.updated_at = now()
+            index = stored.job.current_step
+            if index is not None and index < len(stored.job.steps):
+                step = stored.job.steps[index]
+                step.state = 'failed'
+                step.error_code = 'worker_unverified'
+                step.failure = failure_for('worker_unverified', phase=step.detail)
+                append_event(step, step.failure.summary, stored.job.updated_at)
             self.store.write(stored)
             return
         stored.worker = None
@@ -554,6 +624,7 @@ class ModuleJobService:
         self.stopping = True
         async with self.lock:
             await asyncio.gather(*(cancel_and_wait(task) for task in list(self.tasks.values())))
+            self.tasks.clear()
             for identifier in list(self.reservations):
                 stored = self.store.read(identifier)
                 if stored.worker is None and stored.job.state in ('queued', 'running'):
@@ -566,7 +637,8 @@ class ModuleJobService:
 
 async def _install(context: InstallContext, identifier: ModuleId, download_models: bool) -> InstallOutcome:
     from .module_install import install
-    return await install(context, identifier, download_models)
+    reviewed = context.service.store.read(context.identifier).plan
+    return await install(context, identifier, download_models, reinstall=identifier in reviewed.reinstall)
 
 
 _service: ModuleJobService | None = None

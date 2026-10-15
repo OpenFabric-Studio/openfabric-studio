@@ -31,7 +31,7 @@ class ModuleRouteTests(unittest.TestCase):
         self.assertEqual(response.json(), {'detail': 'setup_origin_forbidden'})
 
     def test_plan_rejects_arbitrary_targets_and_unknown_module_ids(self) -> None:
-        for body in ({'features': ['shell']}, {'features': ['speech'], 'url': 'https://evil.example'}, {'features': ['speech'], 'destination': '/private'}):
+        for body in ({'features': ['shell']}, {'features': ['speech'], 'url': 'https://evil.example'}, {'features': ['speech'], 'destination': '/private'}, {'features': ['speech'], 'reinstall': ['singing']}):
             response = self.client.post('/api/modules/plan', json=body)
             self.assertEqual(response.status_code, 422)
             self.assertEqual(response.json(), {'detail': 'invalid_setup_request'})

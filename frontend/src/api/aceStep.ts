@@ -1,7 +1,9 @@
 import { apiFetch, apiJson, ApiError } from './http'
 import * as v from './nativeValidation'
-import { parseAceGenerationSettings, parseAceJobResponse, parseAceJobsResponse, parseAceJobQueryResponse, parseAceJobReleaseResponse } from './contracts'
-import type { AceGenerationSettings, AceJobResponse, AceJobReleaseResponse, AceAdoptRequest } from './contracts'
+import { parseAceGenerationSettings, parseAceJobResponse, parseAceJobsResponse, parseAceJobQueryResponse, parseAceJobReleaseResponse, parseAceLoraStatus } from './contracts'
+import type { AceGenerationSettings, AceJobResponse, AceJobReleaseResponse, AceAdoptRequest, AceLoraStatus } from './contracts'
+
+export type { AceLoraStatus } from './contracts'
 
 const BASE = '/api/ace'
 
@@ -174,6 +176,10 @@ export async function deleteJob(taskId: string): Promise<void> {
 
 export async function loraLoad(loraPath: string, adapterName?: string): Promise<void> {
   v.string(v.record(v.nativePayload(await apiJson(`${BASE}/v1/lora/load`, { lora_path: loraPath, adapter_name: adapterName }))).message)
+}
+
+export async function loraStatus(signal?: AbortSignal): Promise<AceLoraStatus> {
+  return parseAceLoraStatus(v.nativePayload(await apiFetch(`${BASE}/v1/lora/status`, { signal })))
 }
 
 export async function loraUnload(): Promise<void> {

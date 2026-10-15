@@ -333,7 +333,7 @@ export const useAceStepStore = defineStore('aceStep', {
       this._noteCompletion(live)
     },
     async submit(req: GenerateMusicRequest, refAudioFile: File | null, title: string, styleAudioFile?: File | null, settings?: AceGenerationSettings): Promise<AceJob> {
-      const voiceId = getActiveVoiceId()
+      const voiceId = settings ? settings.voiceId : getActiveVoiceId()
       const result = await api.releaseTask(req, refAudioFile, title, voiceId, styleAudioFile, settings)
       const job: AceJob = {
         id: result.task_id, status: result.status, createdAt: Date.now(), title,

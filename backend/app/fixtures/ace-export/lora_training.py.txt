@@ -1,0 +1,71 @@
+"""LoRA training handlers for the training UI.
+
+Contains functions for starting LoRA training, stopping training,
+and exporting trained LoRA weights.
+"""
+
+import os
+import re
+import time
+from typing import Dict, Tuple
+
+from loguru import logger
+
+from acestep.gpu_config import get_global_gpu_config
+from acestep.training.path_safety import safe_path
+from acestep.ui.gradio.i18n import t
+from .training_utils import (
+    _format_duration,
+    _training_loss_figure,
+)
+
+
+def export_lora(export_path: str, lora_output_dir: str) -> str:
+    """Export the trained LoRA weights.
+
+    Returns:
+        Status message.
+    """
+    if not export_path or not export_path.strip():
+        return t("training.export_path_required")
+
+    try:
+        safe_lora_dir = safe_path(lora_output_dir)
+    except ValueError:
+        return t("training.invalid_lora_output_dir")
+
+    final_dir = os.path.join(safe_lora_dir, "final")
+    checkpoint_dir = os.path.join(safe_lora_dir, "checkpoints")
+
+    if os.path.exists(final_dir):
+        source_path = final_dir
+    elif os.path.exists(checkpoint_dir):
+        checkpoints = [d for d in os.listdir(checkpoint_dir) if d.startswith("epoch_")]
+        if not checkpoints:
+            return t("training.no_checkpoints_found")
+        checkpoints.sort(key=lambda x: int(x.split("_")[1]))
+        latest = checkpoints[-1]
+        source_path = os.path.join(checkpoint_dir, latest)
+    else:
+        return t("training.no_trained_model_found", path=lora_output_dir)
+
+    try:
+        safe_export = safe_path(export_path.strip())
+    except ValueError:
+        return t("training.invalid_export_path")
+
+    try:
+        import shutil
+
+        parent_dir = os.path.dirname(safe_export) or "."
+        os.makedirs(parent_dir, exist_ok=True)
+
+        if os.path.exists(safe_export):
+            shutil.rmtree(safe_export)
+
+        shutil.copytree(source_path, safe_export)
+        return t("training.lora_exported", path=safe_export)
+
+    except Exception as e:
+        logger.exception("Export error")
+        return t("training.export_failed", error=str(e))

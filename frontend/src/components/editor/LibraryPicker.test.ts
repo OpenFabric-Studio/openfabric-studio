@@ -10,7 +10,7 @@ const track = { id: 42, short_id: 42, model: 'upload', title: 'Piano', created_a
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(tracks.listTracks).mockResolvedValue([track]) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren() })
 async function settle() { for (let index = 0; index < 10; index++) await nextTick() }
-async function mount(trackOnly = false) { const picks: unknown[] = []; app = createApp(LibraryPicker, { trackOnly, onPick: (value: unknown) => picks.push(value) }).use(i18n); const node = document.body.appendChild(document.createElement('div')); app.mount(node); await settle(); return picks }
+async function mount(trackOnly = false, selectedTrackIds: number[] = []) { const picks: unknown[] = []; app = createApp(LibraryPicker, { trackOnly, selectedTrackIds, onPick: (value: unknown) => picks.push(value) }).use(i18n); const node = document.body.appendChild(document.createElement('div')); app.mount(node); await settle(); return picks }
 function button(label: string) { const found = [...document.querySelectorAll('button')].find(element => element.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
 it('returns a track ID for full mix selection and keeps legacy stem selection', async () => {
   const picks = await mount()
@@ -21,4 +21,12 @@ it('returns a track ID for full mix selection and keeps legacy stem selection', 
 it('offers only whole tracks for the training picker', async () => {
   await mount(true)
   expect([...document.querySelectorAll('button')].some(element => element.textContent?.trim() === 'Vocals')).toBe(false)
+})
+it('marks existing training selections and prevents adding them twice', async () => {
+  const picks = await mount(true, [42])
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Already added')
+  const selected = button('Already added')
+  expect(selected.disabled).toBe(true)
+  selected.click()
+  expect(picks).toEqual([])
 })

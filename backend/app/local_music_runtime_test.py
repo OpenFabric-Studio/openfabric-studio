@@ -96,6 +96,24 @@ class LocalMusicRuntimeTests(unittest.TestCase):
         command = json.loads((output.parent / 'request.json').read_text())['argv']
         self.assertEqual(command[command.index('--lora') + 1:][-2:], [str(adapter), 'strength=0.7'])
 
+    def test_heart_adapter_uses_its_training_runtime_and_own_seed_without_requiring_mlx(self) -> None:
+        from app.music_training_contracts import MusicLoraTrainingStatus
+        output = self.root / 'job/output.wav'; output.parent.mkdir()
+        request = LocalMusicRequest(engine='heartmula', prompt='Gentle piano', duration_seconds=5,
+            adapter={'id': 'a' * 32, 'strength': 0.7})
+        adapter = self.root / 'managed.safetensors'
+        trainer = self.root / 'trainer/bin/python'
+        command = ['/reviewed/heart_lora_worker.py', '--mode', 'generate', '--request', '/private/inference.json']
+        status = MusicLoraTrainingStatus(engine='heartmula', supported=True, installed=True, weights_ready=True)
+        with patch.object(runtime, 'configured_environment', return_value=self.env), patch('app.music_lora.resolve', return_value=adapter) as resolve, \
+             patch('app.heart_lora_runtime.status', return_value=status), patch('app.heart_lora_runtime.generation_command', return_value=(command, trainer)):
+            argv, _cwd, _env = runtime.prepare_worker(request, output)
+        resolve.assert_called_once_with(request.adapter, engine='heartmula', target='heartmula-3b')
+        self.assertEqual(argv[0], str(trainer))
+        payload = json.loads((output.parent / 'request.json').read_text())
+        self.assertEqual(payload['argv'], command)
+        self.assertIsNone(payload['seed'])
+
     def test_worker_runs_native_cli_then_normalizes_pcm_without_model_packages(self) -> None:
         root = self.root / 'fake-engine'
         root.mkdir()
