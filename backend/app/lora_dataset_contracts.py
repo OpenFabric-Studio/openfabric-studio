@@ -78,6 +78,7 @@ class LoraWorkspaceForm(DatasetContract):
     use_fp8: bool = False
     gradient_checkpointing: bool = False
     export_path: str = Field(default='', max_length=4096)
+    export_parent_dir: str = Field(default='', max_length=4096)
     registry_name: str = Field(default='', max_length=120)
 
 

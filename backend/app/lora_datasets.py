@@ -473,6 +473,16 @@ def _operation(entry: LoraDatasetEntry, raw: JsonObject) -> LoraDatasetOperation
     return LoraDatasetOperationResponse(dataset=entry, samples=samples, metadata=metadata)
 
 
+def read_saved_dataset(identifier: str, revision: int) -> LoraDatasetOperationResponse:
+    """Read a saved snapshot without changing the native dataset builder."""
+    list_datasets()
+    catalog_path = _catalog_path()
+    with document_lock(catalog_path):
+        entry = _entry(_read_catalog(catalog_path), identifier, revision)
+        raw, _document = _read_dataset(confined_path(entry.dataset_path))
+        return _operation(entry, raw)
+
+
 async def load_dataset(identifier: str, body: LoraDatasetRevision) -> LoraDatasetOperationResponse:
     await require_native_idle(require_running=True)
     entry = get_dataset(identifier, body.revision)

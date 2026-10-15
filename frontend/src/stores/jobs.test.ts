@@ -16,6 +16,7 @@ import { getActiveVoiceId, applyStatus, waitForVoiceApply } from '../api/voices'
 import { useLoraTrainingStore } from './loraTraining'
 import * as trainingApi from '../api/aceStepTraining'
 import { clearVoiceWatch } from './voiceWatch'
+import { emptyAceSettings } from '../composables/generationSnapshots'
 
 vi.mock('../api/yueJobs', async original => ({ ...await original<typeof import('../api/yueJobs')>(), list: vi.fn().mockResolvedValue([]), submit: vi.fn(), cancel: vi.fn() }))
 vi.mock('../api/yue2', () => ({ health: vi.fn(), generateTrack: vi.fn() }))
@@ -64,6 +65,16 @@ const completed: AceJobResponse = { task_id: 'task-1', status: 'done', created_a
 const voiceProgress: VoiceJobProgress = { job_id: 'apply-17', kind: 'apply', status: 'queued', queued_at: 100, observed_at: 200, phase: 'waiting_gpu', queue_reason: 'voice_training', queue_label: 'SackJo22' }
 
 describe('backend ACE ownership', () => {
+  it.each(['a'.repeat(32), null])('submits the captured snapshot voice %s even if the active voice changes', async voiceId => {
+    vi.mocked(aceApi.releaseTask).mockResolvedValue({ task_id: 'captured', status: 'queued', queue_position: 0 })
+    const settings = { ...emptyAceSettings(), voiceId }
+    const store = useAceStepStore()
+    await store.submit({}, null, 'Captured settings', null, settings)
+    expect(aceApi.releaseTask).toHaveBeenCalledWith({}, null, 'Captured settings', voiceId, null, settings)
+    expect(store.jobs[0]?.voiceId).toBe(voiceId ?? undefined)
+    store.stopBackgroundTasks()
+  })
+
   it('adopts old browser-owned jobs once before discarding their local records', async () => {
     localStorage.setItem('openfabric_ace_inflight', JSON.stringify([{ id: 'task-1', title: 'Old task', lyrics: 'words', audioFormat: 'wav', batchSize: 2, createdAt: 100, params: { prompt: 'folk' } }]))
     vi.mocked(aceApi.adoptLegacyJob).mockResolvedValue(completed)

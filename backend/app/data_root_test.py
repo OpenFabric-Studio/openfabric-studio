@@ -38,13 +38,13 @@ class DataRootTests(unittest.TestCase):
             dest.mkdir()
             database = dest / 'aicollector.db'
             with sqlite3.connect(database) as connection:
-                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training')):
+                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training'), ('music_training_jobs', 'music-lora-training')):
                     connection.execute(f'CREATE TABLE {table}(worker_json TEXT)')
                     connection.execute(f'INSERT INTO {table} VALUES(?)',
                         (json.dumps({'pid': 100, 'token': 'a' * 32, 'receipt': str(src / directory / ('b' * 32) / 'worker.json')}),))
             rewrite_library_paths(database, src, dest)
             with sqlite3.connect(database) as connection:
-                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training')):
+                for table, directory in (('local_music_jobs', 'local-music'), ('stable_lora_jobs', 'stable-lora-training'), ('music_training_jobs', 'music-lora-training')):
                     worker = json.loads(connection.execute(f'SELECT worker_json FROM {table}').fetchone()[0])
                     self.assertEqual(worker['receipt'], str(dest / directory / ('b' * 32) / 'worker.json'))
                     self.assertEqual(worker['token'], 'a' * 32)
@@ -53,7 +53,7 @@ class DataRootTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
             originals: dict[Path, bytes] = {}
-            for name in ('local-music', 'music-lora', 'stable-lora-training'):
+            for name in ('local-music', 'music-lora', 'stable-lora-training', 'music-lora-training'):
                 folder = src / name
                 folder.mkdir(parents=True)
                 metadata = folder / 'request.json'
@@ -745,7 +745,7 @@ class DataRootTests(unittest.TestCase):
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
                 ["tracks", "voices", "videos", "videoProjects", "videoCharacters", "videoCharacterTraining", "videoCharacterTrainer", "providers",
-                 "audiobooks", "speechProfiles", "speechTrials", "localMusic", "musicAdapters", "musicTraining", "models", "logs", "database"],
+                 "audiobooks", "speechProfiles", "speechTrials", "localMusic", "musicAdapters", "musicTraining", "musicTrainingRuns", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:
@@ -814,5 +814,5 @@ class MusicLibraryRelocationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(saved.status, 'done')
         self.assertIsNotNone(saved.track)
         self.assertEqual(local_music._output(saved).read_bytes(), audio_bytes())
-        for name in ('local-music', 'music-lora', 'stable-lora-training'):
+        for name in ('local-music', 'music-lora', 'stable-lora-training', 'music-lora-training'):
             self.assertFalse((src / name).exists())

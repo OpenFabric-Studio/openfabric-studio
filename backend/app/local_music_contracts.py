@@ -35,8 +35,6 @@ class LocalMusicRequest(Contract):
     def validate_engine_inputs(self) -> Self:
         if not self.prompt.strip():
             raise ValueError('music_prompt_required')
-        if self.engine == 'heartmula' and self.adapter is not None:
-            raise ValueError('heartmula_lora_unsupported')
         if self.engine == 'heartmula' and self.duration_seconds > 240:
             raise ValueError('heartmula_duration_invalid')
         if self.engine == 'heartmula' and self.variant != 'small-music':
@@ -55,6 +53,7 @@ class LocalMusicEngineStatus(Contract):
     weights_ready: bool
     supported: bool
     runtime: str
+    adapter_runtime_ready: bool = False
     detail: str
 
 

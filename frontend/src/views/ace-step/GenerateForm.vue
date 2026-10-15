@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAceStepStore } from '../../stores/aceStep'
-import * as api from '../../api/aceStep'
 import type { GenerateMusicRequest } from '../../api/aceStep'
 import { useLoraRegistry } from '../../composables/useLoraRegistry'
+import { useAceLora } from '../../composables/useAceLora'
 import ChipGroup from '../../components/shared/ChipGroup.vue'
 import CollapsibleDetails from '../../components/shared/CollapsibleDetails.vue'
 import HelpModal from '../../components/shared/HelpModal.vue'
@@ -23,7 +23,7 @@ import { pendingAceDraft, pendingAceReference } from '../../composables/generati
 
 const store = useAceStepStore()
 const props = withDefaults(defineProps<{ generationAvailable?: boolean | null }>(), { generationAvailable: true })
-const { t, tm, locale } = useI18n()
+const { t, tm, locale, te } = useI18n()
 const { loras, add: addLora, remove: removeLora } = useLoraRegistry()
 
 type Mode = 'simple' | 'custom'
@@ -114,10 +114,19 @@ const guidanceScale = ref<number | null>(null)
 const seedValue = ref<number | null>(null)
 const selectedModel = ref('')
 
-const selectedLoraPath = ref('')
-const loraScaleVal = ref(1)
+const submitting = ref(false)
+const lora = useAceLora(loras, () => props.generationAvailable === true, () => submitting.value)
+const { selection: loraSelection, scale: loraScaleVal, actual: loraActual, busy: loraBusy, error: loraError, ready: loraReady, canScale: loraCanScale } = lora
+const hasActiveLora = computed(() => loraActual.value?.lora_loaded === true && loraActual.value.use_lora)
+const loraModelMismatch = computed(() => hasActiveLora.value && !!selectedModel.value && selectedModel.value !== store.inventory?.default_model)
+const loraReadyForModel = computed(() => loraReady.value && !loraModelMismatch.value && (!hasActiveLora.value || (!store.inventoryLoading && !store.inventoryError)))
 const loraScaleLimited = ref(false)
-const loraStatus = ref('')
+const loraErrorText = computed(() => loraMessage(loraError.value))
+function loraMessage(code: string): string { const key = `aceGen.loraErrors.${code}`; return t(te(key) ? key : 'aceGen.loraOperationFailed') }
+async function refreshLoraInventory(operation: Promise<boolean | undefined>) { if (await operation && formAlive) await store.loadInventory() }
+function chooseLora(event: Event) { if (event.target instanceof HTMLSelectElement) void refreshLoraInventory(lora.choose(event.target.value)) }
+function changeLoraScale(event: Event) { if (event.target instanceof HTMLInputElement) lora.setScale(Number(event.target.value)) }
+watch(loraReady, ready => { if (ready) { loraNotice.value = false; savedLoraName.value = null } })
 const newLoraName = ref('')
 const newLoraPath = ref('')
 
@@ -133,8 +142,8 @@ const snapshot = computed<AceGenerationSettings>(() => ({
   trackClasses: [...trackClasses.value], coverStrength: coverStrength.value, voiceId: selectedVoiceId.value,
   useCotCaption: useCotCaption.value, styleReferenceRequiresReupload: styleAudioFile.value !== null || styleReferenceRequired.value,
   sourceReferenceName: refAudioFile.value?.name ?? (useRefAudio.value ? savedSourceName.value : null), styleReferenceName: styleAudioFile.value?.name ?? savedStyleName.value,
-  loraRequiresReselection: selectedLoraPath.value !== '' || loraNotice.value,
-  loraName: loras.value.find(entry => entry.path === selectedLoraPath.value)?.name ?? savedLoraName.value, loraScale: loraScaleVal.value,
+  loraRequiresReselection: lora.name.value !== null || loraNotice.value || loraSelection.value.startsWith('path:') || loraSelection.value === 'current',
+  loraName: loraNotice.value ? savedLoraName.value : lora.name.value, loraScale: loraScaleVal.value,
 }))
 watch(pendingAceDraft, (saved) => {
   if (!saved) return
@@ -156,7 +165,7 @@ watch(pendingAceDraft, (saved) => {
   savedLoraName.value = saved.loraName
   referenceImportId.value = saved.referenceImportId ?? null
   referenceNotice.value = saved.useRefAudio || saved.styleReferenceRequiresReupload
-  selectedLoraPath.value = ''; loraScaleVal.value = Math.min(1, saved.loraScale); loraScaleLimited.value = saved.loraScale > 1; loraNotice.value = saved.loraRequiresReselection
+  lora.reset(Math.min(1, saved.loraScale), saved.loraRequiresReselection); loraScaleLimited.value = saved.loraScale > 1; loraNotice.value = saved.loraRequiresReselection
   setActiveVoiceId(saved.voiceId); selectedVoiceId.value = saved.voiceId
   pendingAceDraft.value = null
 }, { immediate: true })
@@ -167,7 +176,6 @@ watch(pendingAceReference, edit => {
   referenceImportId.value = edit.referenceImportId ?? null; pendingAceReference.value = null
 }, { immediate: true })
 
-const submitting = ref(false)
 const formError = ref('')
 const helpOpen = ref<null | 'style' | 'lyrics' | 'remix' | 'advanced'>(null)
 
@@ -266,63 +274,8 @@ watch(supportedTaskTypes, (set) => {
   }
 })
 
-// The trainer saves each checkpoint as "<checkpoint>/adapter/{adapter_config.json,...}";
-// exporting a checkpoint via the LoRA training page copies that checkpoint dir as-is, so
-// the actual PEFT adapter path can end up one level deeper than the registered path.
-// Probe both nestings rather than requiring the registry entry to be exactly right.
-async function loadLoraWithFallback(path: string, token: number, name?: string) {
-  const candidates = [path, `${path}/adapter`, `${path}/adapter/adapter`]
-  let lastErr: unknown
-  for (const candidate of candidates) {
-    if (!formAlive || token !== loraRequest) return
-    try {
-      await api.loraLoad(candidate, name)
-      return
-    } catch (err) {
-      lastErr = err
-    }
-  }
-  throw lastErr
-}
-
 let formAlive = true
-let loraRequest = 0
-onBeforeUnmount(() => {
-  formAlive = false
-  loraRequest++
-  if (loraDebounce) clearTimeout(loraDebounce)
-})
-
-let loraDebounce: ReturnType<typeof setTimeout> | null = null
-watch(selectedLoraPath, async (path) => {
-  const token = ++loraRequest
-  loraStatus.value = ''
-  try {
-    if (!path) {
-      await api.loraUnload()
-    } else {
-      const entry = loras.value.find((l) => l.path === path)
-      await loadLoraWithFallback(path, token, entry?.name)
-      if (!formAlive || token !== loraRequest) return
-      await api.loraScale(loraScaleVal.value)
-    }
-  } catch {
-    if (formAlive && token === loraRequest) loraStatus.value = t('aceGen.loraOperationFailed')
-  }
-})
-watch(loraScaleVal, (scale) => {
-  if (!selectedLoraPath.value) return
-  if (loraDebounce) clearTimeout(loraDebounce)
-  const token = loraRequest
-  loraDebounce = setTimeout(async () => {
-    if (!formAlive || token !== loraRequest) return
-    try {
-      await api.loraScale(scale)
-    } catch {
-      if (formAlive && token === loraRequest) loraStatus.value = t('aceGen.loraOperationFailed')
-    }
-  }, 300)
-})
+onBeforeUnmount(() => { formAlive = false })
 
 function removeStyleReference() {
   styleReferenceRequired.value = false; styleAudioFile.value = null; savedStyleName.value = null
@@ -398,7 +351,7 @@ async function submit() {
   }
   if (!props.generationAvailable) { formError.value = t('aceGen.generationUnavailable'); return }
   if (styleReferenceRequired.value && !styleAudioFile.value) { formError.value = t('generationWorkspace.reupload'); return }
-  if (loraNotice.value && !selectedLoraPath.value) { formError.value = t('generationWorkspace.reselectLora'); return }
+  if (loraNotice.value && !loraReady.value) { formError.value = t('generationWorkspace.reselectLora'); return }
 
   const req: GenerateMusicRequest = {
     audio_duration: durationAuto.value ? -1 : duration.value,
@@ -461,11 +414,17 @@ async function submit() {
     if (taskType.value === 'cover' || taskType.value === 'repaint') req.audio_cover_strength = coverStrength.value
   }
 
+  if (!loraReadyForModel.value) return
+  const generationSettings = snapshot.value, styleFile = styleAudioFile.value
   submitting.value = true
   try {
-    await store.submit(req, refFile, title, styleAudioFile.value, snapshot.value)
+    if (!await lora.verify() || !formAlive || !loraReadyForModel.value) return
+    await store.submit(req, refFile, title, styleFile, generationSettings)
   } catch (err) {
-    if (formAlive) formError.value = t(err instanceof TypeError ? 'generationWorkspace.invalid' : 'generationWorkspace.submitFailed')
+    if (formAlive) {
+      if (err instanceof ApiError && err.message.startsWith('ace_lora_')) loraError.value = err.message
+      else formError.value = t(err instanceof TypeError ? 'generationWorkspace.invalid' : 'generationWorkspace.submitFailed')
+    }
   } finally {
     if (formAlive) submitting.value = false
   }
@@ -476,17 +435,23 @@ async function submit() {
   <div class="lg:sticky lg:top-20 lg:self-start">
     <div class="space-y-4 rounded-xl border border-border bg-panel p-4">
       <VoiceSelect link :label="isVoiceReplacement ? t('aceGen.replacementVoice') : undefined" :hint="isVoiceReplacement ? t('aceGen.replacementVoiceHint') : undefined" @select="selectedVoiceId = $event" />
-      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || (isVoiceReplacement ? !refAudioFile || !selectedVoiceId : !generationAvailable)" @click="submit">
+      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || (isVoiceReplacement ? !refAudioFile || !selectedVoiceId : !generationAvailable || !loraReadyForModel || loraNotice)" @click="submit">
         {{ submitting ? t(isVoiceReplacement ? 'aceGen.replacementUploading' : 'aceGen.submitting') : t(isVoiceReplacement ? 'aceGen.replaceVoice' : 'aceGen.submit') }}
       </button>
       <p v-if="formError" role="alert" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ formError }}</p>
+      <div v-if="!isVoiceReplacement && loraError" role="alert" class="space-y-1 rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">
+        <p>{{ loraErrorText }}</p>
+        <button type="button" :disabled="loraBusy || submitting" class="min-h-11 underline disabled:opacity-50" @click="refreshLoraInventory(lora.retry())">{{ t('aceGen.retryLora') }}</button>
+      </div>
       <p v-if="!generationAvailable && !isVoiceReplacement" class="text-xs text-text-dim">{{ t('aceGen.generationUnavailable') }}</p>
+      <p v-if="!isVoiceReplacement && loraModelMismatch" role="alert" class="text-xs text-status-queued">{{ t('aceGen.loraBaseModel') }}</p>
+      <p v-if="!isVoiceReplacement && hasActiveLora && (store.inventoryLoading || store.inventoryError)" :role="store.inventoryError ? 'alert' : 'status'" class="text-xs text-status-queued">{{ t(store.inventoryError ? 'aceGen.inventoryUnavailable' : 'aceGen.inventoryLoading') }}</p>
 
       <template v-if="!isVoiceReplacement">
       <GenerationLibraryButton :settings="snapshot" />
       <ReferencePreparationButton engine="ace_step" />
       <p v-if="referenceNotice" class="text-xs text-status-queued">{{ t('generationWorkspace.reupload') }}</p>
-      <p v-if="loraNotice" class="text-xs text-status-queued">{{ t('generationWorkspace.reselectLora') }} <button type="button" class="underline" @click="loraNotice = false; savedLoraName = null">{{ t('generationWorkspace.removeLora') }}</button></p>
+      <p v-if="loraNotice" class="text-xs text-status-queued">{{ t('generationWorkspace.reselectLora') }} <span v-if="savedLoraName">{{ t('aceGen.savedLora', { name: savedLoraName }) }}</span> <button type="button" class="underline" :disabled="loraBusy || submitting" @click="refreshLoraInventory(lora.choose('none'))">{{ t('generationWorkspace.removeLora') }}</button></p>
       <p v-if="loraScaleLimited" role="status" class="text-xs text-status-queued">{{ t('aceGen.loraScaleAdjusted') }}</p>
       <label class="block space-y-1 text-xs text-text-dim">
         <span>{{ t('generationWorkspace.styleReference') }}</span>
@@ -697,8 +662,9 @@ async function submit() {
             <label for="ace-model" class="text-xs text-text-dim">{{ t('aceGen.model') }}</label>
             <select id="ace-model" v-model="selectedModel" :aria-label="t('aceGen.model')" :disabled="!store.inventory?.models.length" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text disabled:opacity-50">
               <option v-if="!store.inventory?.models.length" value="">{{ t(store.inventoryLoading ? 'aceGen.inventoryLoading' : 'aceGen.inventoryEmpty') }}</option>
-              <option v-for="m in store.inventory?.models ?? []" :key="m.name" :value="m.name">{{ m.name }}</option>
+              <option v-for="m in store.inventory?.models ?? []" :key="m.name" :value="m.name" :disabled="hasActiveLora && m.name !== store.inventory?.default_model">{{ m.name }}</option>
             </select>
+            <p v-if="hasActiveLora" class="mt-1 text-xs text-text-dim">{{ t('aceGen.loraBaseModel') }}</p>
             <p v-if="store.inventoryLoading" role="status" class="mt-1 text-xs text-text-dim">{{ t('aceGen.inventoryLoading') }}</p>
             <p v-if="store.inventoryError" role="alert" class="mt-1 text-xs text-status-failed">{{ t('aceGen.inventoryUnavailable') }}</p>
             <button v-if="store.inventoryError || !store.inventory?.models.length" type="button" :disabled="store.inventoryLoading" class="mt-1 text-xs text-accent1 hover:underline disabled:opacity-50" @click="store.loadInventory()">{{ t('aceGen.inventoryRetry') }}</button>
@@ -707,15 +673,20 @@ async function submit() {
 
         <div class="space-y-2 rounded-lg border border-border bg-panel-2/50 p-3">
           <label for="ace-lora" class="text-xs text-text-dim">{{ t('aceGen.lora') }}</label>
-          <select id="ace-lora" v-model="selectedLoraPath" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
-            <option value="">{{ t('aceGen.noLora') }}</option>
-            <option v-for="l in loras" :key="l.path" :value="l.path">{{ l.name }}</option>
+          <select id="ace-lora" :value="loraSelection" :disabled="loraBusy || submitting" @change="chooseLora" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+            <option value="unconfirmed" disabled>{{ t('aceGen.chooseLora') }}</option>
+            <option value="none">{{ t('aceGen.noLora') }}</option>
+            <option v-if="loraActual?.lora_loaded && loraActual.active_adapter" value="current">{{ t('aceGen.currentLora', { name: loraActual.active_adapter }) }}</option>
+            <option v-for="l in loras" :key="l.path" :value="`path:${l.path}`">{{ l.name }}</option>
           </select>
-          <div v-if="selectedLoraPath">
+          <p v-if="loraActual" role="status" class="text-xs text-text-dim">{{ loraActual.lora_loaded && loraActual.active_adapter ? t(loraActual.use_lora ? 'aceGen.activeLora' : 'aceGen.disabledLora', { name: loraActual.active_adapter, scale: loraActual.lora_scale.toFixed(2) }) : t('aceGen.noActiveLora') }}</p>
+          <div v-if="loraSelection !== 'none'">
             <label for="ace-lora-strength" class="text-xs text-text-dim">{{ t('aceGen.loraStrength', { value: loraScaleVal.toFixed(2) }) }}</label>
-            <input id="ace-lora-strength" v-model.number="loraScaleVal" type="range" min="0" max="1" step="0.05" class="w-full accent-accent1" />
+            <input id="ace-lora-strength" :value="loraScaleVal" :disabled="!loraCanScale || submitting" @input="changeLoraScale" type="range" min="0" max="1" step="0.05" class="w-full accent-accent1" />
           </div>
-          <p v-if="loraStatus" class="text-xs text-status-failed">{{ loraStatus }}</p>
+          <p v-if="loraBusy" role="status" class="text-xs text-text-dim">{{ t('aceGen.checkingLora') }}</p>
+          <p v-if="!loraError && !loraReady && !loraBusy" class="text-xs text-status-queued">{{ t('aceGen.confirmLora') }}</p>
+          <button type="button" :disabled="loraBusy || submitting" class="min-h-11 text-xs text-accent1 underline disabled:opacity-50" @click="refreshLoraInventory(lora.check())">{{ t('aceGen.recheckLora') }}</button>
           <div class="flex items-center gap-2">
             <input v-model="newLoraName" type="text" :placeholder="t('aceGen.loraNamePlaceholder')" class="w-1/3 rounded-lg border border-border bg-panel-2 p-1.5 text-xs text-text" />
             <input v-model="newLoraPath" type="text" :placeholder="t('aceGen.loraPathPlaceholder')" class="flex-1 rounded-lg border border-border bg-panel-2 p-1.5 text-xs text-text" />
@@ -724,7 +695,7 @@ async function submit() {
           <ul v-if="loras.length" class="space-y-1">
             <li v-for="l in loras" :key="l.path" class="flex items-center justify-between text-xs text-text-dim">
               <span class="truncate">{{ l.name }}</span>
-              <button type="button" class="text-status-failed hover:underline" @click="removeLora(l.path)">{{ t('aceGen.removeLora') }}</button>
+              <button type="button" class="text-status-failed hover:underline" :disabled="loraBusy || submitting" @click="removeLora(l.path)">{{ t('aceGen.removeLora') }}</button>
             </li>
           </ul>
         </div>

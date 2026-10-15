@@ -40,7 +40,7 @@ def _errors() -> Iterator[None]:
     try:
         yield
     except ModuleSetupError as exc:
-        status = 404 if exc.code == 'job_missing' else 409 if exc.code in ('setup_busy', 'plan_changed', 'setup_not_resumable', 'worker_unverified') else 422
+        status = 404 if exc.code == 'job_missing' else 409 if exc.code in ('setup_busy', 'plan_changed', 'setup_not_resumable', 'worker_unverified', 'already_installed') else 422
         raise HTTPException(status, detail=exc.code) from exc
     except HTTPException:
         raise

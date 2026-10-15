@@ -5,14 +5,15 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .contracts import Contract
 from .music_lora_contracts import MusicAdapter
+from .music_training_contracts import MusicLoraTrainingProgress
+from .music_training_source_contracts import MusicLoraSource, source_key
 
 StableLoraVariant = Literal['small-music', 'medium']
-StableLoraStage = Literal['preparing', 'encoding', 'training', 'publishing', 'done']
+StableLoraStage = Literal['preparing', 'encoding', 'loading', 'training', 'publishing', 'done']
 
 
-class StableLoraSample(Contract):
+class StableLoraSample(MusicLoraSource):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    track_id: int = Field(strict=True, ge=1)
     caption: str = Field(min_length=1, max_length=4000)
 
     @model_validator(mode='after')
@@ -36,9 +37,13 @@ class StableLoraTrainingRequest(Contract):
     def validate_dataset(self) -> Self:
         if not self.name.strip():
             raise ValueError('stable_lora_name_required')
-        if len({sample.track_id for sample in self.samples}) != len(self.samples):
+        if len({source_key(sample) for sample in self.samples}) != len(self.samples):
             raise ValueError('stable_lora_duplicate_track')
         return self
+
+
+class StableLoraProgress(MusicLoraTrainingProgress):
+    stage: StableLoraStage = 'preparing'
 
 
 class StableLoraTrainingJob(Contract):
@@ -46,9 +51,18 @@ class StableLoraTrainingJob(Contract):
     status: Literal['queued', 'running', 'done', 'failed', 'cancelled', 'interrupted']
     stage: StableLoraStage = 'preparing'
     created_at: str
+    started_at: str | None = Field(default=None, max_length=64)
+    finished_at: str | None = Field(default=None, max_length=64)
     request: StableLoraTrainingRequest
+    progress: StableLoraProgress = Field(default_factory=StableLoraProgress)
     adapter: MusicAdapter | None = None
     error_code: str | None = Field(default=None, max_length=80)
+
+    @model_validator(mode='after')
+    def legacy_progress(self) -> Self:
+        if 'progress' not in self.model_fields_set:
+            self.progress.stage = self.stage
+        return self
 
 
 class StableLoraTrainingJobs(Contract):
@@ -74,8 +88,4 @@ class StableLoraCompletion(Contract):
     max_steps: int = Field(ge=1, le=100000, strict=True)
 
 
-class StableLoraProgress(Contract):
-    stage: StableLoraStage
-
-
-STABLE_LORA_CLIENT_MODELS: list[type[BaseModel]] = [StableLoraSample, StableLoraTrainingRequest, StableLoraTrainingJob, StableLoraTrainingJobs, StableLoraTrainingStatus]
+STABLE_LORA_CLIENT_MODELS: list[type[BaseModel]] = [StableLoraSample, StableLoraTrainingRequest, StableLoraProgress, StableLoraTrainingJob, StableLoraTrainingJobs, StableLoraTrainingStatus]

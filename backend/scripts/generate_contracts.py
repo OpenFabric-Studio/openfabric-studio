@@ -12,6 +12,7 @@ from pydantic import BaseModel, TypeAdapter
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.contracts import CLIENT_MODELS, JsonObject, JsonValue
+from app.ace_lora_contracts import ACE_LORA_CLIENT_MODELS
 from app.client_contracts import EXTRA_CLIENT_MODELS
 from app.artist_settings import ArtistSettings
 from app.tagging import TaggedDownloadOptions
@@ -27,8 +28,11 @@ from app.cloud_music_contracts import CLOUD_MUSIC_CLIENT_MODELS
 from app.local_music_contracts import LOCAL_MUSIC_CLIENT_MODELS
 from app.music_lora_contracts import MUSIC_LORA_CLIENT_MODELS
 from app.stable_lora_contracts import STABLE_LORA_CLIENT_MODELS
+from app.music_training_contracts import MUSIC_TRAINING_CLIENT_MODELS
+from app.music_training_source_contracts import MusicLoraSource, MusicLoraDatasetSource
 from app.music_queue_contracts import MUSIC_QUEUE_CLIENT_MODELS
 from app.lora_dataset_contracts import LORA_DATASET_CLIENT_MODELS
+from app.lora_export_contracts import LORA_EXPORT_CLIENT_MODELS
 from app.speaker_review_contracts import SPEAKER_REVIEW_CLIENT_MODELS
 from app.export_provenance_contracts import EXPORT_PROVENANCE_CLIENT_MODELS
 from app.reading_media_contracts import READING_MEDIA_CLIENT_MODELS
@@ -44,12 +48,16 @@ from app.royalty_contracts import ROYALTY_CLIENT_MODELS
 from app.singer_range_contracts import SingerRangeRequest, SingerRangeProfile, PlannedRangeRequest, RangeAssessment
 
 ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS, *SPEAKER_REVIEW_CLIENT_MODELS, *EXPORT_PROVENANCE_CLIENT_MODELS]
+ALL_MODELS.extend(ACE_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(READING_MEDIA_CLIENT_MODELS)
 ALL_MODELS.extend(LOCAL_MUSIC_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(STABLE_LORA_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_TRAINING_CLIENT_MODELS)
+ALL_MODELS.extend([MusicLoraSource, MusicLoraDatasetSource])
 ALL_MODELS.extend(MUSIC_QUEUE_CLIENT_MODELS)
 ALL_MODELS.extend(LORA_DATASET_CLIENT_MODELS)
+ALL_MODELS.extend(LORA_EXPORT_CLIENT_MODELS)
 ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)
 ALL_MODELS.extend(CHARACTER_SWAP_CLIENT_MODELS)
 ALL_MODELS.extend(VIDEO_SCENE_CLIENT_MODELS)

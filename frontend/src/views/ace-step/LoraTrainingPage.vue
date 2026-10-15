@@ -2,14 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useOrchestratorStore } from '../../stores/orchestrator'
-import { useLoraTrainingStore } from '../../stores/loraTraining'
+import { useLoraTrainingStore, loraExportErrorText } from '../../stores/loraTraining'
 import { useLoraRegistry } from '../../composables/useLoraRegistry'
 import { formatDuration } from '../../composables/formatDuration'
 import { preprocessLoraDataset, autoLabelLoraDataset } from '../../api/loraDataset'
 import { useLoraDatasetWorkspace } from '../../composables/useLoraDatasetWorkspace'
 import DatasetLibrary from '../../components/ace-step/DatasetLibrary.vue'
-import type { LoraWorkspaceForm } from '../../api/generated'
+import type { LoraTrainedFilesResponse, LoraWorkspaceForm } from '../../api/generated'
 import * as aceStepApi from '../../api/aceStep'
+import * as trainingApi from '../../api/aceStepTraining'
 import { ApiError } from '../../api/http'
 import ModelOfflineBanner from '../../components/shared/ModelOfflineBanner.vue'
 import ProgressBar from '../../components/shared/ProgressBar.vue'
@@ -51,6 +52,7 @@ const form = reactive<Required<LoraWorkspaceForm>>({
   use_fp8: false,
   gradient_checkpointing: false,
   export_path: '',
+  export_parent_dir: '',
   registry_name: '',
 })
 
@@ -289,7 +291,9 @@ const epochProgress = computed(() => {
   if (!store.totalEpochs) return 0
   return ((store.training?.current_epoch ?? 0) / store.totalEpochs) * 100
 })
+const waitingForFirstUpdate = computed(() => store.isTraining && store.training?.current_step === 0)
 const etaLabel = computed(() => {
+  if (waitingForFirstUpdate.value) return '—'
   const sec = store.training?.estimated_time_remaining
   if (!sec || !Number.isFinite(sec)) return '—'
   const m = Math.round(sec / 60)
@@ -297,20 +301,94 @@ const etaLabel = computed(() => {
 })
 
 // ── 6. Export ──
-const exportPath = toRef(form, 'export_path')
+const exportParent = toRef(form, 'export_parent_dir')
 const registryName = toRef(form, 'registry_name')
+const canPickExportFolder = ref(false), exportPreparing = ref(false)
+const exportReview = ref<{ request: trainingApi.ExportLoraRequest; result: trainingApi.ExportLoraResponse; name: string } | null>(null)
+const exportController = new AbortController()
+let exportAlive = true, exportGeneration = 0
+const validExportName = computed(() => {
+  const name = registryName.value.trim()
+  return !!name && name !== '.' && name !== '..' && name.length <= 120 && !/[<>:"/\\|?*\u0000-\u001f\u007f]/.test(name) && !/[. ]$/.test(name)
+})
+const exportTarget = computed(() => `${exportParent.value.trim().replace(/[\\/]+$/, '')}/${registryName.value.trim()}`)
+const exportControlsBusy = computed(() => exportPreparing.value || store.exporting || !!exportReview.value)
+
+onMounted(async () => {
+  try {
+    const result = await trainingApi.loraExportOptions(exportController.signal)
+    if (exportAlive) canPickExportFolder.value = result.can_pick
+  } catch { /* Manual folder entry remains available. */ }
+})
+onBeforeUnmount(() => { exportAlive = false; ++exportGeneration; exportController.abort() })
+
+async function chooseExportFolder() {
+  if (exportControlsBusy.value) return
+  const generation = ++exportGeneration
+  exportPreparing.value = true; store.exportError = ''
+  try {
+    const result = await trainingApi.pickLoraExportFolder(exportController.signal)
+    if (exportAlive && generation === exportGeneration && result.path) exportParent.value = result.path
+  } catch (cause) {
+    if (exportAlive && generation === exportGeneration) store.exportError = loraExportErrorText(cause)
+  } finally {
+    if (exportAlive && generation === exportGeneration) exportPreparing.value = false
+  }
+}
 async function onExport() {
-  if (!exportPath.value.trim() || !registryName.value.trim()) return
-  await store.exportAndRegister(exportPath.value.trim(), loraOutputDir.value, registryName.value.trim(), addLora)
-  registryName.value = ''
+  if (exportControlsBusy.value || !exportParent.value.trim() || !validExportName.value || store.nativeBusy) return
+  const generation = ++exportGeneration, name = registryName.value.trim()
+  const request = { export_path: exportTarget.value, lora_output_dir: loraOutputDir.value }
+  exportPreparing.value = true; store.exportError = ''
+  try {
+    const result = await trainingApi.previewLoraExport(request, exportController.signal)
+    if (exportAlive && generation === exportGeneration) exportReview.value = { request: { ...request, export_path: result.export_path }, result, name }
+  } catch (cause) {
+    if (exportAlive && generation === exportGeneration) store.exportError = loraExportErrorText(cause)
+  } finally {
+    if (exportAlive && generation === exportGeneration) exportPreparing.value = false
+  }
+}
+async function confirmExport() {
+  const review = exportReview.value
+  if (!review || store.exporting) return
+  try {
+    await store.exportAndRegister(review.request.export_path, review.request.lora_output_dir, review.name, addLora)
+    if (exportAlive && exportReview.value === review) { exportReview.value = null; registryName.value = '' }
+  } catch { /* The store retains the safe, translated error. */ }
 }
 
 const library = useLoraDatasetWorkspace(store, form, isRunning)
+const checkingTrainedFiles = ref(false), trainedFiles = ref<LoraTrainedFilesResponse | null>(null), trainedFilesError = ref('')
+let trainedFilesController: AbortController | undefined, trainedFilesGeneration = 0
+function clearTrainedFilesCheck() {
+  ++trainedFilesGeneration
+  trainedFilesController?.abort(); trainedFilesController = undefined
+  checkingTrainedFiles.value = false; trainedFiles.value = null; trainedFilesError.value = ''
+}
+watch([loraOutputDir, library.selectedId], clearTrainedFilesCheck, { flush: 'sync' })
+onBeforeUnmount(clearTrainedFilesCheck)
+
+async function checkTrainedFiles() {
+  if (!exportAlive || checkingTrainedFiles.value || exportControlsBusy.value || !loraOutputDir.value.trim()) return
+  const generation = ++trainedFilesGeneration
+  const controller = new AbortController()
+  trainedFilesController = controller
+  checkingTrainedFiles.value = true; trainedFiles.value = null; trainedFilesError.value = ''
+  try {
+    const result = await trainingApi.checkTrainedLoraFiles({ lora_output_dir: loraOutputDir.value }, controller.signal)
+    if (exportAlive && generation === trainedFilesGeneration) trainedFiles.value = result
+  } catch {
+    if (exportAlive && generation === trainedFilesGeneration) trainedFilesError.value = t('loraExport.checkFailed')
+  } finally {
+    if (exportAlive && generation === trainedFilesGeneration) { checkingTrainedFiles.value = false; trainedFilesController = undefined }
+  }
+}
 </script>
 
 <template>
   <div class="space-y-6">
-    <DatasetLibrary :datasets="library.datasets.value" :selected-id="library.selectedId.value" :disabled="library.disabled.value" :loading="library.busy.value" :status="store.autoLabelRunning || store.preprocessRunning || store.isTraining ? t('loraRecovery.active') : library.busy.value ? t('loraRecovery.saving') : t('loraRecovery.saved')" @select="library.select" @create="library.create" @rename="library.rename" @trash="library.trash" @restore="library.restore" />
+    <DatasetLibrary :datasets="library.datasets.value" :selected-id="library.selectedId.value" :disabled="library.disabled.value || exportControlsBusy" :loading="library.busy.value" :status="store.autoLabelRunning || store.preprocessRunning || store.isTraining ? t('loraRecovery.active') : library.busy.value ? t('loraRecovery.saving') : t('loraRecovery.saved')" @select="library.select" @create="library.create" @rename="library.rename" @trash="library.trash" @restore="library.restore" />
     <div v-if="library.error.value" role="alert" class="flex flex-wrap items-center gap-3 text-sm text-status-failed"><p>{{ library.error.value }}</p><button type="button" class="min-h-11 rounded-lg border border-border px-3" :disabled="library.busy.value" @click="library.initialize">{{ t('musicLora.refresh') }}</button></div>
     <p v-if="library.issues.value" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.issues', { count: library.issues.value }) }}</p>
     <p v-if="library.notice.value" role="status" class="text-sm text-status-queued">{{ library.notice.value }}</p>
@@ -565,6 +643,7 @@ const library = useLoraDatasetWorkspace(store, form, isRunning)
             <button v-if="store.isTraining" type="button" class="rounded-lg border border-status-failed px-4 py-2 text-sm font-medium text-status-failed" @click="store.stopTraining">
               {{ t('lora.stop') }}
             </button>
+            <button type="button" :disabled="checkingTrainedFiles || exportControlsBusy || !loraOutputDir.trim()" :aria-busy="checkingTrainedFiles" aria-describedby="lora-trained-files-status" class="min-h-11 rounded-lg border border-border px-4 py-2 text-sm text-text disabled:opacity-50" @click="checkTrainedFiles">{{ t(checkingTrainedFiles ? 'loraExport.checkingFiles' : 'loraExport.checkFiles') }}</button>
           </div>
           <p v-if="store.trainingError" class="text-xs text-status-failed">{{ store.trainingError }}</p>
 
@@ -575,37 +654,79 @@ const library = useLoraDatasetWorkspace(store, form, isRunning)
                 epoch: store.training.current_epoch,
                 total: store.totalEpochs ? ` / ${store.totalEpochs}` : '',
                 step: store.training.current_step,
-                loss: store.training.current_loss != null ? store.training.current_loss.toFixed(4) : '—',
+                loss: !waitingForFirstUpdate && store.training.current_loss != null ? store.training.current_loss.toFixed(4) : '—',
                 eta: etaLabel,
               }) }}
             </p>
+            <p v-if="waitingForFirstUpdate" role="status" class="text-xs text-text-dim">{{ t('loraRecovery.firstUpdate') }}</p>
             <p class="text-xs text-text-dim">{{ store.training.status }}</p>
-            <a v-if="store.training.tensorboard_url" :href="store.training.tensorboard_url" target="_blank" rel="noopener" class="text-xs text-accent1 hover:underline">{{ t('lora.openTensorboard') }}</a>
+            <p v-if="waitingForFirstUpdate && store.training.tensorboard_url" class="text-xs text-text-dim">{{ t('loraRecovery.tensorboardPending') }}</p>
+            <a v-else-if="store.training.tensorboard_url" :href="store.training.tensorboard_url" target="_blank" rel="noopener" class="text-xs text-accent1 hover:underline">{{ t('lora.openTensorboard') }}</a>
           </div>
         </section>
 
-        <!-- 6. Export -->
-        <section class="space-y-3 rounded-xl border border-border bg-panel p-5">
-          <h2 class="text-lg font-semibold text-text">{{ t('lora.step6Title') }}</h2>
-          <p class="text-xs text-text-dim">{{ t('lora.exportHint') }}</p>
-          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <label class="space-y-1">
-              <span class="text-xs text-text-dim">{{ t('lora.exportPathLabel') }}</span>
-              <input v-model="exportPath" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" placeholder="E:/AI/LoRAs/my-voice" />
-            </label>
-            <label class="space-y-1">
-              <span class="text-xs text-text-dim">{{ t('lora.registryNameLabel') }}</span>
-              <input v-model="registryName" type="text" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" placeholder="my-voice" />
-            </label>
-          </div>
-          <button type="button" class="accent-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="store.exporting" @click="onExport">
-            {{ store.exporting ? t('lora.exporting') : t('lora.exportAndRegister') }}
-          </button>
-          <p v-if="store.exportError" class="text-xs text-status-failed">{{ store.exportError }}</p>
-          <p v-if="store.lastExportedPath" class="text-xs text-status-done">{{ t('lora.registered', { path: store.lastExportedPath }) }}</p>
-        </section>
       </template>
     </template>
+
+    <div id="lora-trained-files-status" v-show="checkingTrainedFiles || trainedFiles || trainedFilesError" aria-live="polite" aria-atomic="true" class="space-y-2 rounded-xl border border-border bg-panel p-4 text-sm">
+      <p v-if="checkingTrainedFiles" class="text-text-dim">{{ t('loraExport.checkingFiles') }}</p>
+      <div v-if="trainedFiles" data-trained-files-result class="space-y-2">
+        <template v-if="trainedFiles.checkpoint">
+          <p class="font-semibold text-status-done">{{ t(trainedFiles.checkpoint.kind === 'final' ? 'loraExport.finalFound' : 'loraExport.checkpointFound') }}</p>
+          <p class="break-all font-mono text-xs text-text">{{ trainedFiles.checkpoint.source }}</p>
+          <p class="text-xs text-text-dim">{{ t('loraExport.foundHint') }}</p>
+          <a href="#lora-export" class="inline-flex min-h-11 items-center text-accent1 hover:underline">{{ t('loraExport.goToExport') }}</a>
+        </template>
+        <p v-else class="text-text-dim">{{ t('loraExport.noFiles') }}</p>
+      </div>
+      <p v-if="trainedFilesError" data-trained-files-error role="alert" class="text-status-failed">{{ trainedFilesError }}</p>
+    </div>
+
+        <!-- 6. Export -->
+        <section id="lora-export" class="space-y-3 rounded-xl border border-border bg-panel p-5">
+          <h2 class="text-lg font-semibold text-text">{{ t('lora.step6Title') }}</h2>
+          <p class="text-xs text-text-dim">{{ t('loraExport.hint') }}</p>
+          <div class="space-y-1">
+            <label for="lora-export-source" class="text-xs text-text-dim">{{ t('loraExport.trainingRun') }}</label>
+            <span class="flex flex-wrap gap-2">
+              <input id="lora-export-source" v-model="loraOutputDir" name="lora-export-source" type="text" :disabled="exportControlsBusy" class="min-w-0 flex-1 rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" spellcheck="false" />
+              <button type="button" :disabled="checkingTrainedFiles || exportControlsBusy || !loraOutputDir.trim()" :aria-busy="checkingTrainedFiles" aria-describedby="lora-trained-files-status" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" @click="checkTrainedFiles">{{ t(checkingTrainedFiles ? 'loraExport.checkingFiles' : 'loraExport.checkFiles') }}</button>
+            </span>
+          </div>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <label class="space-y-1">
+              <span class="text-xs text-text-dim">{{ t('loraExport.parent') }}</span>
+              <span class="flex gap-2">
+                <input v-model="exportParent" name="lora-export-parent" type="text" :disabled="exportControlsBusy" class="min-w-0 flex-1 rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" spellcheck="false" />
+                <button v-if="canPickExportFolder" type="button" :disabled="exportControlsBusy" class="min-h-11 rounded-lg border border-border px-3 text-sm text-text disabled:opacity-50" @click="chooseExportFolder">{{ t('loraExport.choose') }}</button>
+              </span>
+              <span v-if="!canPickExportFolder" class="text-xs text-text-dim">{{ t('loraExport.manual') }}</span>
+            </label>
+            <label class="space-y-1">
+              <span class="text-xs text-text-dim">{{ t('loraExport.name') }}</span>
+              <input v-model="registryName" name="lora-export-name" type="text" maxlength="120" :disabled="exportControlsBusy" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" placeholder="my-voice" />
+              <span v-if="registryName && !validExportName" class="text-xs text-status-failed">{{ t('loraExport.nameHint') }}</span>
+            </label>
+          </div>
+          <p v-if="exportParent.trim() && validExportName" class="break-all text-xs text-text-dim">{{ t('loraExport.destination') }}: <span class="font-mono">{{ exportTarget }}</span></p>
+          <button type="button" class="accent-gradient rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="exportControlsBusy || store.nativeBusy || !exportParent.trim() || !validExportName" @click="onExport">
+            {{ store.exporting ? t('lora.exporting') : exportPreparing ? t('loraExport.preparing') : t('lora.exportAndRegister') }}
+          </button>
+          <p v-if="store.exportError" role="alert" class="text-xs text-status-failed">{{ store.exportError }}</p>
+          <p v-if="store.lastExportedPath" class="text-xs text-status-done">{{ t('lora.registered', { path: store.lastExportedPath }) }}</p>
+        </section>
+    <HelpModal :open="!!exportReview" :title="t('loraExport.review')" @close="!store.exporting && (exportReview = null)">
+      <template v-if="exportReview">
+        <p>{{ t('loraExport.destination') }}</p><p class="break-all font-mono text-text">{{ exportReview.result.export_path }}</p>
+        <p>{{ t('loraExport.source') }}</p><p class="break-all font-mono">{{ exportReview.result.source }}</p>
+        <p class="rounded-lg border border-border p-3 text-text">{{ t('loraExport.noDeletion') }}</p>
+        <p v-if="store.exportError" role="alert" class="text-status-failed">{{ store.exportError }}</p>
+        <div class="flex flex-wrap gap-3">
+          <button type="button" :disabled="store.exporting" class="min-h-11 rounded-lg border border-border px-4 text-text disabled:opacity-50" @click="exportReview = null">{{ t('loraRecovery.cancel') }}</button>
+          <button type="button" :disabled="store.exporting" class="accent-gradient min-h-11 rounded-lg px-4 font-semibold text-white disabled:opacity-50" @click="confirmExport">{{ store.exporting ? t('lora.exporting') : t('loraExport.confirm') }}</button>
+        </div>
+      </template>
+    </HelpModal>
 
     <HelpModal :open="helpOpen === 'dataset'" :title="t('lora.help.dataset.title')" @close="helpOpen = null">
       <table class="w-full border-collapse text-xs">

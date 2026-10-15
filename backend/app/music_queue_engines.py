@@ -260,6 +260,11 @@ class EngineSession:
             except resource_admission.ResourceBusyError as error:
                 raise MusicQueueError(error.code) from error
             except Exception as error:
+                if isinstance(error, HTTPException) and isinstance(error.detail, str) and (error.status_code, error.detail) in {
+                    (409, 'ace_lora_selection_mismatch'), (502, 'ace_lora_status_unavailable'), (503, 'model_inactive'),
+                }:
+                    code = 'ace_lora_model_inactive' if error.detail == 'model_inactive' else error.detail
+                    raise MusicQueueError(code, error.status_code) from error
                 logger.exception('Queue ACE submission could not be proven')
                 raise MusicQueueError('music_queue_submission_interrupted', 503) from error
         elif payload.engine == 'yue2':

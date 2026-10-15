@@ -65,6 +65,7 @@ function beginAction(source: MidiSource) {
 }
 
 async function start(source: MidiSource, force = false) {
+  if (force && !window.confirm(t('midiPanel.confirmRecreate', { source: SOURCE_LABELS.value[source] }))) return
   const context = beginAction(source)
   actionError.value = null
   try {

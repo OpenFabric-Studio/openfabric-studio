@@ -380,6 +380,37 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(interrupted.exception.code, 'music_queue_submission_interrupted')
         submit.assert_awaited_once()
 
+    async def test_ace_preflight_rejection_preserves_safe_code_without_ambiguous_submission(self) -> None:
+        item = self.item()
+        await self.session.ensure(item.payload)
+        self.enterContext(patch.object(engines.resource_admission, 'native_admission', return_value=_Admission()))
+        for status, code, expected in ((409, 'ace_lora_selection_mismatch', 'ace_lora_selection_mismatch'),
+                                      (502, 'ace_lora_status_unavailable', 'ace_lora_status_unavailable'),
+                                      (503, 'model_inactive', 'ace_lora_model_inactive')):
+            with self.subTest(code=code), patch.object(engines.ace_jobs, 'submit', new=AsyncMock(
+                    side_effect=HTTPException(status, code))) as submit:
+                with self.assertRaises(MusicQueueError) as rejected:
+                    await self.session.submit(item)
+                self.assertEqual(rejected.exception.code, expected)
+                self.assertEqual(rejected.exception.status, status)
+                self.assertEqual(self.session._children, {})
+                submit.assert_awaited_once()
+
+    async def test_unknown_ace_http_failure_stays_interrupted_without_raw_details(self) -> None:
+        item = self.item()
+        await self.session.ensure(item.payload)
+        self.enterContext(patch.object(engines.resource_admission, 'native_admission', return_value=_Admission()))
+        for detail in ('/private/model/path', {'private': '/secret/path'}):
+            with self.subTest(detail=detail), patch.object(engines.ace_jobs, 'submit', new=AsyncMock(
+                    side_effect=HTTPException(502, detail))) as submit:
+                with self.assertRaises(MusicQueueError) as interrupted:
+                    await self.session.submit(item)
+                self.assertEqual(interrupted.exception.code, 'music_queue_submission_interrupted')
+                self.assertNotIn('private', str(interrupted.exception))
+                self.assertNotIn('secret', str(interrupted.exception))
+                self.assertEqual(self.session._children, {})
+                submit.assert_awaited_once()
+
     async def test_recovery_waits_for_existing_delayed_publication_without_starting_work(self) -> None:
         item = self.item()
         job = self.ace_job('running')

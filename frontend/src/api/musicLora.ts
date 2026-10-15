@@ -11,7 +11,7 @@ export function musicLoraCapabilities(signal?: AbortSignal): Promise<MusicLoraCa
 export async function importMusicAdapter(file: File, metadata: Pick<MusicAdapter, 'engine' | 'target' | 'name'>, signal?: AbortSignal): Promise<MusicAdapter> {
   const name = metadata.name.trim()
   if (!/\.safetensors$/i.test(file.name) || file.size <= 8 || file.size > 512 * 1024 * 1024 || !name || name.length > 120
-    || (metadata.engine === 'stable_audio3') !== (metadata.target === 'small-music' || metadata.target === 'medium')) throw new TypeError('Invalid music adapter import')
+    || !(metadata.engine === 'stable_audio3' ? metadata.target === 'small-music' || metadata.target === 'medium' : metadata.engine === 'heartmula' ? metadata.target === 'heartmula-3b' : metadata.target === 'ar' || metadata.target === 'nar')) throw new TypeError('Invalid music adapter import')
   const body = new FormData()
   body.append('file', file); body.append('engine', metadata.engine); body.append('target', metadata.target); body.append('name', name)
   return apiFetch('/api/music-lora/adapters', { method: 'POST', body, signal }, parseMusicAdapter)

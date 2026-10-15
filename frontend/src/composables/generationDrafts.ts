@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { parseAceGenerationSettings, parseYueGenerationSettings } from '../api/contracts'
 import type { AceGenerationSettings, YueGenerationSettings, GenerationPreset } from '../api/contracts'
+import type { MusicAdapter, MusicAdapterSelection } from '../api/generated'
 import type { GenerationSnapshot } from '../api/generationLibrary'
 export const pendingAceDraft = ref<AceGenerationSettings | null>(null)
 export const pendingYueDraft = ref<YueGenerationSettings | null>(null)
@@ -19,3 +20,5 @@ export function applyReferenceText(engine: 'ace_step' | 'yue2', kind: 'lyrics' |
   if (engine === 'ace_step' && kind === 'lyrics') pendingAceReference.value = { customLyrics: text, referenceImportId: importId }
   if (engine === 'yue2') pendingYueReference.value = kind === 'lyrics' ? { lyrics: text, referenceImportId: importId } : { abc: text, referenceImportId: importId }
 }
+
+export const pendingMusicAdapter = ref<(Pick<MusicAdapter, 'engine' | 'target'> & { selection: MusicAdapterSelection | null }) | null>(null)

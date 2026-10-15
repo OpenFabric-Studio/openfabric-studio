@@ -7,7 +7,7 @@ import { ApiError } from '../api/http'
 
 vi.mock('../api/aceStepTraining', async original => ({ ...await original<typeof import('../api/aceStepTraining')>(),
   autoLabelStatus: vi.fn(), preprocessStatus: vi.fn(), latestAutoLabelStatus: vi.fn(), latestPreprocessStatus: vi.fn(),
-  trainingStatus: vi.fn(), getSamples: vi.fn(), startAutoLabel: vi.fn(), startPreprocess: vi.fn(), startLoraTraining: vi.fn(),
+  trainingStatus: vi.fn(), getSamples: vi.fn(), startAutoLabel: vi.fn(), startPreprocess: vi.fn(), startLoraTraining: vi.fn(), exportLora: vi.fn(),
 }))
 const idle = { task_id: null, status: 'idle', progress: '', current: 0, total: 0 } as const
 const sample: api.DatasetSample = { index: 0, filename: 'voice.wav', audio_path: '/audio/voice.wav', duration: 10, caption: 'preserved', genre: '', prompt_override: null, lyrics: '', bpm: null, keyscale: '', timesignature: '', language: 'en', is_instrumental: false, labeled: true }
@@ -27,6 +27,23 @@ beforeEach(() => {
   vi.mocked(api.getSamples).mockResolvedValue({ samples: [sample] })
 })
 afterEach(() => { useLoraTrainingStore().stopBackgroundTasks(); vi.clearAllTimers(); vi.useRealTimers() })
+
+it('registers only the canonical adapter path returned by a successful safe export', async () => {
+  const store = useLoraTrainingStore(), register = vi.fn()
+  const adapter = 'C:\\exports\\voice\\adapter'
+  vi.mocked(api.exportLora).mockResolvedValue({ export_path: 'C:\\exports\\voice', adapter_path: adapter, source: '/engine/lora_output/run/final', message: 'Exported' })
+  await store.exportAndRegister('C:/exports/voice', 'lora_output/run', 'Voice', register)
+  expect(register).toHaveBeenCalledWith('Voice', adapter)
+  expect(store.lastExportedPath).toBe(adapter)
+})
+it('keeps the registry unchanged when a competing export creates the reviewed destination', async () => {
+  const store = useLoraTrainingStore(), register = vi.fn()
+  vi.mocked(api.exportLora).mockRejectedValue(new ApiError('lora_export_destination_exists', 409))
+  await expect(store.exportAndRegister('/exports/voice', 'lora_output/run', 'Voice', register)).rejects.toThrow()
+  expect(register).not.toHaveBeenCalled()
+  expect(store.exportError).toContain('already exists')
+  expect(store.lastExportedPath).toBe('')
+})
 
 it('explains a rejected tensor reuse without exposing an internal code or resubmitting', async () => {
   const store = useLoraTrainingStore()

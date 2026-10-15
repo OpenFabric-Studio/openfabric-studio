@@ -10,6 +10,8 @@ import os
 from pathlib import Path
 import sys
 
+from pydantic import ValidationError
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.module_catalog import configured_environment, MODULE_IDS, plan
 from app.module_contracts import ModuleInstallRequest, ModulePlanRequest
@@ -26,7 +28,7 @@ async def run(request: ModulePlanRequest, *, install: bool) -> int:
     await service.recover()
     try:
         created = await service.create(ModuleInstallRequest(features=request.features,
-            download_models=request.download_models, plan_token=reviewed.plan_token))
+            download_models=request.download_models, reinstall=request.reinstall, plan_token=reviewed.plan_token))
         previous = ''
         while True:
             current = service.get(created.id)
@@ -46,12 +48,14 @@ def main() -> int:
     parser.add_argument('--feature', action='append', choices=MODULE_IDS, required=True)
     parser.add_argument('--root', type=Path)
     parser.add_argument('--download-models', action='store_true')
+    parser.add_argument('--reinstall', action='append', choices=MODULE_IDS, default=[], help='Explicitly reinstall isolated dependencies for a selected managed Python engine')
     parser.add_argument('--install', action='store_true')
     args = parser.parse_args()
     root: object = args.root
     features: object = args.feature
     download: object = args.download_models
     install: object = args.install
+    reinstall: object = args.reinstall
     if isinstance(root, Path):
         if not root.is_absolute():
             parser.error('--root must be an absolute path')
@@ -59,10 +63,13 @@ def main() -> int:
     if not isinstance(features, list) or not isinstance(download, bool) or not isinstance(install, bool):
         return 2
     try:
-        request = ModulePlanRequest.model_validate({'features': features, 'download_models': download})
+        request = ModulePlanRequest.model_validate({'features': features, 'download_models': download, 'reinstall': reinstall})
         return asyncio.run(run(request, install=install))
     except ModuleSetupError as exc:
         print(exc.code, file=sys.stderr)
+        return 2
+    except ValidationError:
+        print('invalid_setup_request', file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print('Setup interrupted; owned workers drained. Review the saved job before resuming.', file=sys.stderr)

@@ -165,3 +165,32 @@ class MusicLoraTests(unittest.TestCase):
         with patch.object(music_lora, 'write_object', side_effect=OSError('disk full')), self.assertRaises(OSError):
             self.register()
         self.assertEqual(music_lora.list_adapters().adapters, [])
+
+
+class HeartMusicLoraTests(unittest.TestCase):
+    def test_plain_heart_adapter_is_managed_and_cannot_be_used_with_another_engine(self) -> None:
+        from app.heart_lora_contracts import HeartLoraMetadata
+        with tempfile.TemporaryDirectory() as directory, patch.object(music_lora.db, 'DATA_DIR', Path(directory)):
+            config = HeartLoraMetadata(rank=8, alpha=8.0, target_modules=['q_proj'])
+            size = 8 * 3072 * 4
+            tensors: dict[str, object] = {'__metadata__': {'heart_lora_config': config.model_dump_json()}}
+            offset = 0
+            for stack, layers in (('backbone', 28), ('decoder', 3)):
+                for layer in range(layers):
+                    for factor, shape in (('A', [8, 3072]), ('B', [3072, 8])):
+                        tensors[f'base_model.model.{stack}.layers.{layer}.self_attn.q_proj.lora_{factor}.weight'] = {
+                            'dtype': 'F32', 'shape': shape, 'data_offsets': [offset, offset + size]}
+                        offset += size
+            header = json.dumps(tensors).encode()
+            content = struct.pack('<Q', len(header)) + header + bytes(offset)
+            imported = music_lora.import_stream(io.BytesIO(content), filename='adapter.safetensors', name='Warm voice', engine='heartmula', target='heartmula-3b')
+            self.assertEqual(music_lora.export_path(imported.id).read_bytes(), content)
+            with self.assertRaises(MusicLoraError):
+                music_lora.resolve(MusicAdapterSelection(id=imported.id), engine='yue2', target='nar')
+
+    def test_nonfinite_adapter_weights_are_refused(self) -> None:
+        content = adapter_bytes()
+        length = struct.unpack('<Q', content[:8])[0]
+        content = content[:8 + length] + struct.pack('<H', 0x7c00) + content[10 + length:]
+        with tempfile.TemporaryDirectory() as directory, patch.object(music_lora.db, 'DATA_DIR', Path(directory)), self.assertRaises(MusicLoraError):
+            music_lora.import_stream(io.BytesIO(content), filename='invalid.safetensors', name='Invalid', engine='stable_audio3', target='small-music')

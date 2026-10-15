@@ -5,7 +5,9 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import AceStepPage from './AceStepPage.vue'
 import { i18n, setLocale } from '../../i18n'
 import * as voices from '../../api/voices'
+import * as aceApi from '../../api/aceStep'
 import type { ModelInventory } from '../../api/aceStep'
+import type { AceLoraStatus } from '../../api/generated'
 import { voiceProfile } from '../voice/voiceTestFixtures'
 
 const actions = vi.hoisted(() => {
@@ -18,14 +20,17 @@ vi.mock('../../stores/aceStep', () => ({ useAceStepStore: () => actions }))
 vi.mock('../../stores/orchestrator', () => ({ useOrchestratorStore: () => engine }))
 vi.mock('../../api/voices', async (original) => ({ ...await original<typeof import('../../api/voices')>(), listVoices: vi.fn() }))
 vi.mock('../../api/aceStepTraining', () => ({ trainingStatus: vi.fn().mockResolvedValue({ is_training: false }) }))
+vi.mock('../../api/aceStep', async original => ({ ...await original<typeof import('../../api/aceStep')>(), loraStatus: vi.fn() }))
 vi.mock('./ResultsFeed.vue', async () => { const { h } = await import('vue'); return { default: { render: () => h('div', { 'data-results': true }, 'Track list') } } })
 vi.mock('../../components/shared/ModelOfflineBanner.vue', async () => { const { h } = await import('vue'); return { default: { render: () => h('div', 'Offline') } } })
 
 let app: App | undefined
+const noLora: AceLoraStatus = { lora_loaded: false, use_lora: false, lora_scale: 1, active_adapter: null, adapters: [] }
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks(); localStorage.clear(); setLocale('en'); engine.statuses = {}
   vi.mocked(voices.listVoices).mockResolvedValue([{ ...voiceProfile(), status: 'ready', usable: true }, { ...voiceProfile(), id: 'b'.repeat(32), name: 'Second voice', status: 'ready', usable: true }])
   voices.setActiveVoiceId(voiceProfile().id)
+  vi.mocked(aceApi.loraStatus).mockReset().mockResolvedValue(noLora)
   actions.submit.mockResolvedValue(undefined); actions.submitVoiceReplacement.mockResolvedValue(undefined)
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.clearAllTimers(); vi.useRealTimers() })
@@ -103,7 +108,9 @@ it('preserves real custom lyrics, voice choice and a pending ACE submission acro
   expect(submit.disabled).toBe(false); expect(input.disabled).toBe(false); expect(actions.submit).toHaveBeenCalledOnce()
 })
 
-it('keeps ordinary generation at unknown startup and enables it after actual running status arrives', async () => {
+it('keeps ordinary generation at unknown startup and enables submission after running and LoRA status are confirmed', async () => {
+  let finish: ((status: AceLoraStatus) => void) | undefined
+  vi.mocked(aceApi.loraStatus).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
   const container = await mount(false)
   const prompt = container.querySelector('textarea')
   if (!(prompt instanceof HTMLTextAreaElement)) throw new Error('Unknown startup must retain ordinary controls')
@@ -111,6 +118,9 @@ it('keeps ordinary generation at unknown startup and enables it after actual run
   prompt.value = 'A startup draft'; prompt.dispatchEvent(new Event('input', { bubbles: true })); await settle()
   button(container, 'Float generator').click(); await settle()
   engine.statuses.ace_step = { status: 'running', error: null }; await settle()
+  expect(button(container, 'Generate').disabled).toBe(true)
+  if (!finish) throw new Error('LoRA status check did not start')
+  finish(noLora); await settle()
   expect(container.querySelector('textarea')).toBe(prompt); expect(prompt.value).toBe('A startup draft'); expect(button(container, 'Generate').disabled).toBe(false)
   expect(container.textContent).not.toContain('Replace voice')
 })

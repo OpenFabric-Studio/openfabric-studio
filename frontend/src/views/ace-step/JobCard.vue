@@ -212,7 +212,7 @@ function copyParamsToForm() {
         <FavoriteTrackButton v-if="singleSavedTrack" :track-id="singleSavedTrack.id" :label="favoriteLabel(singleSavedTrack.index)" />
         <StatusBadge :status="shownStatus" :label="voiceRunning && shownStatus !== 'queued' ? t('voiceClone.applyingBadge') : undefined" />
         <button v-if="voiceRunning && replacement || !voiceRunning && (job.status === 'queued' || job.status === 'running')" type="button" :disabled="actionPending || job.voiceActionPending" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :title="t('aceJob.cancel')" :aria-label="t('aceJob.cancel')" @click="cancel">⏹</button>
-        <button v-else type="button" :disabled="actionPending || job.voiceActionPending" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :title="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :aria-label="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" @blur="disarmDelete" @click="remove"><span v-if="deleteArmed">{{ t('upstreamLibrary.confirmDelete') }}</span><span v-else aria-hidden="true">✕</span></button>
+        <button v-else type="button" :disabled="actionPending || job.voiceActionPending" class="min-h-9 min-w-9 rounded-lg px-2 text-text-dim hover:bg-panel-2 hover:text-status-failed focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent1" :title="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :aria-label="deleteArmed ? t('upstreamLibrary.confirmDelete') : t('aceJob.delete')" :aria-describedby="deleteArmed ? `ace-delete-warning-${job.id}` : undefined" @blur="disarmDelete" @click="remove"><span v-if="deleteArmed">{{ t('upstreamLibrary.confirmDelete') }}</span><span v-else aria-hidden="true">✕</span></button>
       </div>
     </div>
 
@@ -234,6 +234,7 @@ function copyParamsToForm() {
     </div>
     <div v-else-if="job.status === 'cancelled'" class="rounded-lg bg-panel-2 p-2 text-xs text-text-dim">{{ t('aceJob.cancelled') }}</div>
 
+    <p v-if="deleteArmed" :id="`ace-delete-warning-${job.id}`" data-delete-warning role="alert" class="text-xs text-status-failed">{{ t('common.trackFileDeletionWarning', { name: job.title || t('aceJob.noDescription') }) }}</p>
     <p v-if="actionError" class="text-xs text-status-failed" role="alert">{{ actionError }}</p>
     <p v-if="job.voiceApply === 'failed'" role="alert" :class="replacementCancelled ? 'text-xs text-text-dim' : 'text-xs text-status-failed'">{{ replacementCancelled ? t('aceGen.replacementCancelled') : voiceErrorText(job.voiceErrorCode || '', job.voiceError || '') }}</p>
     <div v-if="job.dbIds.length > 0 || job.audioUrls.length > 0 && (!replacement || job.voiceApply === 'done')" class="space-y-2">
@@ -267,7 +268,7 @@ function copyParamsToForm() {
         {{ copied ? t('aceJob.copied') : t('aceJob.copyParams') }}
       </button>
       <button v-if="view === 'list' && (voiceRunning && replacement || !voiceRunning && (job.status === 'queued' || job.status === 'running'))" type="button" :disabled="actionPending || job.voiceActionPending" class="text-xs text-text-dim hover:text-status-failed" @click="cancel">{{ t('aceJob.cancel') }}</button>
-      <button v-else-if="view === 'list'" type="button" :disabled="actionPending || job.voiceActionPending" class="text-xs text-text-dim hover:text-status-failed" @blur="disarmDelete" @click="remove">{{ t(deleteArmed ? 'upstreamLibrary.confirmDelete' : 'aceJob.delete') }}</button>
+      <button v-else-if="view === 'list'" type="button" :disabled="actionPending || job.voiceActionPending" class="text-xs text-text-dim hover:text-status-failed" :aria-describedby="deleteArmed ? `ace-delete-warning-${job.id}` : undefined" @blur="disarmDelete" @click="remove">{{ t(deleteArmed ? 'upstreamLibrary.confirmDelete' : 'aceJob.delete') }}</button>
       <button v-if="view === 'cards' && (job.lyrics || styleText || detailRows.length)" type="button" class="text-xs text-text-dim hover:underline" @click="showDetails = !showDetails">
         {{ showDetails ? t('aceJob.hideDetails') : t('aceJob.showDetails') }}
       </button>

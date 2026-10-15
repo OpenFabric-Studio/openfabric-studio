@@ -25,11 +25,12 @@ from pydantic import BaseModel, Field, ValidationError
 
 from .atomic_files import write_object
 from .contracts import JsonValue
-from .module_catalog import engine_python, is_managed, MODULE_IDS, platform_key, supported
+from .module_catalog import engine_python, is_managed, MODULE_IDS, ModuleEnvironment, platform_key, REINSTALLABLE_MODULES, supported
 from .module_contracts import ModuleId, ModuleDownloadProgress
-from .module_evidence import environment_fingerprint
+from .module_evidence import environment_fingerprint, VerificationReceipt
 from .module_jobs import InstallContext, InstallOutcome, ModuleSetupError
 from .job_lifecycle import await_cleanup
+from .module_music_models import setup_music_models
 
 
 class DownloadArtifact(BaseModel):
@@ -93,7 +94,7 @@ class SourcePin:
 
 
 SOURCE_PINS: dict[ModuleId, SourcePin] = {
-    # Music pins reviewed 14 Oct 2026; install dependencies only, never weights.
+    # Music source pins are separate from the immutable model artifact manifest.
     'heartmula': SourcePin('https://github.com/Acelogic/heartlib-mlx.git', '02dd2e22f6a1bf1a2f769a13f8af952a7a4e9cee', '3.11'),
     'stable_audio3': SourcePin('https://github.com/Stability-AI/stable-audio-3.git', '77e0398c26f7d22d801ec1bb036307e8b231f741', '3.11'),
     'speech': SourcePin('https://github.com/RVC-Boss/GPT-SoVITS.git', '48b1a0169a28582a8984402f82cf438d3bfa6aca', '3.11'),
@@ -291,18 +292,47 @@ def _owned_path(context: InstallContext, identifier: ModuleId) -> Path:
 
 def _owned(context: InstallContext, identifier: ModuleId, target: Path, version: str) -> bool:
     marker = _owned_path(context, identifier)
+    return _owned_receipt(marker, identifier, target, version)
+
+
+def _owned_receipt(marker: Path, identifier: ModuleId, target: Path, version: str) -> bool:
     try:
         if marker.stat().st_size > 16384:
             return False
         owned = OwnedInstallation.model_validate_json(marker.read_bytes())
         if owned.module_id != identifier or owned.root != str(target.resolve()) or owned.version != version:
             return False
+        source_bytes = 0
         for relative, digest in owned.files.items():
             path = _archive_path(relative, target)
-            if not path.is_file() or _sha256(path) != digest:
+            if not path.is_file():
+                return False
+            source_bytes += path.stat().st_size
+            # Python inventory must not hash arbitrarily enlarged source markers.
+            if identifier in REINSTALLABLE_MODULES and source_bytes > 8 * 1024**2 or _sha256(path) != digest:
                 return False
         return bool(owned.files)
     except (OSError, ValueError, ValidationError, ModuleSetupError):
+        return False
+
+
+def _installation_version(identifier: ModuleId, assets: AssetManifest) -> str:
+    return 'speechbrain-1.0.3-torch-2.6.0-cpu-v1' if identifier == 'speaker_review' else assets.aceStep.commit if identifier == 'ace_step' else assets.engine.tag if identifier == 'yue2' else SOURCE_PINS[identifier].commit if identifier in SOURCE_PINS else hashlib.sha256(manifest_path().read_bytes()).hexdigest()
+
+
+def reinstall_available(environment: ModuleEnvironment, identifier: ModuleId) -> bool:
+    """Read existing ownership and path evidence without creating setup state."""
+    try:
+        if identifier not in REINSTALLABLE_MODULES or not supported(identifier, environment) or not is_managed(identifier, environment):
+            return False
+        target = environment.paths[identifier]
+        marker = environment.root / '.setup/owned' / f'{identifier}.json'
+        venv = target / '.venv'
+        for path in (marker, venv):
+            if path.is_symlink() or not path.resolve().is_relative_to(environment.root.resolve()):
+                return False
+        return _owned_receipt(marker, identifier, target, _installation_version(identifier, load_manifest()))
+    except (OSError, ValueError, RuntimeError, ModuleSetupError):
         return False
 
 
@@ -369,8 +399,8 @@ async def _check_environment(context: InstallContext, identifier: ModuleId, targ
         'environment_verified': True})
 
 
-async def verify(context: InstallContext, identifier: ModuleId) -> InstallOutcome:
-    """Explicitly check existing environments without changing their contents."""
+async def verify(context: InstallContext, identifier: ModuleId, *, download_models: bool = False) -> InstallOutcome:
+    """Reuse existing environments and finish explicitly selected music models."""
     from .module_catalog import DEFINITIONS, inventory
     status = await inventory(context.environment)
     module = next(item for item in status.modules if item.id == identifier)
@@ -378,10 +408,16 @@ async def verify(context: InstallContext, identifier: ModuleId) -> InstallOutcom
         return InstallOutcome('verified', 'Current bounded tool or runtime/model checks passed. No engine files were changed.')
     if identifier == 'speaker_review':
         return _speaker_outcome(context)
+    if identifier == 'yue2':
+        from .module_native_setup import setup_native_models
+        return await setup_native_models(context, download_models)
     definition = DEFINITIONS[identifier]
     target = context.environment.paths[identifier]
     if definition.packages and all((target / marker).exists() for marker in definition.source_markers) and engine_python(target, context.environment.platform).is_file():
+        context.update_detail('Checking the existing isolated environment and declared package compatibility.')
         await _check_environment(context, identifier, target)
+        if identifier in ('ace_step', 'heartmula', 'stable_audio3'):
+            return await setup_music_models(context, identifier, download_models)
         return InstallOutcome('manual', 'Existing environment packages and declared compatibility checked without changing the checkout. Model setup and a short output still require review.')
     raise ModuleSetupError('environment_unverified')
 
@@ -472,52 +508,32 @@ async def _native(context: InstallContext, target: Path, assets: AssetManifest, 
 
 
 async def _native_weights(context: InstallContext, target: Path, assets: AssetManifest, download: bool) -> InstallOutcome:
-    if not download:
-        return InstallOutcome('manual', 'Native engine installed. Review the plan with model downloads selected to install required weights.')
-    if shutil.which('git') is None:
-        return InstallOutcome('manual', 'Git is required to apply the verified resumable model downloader before installing weights.')
-    patch_dir = Path(__file__).resolve().parents[2] / 'external/patches'
-    if not (patch_dir / 'yue-model-resume.patch').is_file():
-        patch_dir = Path(__file__).resolve().parents[2] / 'patches'
-    reliability = patch_dir / 'yue-model-download-reliability.patch'
-    try:
-        # Check the final layer first: it changes old-patch context, so checking
-        # the old layer alone is no longer a reliable installed-state probe.
-        await context.run(['git', 'apply', '--reverse', '--check', str(reliability)], cwd=target)
-    except ModuleSetupError as exc:
-        if exc.code != 'installer_failed':
-            raise
-        patch = patch_dir / 'yue-model-resume.patch'
-        try:
-            await context.run(['git', 'apply', '--reverse', '--check', str(patch)], cwd=target)
-        except ModuleSetupError as previous:
-            if previous.code != 'installer_failed':
-                raise
-            await context.run(['git', 'apply', '--check', str(patch)], cwd=target)
-            await context.run(['git', 'apply', '--whitespace=nowarn', str(patch)], cwd=target)
-        await context.run(['git', 'apply', '--check', str(reliability)], cwd=target)
-        await context.run(['git', 'apply', '--whitespace=nowarn', str(reliability)], cwd=target)
-    # Refresh ownership before any awaited model download can be interrupted.
-    _record_owned(context, 'yue2', target, assets.engine.tag)
-    for package in assets.weights.packages:
-        if package not in ('yue2_main_q8_0', 'yue2_main_q4_0', 'yue2_vae_f16', 'sheetsage2_orig', 'muscriptor_small_f32'):
-            raise ModuleSetupError('artifact_integrity')
-        await context.run([str(context.environment.python), 'tools/model_manager_v2.py', 'install', package, '--progress'], cwd=target, env=_uv_env(context), download_progress=True)
-    return InstallOutcome('manual', 'Native packages downloaded by the verified model manager. Verify GPU compatibility and a short generation in Music before claiming readiness.')
+    from .module_native_setup import PACKAGES, setup_native_models
+    if target.resolve() != context.environment.paths['yue2'].resolve() or set(assets.weights.packages) != {package.identifier for package in PACKAGES}:
+        raise ModuleSetupError('artifact_integrity')
+    return await setup_native_models(context, download)
 
 
-async def install(context: InstallContext, identifier: ModuleId, download_models: bool) -> InstallOutcome:
+async def install(context: InstallContext, identifier: ModuleId, download_models: bool, *, reinstall: bool = False) -> InstallOutcome:
     env = context.environment
     if identifier not in MODULE_IDS or not supported(identifier, env):
         raise ModuleSetupError('unsupported_platform')
+    if reinstall and (identifier not in REINSTALLABLE_MODULES or not is_managed(identifier, env)):
+        raise ModuleSetupError('reinstall_unavailable')
     if not is_managed(identifier, env):
         return InstallOutcome('manual', 'The configured external installation is preserved. Review its setup outside the managed installer.')
     target = context.confined(env.paths[identifier])
     assets = load_manifest()
-    version = 'speechbrain-1.0.3-torch-2.6.0-cpu-v1' if identifier == 'speaker_review' else assets.aceStep.commit if identifier == 'ace_step' else assets.engine.tag if identifier == 'yue2' else SOURCE_PINS[identifier].commit if identifier in SOURCE_PINS else hashlib.sha256(manifest_path().read_bytes()).hexdigest()
+    version = _installation_version(identifier, assets)
     owned = _owned(context, identifier, target, version)
+    if reinstall:
+        if not owned:
+            raise ModuleSetupError('reinstall_unavailable')
+        context.confined(target / '.venv')
     if target.exists() and not owned:
         return InstallOutcome('manual', 'An existing or modified installation was preserved. Use a separate managed root or review the existing setup manually.')
+    from .module_catalog import DEFINITIONS
+    context.update_detail(f'Preparing the managed {DEFINITIONS[identifier].name} installation.')
     if identifier == 'speaker_review':
         target.mkdir(parents=True, exist_ok=True)
         marker = context.confined(target / '.openfabric-speaker-runtime.json')
@@ -553,6 +569,7 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
     if uv is None:
         raise ModuleSetupError('environment_unverified')
     if not owned:
+        context.update_detail('Installing pinned source into the managed engine home. Existing external checkouts are preserved.')
         if identifier == 'separation':
             target.mkdir(parents=True)
             project = '[project]\nname="openfabric-demucs"\nversion="0.1.0"\nrequires-python=">=3.11,<3.13"\ndependencies=["demucs>=4.0.1","numpy>=1.26.4","torch>=2.11.0"]\n[tool.uv]\npackage=false\n'
@@ -563,13 +580,26 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
             pin = SourcePin('https://github.com/ace-step/ACE-Step-1.5.git', assets.aceStep.commit, '3.12') if identifier == 'ace_step' else SOURCE_PINS[identifier]
             await _clone(context, identifier, pin, target)
         _record_owned(context, identifier, target, version)
+    if reinstall:
+        marker = context.confined(env.root / '.setup/verification' / f'{identifier}.json')
+        if marker.exists():
+            try:
+                if marker.stat().st_size > 16384:
+                    raise ModuleSetupError('environment_unverified')
+                receipt = VerificationReceipt.model_validate_json(marker.read_bytes())
+            except ValidationError as exc:
+                raise ModuleSetupError('environment_unverified') from exc
+            write_object(marker, {'schema_version': receipt.schema_version, 'root': receipt.root,
+                'fingerprint': receipt.fingerprint, 'environment_verified': False})
     child_env = _uv_env(context)
+    dependency_flags = ['--reinstall'] if reinstall else []
+    context.update_detail('Reinstalling isolated Python dependencies and checking compatibility.' if reinstall else 'Installing isolated Python dependencies and checking compatibility.')
     if identifier in ('ace_step', 'separation'):
         command = [uv, 'sync', '--frozen'] if identifier == 'ace_step' or (target / 'uv.lock').exists() else [uv, 'sync']
+        command.extend(dependency_flags)
         await context.run(command, cwd=target, env=child_env)
-        if download_models:
-            command = [uv, 'run', 'acestep-download'] if identifier == 'ace_step' else [uv, 'run', 'python', '-c', "from demucs.pretrained import get_model;get_model('htdemucs')"]
-            await context.run(command, cwd=target, env=child_env)
+        if download_models and identifier == 'separation':
+            await context.run([uv, 'run', 'python', '-c', "from demucs.pretrained import get_model;get_model('htdemucs')"], cwd=target, env=child_env)
     elif identifier == 'video':
         command = [str(env.python), str(Path(__file__).resolve().parents[1] / 'scripts/setup_video.py'), '--engine-dir', str(target), '--cache-dir', str(env.data_dir / 'models/ltx')]
         if download_models:
@@ -581,30 +611,32 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
         if not python.is_file():
             await context.run([uv, 'venv', '--python', SOURCE_PINS[identifier].python, str(target / '.venv')], env=child_env)
         # Editable or CPU package install only. Never pass a weight repo or from_pretrained.
-        await context.run(install_command(uv, identifier, python, target), env=child_env)
+        command = install_command(uv, identifier, python, target)
+        command.extend(dependency_flags)
+        await context.run(command, env=child_env)
     elif identifier in ('heartmula', 'stable_audio3'):
         python = venv_python(target, env.platform)
         if not python.is_file():
             await context.run([uv, 'venv', '--python', SOURCE_PINS[identifier].python, str(target / '.venv')], env=child_env)
         # Upstream bootstrap wrappers can auto-download weights or publish a UI.
         arguments = ['-e', str(target)] if identifier == 'heartmula' else ['-r', str(target / 'optimized/mlx/requirements.txt')]
-        await context.run([uv, 'pip', 'install', '--python', str(python), *arguments], env=child_env)
+        await context.run([uv, 'pip', 'install', '--python', str(python), *dependency_flags, *arguments], env=child_env)
     else:
         python = venv_python(target, env.platform)
         if not python.is_file():
             await context.run([uv, 'venv', '--python', SOURCE_PINS[identifier].python, str(target / '.venv')], env=child_env)
         if identifier == 'speech':
-            await context.run([uv, 'pip', 'install', '--python', str(python), '-r', str(target / 'requirements.txt')], env=child_env)
+            await context.run([uv, 'pip', 'install', '--python', str(python), *dependency_flags, '-r', str(target / 'requirements.txt')], env=child_env)
         else:
-            await context.run([uv, 'pip', 'install', '--python', str(python), 'torch', 'torchaudio', 'transformers==4.46.3', 'numpy<2', 'matplotlib>=3.8,<3.10', 'descript-audio-codec', 'scipy', 'librosa', 'pyyaml', 'munch', 'einops', 'huggingface_hub', 'soundfile', 'tqdm', 'pydantic>=2.13.5,<3'], env=child_env)
+            await context.run([uv, 'pip', 'install', '--python', str(python), *dependency_flags, 'torch', 'torchaudio', 'transformers==4.46.3', 'numpy<2', 'matplotlib>=3.8,<3.10', 'descript-audio-codec', 'scipy', 'librosa', 'pyyaml', 'munch', 'einops', 'huggingface_hub', 'soundfile', 'tqdm', 'pydantic>=2.13.5,<3'], env=child_env)
     await _check_environment(context, identifier, target)
+    if identifier in ('ace_step', 'heartmula', 'stable_audio3'):
+        return await setup_music_models(context, identifier, download_models)
     detail = 'Pinned source and environment checked. Model weights and a short inference preview remain to be reviewed.'
     if identifier == 'speech':
         detail += ' Complete upstream pretrained weights and start the loopback speech API manually.'
     elif identifier == 'singing':
         detail += ' CPU training is unsupported; weights remain a separate reviewed step.'
-    elif identifier in ('heartmula', 'stable_audio3'):
-        detail += ' No weights were downloaded, even when model downloads were selected. Complete the explicit local model layout in docs/local-music.md, then generate in Music.'
     elif identifier == 'kokoro':
         detail = 'Pinned Kokoro checkout checked. No voices were downloaded. Install espeak-ng yourself. Narration is POST /api/local-engines/kokoro after config.json, kokoro-v1_0.pth, and a preset voice file are in place. Kokoro does not clone a person and does not replace GPT-SoVITS. The runner uses PyTorch with PYTORCH_ENABLE_MPS_FALLBACK=1.'
     elif identifier == 'chatterbox':

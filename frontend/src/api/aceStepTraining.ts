@@ -1,5 +1,7 @@
 import { apiFetch, apiJson } from './http'
 import * as v from './nativeValidation'
+import { parseLoraExportRequest, parseLoraExportResponse, parseLoraExportOptionsResponse, parseLoraExportPickResponse, parseLoraTrainedFilesRequest, parseLoraTrainedFilesResponse } from './generated'
+import type { LoraExportRequest, LoraExportResponse, LoraTrainedFilesRequest } from './generated'
 
 const BASE = '/api/ace'
 
@@ -160,16 +162,8 @@ export interface TrainingStatus {
   error: string | null
 }
 
-export interface ExportLoraRequest {
-  export_path: string
-  lora_output_dir: string
-}
-
-export interface ExportLoraResponse {
-  message: string
-  export_path: string
-  source: string
-}
+export type ExportLoraRequest = LoraExportRequest
+export type ExportLoraResponse = LoraExportResponse
 
 export function parseDatasetSample(value: unknown): DatasetSample {
   const row = v.record(value)
@@ -291,7 +285,12 @@ export const startLoraTraining = (req: StartLoraTrainingRequest) => post('/v1/tr
 })
 export const trainingStatus = (signal?: AbortSignal) => get('/v1/training/status', parseTrainingStatus, signal)
 export const stopTraining = () => post('/v1/training/stop', {}, parseMessage)
-export const exportLora = (req: ExportLoraRequest) => post('/v1/training/export', req, (value): ExportLoraResponse => {
-  const row = v.record(value)
-  return { message: v.string(row.message), export_path: v.string(row.export_path), source: v.string(row.source) }
-})
+export const loraExportOptions = (signal?: AbortSignal) => apiFetch('/api/lora-export/options', { signal }, parseLoraExportOptionsResponse)
+export const checkTrainedLoraFiles = (req: LoraTrainedFilesRequest, signal?: AbortSignal) => apiFetch('/api/lora-export/check', {
+  method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parseLoraTrainedFilesRequest(req)),
+}, parseLoraTrainedFilesResponse)
+export const pickLoraExportFolder = (signal?: AbortSignal) => apiFetch('/api/lora-export/pick', { method: 'POST', signal }, parseLoraExportPickResponse)
+export const previewLoraExport = (req: ExportLoraRequest, signal?: AbortSignal) => apiFetch('/api/lora-export/preview', {
+  method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parseLoraExportRequest(req)),
+}, parseLoraExportResponse)
+export const exportLora = (req: ExportLoraRequest) => apiJson('/api/lora-export', parseLoraExportRequest(req), 'POST', parseLoraExportResponse)

@@ -9,6 +9,7 @@ import { ApiError } from '../../api/http'
 import type { LocalMusicEngineId } from '../../api/localMusic'
 import type { LocalMusicJob, LocalMusicJobs, LocalMusicRequest, SavedTrack } from '../../api/generated'
 import LocalMusicPanel from './LocalMusicPanel.vue'
+import { pendingMusicAdapter } from '../../composables/generationDrafts'
 
 vi.mock('../../api/localMusic', () => ({ localMusicEngines: vi.fn(), listLocalMusic: vi.fn(), submitLocalMusic: vi.fn(), cancelLocalMusic: vi.fn() }))
 vi.mock('../../api/musicLora', () => ({ listMusicAdapters: vi.fn() }))
@@ -43,12 +44,45 @@ async function input(node: HTMLElement, name: string, value: string) {
   element.value = value; element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); await settle()
 }
 beforeEach(() => {
+  pendingMusicAdapter.value = null
   vi.resetAllMocks(); setLocale('en')
   vi.mocked(music.localMusicEngines).mockResolvedValue({ engines: engines.map(id => ({ id, installed: true, weights_ready: true, supported: true, runtime: 'mlx', detail: '' })) })
   vi.mocked(music.listLocalMusic).mockResolvedValue({ jobs: [], history_incomplete: false })
   vi.mocked(music.submitLocalMusic).mockResolvedValue(job('queued'))
   vi.mocked(music.cancelLocalMusic).mockResolvedValue(job('cancelled'))
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'b'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Piano style', sha256: 'c'.repeat(64), created_at: 'now', source_job_id: null }], history_incomplete: false })
+})
+
+it('applies a trained adapter draft on entry without automatically generating', async () => {
+  pendingMusicAdapter.value = { engine: 'stable_audio3', target: 'small-music', selection: { id: 'b'.repeat(32), strength: 1 } }
+  const { node } = await mount('stable_audio3')
+  expect(pendingMusicAdapter.value).toBeNull()
+  expect(music.submitLocalMusic).not.toHaveBeenCalled()
+  await input(node, 'prompt', 'A piano melody')
+  button(node, 'Generate music').click(); await settle()
+  expect(music.submitLocalMusic).toHaveBeenCalledWith(expect.objectContaining({ adapter: { id: 'b'.repeat(32), strength: 1 } }), expect.any(AbortSignal))
+})
+
+it('describes the corrected Heart adapter runtime independently of MLX installation', async () => {
+  vi.mocked(music.localMusicEngines).mockResolvedValue({ engines: [{ id: 'heartmula', installed: false, weights_ready: false, supported: true, runtime: 'Community HeartMuLa MLX port', detail: '', adapter_runtime_ready: true }] })
+  vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'd'.repeat(32), engine: 'heartmula', target: 'heartmula-3b', name: 'Heart style', sha256: 'c'.repeat(64), created_at: 'now', source_job_id: null }] })
+  pendingMusicAdapter.value = { engine: 'heartmula', target: 'heartmula-3b', selection: { id: 'd'.repeat(32), strength: 1 } }
+  const { node } = await mount('heartmula')
+  expect(node.querySelector('header')?.textContent).toContain('Corrected HeartMuLa PyTorch adapter runtime')
+  expect(node.querySelector('header')?.textContent).not.toContain('Community HeartMuLa MLX port')
+  expect(node.querySelector('header')?.textContent).not.toContain(i18n.global.t('localMusic.missingEngine'))
+  await input(node, 'prompt', 'Jazz')
+  expect(button(node, 'Generate music').disabled).toBe(false)
+})
+
+it('retains a preview adapter when its draft switches the current Stable variant', async () => {
+  vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'd'.repeat(32), engine: 'stable_audio3', target: 'medium', name: 'Medium style', sha256: 'c'.repeat(64), created_at: 'now', source_job_id: null }] })
+  const { node } = await mount('stable_audio3')
+  pendingMusicAdapter.value = { engine: 'stable_audio3', target: 'medium', selection: { id: 'd'.repeat(32), strength: 1 } }
+  await settle()
+  await input(node, 'prompt', 'A piano melody')
+  button(node, 'Generate music').click(); await settle()
+  expect(music.submitLocalMusic).toHaveBeenCalledWith(expect.objectContaining({ variant: 'medium', adapter: { id: 'd'.repeat(32), strength: 1 } }), expect.any(AbortSignal))
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
 
@@ -209,9 +243,10 @@ it('submits a compatible Stable adapter selection and clears it when switching b
   expect(vi.mocked(music.submitLocalMusic).mock.calls.at(-1)?.[0].adapter).toBeNull()
 })
 
-it('does not offer adapters to the unsupported HeartMuLa runtime', async () => {
+it('offers only matching HeartMuLa adapters', async () => {
   const { node } = await mount('heartmula')
-  expect(node.querySelector('select[name^="adapter-"]')).toBeNull()
+  expect(node.querySelector('select[name="adapter-heartmula-3b"]')).not.toBeNull()
+  expect(node.querySelector('select[name="adapter-small-music"]')).toBeNull()
 })
 
 it('blocks even a programmatic Stable form submission when adapter strength is invalid', async () => {
@@ -229,4 +264,14 @@ it('blocks even a programmatic Stable form submission when adapter strength is i
   strength.value = '0.5'; strength.dispatchEvent(new Event('input', { bubbles: true })); await settle()
   button(node, 'Generate music').click(); await settle()
   expect(music.submitLocalMusic).toHaveBeenCalledWith(expect.objectContaining({ adapter: { id: 'b'.repeat(32), strength: 0.5 } }), expect.any(AbortSignal))
+})
+
+it('uses a HeartMuLa adapter only when its separate training runtime is prepared', async () => {
+  vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'b'.repeat(32), engine: 'heartmula', target: 'heartmula-3b', name: 'Warm voice', sha256: 'c'.repeat(64), created_at: 'now' }] })
+  vi.mocked(music.localMusicEngines).mockResolvedValue({ engines: [{ id: 'heartmula', installed: true, weights_ready: true, supported: true, runtime: 'mlx', detail: '', adapter_runtime_ready: true }] })
+  const { node } = await mount()
+  await input(node, 'prompt', 'Warm piano')
+  await input(node, 'adapter-heartmula-3b', 'b'.repeat(32))
+  button(node, 'Generate music').click(); await settle()
+  expect(music.submitLocalMusic).toHaveBeenCalledWith(expect.objectContaining({ engine: 'heartmula', adapter: { id: 'b'.repeat(32), strength: 1 } }), expect.any(AbortSignal))
 })

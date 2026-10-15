@@ -63,6 +63,7 @@ function beginAction() {
 }
 
 async function start(force = false) {
+  if (force && !window.confirm(t('stemsPanel.confirmRecreate', { name: props.title }))) return
   const context = beginAction()
   try {
     const response = await stemsApi.startSeparation(context.trackId, force)

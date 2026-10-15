@@ -21,10 +21,11 @@ import httpx
 from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel, Field, TypeAdapter
 
-from . import db
+from . import ace_lora, db
 from .audio_encoding import AudioEncodingSettings, load_settings
 from . import audio_exports, audio_versions
 from .contracts import AceJobReleaseResponse, AceJobResponse, AceSubmitParams, JsonObject, JsonValue
+from .generation_contracts import AceGenerationSettings
 from .track_view import track_response
 from .config import MODELS
 from .orchestrator.manager import manager
@@ -168,6 +169,7 @@ async def submit(params: JsonObject, title: str, voice_id: str | None, audio: Up
     # Retain a lossless source for independent voice versions and exports.
     # Internal metadata is server-owned and must never reach the native engine.
     snapshot = params.get('_generation_settings')
+    settings = AceGenerationSettings.model_validate(snapshot) if snapshot is not None else None
     clean = {key: value for key, value in params.items() if key not in {'_source_audio_format', '_encoding_settings', '_generation_settings'}}
     engine_params: JsonObject = {**clean, 'audio_format': 'wav', 'batch_size': validated.batch_size}
     params = {**clean, 'audio_format': validated.audio_format, 'batch_size': validated.batch_size,
@@ -178,7 +180,32 @@ async def submit(params: JsonObject, title: str, voice_id: str | None, audio: Up
         voice = public_voice(voice_id)
         if not voice.get('usable'):
             raise HTTPException(status_code=409, detail='voice_not_ready')
-    async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+    async with ace_lora.control_lock, httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+        if not _engine_running():
+            raise HTTPException(status_code=503, detail='model_inactive')
+        if settings is not None:
+            try:
+                status = await ace_lora.fetch_status(client)
+            except ace_lora.AceLoraError as exc:
+                raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+            enabled = status.lora_loaded and status.use_lora
+            if settings.loraName is None:
+                matches = not enabled
+            else:
+                matches = (enabled and status.active_adapter == settings.loraName
+                           and math.isclose(status.lora_scale, settings.loraScale, rel_tol=0, abs_tol=1e-6))
+            if not matches:
+                raise HTTPException(status_code=409, detail='ace_lora_selection_mismatch')
+            if settings.loraName is not None:
+                selectors = [engine_params[key] for key in ('model', 'model_name', 'modelName', 'dit_model', 'ditModel')
+                             if engine_params.get(key) not in (None, '')]
+                if selectors:
+                    try:
+                        primary = await ace_lora.fetch_primary_model(client)
+                    except ace_lora.AceLoraError as exc:
+                        raise HTTPException(status_code=exc.status, detail=exc.code) from exc
+                    if any(not isinstance(selector, str) or selector != primary for selector in selectors):
+                        raise HTTPException(status_code=409, detail='ace_lora_selection_mismatch')
         if audio is None and style_audio is None:
             result = await _engine_json(client, '/release_task', engine_params)
         else:

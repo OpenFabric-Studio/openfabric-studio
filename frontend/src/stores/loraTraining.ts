@@ -6,6 +6,25 @@ import { createPollingLoop, type PollContext, type PollingLoop } from '../compos
 
 const t = i18n.global.t
 
+export function loraExportErrorText(cause: unknown): string {
+  if (cause instanceof ApiError) {
+    switch (cause.message) {
+      case 'lora_export_destination_exists': return t('loraExport.errors.exists')
+      case 'lora_export_destination_unsafe': return t('loraExport.errors.destination')
+      case 'lora_export_source_unsafe':
+      case 'lora_export_source_missing':
+      case 'lora_export_adapter_missing': return t('loraExport.errors.source')
+      case 'lora_export_copy_failed': return t('loraExport.errors.copy')
+      case 'lora_export_picker_unavailable':
+      case 'lora_export_picker_failed': return t('loraExport.errors.picker')
+      case 'dataset_busy':
+      case 'dataset_native_unavailable':
+      case 'music_queue_busy': return t('loraExport.errors.busy')
+    }
+  }
+  return t('loraExport.errors.failed')
+}
+
 function errorText(cause: unknown): string {
   if (cause instanceof ApiError) {
     switch (cause.message) {
@@ -553,11 +572,11 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
       this.exportError = ''
       try {
         const res = await api.exportLora({ export_path: exportPath, lora_output_dir: loraOutputDir })
-        const adapterPath = res.export_path.replace(/[\\/]+$/, '') + '/adapter'
+        const adapterPath = res.adapter_path
         addToRegistry(registryName, adapterPath)
         this.lastExportedPath = adapterPath
       } catch (err) {
-        this.exportError = errorText(err)
+        this.exportError = loraExportErrorText(err)
         throw err
       } finally {
         this.exporting = false

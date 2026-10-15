@@ -1,11 +1,39 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { health as aceHealth, loraLoad, loraUnload, loraToggle, loraScale } from './aceStep'
+import { health as aceHealth, loraLoad, loraUnload, loraToggle, loraScale, loraStatus } from './aceStep'
 import { generateTrack, parseTaskRunResult, health as yueHealth } from './yue2'
 import { autoLabelStatus, updateSample } from './aceStepTraining'
 import { ApiError } from './http'
 
 afterEach(() => { vi.unstubAllGlobals() })
 const sample = { filename: 'song.wav', audio_path: 'song.wav', duration: 10, caption: 'folk', genre: '', prompt_override: null, lyrics: 'words', bpm: null, keyscale: '', timesignature: '', language: 'en', is_instrumental: false, labeled: true }
+const adapterStatus = { lora_loaded: true, use_lora: true, lora_scale: 0.75, active_adapter: 'Inspiration-1', adapters: ['Inspiration-1'] }
+
+it('decodes the confirmed ACE adapter status and forwards cancellation', async () => {
+  const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 200, data: adapterStatus })))
+  vi.stubGlobal('fetch', fetch)
+  const controller = new AbortController()
+  await expect(loraStatus(controller.signal)).resolves.toEqual(adapterStatus)
+  expect(fetch).toHaveBeenCalledWith('/api/ace/v1/lora/status', expect.objectContaining({ signal: controller.signal }))
+})
+
+it.each([
+  { lora_loaded: 'true' },
+  { use_lora: 1 },
+  { lora_scale: -0.1 },
+  { lora_scale: 1.1 },
+  { lora_scale: null },
+  { active_adapter: 'x'.repeat(501) },
+  { adapters: ['x'.repeat(501)] },
+  { adapters: Array.from({ length: 65 }, () => 'adapter') },
+])('rejects malformed ACE adapter status %j', async invalid => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 200, data: { ...adapterStatus, ...invalid } }))))
+  await expect(loraStatus()).rejects.toThrow('Invalid AceLoraStatus response')
+})
+
+it('keeps the bridge failure code available for actionable LoRA feedback', async () => {
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: 'ace_lora_already_loaded' }), { status: 409 })))
+  await expect(loraLoad('/adapter', 'Inspiration-1')).rejects.toMatchObject({ name: 'ApiError', message: 'ace_lora_already_loaded', status: 409 })
+})
 
 it('validates native response values instead of trusting JSON types', async () => {
   vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ status: 17, backend: 'cpp' }))))

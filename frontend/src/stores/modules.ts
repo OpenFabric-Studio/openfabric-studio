@@ -14,6 +14,7 @@ export const useModulesStore = defineStore('modules', () => {
   const jobsOffline = ref(false)
   const loading = ref(false)
   let generation = 0
+  let polling = false
   let request: AbortController | null = null
   const busy = computed(() => jobs.value.some(job => job.state === 'queued' || job.state === 'running'))
   async function refresh(context?: PollContext) {
@@ -33,12 +34,13 @@ export const useModulesStore = defineStore('modules', () => {
     context?.signal.removeEventListener('abort', abort)
   }
   const loop = createPollingLoop(refresh, () => busy.value ? 2000 : 15000)
-  function startPolling() { loop.start() }
-  function stopPolling() { generation++; request?.abort(); request = null; loading.value = false; loop.stop() }
+  function startPolling() { polling = true; loop.start() }
+  function stopPolling() { polling = false; generation++; request?.abort(); request = null; loading.value = false; loop.stop() }
   function acceptJob(job: ModuleInstallJob) {
     // A poll started before this mutation must not replace its newer result.
     generation++; request?.abort(); request = null; loading.value = false
     jobs.value = [job, ...jobs.value.filter(item => item.id !== job.id)]
+    if (polling) { loop.stop(); loop.start(false) }
   }
   function stateOf(id: ModuleId): DisplayModuleState {
     return offline.value ? 'unknown' : inventory.value?.modules.find(module => module.id === id)?.state ?? 'unknown'

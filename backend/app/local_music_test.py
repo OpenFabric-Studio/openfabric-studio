@@ -36,7 +36,7 @@ class LocalMusicRequestTests(unittest.TestCase):
     def test_validates_model_limits_and_lyrics_before_admission(self) -> None:
         valid = {'engine': 'heartmula', 'prompt': 'Jazz', 'duration_seconds': 95}
         for update in ({'prompt': '  '}, {'engine': 'unknown'}, {'duration_seconds': 241}, {'seed': -1}, {'variant': 'medium'},
-                       {'seed': True}, {'adapter': {'id': 'a' * 32, 'strength': 1}}, {'engine': 'stable_audio3', 'lyrics': 'Sing this'},
+                       {'seed': True}, {'adapter': {'id': 'a' * 32, 'strength': 3}}, {'engine': 'stable_audio3', 'lyrics': 'Sing this'},
                        {'engine': 'stable_audio3', 'duration_seconds': 121},
                        {'output_path': '/tmp/owned-by-user.wav'}):
             with self.subTest(update=update), self.assertRaises(ValidationError):

@@ -56,3 +56,8 @@ export async function updateLoraDatasetSample(id: string, index: number, request
   if (!Number.isSafeInteger(index) || index < 0 || index > 100000) throw new TypeError('Invalid sample index')
   return write(`${datasetUrl(id)}/samples/${index}`, parseUpdateLoraDatasetSampleRequest(request), parseLoraDatasetOperationResponse, signal)
 }
+
+export function readSavedLoraDataset(id: string, revision: number, signal?: AbortSignal): Promise<LoraDatasetOperationResponse> {
+  const checked = parseLoraDatasetRevision({ revision })
+  return apiFetch(`${datasetUrl(id)}/saved?revision=${checked.revision}`, { signal }, parseLoraDatasetOperationResponse)
+}

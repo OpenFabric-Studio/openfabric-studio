@@ -15,6 +15,7 @@ from app.music_lora_contracts import MusicLoraError
 from app.stable_lora_contracts import StableLoraSample, StableLoraTrainingRequest
 from app.module_catalog import ModuleEnvironment
 from app.stable_lora_test import checkpoint_bytes
+from app.module_music_models_test import npz
 
 
 class StableLoraRuntimeTests(unittest.TestCase):
@@ -27,7 +28,28 @@ class StableLoraRuntimeTests(unittest.TestCase):
     def weights(self, variant: str) -> None:
         for path in runtime.training_weights(self.environment, variant):
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(b'local weights')
+            path.write_bytes(npz())
+
+    def test_corrupt_nonempty_training_weights_are_not_ready(self) -> None:
+        self.weights('small-music')
+        runtime.training_weights(self.environment, 'small-music')[1].write_bytes(b'not a numpy archive')
+        self.assertFalse(runtime.status(self.environment).small_weights_ready)
+
+    def test_unsafe_other_variant_does_not_hide_valid_selected_weights(self) -> None:
+        self.weights('small-music')
+        medium_base = runtime.training_weights(self.environment, 'medium')[1]
+        outside = self.root / 'outside.npz'
+        outside.write_bytes(npz())
+        medium_base.symlink_to(outside)
+        status = runtime.status(self.environment)
+        self.assertTrue(status.small_weights_ready)
+        self.assertFalse(status.medium_weights_ready)
+        request = StableLoraTrainingRequest(name='Test', variant='medium', samples=[StableLoraSample(track_id=1, caption='Test')])
+        with patch.object(runtime, 'configured_environment', return_value=self.environment), patch.object(runtime, 'environment_verified', return_value=True):
+            with self.assertRaises(MusicLoraError) as error:
+                runtime.prepare_worker(request, self.root / 'run', [self.root / 'source.wav'])
+        self.assertEqual(error.exception.code, 'stable_lora_training_weights_missing')
+        self.assertFalse((self.root / 'run').exists())
 
     def test_status_requires_training_base_and_matching_encoder_not_arc_files(self) -> None:
         with patch.object(runtime, 'configured_environment', return_value=self.environment), patch.object(runtime, 'environment_verified', return_value=True):

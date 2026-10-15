@@ -270,6 +270,13 @@ it('explains a busy accelerator without marking pending work as failed', async (
   expect(node.querySelector('[data-queue-batch]')?.textContent).toContain('Queued')
 })
 
+it.each(['ace_lora_selection_mismatch', 'ace_lora_status_unavailable'])('explains ACE adapter preflight failure %s before another queue attempt', async error_code => {
+  api.getMusicQueue.mockResolvedValue({ ...snapshot([batch()], 3, 'blocked'), error_code })
+  const { node } = await mount()
+  expect(node.querySelector('[role="alert"]')?.textContent).toBe(i18n.global.t(`aceGen.loraErrors.${error_code}`))
+  expect(api.controlMusicQueue).not.toHaveBeenCalled()
+})
+
 const savedTrack: SavedTrack = { id: 42, short_id: 42, model: 'heartmula', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
 function successfulReplacement() {
   const value = batch('a'.repeat(32), 'failed'), prior = value.items[0]

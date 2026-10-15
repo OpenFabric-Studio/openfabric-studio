@@ -41,3 +41,35 @@ it('retains a mutation result when an older job poll completes later', async () 
   complete([]); await old
   expect(store.busy).toBe(true); expect(store.jobs[0]?.state).toBe('queued')
 })
+
+it('rearms an idle poll at the active job interval after accepting setup', async () => {
+  const store = useModulesStore(); store.startPolling()
+  await vi.advanceTimersByTimeAsync(0)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(1)
+  store.acceptJob({ id: 'b'.repeat(32), state: 'queued', created_at: 'now', updated_at: 'now', features: ['speech'], download_models: false, steps: [] })
+  await vi.advanceTimersByTimeAsync(1999)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(1)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(2)
+})
+
+it('does not start polling for a mutation after its owner stopped', async () => {
+  const store = useModulesStore(); store.startPolling()
+  await vi.advanceTimersByTimeAsync(0); store.stopPolling()
+  store.acceptJob({ id: 'b'.repeat(32), state: 'queued', created_at: 'now', updated_at: 'now', features: ['speech'], download_models: false, steps: [] })
+  await vi.advanceTimersByTimeAsync(15000)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(1)
+})
+
+it('keeps the rearmed poll when a superseded request completes later', async () => {
+  let complete: (value: ModuleInstallJob[]) => void = () => { throw new Error('Uninitialized') }
+  vi.mocked(api.listModuleJobs).mockReturnValueOnce(new Promise<ModuleInstallJob[]>(resolve => { complete = resolve }))
+  const store = useModulesStore(); store.startPolling()
+  store.acceptJob({ id: 'b'.repeat(32), state: 'queued', created_at: 'now', updated_at: 'now', features: ['speech'], download_models: false, steps: [] })
+  complete([]); await vi.advanceTimersByTimeAsync(0)
+  expect(store.busy).toBe(true)
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(2)
+  store.stopPolling(); await vi.advanceTimersByTimeAsync(15000)
+  expect(api.listModuleJobs).toHaveBeenCalledTimes(2)
+})

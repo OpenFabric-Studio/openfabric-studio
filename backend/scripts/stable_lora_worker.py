@@ -175,7 +175,7 @@ def run(plan: TrainingPlan) -> None:
     subprocess.run(plan.preencode_argv, check=True)
     # The native encoder reports per-file errors without a failing exit code.
     validate_latents(plan)
-    progress(plan.directory, 'training')
+    progress(plan.directory, 'loading')
     subprocess.run(plan.train_argv, check=True)
     checkpoints = list((plan.directory / 'checkpoints').glob(f'training/*/checkpoints/training-step={plan.max_steps}-epoch=*.safetensors'))
     if len(checkpoints) != 1:

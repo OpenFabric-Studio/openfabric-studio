@@ -19,18 +19,24 @@ let app: App | undefined
 beforeEach(() => { setLocale('en'); vi.clearAllMocks(); vi.spyOn(window, 'scrollTo').mockImplementation(() => {}); vi.mocked(tracks.listTracks).mockResolvedValue([]) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.unstubAllGlobals(); vi.useRealTimers() })
 async function flush() { for (let i = 0; i < 15; i++) await nextTick() }
-async function mount(kind: 'ace' | 'yue') {
+async function mount(kind: 'ace' | 'yue', view: 'cards' | 'list' = 'cards') {
  const pinia = createPinia(); setActivePinia(pinia)
  const as = useAceStepStore(); const ys = useYue2Store(); as.jobs = [{ ...ace }]; ys.jobs = [{ ...yue }]
- app = createApp({ render: () => kind === 'ace' ? h(JobCard, { job: as.jobs[0], number: '7', view: 'cards' }) : h(TrackCard, { job: ys.jobs[0], number: '7', view: 'cards' }) }).use(pinia).use(i18n)
+ app = createApp({ render: () => kind === 'ace' ? h(JobCard, { job: as.jobs[0], number: '7', view }) : h(TrackCard, { job: ys.jobs[0], number: '7', view }) }).use(pinia).use(i18n)
  app.component('RouterLink', { props: ['to'], template: '<a :href="to"><slot /></a>' }); app.mount(document.body.appendChild(document.createElement('div'))); await flush(); return { as, ys }
 }
 function findButton(text: string): HTMLButtonElement { const el = [...document.querySelectorAll('button')].find(item => item.textContent?.trim().endsWith(text) || item.getAttribute('aria-label') === text); if (!el) throw new Error(`Missing ${text}`); return el }
-it.each(['ace', 'yue'] as const)('requires explicit confirmation before deleting a %s card and exposes failure', async kind => {
- const { as, ys } = await mount(kind)
+it.each([{ kind: 'ace', view: 'cards' }, { kind: 'yue', view: 'cards' }, { kind: 'ace', view: 'list' }, { kind: 'yue', view: 'list' }] as const)('requires a visible file-loss warning before deleting $kind in $view view and exposes failure', async ({ kind, view }) => {
+ const { as, ys } = await mount(kind, view)
+ if (view === 'list') { findButton('Show text/params').click(); await flush() }
  const remove = kind === 'ace' ? vi.spyOn(as, 'removeJob').mockRejectedValue(new Error('private stack')) : vi.spyOn(ys, 'deleteJob').mockRejectedValue(new Error('private stack'))
  findButton('Delete').click(); await flush(); expect(remove).not.toHaveBeenCalled()
+ const warning = document.querySelector('[data-delete-warning]')
+ expect(warning?.textContent).toContain('iPhone song')
+ expect(warning?.textContent).toMatch(/permanently.*tracks.*versions.*stems.*MIDI.*exports.*disk/)
+ expect(findButton('Click again to delete').getAttribute('aria-describedby')).toBe(warning?.id)
  findButton('Click again to delete').click(); await flush(); expect(remove).toHaveBeenCalledOnce()
+ expect(document.querySelector('[data-delete-warning]')).toBeNull()
  expect(document.querySelector('[data-player]')).not.toBeNull()
  expect(document.querySelector('[role=alert]')?.textContent).toContain('Could not delete this track')
  expect(document.body.textContent).not.toContain('private stack')
