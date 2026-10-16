@@ -29,12 +29,12 @@ logger = logging.getLogger(__name__)
 LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm", "video_character_trainer.json")
 LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials",
                 "video_projects", "video_characters", "video_character_training", "providers",
-                "local-music", "music-lora", "stable-lora-training", "music-lora-training")
+                "local-music", "music-lora", "stable-lora-training", "music-lora-training", "lora-datasets")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
 _METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'),
                    Path('videos'), Path('video_projects'), Path('video_characters'), Path('video_character_training'),
                    Path('providers'), Path('video_character_trainer.json'), Path('local-music'),
-                   Path('music-lora'), Path('stable-lora-training'), Path('music-lora-training'))
+                   Path('music-lora'), Path('stable-lora-training'), Path('music-lora-training'), Path('lora-datasets'))
 _DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]

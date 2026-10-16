@@ -24,7 +24,7 @@ from .orchestrator.state import ModelStatus
 from .resource_admission import NativeLease, ResourceBusyError, reserve_native
 from .track_view import track_response
 from .native_artifacts import score_text
-from .yue_contracts import YueJobResponse, YueNativeProgress, YueSubmitRequest
+from .yue_contracts import YueJobResponse, YueNativeProgress, YueOptions, YueSubmitRequest
 
 logger = logging.getLogger(__name__)
 _json = TypeAdapter(JsonObject)
@@ -303,7 +303,8 @@ def _catalog_audio(job: _StoredJob, destination: Path) -> int:
             provenance.append({**manifest, 'strength': selection.strength})
     params['_music_adapters'] = provenance
     settings = job.request.settings or generation_library.snapshot_from_params('yue2', params, job.request.lyrics, job.request.seed, job.response.title)
-    settings = settings.model_copy(update={'arAdapter': job.request.ar_adapter, 'narAdapter': job.request.nar_adapter})
+    settings = settings.model_copy(update={'arAdapter': job.request.ar_adapter, 'narAdapter': job.request.nar_adapter,
+        'bpm': job.request.options.bpm, 'keyScale': job.request.options.key_scale, 'timeSignature': job.request.options.time_signature})
     params['_generation_settings'] = _json.validate_json(settings.model_dump_json())
     wall_ms = job.response.elapsed_seconds * 1000
     track_id = db.insert_track(model='yue2', title=job.response.title, lyrics=job.request.lyrics,
@@ -341,6 +342,20 @@ async def _stop_owned(job: _StoredJob, terminal: str) -> bool:
         return False
 
 
+def _native_options(options: YueOptions) -> JsonObject:
+    values = _json.validate_json(options.model_dump_json(exclude_none=True, exclude={'bpm', 'key_scale', 'time_signature'}))
+    directions = [options.style]
+    if options.bpm is not None:
+        directions.append(f'Tempo: {options.bpm} BPM')
+    if options.key_scale is not None:
+        minor = options.key_scale.endswith('m')
+        directions.append(f'Key: {options.key_scale[:-1] if minor else options.key_scale} {"minor" if minor else "major"}')
+    if options.time_signature is not None:
+        directions.append('Time signature: ' + options.time_signature)
+    values['style'] = '\n'.join(directions)
+    return values
+
+
 async def _worker(job_id: str) -> None:
     job = _read(job_id)
     try:
@@ -373,7 +388,7 @@ async def _worker(job_id: str) -> None:
             job.response.stage = 'generating'
             _store(job)
             _native_requested.add(job_id)
-            options = _json.validate_json(job.request.options.model_dump_json(exclude_none=True))
+            options = _native_options(job.request.options)
             options['openfabric_run_id'] = job_id
             result = await _native_json('/v1/tasks/run', {'model': 'yue2', 'request': {
                 'lyrics': job.request.lyrics, 'seed': job.request.seed, 'options': options}})

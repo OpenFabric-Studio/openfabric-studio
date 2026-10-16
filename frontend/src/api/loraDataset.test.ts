@@ -24,3 +24,21 @@ it('uploads into a selected stable dataset rather than its renamed display name'
   expect(body.get('dataset_id')).toBe('a'.repeat(32))
   expect(body.get('revision')).toBe('2')
 })
+it('submits one revision-bound batch when removing trash records', async () => {
+  const id = 'a'.repeat(32), records = [{ id, revision: 3 }]
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ removed_ids: [id] })))
+  vi.stubGlobal('fetch', fetcher)
+  const controller = new AbortController()
+  await expect(library.removeLoraDatasetRecords(records, controller.signal)).resolves.toEqual({ removed_ids: [id] })
+  expect(fetcher).toHaveBeenCalledWith('/api/lora-datasets/remove-records', expect.objectContaining({ method: 'POST', signal: controller.signal, body: JSON.stringify({ records }) }))
+})
+it('rejects invalid record removals before submission and validates response IDs', async () => {
+  const fetcher = vi.fn().mockResolvedValue(new Response(JSON.stringify({ removed_ids: ['../bad'] })))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(library.removeLoraDatasetRecords([])).rejects.toThrow()
+  await expect(library.removeLoraDatasetRecords([{ id: '../bad', revision: 1 }])).rejects.toThrow()
+  await expect(library.removeLoraDatasetRecords([{ id: 'a'.repeat(32), revision: -1 }])).rejects.toThrow()
+  expect(fetcher).not.toHaveBeenCalled()
+  await expect(library.removeLoraDatasetRecords([{ id: 'a'.repeat(32), revision: 1 }])).rejects.toThrow()
+  expect(fetcher).toHaveBeenCalledOnce()
+})

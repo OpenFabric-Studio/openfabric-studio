@@ -11,7 +11,7 @@ import type { ModelId } from '../../types'
 const { t } = useI18n(), route = useRoute()
 const orchestrator = useOrchestratorStore(), { selectModel } = useModelSwitch()
 const models: ModelId[] = ['ace_step', 'yue2']
-const localModels = [{ id: 'heartmula', path: 'heartmula' }, { id: 'stable_audio3', path: 'stable-audio3' }] as const
+const localModels = [{ id: 'stable_audio3', path: 'stable-audio3' }] as const
 const selected = computed(() => models.find(id => route.name === MODEL_ROUTES[id]))
 const selecting = ref<ModelId | null>(null), navigationFailed = ref(false)
 const busy = computed(() => selecting.value !== null || orchestrator.switching || orchestrator.isBusy)

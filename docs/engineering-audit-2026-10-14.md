@@ -1,5 +1,7 @@
 # Engineering audit — 14 October 2026
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](local-music.md).
+
 Reviewed the current working tree on `feat/local-music-engines`, based on
 `20b8fd1`. The existing uncommitted local music and LoRA implementation was
 preserved. This audit made bounded repairs and added regression tests; it did

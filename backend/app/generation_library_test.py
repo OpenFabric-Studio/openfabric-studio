@@ -58,7 +58,7 @@ class GenerationLibraryTests(unittest.IsolatedAsyncioTestCase):
         legacy = ImportGenerationPreset(legacy_key='yue2_presets:Jazz:1d857a16682b3733', name='Jazz', settings=settings)
         request = ImportGenerationPresetsRequest(presets=[legacy])
         initial = library.import_presets(connection, request)
-        old_settings = settings.model_dump(mode='json', exclude={'arAdapter', 'narAdapter'})
+        old_settings = settings.model_dump(mode='json', exclude={'arAdapter', 'narAdapter', 'bpm', 'keyScale', 'timeSignature'})
         old_fingerprint = hashlib.sha256(json.dumps({'name': legacy.name, 'settings': old_settings},
             sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         connection.execute('UPDATE generation_preset_imports SET fingerprint=? WHERE legacy_key=?',

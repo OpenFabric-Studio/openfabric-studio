@@ -1,5 +1,7 @@
 # Music LoRA pipeline evidence — 15 October 2026
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](local-music.md).
+
 These are short synthetic execution tests on an Apple M4 Max with 128 GiB unified
 memory, macOS. They do not evaluate musical quality, generalization, long-run
 stability or CUDA. User recordings and installed base weights were not modified.

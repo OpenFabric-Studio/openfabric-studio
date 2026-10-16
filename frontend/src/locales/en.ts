@@ -41,7 +41,9 @@ import { upstreamLibraryEn } from './upstreamLibrary'
 import { upstreamWorkspaceEn } from './upstreamWorkspace'
 import { readingMediaEn } from './readingMedia'
 import { supportWorkspaceEn } from './supportWorkspace'
+import { yueScoreEn } from './yueScore'
 export default {
+  yueScore: yueScoreEn,
   characterSwap: characterSwapEn,
   videoScenes: videoScenesEn,
   videoProcesses: videoProcessesEn,
@@ -594,7 +596,7 @@ voiceProfiles: {
     localMusic: 'local music worker logs and recovery files',
     musicAdapters: 'managed music adapters and their metadata',
     musicTraining: 'Stable Audio training inputs, checkpoints and worker logs',
-    musicTrainingRuns: 'HeartMuLa and YuE training inputs, checkpoints and worker logs',
+    musicTrainingRuns: 'YuE training inputs, checkpoints and worker logs',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',
@@ -989,7 +991,8 @@ voiceProfiles: {
   },
   lora: {
     serverNotice: 'Dataset and training are shared ACE-Step server state (not tied to the browser tab). During training the server unloads the LLM and occupies the GPU with the decoder — music generation won\'t work during that time. Audio/dataset/tensor paths must live inside the ACE-Step project folder (e.g. {example}); finished LoRA exports use a new folder outside the engine and application library.',
-    llmNotReady: 'The ACE-Step model isn\'t loaded into memory yet (LLM not initialized) — auto-labeling and training won\'t work until it is. This usually happens automatically on first generation, or you can load it manually now — it can take a couple of minutes.',
+    llmNotReady: 'Automatic labeling needs its language model loaded. Your saved labels can be used for preprocessing and training.',
+    modelNotReady: 'Load the ACE-Step model before preprocessing or training. Initialize model also loads the language model for automatic labeling.',
     loading: 'Loading…',
     initModel: 'Initialize model',
     step1Title: '1. Dataset',
@@ -1040,8 +1043,11 @@ voiceProfiles: {
     skipExisting: 'Skip already processed',
     processing: 'Processing…',
     startPreprocess: 'Start preprocessing',
-    tensorsProgress: '{current} / {total} tensors',
-    done: 'Done: {path}',
+    samplesProgress: '{current} / {total} samples attempted',
+    tensorsProgress: '{current} / {total} tensors ready',
+    preprocessNoTensors: 'No training tensors were created. Check the backend log and retry preprocessing.',
+    preprocessPartial: 'Some samples did not produce training tensors. Review the backend log before training with this partial dataset.',
+    done: 'Tensor folder: {path}',
     step5Title: '5. LoRA training',
     tensorDirLabel: 'Tensor folder',
     outputDirLabel: 'Training output folder',

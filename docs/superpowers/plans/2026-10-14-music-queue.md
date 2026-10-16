@@ -1,5 +1,7 @@
 # Music Queue Implementation Plan
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox syntax for tracking.
 
 **Goal:** Replace `/music`'s automatic engine redirect with an approved brief-and-queue interface backed by durable, sequential local generation.

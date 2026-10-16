@@ -1,5 +1,7 @@
 # Training progress and settings help
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 Add useful feedback to the existing Stable Audio, HeartMuLa and YuE training views without interrupting running jobs.
 
 1. Extend the persisted job contracts with optional start/end timestamps and measured optimizer-step telemetry. Retain compatibility with older jobs. Read bounded native Stable Audio progress output; measure HeartMuLa/YuE optimizer time. Preserve final measurements on all terminal paths.

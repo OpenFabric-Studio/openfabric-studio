@@ -388,9 +388,8 @@ async function checkTrainedFiles() {
 
 <template>
   <div class="space-y-6">
-    <DatasetLibrary :datasets="library.datasets.value" :selected-id="library.selectedId.value" :disabled="library.disabled.value || exportControlsBusy" :loading="library.busy.value" :status="store.autoLabelRunning || store.preprocessRunning || store.isTraining ? t('loraRecovery.active') : library.busy.value ? t('loraRecovery.saving') : t('loraRecovery.saved')" @select="library.select" @create="library.create" @rename="library.rename" @trash="library.trash" @restore="library.restore" />
+    <DatasetLibrary :datasets="library.datasets.value" :issues="library.issues.value" :selected-id="library.selectedId.value" :disabled="library.disabled.value || exportControlsBusy" :loading="library.busy.value" :status="store.autoLabelRunning || store.preprocessRunning || store.isTraining ? t('loraRecovery.active') : library.busy.value ? t('loraRecovery.saving') : t('loraRecovery.saved')" @select="library.select" @create="library.create" @rename="library.rename" @trash="library.trash" @restore="library.restore" @remove-records="library.removeRecords" />
     <div v-if="library.error.value" role="alert" class="flex flex-wrap items-center gap-3 text-sm text-status-failed"><p>{{ library.error.value }}</p><button type="button" class="min-h-11 rounded-lg border border-border px-3" :disabled="library.busy.value" @click="library.initialize">{{ t('musicLora.refresh') }}</button></div>
-    <p v-if="library.issues.value" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.issues', { count: library.issues.value }) }}</p>
     <p v-if="library.notice.value" role="status" class="text-sm text-status-queued">{{ library.notice.value }}</p>
     <p v-if="store.autoLabelReconnecting || store.preprocessReconnecting || store.trainingReconnecting" role="status" class="rounded-xl border border-status-queued/40 p-4 text-sm text-text-dim">{{ t('loraRecovery.reconnecting') }}</p>
     <p v-if="store.autoLabelInterrupted || store.preprocessInterrupted || store.trainingInterrupted" role="status" class="text-sm text-status-queued">{{ t('loraRecovery.interrupted') }}</p>
@@ -405,9 +404,9 @@ async function checkTrainedFiles() {
         </i18n-t>
       </div>
 
-      <div v-if="llmReady === false" class="flex flex-wrap items-center gap-3 rounded-xl border border-status-failed/40 bg-status-failed/10 p-4 text-sm text-text-dim">
+      <div v-if="llmReady === false || modelReady === false" class="flex flex-wrap items-center gap-3 rounded-xl border border-status-failed/40 bg-status-failed/10 p-4 text-sm text-text-dim">
         <span class="flex-1">
-          {{ t('lora.llmNotReady') }}
+          {{ t(modelReady === false ? 'lora.modelNotReady' : 'lora.llmNotReady') }}
         </span>
         <button
           type="button"
@@ -583,11 +582,12 @@ async function checkTrainedFiles() {
               {{ store.preprocessStarting ? t('lora.starting') : store.preprocessRunning ? t('lora.processing') : t('lora.startPreprocess') }}
             </button>
           </div>
-          <div v-if="store.preprocessRunning || store.preprocessTotal" class="space-y-2">
+          <div v-if="store.preprocessRunning" class="space-y-2" role="status">
             <ProgressBar :value="store.preprocessTotal ? (store.preprocessCurrent / store.preprocessTotal) * 100 : 0" />
-            <p class="text-xs text-text-dim">{{ t('lora.tensorsProgress', { current: store.preprocessCurrent, total: store.preprocessTotal }) }}</p>
+            <p class="text-xs text-text-dim">{{ t('lora.samplesProgress', { current: store.preprocessCurrent, total: store.preprocessTotal }) }}</p>
           </div>
-          <p v-if="store.preprocessError" class="text-xs text-status-failed">{{ store.preprocessError }}</p>
+          <p v-if="store.preprocessNumTensors !== null" role="status" class="text-xs text-text-dim">{{ t('lora.tensorsProgress', { current: store.preprocessNumTensors, total: store.preprocessTotal }) }}</p>
+          <p v-if="store.preprocessError" role="alert" class="text-xs text-status-failed">{{ store.preprocessError }}</p>
           <p v-if="store.preprocessOutputDir" class="text-xs text-text-dim">{{ t('lora.done', { path: store.preprocessOutputDir }) }}</p>
         </section>
 

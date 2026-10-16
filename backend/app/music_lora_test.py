@@ -45,6 +45,9 @@ class MusicLoraTests(unittest.TestCase):
         self.patch = patch.object(music_lora.db, 'DATA_DIR', self.root)
         self.patch.start()
         self.addCleanup(self.patch.stop)
+        self.db_path_patch = patch.object(music_lora.db, 'DB_PATH', self.root / 'catalog.db')
+        self.db_path_patch.start()
+        self.addCleanup(self.db_path_patch.stop)
 
     def register(self, engine: str = 'stable_audio3', target: str = 'small-music') -> MusicAdapter:
         return music_lora.import_stream(io.BytesIO(adapter_bytes(engine, target)), filename='adapter.safetensors',
@@ -61,6 +64,40 @@ class MusicLoraTests(unittest.TestCase):
         with self.assertRaises(MusicLoraError) as caught:
             music_lora.resolve(selected, engine='stable_audio3', target='small-music')
         self.assertEqual(caught.exception.code, 'music_lora_adapter_changed')
+
+    def test_retired_adapter_metadata_is_preserved_without_poisoning_other_adapters(self) -> None:
+        stable = self.register()
+        identifier = 'd' * 32
+        directory = self.root / 'music-lora' / identifier
+        directory.mkdir()
+        manifest = json.dumps({**stable.model_dump(), 'id': identifier, 'engine': 'heartmula', 'target': 'heartmula-3b'})
+        (directory / 'manifest.json').write_text(manifest)
+        (directory / 'adapter.safetensors').write_bytes(b'old user adapter')
+        listed = music_lora.list_adapters()
+        self.assertEqual(listed.adapters, [stable])
+        self.assertFalse(listed.history_incomplete)
+        self.assertEqual((directory / 'manifest.json').read_text(), manifest)
+        self.assertEqual((directory / 'adapter.safetensors').read_bytes(), b'old user adapter')
+
+    def test_duplicate_import_names_are_rejected_across_variants_without_changing_original(self) -> None:
+        adapter = self.register()
+        original = music_lora.export_path(adapter.id).read_bytes()
+        for name in ('My style', ' my   STYLE ', 'Ｍｙ style'):
+            with self.subTest(name=name), self.assertRaises(MusicLoraError) as caught:
+                music_lora.import_stream(io.BytesIO(adapter_bytes(target='medium')), filename='other.safetensors',
+                    name=name, engine='stable_audio3', target='medium')
+            self.assertEqual(caught.exception.code, 'music_lora_name_exists')
+        self.assertEqual(music_lora.export_path(adapter.id).read_bytes(), original)
+        self.assertEqual(len(music_lora.list_adapters().adapters), 1)
+
+    def test_names_are_scoped_to_models_and_legacy_publication_is_not_blocked(self) -> None:
+        self.register()
+        other = self.register('yue2', 'ar')
+        self.assertEqual(other.engine, 'yue2')
+        source = self.root / 'trained.safetensors'; source.write_bytes(adapter_bytes())
+        legacy = music_lora.register_file(source, name='My style', engine='stable_audio3', target='small-music', source_job_id='b' * 32)
+        self.assertEqual(legacy.name, 'My style')
+        self.assertEqual(len(music_lora.list_adapters().adapters), 3)
 
     def test_rejects_pickle_unknown_target_and_missing_pairs(self) -> None:
         for filename, engine, target, content in (
@@ -161,36 +198,47 @@ class MusicLoraTests(unittest.TestCase):
         self.assertEqual(music_lora.register_file(source, name='Trained', engine='stable_audio3', target='small-music', source_job_id=job), adapter)
         self.assertEqual(len(music_lora.list_adapters().adapters), 1)
 
+    def test_training_pair_publication_is_idempotent_by_job_and_target(self) -> None:
+        job = 'b' * 32
+        paths = {target: self.root / (target + '.safetensors') for target in ('ar', 'nar')}
+        for target, source in paths.items():
+            source.write_bytes(adapter_bytes('yue2', target))
+        ar = music_lora.register_file(paths['ar'], name='Pair', engine='yue2', target='ar', source_job_id=job)
+        try:
+            nar = music_lora.register_file(paths['nar'], name='Pair', engine='yue2', target='nar', source_job_id=job)
+        except MusicLoraError as error:
+            self.fail('Second target was mistaken for the first: ' + error.code)
+        self.assertNotEqual(ar.id, nar.id)
+        self.assertEqual(music_lora.find_by_job(job, target='ar'), ar)
+        self.assertEqual(music_lora.find_by_job(job, target='nar'), nar)
+        self.assertEqual(music_lora.register_file(paths['ar'], name='Pair', engine='yue2', target='ar', source_job_id=job), ar)
+        self.assertEqual(music_lora.register_file(paths['nar'], name='Pair', engine='yue2', target='nar', source_job_id=job), nar)
+        self.assertEqual(len(music_lora.list_adapters().adapters), 2)
+
+    def test_converted_planner_registers_using_native_ar_projection_names(self) -> None:
+        from app.yue_lora_convert import BASE_SHA256, convert_ar
+        from app.yue_lora_convert_test import AR_PREFIX, PREFIX, factors, fixture
+        source, output = self.root / 'planner.safetensors', self.root / 'adapter-ar.safetensors'
+        tensors = {name.replace(PREFIX, AR_PREFIX): tensor for name, tensor in factors('self_attn.qkv_proj', 2048, 4096).items()}
+        fixture(source, tensors, overrides={'kind': 'planner', 'train_abc': True, 'train_semantic': False})
+        convert_ar(source, output, base_sha256=BASE_SHA256)
+        music_lora.validate_file(output, engine='yue2', target='ar')
+        adapter = music_lora.register_file(output, name='Planner', engine='yue2', target='ar', source_job_id='b' * 32)
+        self.assertEqual(adapter.target, 'ar')
+        self.assertEqual(music_lora.export_path(adapter.id).read_bytes(), output.read_bytes())
+
     def test_failed_manifest_publish_never_lists_partial_import(self) -> None:
         with patch.object(music_lora, 'write_object', side_effect=OSError('disk full')), self.assertRaises(OSError):
             self.register()
         self.assertEqual(music_lora.list_adapters().adapters, [])
 
 
-class HeartMusicLoraTests(unittest.TestCase):
-    def test_plain_heart_adapter_is_managed_and_cannot_be_used_with_another_engine(self) -> None:
-        from app.heart_lora_contracts import HeartLoraMetadata
-        with tempfile.TemporaryDirectory() as directory, patch.object(music_lora.db, 'DATA_DIR', Path(directory)):
-            config = HeartLoraMetadata(rank=8, alpha=8.0, target_modules=['q_proj'])
-            size = 8 * 3072 * 4
-            tensors: dict[str, object] = {'__metadata__': {'heart_lora_config': config.model_dump_json()}}
-            offset = 0
-            for stack, layers in (('backbone', 28), ('decoder', 3)):
-                for layer in range(layers):
-                    for factor, shape in (('A', [8, 3072]), ('B', [3072, 8])):
-                        tensors[f'base_model.model.{stack}.layers.{layer}.self_attn.q_proj.lora_{factor}.weight'] = {
-                            'dtype': 'F32', 'shape': shape, 'data_offsets': [offset, offset + size]}
-                        offset += size
-            header = json.dumps(tensors).encode()
-            content = struct.pack('<Q', len(header)) + header + bytes(offset)
-            imported = music_lora.import_stream(io.BytesIO(content), filename='adapter.safetensors', name='Warm voice', engine='heartmula', target='heartmula-3b')
-            self.assertEqual(music_lora.export_path(imported.id).read_bytes(), content)
-            with self.assertRaises(MusicLoraError):
-                music_lora.resolve(MusicAdapterSelection(id=imported.id), engine='yue2', target='nar')
+class MusicLoraValidationTests(unittest.TestCase):
 
     def test_nonfinite_adapter_weights_are_refused(self) -> None:
         content = adapter_bytes()
         length = struct.unpack('<Q', content[:8])[0]
         content = content[:8 + length] + struct.pack('<H', 0x7c00) + content[10 + length:]
-        with tempfile.TemporaryDirectory() as directory, patch.object(music_lora.db, 'DATA_DIR', Path(directory)), self.assertRaises(MusicLoraError):
+        with tempfile.TemporaryDirectory() as directory, patch.object(music_lora.db, 'DATA_DIR', Path(directory)), \
+                patch.object(music_lora.db, 'DB_PATH', Path(directory) / 'catalog.db'), self.assertRaises(MusicLoraError):
             music_lora.import_stream(io.BytesIO(content), filename='invalid.safetensors', name='Invalid', engine='stable_audio3', target='small-music')

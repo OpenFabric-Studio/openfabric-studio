@@ -109,7 +109,7 @@ class MusicQueueTests(unittest.IsolatedAsyncioTestCase):
         self.enterContext(patch.object(queue, '_controls', asyncio.Lock()))
         self.ready = [MusicQueueReadiness(engine=engine, supported=True, installed=True,
             weights_ready=True, managed_status='stopped' if engine in ('ace_step', 'yue2') else 'one_shot', ready=True)
-            for engine in ('ace_step', 'yue2', 'heartmula', 'stable_audio3')]
+            for engine in ('ace_step', 'yue2', 'stable_audio3')]
 
         self.enterContext(patch.object(music_queue_plan, 'catalog', new=AsyncMock(return_value=MusicQueueCatalog(engines=self.ready))))
         self.enterContext(patch.object(music_queue_plan, '_weights_ready', return_value=True))

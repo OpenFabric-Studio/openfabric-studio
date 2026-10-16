@@ -46,3 +46,10 @@ it('forwards library refresh cancellation and preserves favorite values from the
   expect((await listTracks('upload', signal))[0]?.is_favorite).toBe(true)
   expect(fetch).toHaveBeenCalledWith('/api/tracks?model=upload', expect.objectContaining({ signal }))
 })
+
+it('keeps saved audio from the retired engine readable in the library', async () => {
+  const legacy = { ...track, model: 'heartmula' }
+  const fetch = respond({ data: [legacy] })
+  await expect(listTracks()).resolves.toEqual([legacy])
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/tracks', expect.anything())
+})

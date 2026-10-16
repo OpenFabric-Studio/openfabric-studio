@@ -21,4 +21,4 @@ export function applyReferenceText(engine: 'ace_step' | 'yue2', kind: 'lyrics' |
   if (engine === 'yue2') pendingYueReference.value = kind === 'lyrics' ? { lyrics: text, referenceImportId: importId } : { abc: text, referenceImportId: importId }
 }
 
-export const pendingMusicAdapter = ref<(Pick<MusicAdapter, 'engine' | 'target'> & { selection: MusicAdapterSelection | null }) | null>(null)
+export const pendingMusicAdapter = ref<(Pick<MusicAdapter, 'engine' | 'target'> & { selection: MusicAdapterSelection | null; pair?: { ar: MusicAdapterSelection | null; nar: MusicAdapterSelection | null } }) | null>(null)

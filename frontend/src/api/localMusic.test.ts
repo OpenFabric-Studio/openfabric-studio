@@ -1,16 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { parseLocalMusicRequest } from './generated'
 import { cancelLocalMusic, getLocalMusic, listLocalMusic, localMusicEngines, submitLocalMusic } from './localMusic'
 
-const request = { engine: 'heartmula', title: '', prompt: 'jazz, piano', lyrics: '[Verse]\nA quiet evening', duration_seconds: 30, seed: 0, variant: 'small-music' } as const
+const request = { engine: 'stable_audio3', title: '', prompt: 'jazz, piano', lyrics: '', duration_seconds: 30, seed: 0, variant: 'small-music' } as const
 const job = { id: 'a'.repeat(32), status: 'queued', created_at: '2026-10-14', request, track: null, error_code: null }
 afterEach(() => vi.unstubAllGlobals())
 function response(value: unknown) { const fetch = vi.fn(async () => new Response(JSON.stringify(value))); vi.stubGlobal('fetch', fetch); return fetch }
 
 it('uses the music engines endpoint and rejects unrecognised response engines', async () => {
-  const fetch = response({ engines: [{ id: 'heartmula', installed: true, weights_ready: false, supported: true, runtime: 'mlx', detail: 'Missing weights' }] })
-  await expect(localMusicEngines()).resolves.toMatchObject({ engines: [{ id: 'heartmula', weights_ready: false }] })
+  const fetch = response({ engines: [{ id: 'stable_audio3', installed: true, weights_ready: false, supported: true, runtime: 'mlx', detail: 'Missing weights' }] })
+  await expect(localMusicEngines()).resolves.toMatchObject({ engines: [{ id: 'stable_audio3', weights_ready: false }] })
   expect(fetch).toHaveBeenCalledWith('/api/local-music/engines', expect.anything())
   response({ engines: [{ id: 'unknown', installed: true, weights_ready: true, supported: true, runtime: 'cpu', detail: '' }] })
+  await expect(localMusicEngines()).rejects.toThrow()
+})
+
+it('validates selected Stable model readiness independently of aggregate readiness', async () => {
+  const status = { id: 'stable_audio3', installed: true, weights_ready: true, small_weights_ready: true, medium_weights_ready: false, supported: true, runtime: 'mlx', detail: '' }
+  response({ engines: [status] })
+  await expect(localMusicEngines()).resolves.toMatchObject({ engines: [{ small_weights_ready: true, medium_weights_ready: false }] })
+  response({ engines: [{ ...status, medium_weights_ready: 'true' }] })
   await expect(localMusicEngines()).rejects.toThrow()
 })
 
@@ -40,4 +49,10 @@ it('rejects malformed jobs and unsafe job IDs before making a request', async ()
   await expect(getLocalMusic('../private')).rejects.toThrow()
   await expect(cancelLocalMusic('')).rejects.toThrow()
   expect(fetch).not.toHaveBeenCalled()
+})
+
+
+it('rejects the retired engine and automatic settings at the request boundary', () => {
+  expect(() => parseLocalMusicRequest({ ...request, engine: 'heartmula' })).toThrow()
+  expect(() => parseLocalMusicRequest({ ...request, settings_mode: 'auto' })).toThrow()
 })

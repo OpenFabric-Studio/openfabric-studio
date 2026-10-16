@@ -29,6 +29,7 @@ from app.local_music_contracts import LOCAL_MUSIC_CLIENT_MODELS
 from app.music_lora_contracts import MUSIC_LORA_CLIENT_MODELS
 from app.stable_lora_contracts import STABLE_LORA_CLIENT_MODELS
 from app.music_training_contracts import MUSIC_TRAINING_CLIENT_MODELS
+from app.training_caption_contracts import TRAINING_CAPTION_CLIENT_MODELS
 from app.music_training_source_contracts import MusicLoraSource, MusicLoraDatasetSource
 from app.music_queue_contracts import MUSIC_QUEUE_CLIENT_MODELS
 from app.lora_dataset_contracts import LORA_DATASET_CLIENT_MODELS
@@ -54,6 +55,7 @@ ALL_MODELS.extend(LOCAL_MUSIC_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(STABLE_LORA_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_TRAINING_CLIENT_MODELS)
+ALL_MODELS.extend(TRAINING_CAPTION_CLIENT_MODELS)
 ALL_MODELS.extend([MusicLoraSource, MusicLoraDatasetSource])
 ALL_MODELS.extend(MUSIC_QUEUE_CLIENT_MODELS)
 ALL_MODELS.extend(LORA_DATASET_CLIENT_MODELS)

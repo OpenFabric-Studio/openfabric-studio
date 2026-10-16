@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
-import importlib
 import json
 import logging
 import os
@@ -15,13 +14,6 @@ from pathlib import Path
 import runpy
 import subprocess
 import sys
-from typing import Protocol, runtime_checkable
-
-
-@runtime_checkable
-class RandomSeeder(Protocol):
-    def seed(self, seed: int) -> None: ...
-
 
 @dataclass(frozen=True)
 class WorkerCommand:
@@ -30,7 +22,6 @@ class WorkerCommand:
     raw_output: Path
     output: Path
     ffmpeg: str
-    seed: int | None
 
 
 def _text(value: object) -> str:
@@ -46,13 +37,10 @@ def read_command(path: Path) -> WorkerCommand:
     if not isinstance(payload, dict):
         raise ValueError('invalid_worker_command')
     raw_argv: object = payload.get('argv')
-    seed: object = payload.get('seed')
     if not isinstance(raw_argv, list) or not 1 <= len(raw_argv) <= 32:
         raise ValueError('invalid_worker_command')
-    if seed is not None and (not isinstance(seed, int) or isinstance(seed, bool) or not 0 <= seed <= 2147483647):
-        raise ValueError('invalid_worker_command')
     command = WorkerCommand([_text(item) for item in raw_argv], Path(_text(payload.get('cwd'))),
-        Path(_text(payload.get('raw_output'))), Path(_text(payload.get('output'))), _text(payload.get('ffmpeg')), seed)
+        Path(_text(payload.get('raw_output'))), Path(_text(payload.get('output'))), _text(payload.get('ffmpeg')))
     if not command.raw_output.is_absolute() or not command.output.is_absolute() or command.raw_output.parent != command.output.parent or command.output.parent != path.parent:
         raise ValueError('invalid_worker_output')
     if command.raw_output == command.output or command.raw_output.is_symlink() or command.output.is_symlink():
@@ -65,12 +53,6 @@ def run(command: WorkerCommand) -> None:
     os.chdir(command.cwd)
     sys.path.insert(0, str(command.cwd))
     sys.path.insert(0, str(Path(command.argv[0]).parent))
-    if command.seed is not None:
-        module = importlib.import_module('mlx.core')
-        random: object = getattr(module, 'random', None)
-        if not isinstance(random, RandomSeeder):
-            raise RuntimeError('mlx_seed_unavailable')
-        random.seed(command.seed)
     sys.argv = command.argv
     try:
         runpy.run_path(command.argv[0], run_name='__main__')

@@ -22,6 +22,14 @@ it('constructs schema-complete empty form snapshots without shared sampling obje
   expect(emptyYueSettings().semantic.temperature).toBeNull()
   expect(emptyYueSettings().numInferenceSteps).toBe(8)
   expect(emptyAceSettings().useCotCaption).toBe(true)
+  expect(emptyYueSettings()).toMatchObject({ bpm: null, keyScale: null, timeSignature: null })
+})
+it('preserves musical choices when reusing a complete YuE history snapshot', async () => {
+  const { historyResultSettings } = await import('./generationSnapshots')
+  const settings = { ...emptyYueSettings(), bpm: 88, keyScale: 'Am' as const, timeSignature: '6/8' as const }
+  expect(historyResultSettings({ id: 'a'.repeat(32), engine: 'yue2', settings, lyrics: 'Lyrics', seed: 3,
+    title: 'Folk', created_at: '2026-10-16', track_id: 7, reference_requires_reupload: false }))
+    .toMatchObject({ bpm: 88, keyScale: 'Am', timeSignature: '6/8' })
 })
 it('reuses each completed batch result seed and generated lyrics without mutating input settings', async () => {
   const { historyResultSettings } = await import('./generationSnapshots')

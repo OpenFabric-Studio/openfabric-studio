@@ -10,7 +10,6 @@ const tabs = [
   { name: 'music-lora-ace-step', label: 'musicLora.engines.ace_step' },
   { name: 'music-lora-stable-audio3', label: 'musicLora.engines.stable_audio3' },
   { name: 'music-lora-yue2', label: 'musicLora.engines.yue2' },
-  { name: 'music-lora-heartmula', label: 'musicLora.engines.heartmula' },
 ]
 async function navigateTab(event: KeyboardEvent, index: number) {
   let target: number

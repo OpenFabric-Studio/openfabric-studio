@@ -6,6 +6,7 @@ from typing import Annotated, Literal, Self, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .music_lora_contracts import MusicAdapterSelection
+from .music_score_contracts import MusicKey, MusicMeter, MusicTempo
 
 GenerationEngine = Literal['ace_step', 'yue2']
 GenerationId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
@@ -89,6 +90,9 @@ class YueGenerationSettings(GenerationContract):
     cot: Literal['off', 'melody', 'full'] = 'off'
     precision: Literal['q8_0', 'q4_0'] = 'q8_0'
     abc: GenerationText = ''
+    bpm: MusicTempo | None = None
+    keyScale: MusicKey | None = None
+    timeSignature: MusicMeter | None = None
     cfgScale: float | None = Field(default=None, ge=0, le=20)
     numInferenceSteps: int | None = Field(default=None, ge=1, le=256)
     semantic: GenerationSamplingSettings = Field(default_factory=GenerationSamplingSettings)

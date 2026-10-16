@@ -1,4 +1,4 @@
-"""Bounded fresh-run training shared by the reviewed HeartMuLa and YuE2 workers."""
+"""Bounded fresh-run training for the reviewed YuE2 worker."""
 from __future__ import annotations
 
 from typing import Literal, Self
@@ -7,8 +7,8 @@ from .contracts import Contract
 from .music_lora_contracts import MusicAdapter
 from .music_training_source_contracts import MusicLoraSource, source_key
 
-MusicTrainingEngine = Literal['heartmula', 'yue2']
-MusicTrainingStage = Literal['preparing', 'encoding', 'loading', 'training', 'publishing', 'done']
+MusicTrainingEngine = Literal['yue2']
+MusicTrainingStage = Literal['preparing', 'transcribing', 'encoding', 'loading', 'training', 'publishing', 'done']
 MusicTrainingKind = Literal['training', 'nvidia-package']
 
 
@@ -25,6 +25,12 @@ class MusicLoraTrainingSample(MusicLoraSource):
         return self
 
 
+class YueLoraPairSettings(Contract):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    planner_steps: int = Field(default=100, strict=True, ge=1, le=100000)
+    planner_learning_rate: float = Field(default=0.00005, strict=True, ge=1e-7, le=0.01)
+
+
 class MusicLoraTrainingRequest(Contract):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     engine: MusicTrainingEngine
@@ -35,12 +41,16 @@ class MusicLoraTrainingRequest(Contract):
     learning_rate: float = Field(default=0.0001, ge=0.0000001, le=0.01, strict=True)
     seed: int = Field(default=42, ge=0, le=2147483647, strict=True)
     segment_seconds: int = Field(default=12, ge=6, le=30, strict=True)
+    yue_pair: YueLoraPairSettings | None = None
+    yue_ar_source_job_id: str | None = Field(default=None, pattern=r'^[0-9a-f]{32}$')
 
     @model_validator(mode='after')
     def valid_dataset(self) -> Self:
         if not self.name.strip() or len({source_key(sample) for sample in self.samples}) != len(self.samples):
             raise ValueError('music_training_dataset_invalid')
-        if self.engine == 'yue2' and any(sample.lyrics.strip() for sample in self.samples):
+        if self.yue_ar_source_job_id is not None and self.yue_pair is not None:
+            raise ValueError('music_training_planner_request_invalid')
+        if self.yue_pair is None and self.yue_ar_source_job_id is None and any(sample.lyrics.strip() for sample in self.samples):
             raise ValueError('yue_acoustic_training_lyrics_unsupported')
         return self
 
@@ -48,6 +58,7 @@ class MusicLoraTrainingRequest(Contract):
 class MusicLoraTrainingProgress(Contract):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
     stage: MusicTrainingStage = 'preparing'
+    target: Literal['ar', 'nar'] | None = None
     step: int | None = Field(default=None, strict=True, ge=0, le=100000)
     total_steps: int | None = Field(default=None, strict=True, ge=1, le=100000)
     loss: float | None = None
@@ -73,11 +84,37 @@ class MusicLoraTrainingCompletion(Contract):
     max_steps: int = Field(strict=True, ge=1, le=100000)
 
 
+class MusicLoraTrainingPairArtifact(Contract):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    target: Literal['ar', 'nar']
+    checkpoint: str = Field(min_length=1, max_length=500)
+    sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class MusicLoraTrainingPairCompletion(Contract):
+    model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
+    job_id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    engine: Literal['yue2'] = 'yue2'
+    request_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    dataset_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    base_sha256: str = Field(pattern=r'^[0-9a-f]{64}$')
+    max_steps: int = Field(strict=True, ge=1, le=100000)
+    planner_steps: int = Field(strict=True, ge=1, le=100000)
+    artifacts: list[MusicLoraTrainingPairArtifact] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode='after')
+    def complete_targets(self) -> Self:
+        if {artifact.target for artifact in self.artifacts} != {'ar', 'nar'}:
+            raise ValueError('music_training_completion_invalid')
+        return self
+
+
 class MusicLoraTrainingStatus(Contract):
     engine: MusicTrainingEngine
     supported: bool
     installed: bool
     weights_ready: bool
+    paired_ready: bool | None = None
     device: Literal['mps', 'cuda'] | None = None
     validation: Literal['experimental', 'verified'] = 'experimental'
     error_code: str | None = Field(default=None, max_length=80)
@@ -94,7 +131,7 @@ class MusicLoraPackageCompletion(Contract):
 
 
 class MusicLoraTrainingStatuses(Contract):
-    engines: list[MusicLoraTrainingStatus] = Field(max_length=2)
+    engines: list[MusicLoraTrainingStatus] = Field(max_length=1)
 
 
 class MusicLoraTrainingJob(Contract):
@@ -107,6 +144,8 @@ class MusicLoraTrainingJob(Contract):
     kind: MusicTrainingKind = 'training'
     progress: MusicLoraTrainingProgress = Field(default_factory=MusicLoraTrainingProgress)
     adapter: MusicAdapter | None = None
+    adapters: list[MusicAdapter] = Field(default_factory=list, max_length=2)
+    can_train_missing_ar: bool = False  # Availability hint; Start verifies the saved files.
     package_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
     error_code: str | None = Field(default=None, max_length=80)
 
@@ -116,5 +155,5 @@ class MusicLoraTrainingJobs(Contract):
     history_incomplete: bool = False
 
 
-MUSIC_TRAINING_CLIENT_MODELS: list[type[BaseModel]] = [MusicLoraTrainingSample, MusicLoraTrainingRequest,
+MUSIC_TRAINING_CLIENT_MODELS: list[type[BaseModel]] = [MusicLoraTrainingSample, YueLoraPairSettings, MusicLoraTrainingRequest,
     MusicLoraTrainingProgress, MusicLoraTrainingStatus, MusicLoraTrainingStatuses, MusicLoraTrainingJob, MusicLoraTrainingJobs]

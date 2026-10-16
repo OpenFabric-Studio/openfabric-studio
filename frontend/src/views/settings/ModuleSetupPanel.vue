@@ -19,7 +19,7 @@ const wizardHeading = ref<HTMLElement | null>(null), activityHeading = ref<HTMLE
 let alive = true, generation = 0, controller: AbortController | null = null
 const steps = ['computer', 'features', 'review', 'install']
 const groups: { label: string; ids: ModuleId[] }[] = [
-  { label: 'music', ids: ['ace_step', 'yue2', 'heartmula', 'stable_audio3'] },
+  { label: 'music', ids: ['ace_step', 'yue2', 'stable_audio3'] },
   { label: 'voices', ids: ['speech', 'singing', 'separation', 'kokoro', 'chatterbox', 'rvc', 'speaker_review'] },
   { label: 'videoTools', ids: ['video', 'wan22', 'media', 'transcription', 'source_import', 'ebooks'] },
 ]

@@ -14,6 +14,7 @@ import ReferencePreparationButton from '../../components/shared/ReferencePrepara
 import { setActiveVoiceId } from '../../api/voices'
 import { parseMusicAdapterSelection } from '../../api/contracts'
 import { ApiError } from '../../api/http'
+import { transformAbc } from '../../api/references'
 import type { MusicAdapterSelection, YueGenerationSettings } from '../../api/contracts'
 import { pendingYueDraft, pendingYueReference, pendingMusicAdapter } from '../../composables/generationDrafts'
 import { samplingSettings, finiteNumber, SAMPLING_KEYS, type SamplingKey, type SamplingSettings } from '../../composables/generationPresets'
@@ -26,11 +27,17 @@ const narAdapter = ref<MusicAdapterSelection | null>(null)
 const arAdapterValid = ref(true), narAdapterValid = ref(true)
 const referenceNotice = ref(false)
 const { t, tm } = useI18n()
+const MUSIC_KEYS: NonNullable<YueGenerationSettings['keyScale']>[] = [
+  'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#', 'F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb',
+  'Am', 'Em', 'Bm', 'F#m', 'C#m', 'G#m', 'D#m', 'A#m', 'Dm', 'Gm', 'Cm', 'Fm', 'Bbm', 'Ebm', 'Abm',
+]
+const MUSIC_METERS: NonNullable<YueGenerationSettings['timeSignature']>[] = ['2/4', '3/4', '4/4', '6/8', '9/8', '12/8']
 
 watch(
   () => store.pendingParamsInsert,
   (params) => {
     if (!params) return
+    invalidateScoreEdit()
     referenceImportId.value = null; referenceNotice.value = false
     lyrics.value = typeof params.lyrics === 'string' ? params.lyrics : ''
     style.value = typeof params.style === 'string' ? params.style : ''
@@ -40,6 +47,7 @@ watch(
     seed.value = finiteNumber(params.seed) ? params.seed : 831001
     randomSeed.value = params.random_seed === true
     abc.value = typeof params.abc === 'string' ? params.abc : ''
+    restoreMusicalChoices(params.bpm, params.key_scale, params.time_signature)
     cfgScale.value = finiteNumber(params.cfg_scale) ? params.cfg_scale : null
     numInferenceSteps.value = finiteNumber(params.num_inference_steps) ? params.num_inference_steps : params.num_inference_steps === null ? null : 8
     Object.assign(semantic, samplingSettings(params.semantic))
@@ -62,10 +70,24 @@ const style = ref('')
 const cot = ref<CotMode>('off')
 const precision = ref<'q8_0' | 'q4_0'>('q8_0')
 const abc = ref('')
+const bpmInput = ref<number | string>('')
+const bpmBadInput = ref(false)
+const keyScale = ref<NonNullable<YueGenerationSettings['keyScale']> | ''>('')
+const timeSignature = ref<NonNullable<YueGenerationSettings['timeSignature']> | ''>('')
+const bpm = computed(() => validTempo(bpmInput.value) ? bpmInput.value : null)
+const invalidBpm = computed(() => bpmBadInput.value || bpmInput.value !== '' && bpm.value === null)
+const externalAbc = computed(() => cot.value !== 'off' && !!abc.value.trim())
+const musicalChoicesPending = computed(() => bpmInput.value !== '' || keyScale.value !== '' || timeSignature.value !== '')
+const applyingScore = ref(false)
+const scoreError = ref('')
+const scoreApplied = ref(false)
+let scoreRequestId = 0
+let scoreController: AbortController | null = null
+watch([abc, cot, bpmInput, bpmBadInput, keyScale, timeSignature], invalidateScoreEdit, { flush: 'sync' })
 
 const referenceImportId = ref<string | null>(null)
 let formAlive = true
-onBeforeUnmount(() => { formAlive = false })
+onBeforeUnmount(() => { formAlive = false; invalidateScoreEdit() })
 
 const seed = ref(831001)
 const randomSeed = ref(false)
@@ -83,14 +105,17 @@ const abcSampling = reactive<SamplingSettings>({
 const snapshot = computed<YueGenerationSettings>(() => ({
   engine: 'yue2', referenceImportId: referenceImportId.value, title: songTitle.value, lyrics: lyrics.value, style: style.value, cot: cot.value, precision: precision.value,
   abc: abc.value, cfgScale: cfgScale.value, numInferenceSteps: numInferenceSteps.value,
+  bpm: bpm.value, keyScale: keyScale.value || null, timeSignature: timeSignature.value || null,
   semantic: { ...semantic }, abcSampling: { ...abcSampling }, seed: seed.value, randomSeed: randomSeed.value,
   batchSize: batchSize.value, voiceId: selectedVoiceId.value, referenceRequiresReupload: referenceNotice.value,
   arAdapter: arAdapter.value, narAdapter: narAdapter.value,
 }))
 watch(pendingYueDraft, saved => {
   if (!saved) return
+  invalidateScoreEdit()
   lyrics.value = saved.lyrics; songTitle.value = saved.title; style.value = saved.style; cot.value = saved.cot; precision.value = saved.precision
   abc.value = saved.abc; cfgScale.value = saved.cfgScale; numInferenceSteps.value = saved.numInferenceSteps
+  restoreMusicalChoices(saved.bpm, saved.keyScale, saved.timeSignature)
   Object.assign(semantic, saved.semantic); Object.assign(abcSampling, saved.abcSampling)
   seed.value = saved.seed ?? 831001; randomSeed.value = saved.randomSeed; batchSize.value = saved.batchSize
   referenceImportId.value = saved.referenceImportId ?? null; referenceNotice.value = saved.referenceRequiresReupload
@@ -100,20 +125,20 @@ watch(pendingYueDraft, saved => {
 watch(pendingYueReference, edit => {
   if (!edit) return
   if (edit.lyrics !== undefined) lyrics.value = edit.lyrics
-  if (edit.abc !== undefined) { abc.value = edit.abc; if (cot.value === 'off') cot.value = 'melody' }
+  if (edit.abc !== undefined) { invalidateScoreEdit(); abc.value = edit.abc; if (cot.value === 'off') cot.value = 'melody' }
   referenceImportId.value = edit.referenceImportId ?? null; referenceNotice.value = false; pendingYueReference.value = null
 }, { immediate: true })
 
 watch(pendingMusicAdapter, selection => {
   if (!selection || selection.engine !== 'yue2') return
-  arAdapter.value = null
-  narAdapter.value = selection.target === 'nar' ? selection.selection : null
+  arAdapter.value = selection.pair ? selection.pair.ar : selection.target === 'ar' ? selection.selection : null
+  narAdapter.value = selection.pair ? selection.pair.nar : selection.target === 'nar' ? selection.selection : null
   pendingMusicAdapter.value = null
 }, { immediate: true })
 
 const submitting = ref(false)
 const formError = ref('')
-const helpOpen = ref<null | 'style' | 'lyrics' | 'cot' | 'advanced'>(null)
+const helpOpen = ref<null | 'style' | 'lyrics' | 'cot' | 'advanced' | 'music'>(null)
 
 const COT_OPTIONS: { value: CotMode; label: string }[] = [
   { value: 'off', label: 'off' },
@@ -139,6 +164,7 @@ watch(
   () => store.pendingAbcInsert,
   (val) => {
     if (!val) return
+    invalidateScoreEdit()
     abc.value = val
     if (cot.value === 'off') cot.value = 'melody'
     store.clearPendingAbcInsert()
@@ -147,6 +173,11 @@ watch(
 
 function buildOptions(): GenerateOptions {
   const options: GenerateOptions = { style: style.value.trim(), cot: cot.value }
+  if (!externalAbc.value) {
+    if (bpm.value !== null) options.bpm = bpm.value
+    if (keyScale.value) options.key_scale = keyScale.value
+    if (timeSignature.value) options.time_signature = timeSignature.value
+  }
   if (cfgScale.value != null) options.cfg_scale = cfgScale.value
   if (numInferenceSteps.value != null) options.num_inference_steps = numInferenceSteps.value
   for (const f of SAMPLING_FIELDS) {
@@ -167,8 +198,57 @@ function copiedAdapter(value: unknown): MusicAdapterSelection | null {
   try { return parseMusicAdapterSelection(value) } catch { return null }
 }
 
+function validTempo(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 20 && value <= 300
+}
+
+function restoreMusicalChoices(tempo: unknown, key: unknown, meter: unknown) {
+  bpmBadInput.value = false
+  bpmInput.value = validTempo(tempo) ? tempo : ''
+  keyScale.value = MUSIC_KEYS.find(option => option === key) ?? ''
+  timeSignature.value = MUSIC_METERS.find(option => option === meter) ?? ''
+}
+
+function validateTempoInput(event: Event) {
+  if (event.target instanceof HTMLInputElement) bpmBadInput.value = event.target.validity.badInput
+}
+
+function invalidateScoreEdit() {
+  scoreRequestId++
+  scoreController?.abort()
+  scoreController = null
+  applyingScore.value = false
+  scoreError.value = ''
+  scoreApplied.value = false
+}
+
+async function applyScoreChoices() {
+  if (!externalAbc.value || !musicalChoicesPending.value || invalidBpm.value || applyingScore.value) return
+  const requestId = ++scoreRequestId
+  const controller = new AbortController()
+  scoreController = controller
+  applyingScore.value = true
+  scoreError.value = ''
+  scoreApplied.value = false
+  try {
+    const result = await transformAbc({ abc: abc.value, tempo_bpm: bpm.value, target_key: keyScale.value || null, time_signature: timeSignature.value || null }, controller.signal)
+    if (!formAlive || requestId !== scoreRequestId || controller.signal.aborted) return
+    abc.value = result.abc
+    restoreMusicalChoices(null, null, null)
+    scoreApplied.value = true
+  } catch (cause) {
+    if (!formAlive || requestId !== scoreRequestId || controller.signal.aborted) return
+    const code = cause instanceof ApiError ? cause.message : ''
+    scoreError.value = t(code === 'key_mode_mismatch' ? 'yueScore.errors.mode'
+      : code === 'unsupported_abc' ? 'yueScore.errors.unsupported'
+        : code === 'invalid_abc' ? 'yueScore.errors.invalid' : 'yueScore.errors.failed')
+  } finally {
+    if (formAlive && requestId === scoreRequestId) { applyingScore.value = false; scoreController = null }
+  }
+}
+
 async function submit() {
-  if (!props.generationAvailable || submitting.value || !arAdapterValid.value || !narAdapterValid.value) return
+  if (!props.generationAvailable || submitting.value || !arAdapterValid.value || !narAdapterValid.value || invalidBpm.value || applyingScore.value || externalAbc.value && musicalChoicesPending.value) return
   formError.value = ''
   if (!lyrics.value.trim()) {
     formError.value = t('yueGen.enterLyrics')
@@ -208,7 +288,7 @@ async function submit() {
   <div class="lg:sticky lg:top-20 lg:self-start">
     <div class="space-y-4 rounded-xl border border-border bg-panel p-4">
       <VoiceSelect link @select="selectedVoiceId = $event" />
-      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || !generationAvailable || !arAdapterValid || !narAdapterValid" @click="submit">
+      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || !generationAvailable || !arAdapterValid || !narAdapterValid || invalidBpm || applyingScore || externalAbc && musicalChoicesPending" @click="submit">
         {{ submitting ? t('yueGen.submitting') : t('yueGen.submit') }}
       </button>
       <p v-if="formError" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ formError }}</p>
@@ -259,10 +339,43 @@ async function submit() {
       </div>
       <p class="text-xs text-text-dim">{{ COT_HINTS[cot] }}</p>
 
+      <fieldset class="space-y-3 rounded-lg border border-border bg-panel-2/50 p-3" :aria-busy="applyingScore">
+        <legend class="px-1 text-sm font-medium text-text">{{ t('yueScore.title') }}</legend>
+        <button type="button" class="min-h-9 text-xs text-accent1 hover:underline focus-visible:outline-2 focus-visible:outline-accent1" @click="helpOpen = 'music'">{{ t('yueScore.helpLabel') }}</button>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="yue-bpm" class="mb-1 block text-xs text-text-dim">{{ t('yueScore.tempo') }}</label>
+            <input id="yue-bpm" v-model="bpmInput" type="number" min="20" max="300" step="1" :aria-invalid="invalidBpm" :aria-describedby="invalidBpm ? 'yue-bpm-error' : 'yue-score-hint'" :placeholder="t('yueScore.keepAuto')" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text" @input="validateTempoInput" />
+            <p v-if="invalidBpm" id="yue-bpm-error" role="alert" class="mt-1 text-xs text-status-failed">{{ t('yueScore.errors.tempo') }}</p>
+          </div>
+          <div>
+            <label for="yue-key-scale" class="mb-1 block text-xs text-text-dim">{{ t('yueScore.keyScale') }}</label>
+            <select id="yue-key-scale" v-model="keyScale" aria-describedby="yue-score-hint" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+              <option value="">{{ t('yueScore.keepAuto') }}</option>
+              <option v-for="key in MUSIC_KEYS" :key="key" :value="key">{{ t(key.endsWith('m') ? 'yueScore.minor' : 'yueScore.major', { key: key.endsWith('m') ? key.slice(0, -1) : key }) }}</option>
+            </select>
+          </div>
+          <div>
+            <label for="yue-time-signature" class="mb-1 block text-xs text-text-dim">{{ t('yueScore.meter') }}</label>
+            <select id="yue-time-signature" v-model="timeSignature" aria-describedby="yue-score-hint" class="w-full rounded-lg border border-border bg-panel-2 p-2 text-sm text-text">
+              <option value="">{{ t('yueScore.keepAuto') }}</option>
+              <option v-for="meter in MUSIC_METERS" :key="meter" :value="meter">{{ meter }}</option>
+            </select>
+          </div>
+        </div>
+        <p id="yue-score-hint" class="text-xs text-text-dim">{{ t(externalAbc ? 'yueScore.scoreHint' : 'yueScore.guidanceHint') }}</p>
+        <template v-if="externalAbc">
+          <button type="button" :disabled="!musicalChoicesPending || invalidBpm || applyingScore" class="rounded-lg border border-border px-3 py-2 text-sm text-text hover:bg-panel-2 disabled:opacity-50" @click="applyScoreChoices">{{ t(applyingScore ? 'yueScore.applying' : 'yueScore.apply') }}</button>
+          <p v-if="musicalChoicesPending" class="text-xs text-status-queued">{{ t('yueScore.pending') }}</p>
+        </template>
+        <p v-if="scoreError" role="alert" class="text-xs text-status-failed">{{ scoreError }}</p>
+        <p v-if="scoreApplied" role="status" class="text-xs text-text-dim">{{ t('yueScore.applied') }}</p>
+      </fieldset>
+
       <div v-if="cot !== 'off'" class="space-y-3 rounded-lg border border-border bg-panel-2/50 p-3">
         <div>
           <label for="yue-abc" class="text-xs text-text-dim">{{ t('yueGen.abcScore') }}</label>
-          <textarea id="yue-abc" v-model="abc" rows="6" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-xs text-text"></textarea>
+          <textarea id="yue-abc" v-model="abc" rows="6" maxlength="100000" class="w-full rounded-lg border border-border bg-panel-2 p-2.5 font-mono text-xs text-text"></textarea>
         </div>
 
       </div>
@@ -328,6 +441,13 @@ async function submit() {
       </CollapsibleDetails>
     </div>
 
+    <HelpModal :open="helpOpen === 'music'" :title="t('yueScore.title')" @close="helpOpen = null">
+      <p>{{ t('yueScore.help.guidance') }}</p>
+      <p><strong class="text-text">{{ t('yueScore.tempo') }}</strong> {{ t('yueScore.help.tempo') }}</p>
+      <p><strong class="text-text">{{ t('yueScore.keyScale') }}</strong> {{ t('yueScore.help.key') }}</p>
+      <p><strong class="text-text">{{ t('yueScore.meter') }}</strong> {{ t('yueScore.help.meter') }}</p>
+      <p>{{ t('yueScore.help.apply') }}</p>
+    </HelpModal>
     <HelpModal :open="helpOpen === 'style'" :title="t('yueGen.help.style.title')" @close="helpOpen = null">
       <p>{{ t('yueGen.help.style.intro') }}</p>
       <table class="w-full border-collapse text-xs">

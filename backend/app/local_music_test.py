@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 from pathlib import Path
 import sys
@@ -33,16 +34,31 @@ def audio_bytes() -> bytes:
 
 
 class LocalMusicRequestTests(unittest.TestCase):
+    def test_saved_requests_remain_manual_and_auto_is_rejected(self) -> None:
+        request = LocalMusicRequest(engine='stable_audio3', prompt='Jazz', duration_seconds=95)
+        self.assertEqual(request.model_dump().get('settings_mode'), 'manual')
+        for mode in ('auto', 'unknown'):
+            with self.subTest(mode=mode), self.assertRaises(ValidationError):
+                LocalMusicRequest.model_validate({'engine': 'stable_audio3', 'prompt': 'Jazz',
+                    'duration_seconds': 95, 'settings_mode': mode})
+
+    def test_engine_duration_limits_remain_distinct_above_four_minutes(self) -> None:
+        LocalMusicRequest(engine='stable_audio3', prompt='Jazz', variant='medium', duration_seconds=380)
+        for update in ({'engine': 'stable_audio3', 'duration_seconds': 121},
+                       {'engine': 'stable_audio3', 'variant': 'medium', 'duration_seconds': 381}):
+            with self.subTest(update=update), self.assertRaises(ValidationError):
+                LocalMusicRequest.model_validate({'prompt': 'Jazz', **update})
+
     def test_validates_model_limits_and_lyrics_before_admission(self) -> None:
-        valid = {'engine': 'heartmula', 'prompt': 'Jazz', 'duration_seconds': 95}
-        for update in ({'prompt': '  '}, {'engine': 'unknown'}, {'duration_seconds': 241}, {'seed': -1}, {'variant': 'medium'},
+        valid = {'engine': 'stable_audio3', 'prompt': 'Jazz', 'duration_seconds': 95}
+        for update in ({'prompt': '  '}, {'engine': 'unknown'}, {'duration_seconds': 601}, {'seed': -1}, {'variant': 'unknown'},
                        {'seed': True}, {'adapter': {'id': 'a' * 32, 'strength': 3}}, {'engine': 'stable_audio3', 'lyrics': 'Sing this'},
                        {'engine': 'stable_audio3', 'duration_seconds': 121},
                        {'output_path': '/tmp/owned-by-user.wav'}):
             with self.subTest(update=update), self.assertRaises(ValidationError):
                 LocalMusicRequest.model_validate({**valid, **update})
-        request = LocalMusicRequest(engine='heartmula', prompt='Jazz', lyrics='Hello world', duration_seconds=95)
-        self.assertEqual(request.engine, 'heartmula')
+        request = LocalMusicRequest(engine='stable_audio3', prompt='Jazz', duration_seconds=95)
+        self.assertEqual(request.engine, 'stable_audio3')
         LocalMusicRequest(engine='stable_audio3', prompt='Jazz', variant='medium', duration_seconds=380)
 
 
@@ -51,7 +67,8 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         statuses = LocalMusicEngines(engines=[LocalMusicEngineStatus(id=engine, installed=True,
-            weights_ready=True, supported=True, runtime='test', detail='') for engine in ('heartmula', 'stable_audio3')])
+            weights_ready=True, small_weights_ready=True, medium_weights_ready=True,
+            supported=True, runtime='test', detail='') for engine in ('stable_audio3',)])
         self.patches = [patch.object(db, '_db', None), patch.object(db, 'DATA_DIR', self.root),
             patch.object(db, 'DB_PATH', self.root / 'catalog.db'), patch.object(db, 'FILES_DIR', self.root / 'files'),
             patch.object(local_music, '_closing', False), patch.object(local_music, '_tasks', {}),
@@ -71,20 +88,20 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
             item.stop()
         self.temporary.cleanup()
 
-    def body(self, engine: str = 'heartmula') -> LocalMusicRequest:
+    def body(self, engine: str = 'stable_audio3') -> LocalMusicRequest:
         return LocalMusicRequest.model_validate({'engine': engine, 'prompt': 'Warm jazz', 'title': 'Test song', 'duration_seconds': 95})
 
     def command(self, request: LocalMusicRequest, output: Path) -> tuple[list[str], Path, dict[str, str]]:
         return [sys.executable, str(self.worker), str(output)], self.root, dict(os.environ)
 
-    async def submit_and_finish(self, engine: str = 'heartmula') -> str:
+    async def submit_and_finish(self, engine: str = 'stable_audio3') -> str:
         job = await local_music.submit(self.body(engine))
         await local_music._tasks[job.id]
         return job.id
 
     async def test_each_engine_publishes_once_as_a_normal_track(self) -> None:
         with patch.object(local_music, 'prepare_worker', side_effect=self.command):
-            for engine in ('heartmula', 'stable_audio3'):
+            for engine in ('stable_audio3',):
                 identifier = await self.submit_and_finish(engine)
                 final = local_music.get(identifier)
                 self.assertEqual(final.status, 'done')
@@ -93,10 +110,84 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
                     self.fail('Expected saved track')
                 self.assertEqual(final.track.model, engine)
                 self.assertEqual(final.track.params['local_music_job_id'], identifier)
+                self.assertNotIn('settings_mode', final.track.params)
             await local_music.recover()
             await local_music.recover()
-        self.assertEqual(len(db.list_tracks()), 2)
+        self.assertEqual(len(db.list_tracks()), 1)
         self.assertFalse(local_music.work_busy())
+
+
+    async def test_legacy_persisted_request_without_mode_remains_manual(self) -> None:
+        with patch('secrets.randbelow') as random_seed, patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            job = await local_music.submit(self.body())
+            await local_music.cancel(job.id)
+            payload = json.loads(job.model_dump_json())
+            payload['request'].pop('settings_mode', None)
+            self.connection.execute('UPDATE local_music_jobs SET payload_json=? WHERE id=?', (json.dumps(payload), job.id))
+            self.connection.commit()
+            loaded = local_music.get(job.id)
+        random_seed.assert_not_called()
+        self.assertEqual(loaded.request.settings_mode, 'manual')
+        self.assertEqual(loaded.request.seed, 0)
+
+    async def test_audio_publication_accepts_medium_output_and_remains_bounded(self) -> None:
+        output = self.root / 'long.wav'
+        for seconds in (380, 391):
+            with wave.open(str(output), 'wb') as audio:
+                audio.setnchannels(1)
+                audio.setsampwidth(2)
+                audio.setframerate(8000)
+                audio.writeframes(b'\0\0' * (8000 * seconds))
+            if seconds == 380:
+                self.assertEqual(local_music._validate_audio(output), 380 * 1000)
+            else:
+                with self.assertRaises(LocalMusicError) as caught:
+                    local_music._validate_audio(output)
+                self.assertEqual(caught.exception.code, 'invalid_music_audio')
+
+    async def test_missing_selected_stable_generation_weights_rejected_before_job_creation(self) -> None:
+        status = LocalMusicEngineStatus.model_validate({'id': 'stable_audio3', 'installed': True,
+            'weights_ready': True, 'small_weights_ready': True, 'medium_weights_ready': False,
+            'supported': True, 'runtime': 'test', 'detail': ''})
+        with patch.object(local_music, 'engine_status', return_value=LocalMusicEngines(engines=[status])):
+            with self.assertRaises(LocalMusicError) as caught:
+                await local_music.submit(LocalMusicRequest(engine='stable_audio3', prompt='Piano', variant='medium', duration_seconds=30))
+        self.assertEqual(caught.exception.code, 'local_music_weights_missing')
+        self.assertFalse(local_music._tasks)
+        self.assertEqual(local_music.list_jobs().jobs, [])
+
+
+    async def test_worker_failure_receipt_rejects_arbitrary_oversized_and_symlinked_codes(self) -> None:
+        for content in ('{"code":"private internal detail"}', '{"code":"untrusted_worker_detail"}' + ' ' * 1024,
+                        '{"code":"untrusted_worker_detail","detail":"private internal detail"}', 'not json'):
+            with self.subTest(content=content[:80]):
+                self.worker.write_text('import sys\nfrom pathlib import Path\n'
+                    f'Path(sys.argv[1]).parent.joinpath("generation-error.json").write_text({content!r})\n'
+                    'raise SystemExit(1)\n')
+                with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+                    identifier = await self.submit_and_finish()
+                self.assertEqual(local_music.get(identifier).error_code, 'local_music_generation_failed')
+        outside = self.root / 'outside-error.json'
+        outside.write_text('{"code":"untrusted_worker_detail"}')
+        self.worker.write_text('raise SystemExit(1)\n')
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            job = await local_music.submit(self.body())
+            local_music._artifact(job.id, 'generation-error.json', create=True).symlink_to(outside)
+            await local_music._tasks[job.id]
+        self.assertEqual(local_music.get(job.id).error_code, 'local_music_generation_failed')
+        self.assertEqual(outside.read_text(), '{"code":"untrusted_worker_detail"}')
+
+    async def test_selected_weights_removed_after_submission_fail_before_worker_launch(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=AssertionError('missing weights must not launch')) as prepare:
+            job = await local_music.submit(self.body('stable_audio3'))
+            status = LocalMusicEngineStatus(id='stable_audio3', installed=True, weights_ready=True,
+                small_weights_ready=False, medium_weights_ready=True, supported=True, runtime='test', detail='')
+            task = local_music._tasks[job.id]
+            with patch.object(local_music, 'engine_status', return_value=LocalMusicEngines(engines=[status])):
+                await task
+        prepare.assert_not_called()
+        self.assertEqual(local_music.get(job.id).status, 'failed')
+        self.assertEqual(local_music.get(job.id).error_code, 'local_music_weights_missing')
 
     async def test_queue_owner_can_submit_and_drain_a_real_cpu_child_worker(self) -> None:
         from app import music_queue_ownership as ownership
@@ -153,8 +244,11 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         app = FastAPI()
         app.include_router(tracks_router)
         with patch.object(local_music, 'prepare_worker', side_effect=self.command):
-            for engine in ('heartmula', 'stable_audio3'):
-                await self.submit_and_finish(engine)
+            await self.submit_and_finish()
+        legacy = self.root / 'files' / 'retired.wav'
+        legacy.write_bytes(audio_bytes())
+        db.insert_track(model='heartmula', title='Old song', lyrics='', seed=0, duration_ms=100,
+            wall_ms=None, params={}, audio_path=legacy, abc_path=None)
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:9000') as client:
             for engine in ('heartmula', 'stable_audio3'):
                 response = await client.get('/api/tracks', params={'model': engine})
@@ -165,6 +259,43 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
                 audio = await client.get(result.data[0].audio_url)
                 self.assertEqual(audio.status_code, 200)
                 self.assertEqual(audio.content, audio_bytes())
+
+    async def test_retired_job_history_and_files_are_preserved_without_hiding_stable_jobs(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            stable = await self.submit_and_finish()
+        retired_id = 'd' * 32
+        payload = json.loads(local_music.get(stable).model_dump_json())
+        payload.update(id=retired_id, status='queued', track=None)
+        payload['request'].update(engine='heartmula', settings_mode='auto', duration_seconds=600)
+        raw = json.dumps(payload)
+        self.connection.execute('INSERT INTO local_music_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (retired_id, raw, '2026-10-16'))
+        self.connection.commit()
+        pending = local_music._artifact(retired_id, 'output.wav', create=True)
+        pending.write_bytes(audio_bytes())
+        await local_music.recover()
+        history = local_music.list_jobs()
+        self.assertEqual([job.id for job in history.jobs], [stable])
+        self.assertFalse(history.history_incomplete)
+        self.assertFalse(local_music.work_busy())
+        self.assertEqual(pending.read_bytes(), audio_bytes())
+        self.assertEqual(self.connection.execute('SELECT payload_json FROM local_music_jobs WHERE id=?',
+            (retired_id,)).fetchone()[0], raw)
+
+    async def test_retired_records_do_not_consume_the_supported_history_limit(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            stable = await self.submit_and_finish()
+        payload = json.loads(local_music.get(stable).model_dump_json())
+        payload['request']['engine'] = 'heartmula'
+        records: list[tuple[str, str, str]] = []
+        for index in range(1001):
+            identifier = f'{index:032x}'
+            records.append((identifier, json.dumps({**payload, 'id': identifier}), '2099-01-01'))
+        self.connection.executemany('INSERT INTO local_music_jobs(id,payload_json,created_at) VALUES(?,?,?)', records)
+        self.connection.commit()
+        history = local_music.list_jobs()
+        self.assertEqual([job.id for job in history.jobs], [stable])
+        self.assertFalse(history.history_incomplete)
 
     async def test_invalid_and_truncated_audio_never_enters_library(self) -> None:
         for content in (b'not audio', audio_bytes()[:-8]):
@@ -310,7 +441,7 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         output = self.root / 'test.wav'
         output.write_bytes(audio_bytes())
         with self.assertRaises(ValueError):
-            db.insert_track(model='heartmula', title='Test', lyrics='', seed=0, duration_ms=100,
+            db.insert_track(model='stable_audio3', title='Test', lyrics='', seed=0, duration_ms=100,
                 wall_ms=None, params={}, audio_path=output, abc_path=None, local_music_job_id='missing')
         self.assertEqual(db.list_tracks(), [])
 

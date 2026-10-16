@@ -1,5 +1,7 @@
 # HeartMuLa training boundary and Mac proof
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](local-music.md).
+
 Recorded 2026-10-15 on an Apple M4 Max with 128 GiB unified memory. This is a functional short-run proof, not a musical-quality evaluation or NVIDIA result. Original installed model files were read without modification.
 
 ## Reviewed sources

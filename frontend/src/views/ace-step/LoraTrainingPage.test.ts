@@ -13,7 +13,7 @@ import * as datasets from '../../api/loraDataset'
 
 vi.mock('../../api/aceStepTraining', async original => ({ ...await original<typeof import('../../api/aceStepTraining')>(), trainingStatus: vi.fn(), autoLabelStatus: vi.fn(), preprocessStatus: vi.fn(), latestAutoLabelStatus: vi.fn(), latestPreprocessStatus: vi.fn(), getSamples: vi.fn(), startAutoLabel: vi.fn(), startLoraTraining: vi.fn(), loraExportOptions: vi.fn(), pickLoraExportFolder: vi.fn(), previewLoraExport: vi.fn(), exportLora: vi.fn(), checkTrainedLoraFiles: vi.fn() }))
 vi.mock('../../api/aceStep', async original => ({ ...await original<typeof import('../../api/aceStep')>(), health: vi.fn(), initModel: vi.fn() }))
-vi.mock('../../api/loraDataset', () => ({ listLoraDatasets: vi.fn(), getLoraWorkspace: vi.fn(), saveLoraWorkspace: vi.fn(), createLoraDataset: vi.fn(), renameLoraDataset: vi.fn(), trashLoraDataset: vi.fn(), restoreLoraDataset: vi.fn(), loadLoraDataset: vi.fn(), scanLoraDataset: vi.fn(), saveLoraDataset: vi.fn(), preprocessLoraDataset: vi.fn(), autoLabelLoraDataset: vi.fn(), updateLoraDatasetSample: vi.fn(), uploadDatasetFiles: vi.fn() }))
+vi.mock('../../api/loraDataset', () => ({ listLoraDatasets: vi.fn(), getLoraWorkspace: vi.fn(), saveLoraWorkspace: vi.fn(), createLoraDataset: vi.fn(), renameLoraDataset: vi.fn(), trashLoraDataset: vi.fn(), restoreLoraDataset: vi.fn(), removeLoraDatasetRecords: vi.fn(), loadLoraDataset: vi.fn(), scanLoraDataset: vi.fn(), saveLoraDataset: vi.fn(), preprocessLoraDataset: vi.fn(), autoLabelLoraDataset: vi.fn(), updateLoraDatasetSample: vi.fn(), uploadDatasetFiles: vi.fn() }))
 let app: App | undefined, pinia: Pinia
 const training: api.TrainingStatus = { is_training: true, should_stop: false, current_step: 1, current_loss: 0.2, status: 'Running', config: { epochs: 3 }, tensor_dir: 'tensors', loss_history: [], tensorboard_url: null, tensorboard_logdir: null, training_log: '', start_time: 1, current_epoch: 1, steps_per_second: 1, estimated_time_remaining: 30, error: null }
 function deferred<T>() {
@@ -43,6 +43,35 @@ beforeEach(() => {
 
 const savedDataset = { id: 'a'.repeat(32), name: 'Saved voice', dataset_path: 'datasets/voice/dataset.json', audio_dir: 'datasets/voice', sample_count: 22, labeled_count: 22, revision: 1, trashed: false, available: true, error_code: '' }
 const sample = { id: 'sample-one', index: 0, filename: 'voice.wav', audio_path: 'datasets/voice/voice.wav', duration: 10, caption: 'Original', genre: '', prompt_override: null, lyrics: '', bpm: null, keyscale: '', timesignature: '', language: 'en', is_instrumental: false, labeled: true }
+it('shows dataset issue details and clears only confirmed trash records while preserving the selected dataset', async () => {
+  const trashed = { ...savedDataset, id: 'b'.repeat(32), name: 'Old dataset', trashed: true }
+  vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [savedDataset, trashed], issues: [{ path: 'datasets/broken.json', code: 'dataset_invalid' }] })
+  vi.mocked(datasets.getLoraWorkspace).mockResolvedValue({ revision: 1, selected_dataset_id: savedDataset.id, form: {} })
+  vi.mocked(datasets.loadLoraDataset).mockResolvedValue({ dataset: savedDataset, samples: [sample] })
+  vi.mocked(datasets.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [trashed.id] })
+  await mount()
+  expect(document.body.textContent).toContain('datasets/broken.json')
+  expect(document.body.textContent).toContain(i18n.global.t('loraRecovery.issueInvalid'))
+  button('Remove record').click(); await settle()
+  expect(datasets.removeLoraDatasetRecords).not.toHaveBeenCalled()
+  button('Remove records, keep files').click(); await settle()
+  expect(datasets.removeLoraDatasetRecords).toHaveBeenCalledWith([{ id: trashed.id, revision: trashed.revision }], expect.any(AbortSignal))
+  expect(document.body.textContent).not.toContain('Old dataset')
+  expect(document.querySelector('select[aria-label="Saved dataset"]')).toHaveProperty('value', savedDataset.id)
+  expect(useLoraTrainingStore(pinia).samples[0]?.caption).toBe(sample.caption)
+})
+it('keeps training available when only the automatic labeling model is unloaded', async () => {
+  vi.mocked(ace.health).mockResolvedValue({ status: 'ok', service: 'ACE', version: '1', models_initialized: true, llm_initialized: false, loaded_model: 'model', loaded_lm_model: null })
+  vi.mocked(datasets.getLoraWorkspace).mockResolvedValue({ revision: 1, training_tensor_dir: 'datasets/voice/tensors', form: { tensor_dir: 'datasets/voice/tensors' } })
+  await mount()
+  expect(document.body.textContent).toContain('Your saved labels can be used for preprocessing and training.')
+  expect(button('Start training').disabled).toBe(false)
+})
+it('explains that preprocessing and training need the base model when it is unloaded', async () => {
+  vi.mocked(ace.health).mockResolvedValue({ status: 'ok', service: 'ACE', version: '1', models_initialized: false, llm_initialized: false, loaded_model: null, loaded_lm_model: null })
+  await mount()
+  expect(document.body.textContent).toContain('Load the ACE-Step model before preprocessing or training.')
+})
 async function editingRows() {
   vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [savedDataset] })
   vi.mocked(datasets.getLoraWorkspace).mockResolvedValue({ revision: 1, selected_dataset_id: savedDataset.id, form: {} })
@@ -328,6 +357,45 @@ it('resumes retained auto-label and preprocessing tasks on re-entry', async () =
   expect(store.preprocessOutputDir).toBe('completed/tensors')
   expect(api.autoLabelStatus).toHaveBeenCalledTimes(2)
   expect(api.preprocessStatus).toHaveBeenCalledTimes(2)
+})
+
+it('labels running preprocessing as attempted samples and retains it while reconnecting', async () => {
+  const store = useLoraTrainingStore(pinia)
+  store.samples = [sample]; store.preprocessRunning = true; store.preprocessTaskId = 'prepare-task'
+  vi.mocked(api.preprocessStatus).mockResolvedValueOnce({ task_id: 'prepare-task', status: 'running', current: 1, total: 2, progress: '' }).mockRejectedValue(new Error('offline'))
+  await mount()
+  expect(document.body.textContent).toContain('1 / 2 samples attempted')
+  expect(document.body.textContent).not.toContain('1 / 2 tensors')
+  await vi.advanceTimersByTimeAsync(2000); await settle()
+  expect(document.body.textContent).toContain('1 / 2 samples attempted')
+  expect(document.body.textContent).toContain('Reconnecting')
+})
+
+it('shows zero tensors and a clear failure instead of a full success bar after all attempts fail', async () => {
+  const store = useLoraTrainingStore(pinia)
+  store.samples = [sample]; store.preprocessRunning = true; store.preprocessTaskId = 'prepare-task'
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ task_id: 'prepare-task', status: 'completed', current: 1, total: 1, progress: '',
+    result: { output_dir: 'completed/tensors', num_tensors: 0, message: '✅ Preprocessed 0/1 samples (1 failed)' } })
+  await mount()
+  const section = [...document.querySelectorAll('section')].find(item => item.querySelector('h2')?.textContent === i18n.global.t('lora.step4Title'))
+  expect(section?.textContent).toContain('0 / 1 tensors ready')
+  expect(section?.textContent).toContain('No training tensors were created')
+  expect(section?.textContent).not.toContain('✅')
+  expect(section?.querySelector('[style*="width: 100%"]')).toBeNull()
+  expect(button(i18n.global.t('lora.startTraining')).disabled).toBe(true)
+})
+
+it('shows only confirmed ready tensors after partial preprocessing', async () => {
+  const store = useLoraTrainingStore(pinia)
+  store.samples = [sample]; store.preprocessRunning = true; store.preprocessTaskId = 'prepare-task'
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ task_id: 'prepare-task', status: 'completed', current: 2, total: 2, progress: '',
+    result: { output_dir: 'completed/tensors', num_tensors: 1, message: '✅ Preprocessed 1/2 samples (1 failed)' } })
+  await mount()
+  expect(document.body.textContent).toContain('1 / 2 tensors ready')
+  expect(document.body.textContent).not.toContain('2 / 2 tensors')
+  expect(document.body.textContent).toContain('Some samples did not produce training tensors')
+  expect(document.body.textContent).not.toContain('✅')
+  expect(button(i18n.global.t('lora.startTraining')).disabled).toBe(false)
 })
 
 it('invalidates a pending training status when the page closes', async () => {

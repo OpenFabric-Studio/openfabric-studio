@@ -45,6 +45,117 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(other.get(created.id).steps[0].state, 'manual')
         await service.shutdown()
 
+    async def test_retired_setup_history_is_preserved_without_hiding_other_jobs(self) -> None:
+        service = jobs.ModuleJobService(self.environment)
+        retired = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, retired.id)
+        retained = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, retained.id)
+        document = service.store.read(retired.id).model_dump_json().replace('"ebooks"', '"heartmula"')
+        with sqlite3.connect(service.store.path) as connection:
+            connection.execute('UPDATE setup_jobs SET document=? WHERE id=?', (document, retired.id))
+        before = service.store.path.read_bytes()
+        self.assertEqual([job.id for job in service.list().jobs], [retained.id])
+        with self.assertRaisesRegex(jobs.ModuleSetupError, 'job_missing'):
+            service.get(retired.id)
+        with self.assertRaisesRegex(jobs.ModuleSetupError, 'setup_not_resumable'):
+            await service.resume(retired.id)
+        self.assertEqual(before, service.store.path.read_bytes())
+        await service.shutdown()
+
+    async def test_history_limit_counts_supported_jobs_after_retired_backlog(self) -> None:
+        service = jobs.ModuleJobService(self.environment)
+        created = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, created.id)
+        template = service.store.read(created.id)
+        expected: list[str] = []
+        with sqlite3.connect(service.store.path) as connection:
+            for number in range(1, 102):
+                stored = template.model_copy(deep=True)
+                stored.job.id = f'{number:032x}'
+                document = stored.model_dump_json()
+                if number <= 51:
+                    expected.append(stored.job.id)
+                else:
+                    document = document.replace('"ebooks"', '"heartmula"')
+                connection.execute('INSERT INTO setup_jobs(id,state,worker,document) VALUES(?,?,0,?)',
+                    (stored.job.id, stored.job.state, document))
+        before = service.store.path.read_bytes()
+        self.assertEqual([job.id for job in service.list().jobs], list(reversed(expected[-50:])))
+        self.assertEqual(before, service.store.path.read_bytes())
+        await service.shutdown()
+
+    async def test_retired_backlog_does_not_hide_corrupt_history_or_active_recovery(self) -> None:
+        service = jobs.ModuleJobService(self.environment)
+        created = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, created.id)
+        template = service.store.read(created.id)
+        with sqlite3.connect(service.store.path) as connection:
+            corrupt = template.model_dump_json().replace('"awaiting_manual"', '"invalid"')
+            connection.execute('UPDATE setup_jobs SET document=? WHERE id=?', (corrupt, created.id))
+            for number in range(1, 52):
+                stored = template.model_copy(deep=True)
+                stored.job.id = f'{number:032x}'
+                stored.job.state = 'running' if number == 1 else 'awaiting_manual'
+                document = stored.model_dump_json().replace('"ebooks"', '"heartmula"')
+                connection.execute('INSERT INTO setup_jobs(id,state,worker,document) VALUES(?,?,0,?)',
+                    (stored.job.id, stored.job.state, document))
+        recovery = service.store.records(recovery=True)
+        self.assertEqual([record.job.id for record in recovery], [f'{1:032x}'])
+        self.assertIsNotNone(recovery[0]._retired_document)
+        with self.assertRaisesRegex(jobs.ModuleSetupError, 'job_corrupt'):
+            service.list()
+        await service.shutdown()
+
+    async def test_retired_setup_recovery_drains_workers_and_preserves_retired_ids(self) -> None:
+        service = jobs.ModuleJobService(self.environment)
+        created = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, created.id)
+        stored = service.store.read(created.id)
+        stored.job.state = 'running'
+        stored.job.current_step = 0
+        stored.worker = jobs.WorkerIdentity(pid=12345, token='a' * 32,
+            receipt=str(self.environment.root / '.setup/workers' / f'{created.id}.json'))
+        document = stored.model_dump_json().replace('"ebooks"', '"heartmula"')
+        with sqlite3.connect(service.store.path) as connection:
+            connection.execute('UPDATE setup_jobs SET state=?,worker=1,document=? WHERE id=?', ('running', document, created.id))
+        recovered = jobs.ModuleJobService(self.environment)
+        try:
+            with patch.object(jobs, 'terminate_verified', AsyncMock(return_value=False)) as terminate:
+                await recovered.recover()
+            terminate.assert_awaited_once_with(stored.worker)
+            self.assertEqual(recovered.list().jobs, [])
+            with self.assertRaisesRegex(jobs.ModuleSetupError, 'setup_busy'):
+                await recovered.create(await self.request(['ebooks']))
+            with patch.object(jobs, 'terminate_verified', AsyncMock(return_value=True)) as terminate:
+                await recovered.recover()
+            terminate.assert_awaited_once_with(stored.worker)
+            with sqlite3.connect(service.store.path) as connection:
+                state, worker, retained = connection.execute('SELECT state,worker,document FROM setup_jobs WHERE id=?', (created.id,)).fetchone()
+            self.assertEqual(state, 'failed')
+            self.assertEqual(worker, 0)
+            self.assertIn('"heartmula"', retained)
+            self.assertNotIn('"media"', retained)
+            other = await recovered.create(await self.request(['ebooks']))
+            await self.wait_for_terminal(recovered, other.id)
+        finally:
+            await recovered.shutdown()
+            await service.shutdown()
+
+    async def test_retired_setup_compatibility_still_rejects_corrupt_records(self) -> None:
+        service = jobs.ModuleJobService(self.environment)
+        created = await service.create(await self.request(['ebooks']))
+        await self.wait_for_terminal(service, created.id)
+        original = service.store.read(created.id).model_dump_json()
+        documents = (original.replace('"ebooks"', '"unknown"'),
+            original.replace('"ebooks"', '"heartmula"').replace('"awaiting_manual"', '"invalid"'))
+        for document in documents:
+            with self.subTest(document=document), sqlite3.connect(service.store.path) as connection:
+                connection.execute('UPDATE setup_jobs SET document=? WHERE id=?', (document, created.id))
+            with self.assertRaisesRegex(jobs.ModuleSetupError, 'job_corrupt'):
+                service.list()
+        await service.shutdown()
+
     async def test_download_bytes_and_retry_phase_survive_a_new_service_reader(self) -> None:
         from app import module_contracts
         self.assertTrue(hasattr(module_contracts, 'ModuleDownloadProgress'), 'download progress needs an app-owned persisted schema')
@@ -125,7 +236,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
     async def test_reinstall_retry_reuses_completed_engines_and_keeps_unfinished_intent(self) -> None:
         status = await catalog.inventory(self.environment)
         for module in status.modules:
-            if module.id in ('media', 'heartmula', 'stable_audio3'):
+            if module.id in ('media', 'speech', 'stable_audio3'):
                 module.state = 'installed'
                 module.supported = True
                 module.can_reinstall = module.id != 'media'
@@ -138,7 +249,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         service = jobs.ModuleJobService(self.environment, installer=installer)
         try:
             with patch.object(catalog, 'inventory', AsyncMock(return_value=status)):
-                reviewed = await catalog.plan(ModulePlanRequest(features=['heartmula', 'stable_audio3'], reinstall=['heartmula', 'stable_audio3']), self.environment)
+                reviewed = await catalog.plan(ModulePlanRequest(features=['speech', 'stable_audio3'], reinstall=['speech', 'stable_audio3']), self.environment)
                 created = await service.create(ModuleInstallRequest(features=reviewed.features, reinstall=reviewed.reinstall, plan_token=reviewed.plan_token))
                 await self.wait_for_terminal(service, created.id)
                 self.assertEqual(service.get(created.id).state, 'failed')
@@ -148,8 +259,8 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
                 await service.resume(created.id)
                 await self.wait_for_terminal(service, created.id)
             self.assertEqual(service.get(created.id).state, 'completed')
-            self.assertEqual(attempts, ['heartmula', 'stable_audio3', 'stable_audio3'])
-            self.assertEqual(service.get(created.id).reinstall, ['heartmula', 'stable_audio3'])
+            self.assertEqual(attempts, ['speech', 'stable_audio3', 'stable_audio3'])
+            self.assertEqual(service.get(created.id).reinstall, ['speech', 'stable_audio3'])
             self.assertEqual(service.store.read(created.id).plan.reinstall, ['stable_audio3'])
         finally:
             await service.shutdown()
@@ -218,7 +329,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         started, release = asyncio.Event(), asyncio.Event()
         async def installer(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
             context.update_download(ModuleDownloadProgress(artifact_name='model.safetensors', bytes_received=10, total_bytes=10, attempt=1, max_attempts=3, phase='complete'))
-            context.update_detail('Converting verified HeartMuLa weights for this Mac.')
+            context.update_detail('Verifying installed music weights.')
             started.set()
             await release.wait()
             return jobs.InstallOutcome('verified', 'Automatic setup complete.')
@@ -227,7 +338,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         try:
             await asyncio.wait_for(started.wait(), 2)
             other = jobs.ModuleJobService(self.environment).get(created.id)
-            self.assertEqual(other.steps[0].detail, 'Converting verified HeartMuLa weights for this Mac.')
+            self.assertEqual(other.steps[0].detail, 'Verifying installed music weights.')
             self.assertIsNone(other.steps[0].download)
             self.assertEqual(other.state, 'running')
         finally:
@@ -281,7 +392,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_failure_preserves_phase_and_safe_recovery_across_readers(self) -> None:
         async def installer(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
-            context.update_detail('Converting HeartMuLa weights to MLX bfloat16.')
+            context.update_detail('Verifying installed music weights.')
             raise jobs.ModuleSetupError('artifact_integrity')
         service = jobs.ModuleJobService(self.environment, installer=installer)
         try:
@@ -289,7 +400,7 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
             await self.wait_for_terminal(service, created.id)
             failed = jobs.ModuleJobService(self.environment).get(created.id)
             step = failed.steps[0]
-            self.assertEqual(step.detail, 'Converting HeartMuLa weights to MLX bfloat16.')
+            self.assertEqual(step.detail, 'Verifying installed music weights.')
             self.assertIsNotNone(step.failure)
             assert step.failure is not None
             self.assertEqual(step.failure.code, 'artifact_integrity')

@@ -1,8 +1,8 @@
 """Bounded app-owned dataset catalog and recoverable LoRA workspace contracts."""
 from __future__ import annotations
 
-from typing import Literal
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from typing import Annotated, Literal, Self
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from .contracts import Contract
 
 
@@ -12,6 +12,25 @@ class DatasetContract(Contract):
 
 class LoraDatasetRevision(DatasetContract):
     revision: int = Field(ge=0, le=9007199254740991)
+
+
+class LoraDatasetRecordRevision(LoraDatasetRevision):
+    id: str = Field(pattern=r'^[0-9a-f]{32}$')
+    revision: int = Field(ge=0, le=9007199254740991, strict=True)
+
+
+class RemoveLoraDatasetRecordsRequest(DatasetContract):
+    records: list[LoraDatasetRecordRevision] = Field(min_length=1, max_length=10000)
+
+    @model_validator(mode='after')
+    def unique_records(self) -> Self:
+        if len({record.id for record in self.records}) != len(self.records):
+            raise ValueError('dataset_records_duplicate')
+        return self
+
+
+class RemoveLoraDatasetRecordsResponse(DatasetContract):
+    removed_ids: list[Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]] = Field(max_length=10000)
 
 
 class CreateLoraDatasetRequest(DatasetContract):
@@ -195,6 +214,7 @@ class LoraDatasetTaskStarted(DatasetContract):
 
 LORA_DATASET_CLIENT_MODELS: list[type[BaseModel]] = [
     LoraDatasetRevision, CreateLoraDatasetRequest, RenameLoraDatasetRequest,
+    LoraDatasetRecordRevision, RemoveLoraDatasetRecordsRequest, RemoveLoraDatasetRecordsResponse,
     LoraDatasetEntry, LoraDatasetIssue, LoraDatasetsResponse, LoraWorkspaceForm,
     LoraObservedTask, LoraPreprocessReceipt, LoraWorkspace, ScanLoraDatasetRequest,
     SaveLoraDatasetRequest, LoraDatasetSample, LoraDatasetMetadata, LoraDatasetOperationResponse,

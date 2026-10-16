@@ -3,7 +3,7 @@ import { parseYueJobResponse, parseYueJobsResponse, parseYueSubmitRequest, parse
 import type { YueJobResponse, YueSubmitRequest, YueOptions } from './contracts'
 import type { GenerateOptions } from './yue2'
 export function completeYueOptions(options: GenerateOptions): YueOptions {
-  return parseYueOptions({ cfg_scale: null, num_inference_steps: 8, abc: null,
+  return parseYueOptions({ cfg_scale: null, num_inference_steps: 8, abc: null, bpm: null, key_scale: null, time_signature: null,
     semantic_temperature: null, semantic_top_p: null, semantic_top_k: null, semantic_repetition_penalty: null,
     semantic_penalty_window: null, semantic_min_tokens: null, semantic_max_tokens: null,
     abc_temperature: null, abc_top_p: null, abc_top_k: null, abc_repetition_penalty: null,

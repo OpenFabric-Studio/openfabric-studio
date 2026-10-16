@@ -42,7 +42,7 @@ class ModelArtifact(BaseModel):
         return value
 
 
-BundleId = Literal['ace-main', 'ace-xl', 'ace-lm4b', 'heartmula', 'heartcodec', 'heart-tokenizer', 'stable-small', 'stable-medium', 'stable-small-training', 'stable-medium-training']
+BundleId = Literal['ace-main', 'ace-xl', 'ace-lm4b', 'stable-small', 'stable-medium', 'stable-small-training', 'stable-medium-training']
 
 
 class ModelManifest(BaseModel):
@@ -69,8 +69,7 @@ _json = TypeAdapter(JsonObject)
 _header = TypeAdapter(dict[str, _Tensor | dict[str, str] | None])
 _DTYPE_BYTES = {'F16': 2, 'BF16': 2, 'F32': 4, 'F64': 8, 'I8': 1, 'U8': 1, 'BOOL': 1,
                 'I16': 2, 'U16': 2, 'I32': 4, 'U32': 4, 'I64': 8, 'U64': 8}
-_HEART_OUTPUTS = ('ckpt-mlx/heartmula/config.json', 'ckpt-mlx/heartmula/model.safetensors',
-                  'ckpt-mlx/heartcodec/config.json', 'ckpt-mlx/heartcodec/model.safetensors', 'ckpt/tokenizer.json')
+
 
 
 def manifest_path() -> Path:
@@ -197,6 +196,26 @@ def stable_training_artifacts(variant: StableLoraVariant) -> list[ModelArtifact]
     return artifacts
 
 
+def stable_generation_artifacts(variant: StableLoraVariant) -> list[ModelArtifact]:
+    from .module_jobs import ModuleSetupError
+    bundle: BundleId = 'stable-medium' if variant == 'medium' else 'stable-small'
+    artifacts = _manifest().bundles.get(bundle, [])
+    if len(artifacts) != 3:
+        raise ModuleSetupError('artifact_integrity')
+    return artifacts
+
+
+async def setup_stable_generation_models(context: InstallContext, variant: StableLoraVariant) -> InstallOutcome:
+    from .module_jobs import InstallOutcome, ModuleSetupError
+    artifacts = stable_generation_artifacts(variant)
+    root = context.environment.paths['stable_audio3']
+    _preflight(root, [item.path for item in artifacts])
+    await _install_artifacts(context, 'stable_audio3', artifacts)
+    if not _all_valid(root, [item.path for item in artifacts]):
+        raise ModuleSetupError('artifact_integrity')
+    return InstallOutcome('verified', 'Selected generation model, matching audio decoder and text encoder passed structural checks. Audio generation and GPU compatibility remain unverified.')
+
+
 async def setup_stable_training_models(context: InstallContext, variant: StableLoraVariant) -> InstallOutcome:
     from .module_jobs import InstallOutcome, ModuleSetupError
     artifacts = stable_training_artifacts(variant)
@@ -211,12 +230,6 @@ async def setup_stable_training_models(context: InstallContext, variant: StableL
 def _required_artifacts(environment: ModuleEnvironment, identifier: ModuleId) -> list[ModelArtifact]:
     from .module_jobs import ModuleSetupError
     manifest = _manifest()
-    if identifier == 'heartmula':
-        bundles: tuple[BundleId, ...] = ('heartmula', 'heartcodec', 'heart-tokenizer')
-        root = environment.paths[identifier]
-        return [item for bundle in bundles
-                if bundle == 'heart-tokenizer' or not _all_valid(root, (f'ckpt-mlx/{bundle}/config.json', f'ckpt-mlx/{bundle}/model.safetensors'))
-                for item in manifest.bundles.get(bundle, [])]
     if identifier == 'stable_audio3':
         medium = manifest.bundles.get('stable-medium', [])
         bundle: BundleId = 'stable-medium' if _all_valid(environment.paths[identifier], [item.path for item in medium]) else 'stable-small'
@@ -239,7 +252,7 @@ def _required_artifacts(environment: ModuleEnvironment, identifier: ModuleId) ->
 def music_models_present(environment: ModuleEnvironment, identifier: ModuleId) -> bool:
     from .module_jobs import ModuleSetupError
     try:
-        paths = list(_HEART_OUTPUTS) if identifier == 'heartmula' else [item.path for item in _required_artifacts(environment, identifier)]
+        paths = [item.path for item in _required_artifacts(environment, identifier)]
         return _all_valid(environment.paths[identifier], paths)
     except (OSError, ModuleSetupError):
         return False
@@ -257,21 +270,12 @@ def model_download_bytes(environment: ModuleEnvironment, identifier: ModuleId) -
         return None
 
 
-def conversion_required_bytes(environment: ModuleEnvironment, identifier: ModuleId) -> int:
-    """Reserve conversion staging and publication even when originals already exist."""
-    if identifier != 'heartmula' or music_models_present(environment, identifier):
-        return 0
-    return 2 * sum(item.bytes for item in _required_artifacts(environment, identifier) if item.path.endswith('.safetensors'))
-
-
 def model_directories(environment: ModuleEnvironment, identifier: ModuleId) -> tuple[Path, ...]:
     """Include nested model destinations so disk admission sees mounted directories."""
     from .module_jobs import ModuleSetupError
     root = environment.paths[identifier].expanduser().resolve()
     try:
         paths = [item.path for item in _required_artifacts(environment, identifier)]
-        if identifier == 'heartmula':
-            paths.extend(_HEART_OUTPUTS)
         return tuple(dict.fromkeys([root, *(_path(root, relative).parent for relative in paths)]))
     except (OSError, ModuleSetupError):
         return (root,)
@@ -340,39 +344,6 @@ async def _install_artifacts(context: InstallContext, identifier: ModuleId, arti
         await await_cleanup(asyncio.to_thread(_publish, cached, root, item.path))
 
 
-async def _convert_heart(context: InstallContext) -> None:
-    from .module_catalog import engine_python
-    from .module_jobs import ModuleSetupError
-    root = context.environment.paths['heartmula']
-    staging = context.confined(context.workspace / ('heart-convert-' + uuid.uuid4().hex))
-    try:
-        for kind, original in (('heartmula', 'HeartMuLa-oss-3B'), ('heartcodec', 'HeartCodec-oss-20260123')):
-            output = ('ckpt-mlx/' + kind + '/config.json', 'ckpt-mlx/' + kind + '/model.safetensors')
-            if _all_valid(root, output):
-                continue
-            context.update_detail('Converting ' + kind + ' weights to MLX bfloat16.')
-            destination = context.confined(staging / kind)
-            child_env = {**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1'}
-            await context.run([str(engine_python(root, context.environment.platform)), '-m', 'heartlib_mlx.utils.convert',
-                '--src', str(_path(root, 'ckpt/' + original)), '--dst', str(destination),
-                '--model-type', kind, '--dtype', 'bfloat16'], cwd=root, env=child_env)
-            context.update_detail('Verifying converted ' + kind + ' configuration and tensor data.')
-            pending: list[tuple[Path, str]] = []
-            for relative in output:
-                converted = context.confined(destination / Path(relative).name)
-                if not _valid_file(converted):
-                    raise ModuleSetupError('artifact_integrity')
-                pending.append((converted, relative))
-            # Preserve completed components if the next conversion fails.
-            for source, relative in pending:
-                if not _valid_file(_path(root, relative)):
-                    await await_cleanup(asyncio.to_thread(_publish, source, root, relative))
-    finally:
-        # A failed descendant drain retains the worker and its scratch ownership.
-        if staging.exists() and context.identifier not in context.service.processes:
-            await await_cleanup(asyncio.to_thread(shutil.rmtree, staging))
-
-
 async def setup_music_models(context: InstallContext, identifier: ModuleId, download_models: bool) -> InstallOutcome:
     from .module_jobs import InstallOutcome, ModuleSetupError
     if music_models_present(context.environment, identifier):
@@ -389,11 +360,7 @@ async def setup_music_models(context: InstallContext, identifier: ModuleId, down
         raise ModuleSetupError('artifact_integrity')
     root = context.environment.paths[identifier]
     _preflight(root, [item.path for item in artifacts])
-    if identifier == 'heartmula':
-        _preflight(root, _HEART_OUTPUTS)
     await _install_artifacts(context, identifier, artifacts)
-    if identifier == 'heartmula':
-        await _convert_heart(context)
     if not music_models_present(context.environment, identifier):
         raise ModuleSetupError('artifact_integrity')
     return InstallOutcome('verified', 'Required local models are installed and structurally checked. Audio generation and GPU compatibility remain unverified.')

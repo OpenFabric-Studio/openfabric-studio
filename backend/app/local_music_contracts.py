@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .contracts import Contract, SavedTrack
 from .music_lora_contracts import MusicAdapter, MusicAdapterSelection
 
-LocalMusicEngineId = Literal['heartmula', 'stable_audio3']
+LocalMusicEngineId = Literal['stable_audio3']
 
 
 class LocalMusicError(Exception):
@@ -26,6 +26,7 @@ class LocalMusicRequest(Contract):
     title: str = Field(default='', max_length=500)
     prompt: str = Field(min_length=1, max_length=4000)
     lyrics: str = Field(default='', max_length=20000)
+    settings_mode: Literal['manual'] = 'manual'  # Retained for saved Stable Audio requests.
     duration_seconds: int = Field(ge=5, le=380, strict=True)
     seed: int = Field(default=0, ge=0, le=2147483647, strict=True)
     variant: Literal['small-music', 'medium'] = 'small-music'
@@ -35,15 +36,10 @@ class LocalMusicRequest(Contract):
     def validate_engine_inputs(self) -> Self:
         if not self.prompt.strip():
             raise ValueError('music_prompt_required')
-        if self.engine == 'heartmula' and self.duration_seconds > 240:
-            raise ValueError('heartmula_duration_invalid')
-        if self.engine == 'heartmula' and self.variant != 'small-music':
-            raise ValueError('heartmula_variant_invalid')
-        if self.engine == 'stable_audio3':
-            if self.lyrics.strip():
-                raise ValueError('stable_audio3_instrumental_only')
-            if self.variant == 'small-music' and self.duration_seconds > 120:
-                raise ValueError('stable_audio3_duration_invalid')
+        if self.lyrics.strip():
+            raise ValueError('stable_audio3_instrumental_only')
+        if self.duration_seconds > (120 if self.variant == 'small-music' else 380):
+            raise ValueError('stable_audio3_duration_invalid')
         return self
 
 
@@ -51,9 +47,10 @@ class LocalMusicEngineStatus(Contract):
     id: LocalMusicEngineId
     installed: bool
     weights_ready: bool
+    small_weights_ready: bool = False
+    medium_weights_ready: bool = False
     supported: bool
     runtime: str
-    adapter_runtime_ready: bool = False
     detail: str
 
 

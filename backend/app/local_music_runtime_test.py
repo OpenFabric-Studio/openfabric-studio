@@ -24,10 +24,8 @@ class LocalMusicRuntimeTests(unittest.TestCase):
         self.env = ModuleEnvironment.for_root(self.root, platform='darwin', architecture='arm64')
 
     def weights(self, engine: str, variant: str = 'small-music') -> None:
-        directory = self.env.paths['heartmula' if engine == 'heartmula' else 'stable_audio3']
-        names = ('ckpt-mlx/heartmula/config.json', 'ckpt-mlx/heartmula/model.safetensors',
-                 'ckpt-mlx/heartcodec/config.json', 'ckpt-mlx/heartcodec/model.safetensors', 'ckpt/tokenizer.json') if engine == 'heartmula' else (
-            'optimized/mlx/models/mlx/t5gemma_f16.npz',
+        directory = self.env.paths['stable_audio3']
+        names = ('optimized/mlx/models/mlx/t5gemma_f16.npz',
             'optimized/mlx/models/mlx/dit_sm-music_f16.npz' if variant == 'small-music' else 'optimized/mlx/models/mlx/dit_medium_f16.npz',
             'optimized/mlx/models/mlx/same_s_decoder_f32.npz' if variant == 'small-music' else 'optimized/mlx/models/mlx/same_l_decoder_f32.npz')
         for name in names:
@@ -37,14 +35,14 @@ class LocalMusicRuntimeTests(unittest.TestCase):
 
     def test_status_never_installs_or_downloads_and_requires_verified_environment(self) -> None:
         result = runtime.engine_status(self.env)
-        self.assertEqual([item.id for item in result.engines], ['heartmula', 'stable_audio3'])
+        self.assertEqual([item.id for item in result.engines], ['stable_audio3'])
         self.assertFalse(any(item.installed or item.weights_ready for item in result.engines))
         self.assertEqual(list(self.root.iterdir()), [])
-        self.weights('heartmula')
+        self.weights('stable_audio3')
         with patch.object(runtime, 'environment_verified', return_value=False):
-            heart = runtime.engine_status(self.env).engines[0]
-        self.assertTrue(heart.weights_ready)
-        self.assertFalse(heart.installed)
+            stable = runtime.engine_status(self.env).engines[0]
+        self.assertTrue(stable.weights_ready)
+        self.assertFalse(stable.installed)
 
     def test_selected_stable_variant_must_have_all_its_weights(self) -> None:
         self.weights('stable_audio3')
@@ -54,19 +52,23 @@ class LocalMusicRuntimeTests(unittest.TestCase):
                 runtime.prepare_worker(request, self.root / 'job/output.wav')
         self.assertEqual(caught.exception.code, 'local_music_weights_missing')
 
-    def test_heart_uses_explicit_checkpoint_and_keeps_seed_in_worker_spec(self) -> None:
-        self.weights('heartmula')
-        output = self.root / 'job/output.wav'
-        output.parent.mkdir()
-        request = LocalMusicRequest(engine='heartmula', prompt='-piano,pop', lyrics='[Verse]\nHello', duration_seconds=10, seed=73)
-        with patch.object(runtime, 'configured_environment', return_value=self.env), patch.object(runtime, 'environment_verified', return_value=True):
-            argv, cwd, _env = runtime.prepare_worker(request, output)
-        payload = json.loads((output.parent / 'request.json').read_text())
-        self.assertEqual(payload['seed'], 73)
-        self.assertIn('--tags=-piano,pop', payload['argv'])
-        self.assertIn('--lyrics=[Verse]\nHello', payload['argv'])
-        self.assertIn(str(cwd / 'ckpt-mlx'), payload['argv'])
-        self.assertNotIn(request.prompt, argv)
+    def test_stable_status_reports_each_generation_variant_separately(self) -> None:
+        self.weights('stable_audio3')
+        with patch.object(runtime, 'environment_verified', return_value=True):
+            status = runtime.engine_status(self.env).engines[0]
+        self.assertTrue(status.weights_ready)
+        self.assertTrue(status.model_dump().get('small_weights_ready'))
+        self.assertFalse(status.model_dump().get('medium_weights_ready'))
+        from app.stable_lora_runtime import training_weights
+        for path in training_weights(self.env, 'medium'):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'training weights')
+        with patch.object(runtime, 'environment_verified', return_value=True):
+            self.assertFalse(runtime.engine_status(self.env).engines[0].model_dump().get('medium_weights_ready'))
+        self.weights('stable_audio3', 'medium')
+        with patch.object(runtime, 'environment_verified', return_value=True):
+            self.assertTrue(runtime.engine_status(self.env).engines[0].model_dump().get('medium_weights_ready'))
+
 
     def test_command_uses_offline_env_real_cli_flags_and_keeps_text_out_of_process_arguments(self) -> None:
         self.weights('stable_audio3')
@@ -78,6 +80,7 @@ class LocalMusicRuntimeTests(unittest.TestCase):
         self.assertNotIn(request.prompt, argv)
         self.assertEqual(env['HF_HUB_OFFLINE'], '1')
         self.assertEqual(env['TRANSFORMERS_OFFLINE'], '1')
+        self.assertEqual(env.get('PYTHONUNBUFFERED'), '1')
         payload = json.loads((output.parent / 'request.json').read_text())
         self.assertIn('--dit', payload['argv'])
         self.assertIn('sm-music', payload['argv'])
@@ -96,23 +99,6 @@ class LocalMusicRuntimeTests(unittest.TestCase):
         command = json.loads((output.parent / 'request.json').read_text())['argv']
         self.assertEqual(command[command.index('--lora') + 1:][-2:], [str(adapter), 'strength=0.7'])
 
-    def test_heart_adapter_uses_its_training_runtime_and_own_seed_without_requiring_mlx(self) -> None:
-        from app.music_training_contracts import MusicLoraTrainingStatus
-        output = self.root / 'job/output.wav'; output.parent.mkdir()
-        request = LocalMusicRequest(engine='heartmula', prompt='Gentle piano', duration_seconds=5,
-            adapter={'id': 'a' * 32, 'strength': 0.7})
-        adapter = self.root / 'managed.safetensors'
-        trainer = self.root / 'trainer/bin/python'
-        command = ['/reviewed/heart_lora_worker.py', '--mode', 'generate', '--request', '/private/inference.json']
-        status = MusicLoraTrainingStatus(engine='heartmula', supported=True, installed=True, weights_ready=True)
-        with patch.object(runtime, 'configured_environment', return_value=self.env), patch('app.music_lora.resolve', return_value=adapter) as resolve, \
-             patch('app.heart_lora_runtime.status', return_value=status), patch('app.heart_lora_runtime.generation_command', return_value=(command, trainer)):
-            argv, _cwd, _env = runtime.prepare_worker(request, output)
-        resolve.assert_called_once_with(request.adapter, engine='heartmula', target='heartmula-3b')
-        self.assertEqual(argv[0], str(trainer))
-        payload = json.loads((output.parent / 'request.json').read_text())
-        self.assertEqual(payload['argv'], command)
-        self.assertIsNone(payload['seed'])
 
     def test_worker_runs_native_cli_then_normalizes_pcm_without_model_packages(self) -> None:
         root = self.root / 'fake-engine'
@@ -156,7 +142,7 @@ class LocalMusicRuntimeTests(unittest.TestCase):
         raw = self.root / 'raw.wav'
         output = self.root / 'output.wav'
         script.write_text('import sys, wave\nwith wave.open(sys.argv[1], "wb") as audio:\n audio.setnchannels(1); audio.setsampwidth(2); audio.setframerate(8000); audio.writeframes(b"\\0\\0" * 800)\n')
-        command = WorkerCommand([str(script), str(raw)], root, raw, output, runtime.tool('ffmpeg'), None)
+        command = WorkerCommand([str(script), str(raw)], root, raw, output, runtime.tool('ffmpeg'))
         original_cwd, original_argv, original_path = Path.cwd(), sys.argv.copy(), sys.path.copy()
         try:
             with patch.object(Path, 'unlink', side_effect=PermissionError('raw file locked')):

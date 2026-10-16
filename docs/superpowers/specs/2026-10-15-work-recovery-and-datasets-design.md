@@ -1,5 +1,7 @@
 # Work recovery and saved LoRA datasets
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 Status: approved by the maintainer on 2026-10-15. Implementation is authorized;
 a follow-up request on the same date authorizes committing and pushing the feature branch.
 
@@ -84,14 +86,20 @@ saved or active state. Keep advanced folder import available.
 - Discover valid existing dataset JSON files within the configured ACE datasets
   root. Selecting an existing dataset loads its saved metadata/captions; it does
   not rescan and reset labels. Surface malformed/unavailable entries safely.
+  Training manifests, adapter configurations and caption sidecars are not dataset
+  records. Unreadable dataset warnings include the filename and a safe reason.
 - New datasets receive stable backend identifiers and owned storage. Display
   names can change without moving audio, tensors or checkpoint paths.
 - Rename updates metadata atomically and rejects conflicting names. Changes
   carry revisions so another tab cannot silently overwrite a newer edit.
 - Delete marks the dataset as recoverable logical trash, with Restore. Keep its
   JSON and audio in place, preserving shared references and existing tensor
-  paths. There is no permanent deletion endpoint. Reject traversal, absolute
-  identifiers and symlink escapes.
+  paths. The October 16 follow-up adds **Remove record** and **Clear trash
+  records**, with explicit confirmation of the named records. These permanently
+  forget only the revision-checked catalog records; audio, labels, tensors and
+  adapters stay on disk. Persist excluded dataset paths so discovery cannot
+  recreate cleared records. There is no file deletion endpoint. Reject traversal,
+  absolute identifiers and symlink escapes.
 - Block conflicting load/rename/delete/scan operations while that dataset is in
   use. Uploading/rescanning an existing dataset must preserve labels/manual edits
   for unchanged sources rather than silently rebuilding an empty dataset.

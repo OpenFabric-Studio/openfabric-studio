@@ -26,7 +26,14 @@ it('selects a saved snapshot without loading or changing the native dataset buil
   expect(selected).toHaveBeenCalledWith(snapshot)
 })
 it('keeps dataset identity and revision while separating model-specific captions and lyrics', () => {
-  const samples = savedTrainingSamples(snapshot, 'heartmula', 100)
+  const samples = savedTrainingSamples(snapshot, 'yue2', 100)
   expect(samples).toEqual([{ dataset: { dataset_id: dataset.id, revision: 7, sample_id: 'old-clip' }, title: 'piano.wav', caption: 'Warm piano', instrumental: true, lyrics: '' }])
   expect(savedTrainingSamples(snapshot, 'yue2', 0)).toEqual([])
+})
+
+it('preserves reviewed YuE lyrics without attaching them to an instrumental sample', () => {
+  const vocal = parseLoraDatasetOperationResponse({ dataset, samples: [{ id: 'verse', filename: 'verse.wav', caption: 'Folk singing', labeled: true, is_instrumental: false, raw_lyrics: 'Only these words' }], metadata: {} })
+  expect(savedTrainingSamples(vocal, 'yue2', 100)[0]).toMatchObject({ lyrics: 'Only these words', instrumental: false })
+  expect(savedTrainingSamples(snapshot, 'yue2', 100)[0]).toMatchObject({ lyrics: '', instrumental: true })
+  expect(savedTrainingSamples(vocal, 'stable_audio3', 100)[0]).toMatchObject({ lyrics: '' })
 })

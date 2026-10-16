@@ -19,7 +19,7 @@ from .module_runtime import RuntimeEvidence, RuntimeTarget, runtime_status
 from .music_lora_contracts import MusicAdapter, MusicLoraError
 from .music_queue_contracts import (
     MusicQueueAceRequest, MusicQueueAdjustment, MusicQueueBrief, MusicQueueCatalog,
-    MusicQueueEngine, MusicQueueEngineSelection, MusicQueueHeartRequest, MusicQueueModelPlan,
+    MusicQueueEngine, MusicQueueEngineSelection, MusicQueueModelPlan,
     MusicQueueNormalizedItem, MusicQueuePayload, MusicQueuePreview, MusicQueuePreviewRequest,
     MusicQueueReadiness, MusicQueueStableRequest, MusicQueueYueRequest,
 )
@@ -27,7 +27,7 @@ from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .yue_contracts import YueOptions, YueSubmitRequest
 
-ENGINES: tuple[MusicQueueEngine, ...] = ('ace_step', 'yue2', 'heartmula', 'stable_audio3')
+ENGINES: tuple[MusicQueueEngine, ...] = ('ace_step', 'yue2', 'stable_audio3')
 _WEIGHT_NAMES = ('model.safetensors', 'pytorch_model.bin', 'diffusion_pytorch_model.safetensors',
                  'diffusion_pytorch_model.bin')
 
@@ -189,8 +189,6 @@ def _payload(brief: MusicQueueBrief, selection: MusicQueueEngineSelection, durat
     request = LocalMusicRequest(engine=selection.engine, title=brief.title, prompt=prompt, lyrics=brief.lyrics,
         duration_seconds=duration if duration is not None else brief.duration_seconds,
         seed=0, variant=selection.variant, adapter=selection.adapter)
-    if selection.engine == 'heartmula':
-        return MusicQueueHeartRequest(engine='heartmula', request=request)
     return MusicQueueStableRequest(engine='stable_audio3', request=request)
 
 
@@ -208,9 +206,8 @@ async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironm
             readiness.weights_ready = False
             readiness.ready = False
             readiness.error_code = 'music_queue_weights_missing'
-        mode: Literal['target', 'maximum', 'model_led'] = ('model_led' if selection.engine == 'yue2' else
-            'maximum' if selection.engine == 'heartmula' else 'target')
-        cap = 300 if selection.engine == 'ace_step' else 240 if selection.engine == 'heartmula' else 120 if selection.variant == 'small-music' else 380
+        mode: Literal['target', 'model_led'] = 'model_led' if selection.engine == 'yue2' else 'target'
+        cap = 300 if selection.engine == 'ace_step' else 120 if selection.variant == 'small-music' else 380
         duration = None if selection.engine == 'yue2' else min(brief.duration_seconds, cap)
         error = ('music_queue_yue_vocals_required' if selection.engine == 'yue2' and brief.instrumental else
                  'music_queue_yue_lyrics_required' if selection.engine == 'yue2' and not brief.lyrics.strip() else
@@ -220,10 +217,8 @@ async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironm
         if duration is not None and duration != brief.duration_seconds:
             model.adjustments.append(MusicQueueAdjustment(field='duration_seconds', code='music_queue_duration_clamped',
                 requested=str(brief.duration_seconds), effective=str(duration)))
-        if selection.engine in ('heartmula', 'stable_audio3'):
+        if selection.engine == 'stable_audio3':
             model.warnings.append('music_queue_one_shot_reload')
-        if selection.engine == 'heartmula':
-            model.warnings.append('music_queue_heart_duration_maximum')
         if selection.engine == 'yue2':
             model.warnings.append('music_queue_yue_model_led_duration')
         if not error:

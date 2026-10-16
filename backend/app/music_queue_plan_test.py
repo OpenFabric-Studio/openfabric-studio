@@ -22,13 +22,13 @@ from app.orchestrator.state import ModelRuntimeState, ModelStatus
 def ready_catalog() -> MusicQueueCatalog:
     return MusicQueueCatalog(engines=[MusicQueueReadiness(engine=engine, supported=True,
         installed=True, weights_ready=True, managed_status='stopped', ready=True)
-        for engine in ('ace_step', 'yue2', 'heartmula', 'stable_audio3')], adapters=[])
+        for engine in ('ace_step', 'yue2', 'stable_audio3')], adapters=[])
 
 
 class MusicQueueContractTests(unittest.TestCase):
     def test_brief_and_selections_reject_unbounded_or_inconsistent_input(self) -> None:
         for update in ({'description': ' '}, {'title': 'x' * 121}, {'description': 'x' * 3501},
-                       {'lyrics': 'x' * 20001}, {'duration_seconds': 9}, {'duration_seconds': 381},
+                       {'lyrics': 'x' * 20001}, {'duration_seconds': 9}, {'duration_seconds': 601},
                        {'duration_seconds': True}, {'bpm': 19}, {'bpm': 301}, {'bpm': True},
                        {'key': 'x' * 81}, {'language': 'x' * 81}, {'instrumental': True, 'lyrics': 'Keep me'},
                        {'output_path': '/tmp/unsafe.wav'}):
@@ -105,11 +105,7 @@ class MusicQueuePlanTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.can_enqueue)
             self.assertIn(result.models[0].error_code, ('music_queue_yue_lyrics_required', 'music_queue_yue_vocals_required'))
 
-    async def test_local_duration_limits_are_visible_and_heart_is_only_a_maximum(self) -> None:
-        result = await music_queue_plan.preview(self.request(MusicQueueEngineSelection(engine='heartmula')))
-        self.assertEqual(result.models[0].effective_duration_seconds, 240)
-        self.assertEqual(result.models[0].duration_mode, 'maximum')
-        self.assertIn('music_queue_one_shot_reload', result.models[0].warnings)
+    async def test_local_duration_limits_are_visible(self) -> None:
         for variant, seconds in (('small-music', 120), ('medium', 350)):
             request = self.request(MusicQueueEngineSelection.model_validate({'engine': 'stable_audio3', 'variant': variant}),
                 instrumental=True, lyrics='')
@@ -118,9 +114,25 @@ class MusicQueuePlanTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result.models[0].effective_duration_seconds, seconds)
             self.assertEqual(result.items[0].payload.request.seed, 0)
 
+    async def test_six_hundred_second_brief_preserves_each_engine_duration_limit(self) -> None:
+        for variant, stable_limit in (('small-music', 120), ('medium', 380)):
+            with self.subTest(variant=variant):
+                result = await music_queue_plan.preview(self.request(
+                    MusicQueueEngineSelection(engine='ace_step'),
+                    MusicQueueEngineSelection.model_validate({'engine': 'stable_audio3', 'variant': variant}),
+                    duration_seconds=600, instrumental=True, lyrics=''))
+                self.assertTrue(result.can_enqueue)
+                self.assertEqual(result.brief.duration_seconds, 600)
+                self.assertEqual([model.effective_duration_seconds for model in result.models], [300, stable_limit])
+                ace, stable = (item.payload for item in result.items)
+                if ace.engine != 'ace_step' or stable.engine != 'stable_audio3':
+                    self.fail('Unexpected engine payload')
+                self.assertEqual(ace.request.duration, 300)
+                self.assertEqual(stable.request.duration_seconds, stable_limit)
+
     async def test_assembled_prompt_overflow_is_rejected_without_truncation(self) -> None:
         with patch.object(music_queue_plan, '_directions', return_value='x' * 4001):
-            result = await music_queue_plan.preview(self.request(MusicQueueEngineSelection(engine='heartmula')))
+            result = await music_queue_plan.preview(self.request(MusicQueueEngineSelection(engine='stable_audio3'), instrumental=True, lyrics=''))
         self.assertFalse(result.can_enqueue)
         self.assertEqual(result.models[0].error_code, 'music_queue_prompt_too_long')
         self.assertEqual(result.brief.description, 'Warm jazz')
@@ -213,7 +225,7 @@ class MusicQueueReadinessTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(music_queue_plan.manager, 'switch_to', new=AsyncMock()) as switch:
                 result = await music_queue_plan.catalog(environment)
             switch.assert_not_awaited()
-        self.assertEqual([item.engine for item in result.engines], ['ace_step', 'yue2', 'heartmula', 'stable_audio3'])
+        self.assertEqual([item.engine for item in result.engines], ['ace_step', 'yue2', 'stable_audio3'])
         self.assertTrue(all(not item.ready for item in result.engines))
         self.assertTrue(all(not item.installed for item in result.engines))
 

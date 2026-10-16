@@ -20,7 +20,7 @@ class MusicTrainingPackageWorkerTests(unittest.TestCase):
             source = root / 'source.wav'
             with wave.open(str(source), 'wb') as output:
                 output.setnchannels(1);output.setsampwidth(2);output.setframerate(8000);output.writeframes(b'\0\0' * 8000)
-            request = MusicLoraTrainingRequest(engine='heartmula', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
+            request = MusicLoraTrainingRequest(engine='yue2', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
             fingerprint = hashlib.sha256(request.model_dump_json(exclude_none=True).encode()).hexdigest()
             path = directory / 'request.json'
             path.write_text(json.dumps({'request': request.model_dump(mode='json', exclude_none=True),
@@ -38,7 +38,7 @@ class MusicTrainingPackageWorkerTests(unittest.TestCase):
     def test_rejects_changed_request_before_copying_any_audio(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary).resolve() / ('4' * 32);directory.mkdir()
-            request = MusicLoraTrainingRequest(engine='heartmula', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
+            request = MusicLoraTrainingRequest(engine='yue2', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
             path = directory / 'request.json'
             path.write_text(json.dumps({'request': request.model_dump(mode='json', exclude_none=True),
                 'request_sha256': '0' * 64, 'sources': [str(directory / 'missing.wav')]}))
@@ -55,7 +55,7 @@ class MusicTrainingPackageWorkerTests(unittest.TestCase):
             source = root / 'source.wav'
             with wave.open(str(source), 'wb') as output:
                 output.setnchannels(1);output.setsampwidth(2);output.setframerate(8000);output.writeframes(b'\0\0' * 8000)
-            request = MusicLoraTrainingRequest(engine='heartmula', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
+            request = MusicLoraTrainingRequest(engine='yue2', name='package', samples=[{'track_id': 1, 'caption': 'synth'}])
             from app.music_training_package import prepare_package
             with patch('zipfile.ZipFile.write', side_effect=SystemExit(143)), self.assertRaises(SystemExit):
                 prepare_package(request, [source], root / 'package.zip')

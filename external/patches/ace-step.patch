@@ -1121,3 +1121,404 @@ new file mode 100644
 +        destination = destination / "lokr_weights.safetensors"
 +    _copy_file(source, destination)
 +    return str(destination)
+diff --git a/acestep/core/generation/handler/init_service_downloads.py b/acestep/core/generation/handler/init_service_downloads.py
+--- a/acestep/core/generation/handler/init_service_downloads.py
++++ b/acestep/core/generation/handler/init_service_downloads.py
+@@ -7,7 +7,6 @@
+ 
+ from acestep.model_downloader import (
+     DEFAULT_VAE_VARIANT,
+-    check_main_model_exists,
+     check_model_exists,
+     check_vae_exists,
+     ensure_dit_model,
+@@ -28,8 +27,9 @@
+         vae_variant: Optional[str] = None,
+     ) -> Optional[Tuple[str, bool]]:
+         """Ensure required checkpoint assets exist locally, downloading when missing."""
+-        if not check_main_model_exists(checkpoint_path):
+-            logger.info("[initialize_service] Main model not found, starting auto-download...")
++        # LLM initialization validates its selected model separately.
++        if not all(check_model_exists(name, checkpoint_path) for name in ("vae", "Qwen3-Embedding-0.6B")):
++            logger.info("[initialize_service] Shared models not found, starting auto-download...")
+             success, msg = ensure_main_model(checkpoint_path, prefer_source=prefer_source)
+             if not success:
+                 return f"ERROR: Failed to download main model: {msg}", False
+diff --git a/acestep/training/dataset_builder_modules/preprocess_audio.py b/acestep/training/dataset_builder_modules/preprocess_audio.py
+--- a/acestep/training/dataset_builder_modules/preprocess_audio.py
++++ b/acestep/training/dataset_builder_modules/preprocess_audio.py
+@@ -1,9 +1,13 @@
++import torch
+ import torchaudio
+ 
++from acestep.core.generation.handler.io_audio import IoAudioMixin, _read_audio_file
+ 
+-def load_audio_stereo(audio_path: str, target_sample_rate: int, max_duration: float):
++
++def load_audio_stereo(audio_path: str, target_sample_rate: int, max_duration: float) -> tuple[torch.Tensor, int]:
+     """Load audio, resample, convert to stereo, and truncate."""
+-    audio, sr = torchaudio.load(audio_path)
++    audio_np, sr = _read_audio_file(audio_path)
++    audio = IoAudioMixin._numpy_to_channels_first(audio_np)
+ 
+     if sr != target_sample_rate:
+         resampler = torchaudio.transforms.Resample(sr, target_sample_rate)
+diff --git a/acestep/training/data_module.py b/acestep/training/data_module.py
+--- a/acestep/training/data_module.py
++++ b/acestep/training/data_module.py
+@@ -14,7 +14,7 @@
+ from acestep.training.path_safety import safe_path
+ 
+ import torch
+-import torchaudio
++from acestep.training.dataset_builder_modules.preprocess_audio import load_audio_stereo
+ from torch.utils.data import Dataset, DataLoader
+ 
+ try:
+@@ -386,23 +386,7 @@
+         sample = self.valid_samples[idx]
+         
+         audio_path = sample["audio_path"]
+-        audio, sr = torchaudio.load(audio_path)
+-        
+-        # Resample to 48kHz
+-        if sr != self.target_sample_rate:
+-            resampler = torchaudio.transforms.Resample(sr, self.target_sample_rate)
+-            audio = resampler(audio)
+-        
+-        # Convert to stereo
+-        if audio.shape[0] == 1:
+-            audio = audio.repeat(2, 1)
+-        elif audio.shape[0] > 2:
+-            audio = audio[:2, :]
+-        
+-        # Truncate/pad
+-        max_samples = int(self.max_duration * self.target_sample_rate)
+-        if audio.shape[1] > max_samples:
+-            audio = audio[:, :max_samples]
++        audio, _ = load_audio_stereo(audio_path, self.target_sample_rate, self.max_duration)
+         
+         min_samples = int(5.0 * self.target_sample_rate)
+         if audio.shape[1] < min_samples:
+diff --git a/acestep/training/trainer.py b/acestep/training/trainer.py
+--- a/acestep/training/trainer.py
++++ b/acestep/training/trainer.py
+@@ -83,8 +83,6 @@
+     """Pick the compute dtype for each accelerator."""
+     if device_type in ("cuda", "xpu"):
+         return torch.bfloat16
+-    if device_type == "mps":
+-        return torch.float16
+     return torch.float32
+ 
+ 
+@@ -92,10 +90,6 @@
+     """Pick Fabric precision plugin setting for each accelerator."""
+     if device_type in ("cuda", "xpu"):
+         return "bf16-mixed"
+-    if device_type == "mps":
+-        # Use AMP on MPS for better throughput. Trainable LoRA parameters are
+-        # explicitly forced to fp32 before optimizer/Fabric setup.
+-        return "16-mixed"
+     return "32-true"
+ 
+ 
+@@ -473,8 +467,8 @@
+         Returns:
+             Loss tensor (float32 for stable backward)
+         """
+-        # Use autocast for mixed precision training (bf16 on CUDA/XPU, fp16 on MPS)
+-        if self.device_type in ("cuda", "xpu", "mps"):
++        # Use bf16 autocast on CUDA/XPU; MPS stays in fp32 to avoid overflow.
++        if self.device_type in ("cuda", "xpu"):
+             autocast_ctx = torch.autocast(
+                 device_type=self.device_type, dtype=self.dtype
+             )
+@@ -741,8 +735,7 @@
+         )
+ 
+         # Keep decoder weights in a stable dtype before optimizer/Fabric setup.
+-        # MPS stays in fp32 weights for stability; computation still uses fp16
+-        # autocast inside training_step.
++        # MPS uses fp32 weights and computation to avoid fp16 overflow.
+         if device_type == "mps" or precision.endswith("-mixed"):
+             self.module.model.decoder = self.module.model.decoder.to(
+                 dtype=torch.float32
+@@ -970,17 +963,7 @@
+                     )
+                     if nonfinite_grads > 0:
+                         optimizer.zero_grad(set_to_none=True)
+-                        yield (
+-                            global_step,
+-                            float("nan"),
+-                            (
+-                                f"⚠️ Non-finite gradients ({nonfinite_grads}/{grad_tensors}); "
+-                                "skipping optimizer step"
+-                            ),
+-                        )
+-                        accumulated_loss = 0.0
+-                        accumulation_step = 0
+-                        continue
++                        raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+ 
+                     self.fabric.clip_gradients(
+                         self.module.model.decoder,
+@@ -1029,16 +1012,7 @@
+                 nonfinite_grads, grad_tensors = _count_nonfinite_grads(trainable_params)
+                 if nonfinite_grads > 0:
+                     optimizer.zero_grad(set_to_none=True)
+-                    yield (
+-                        global_step,
+-                        float("nan"),
+-                        (
+-                            f"⚠️ Non-finite gradients ({nonfinite_grads}/{grad_tensors}); "
+-                            "skipping optimizer remainder step"
+-                        ),
+-                    )
+-                    accumulated_loss = 0.0
+-                    accumulation_step = 0
++                    raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+                 else:
+                     self.fabric.clip_gradients(
+                         self.module.model.decoder,
+@@ -1072,13 +1046,15 @@
+                         f"Epoch {epoch + 1}/{self.training_config.max_epochs}, Step {global_step}, Loss: {avg_loss:.4f}",
+                     )
+ 
+-                    epoch_loss += avg_loss
+-                    num_updates += 1
+-                    accumulated_loss = 0.0
+-                    accumulation_step = 0
++                epoch_loss += avg_loss
++                num_updates += 1
++                accumulated_loss = 0.0
++                accumulation_step = 0
+ 
+             # End of epoch
+             epoch_time = time.time() - epoch_start_time
++            if num_updates == 0:
++                raise RuntimeError("No optimizer updates completed; training stopped before saving an adapter.")
+             avg_epoch_loss = epoch_loss / max(num_updates, 1)
+             if training_state is not None:
+                 if ema_loss is None:
+@@ -1246,6 +1222,9 @@
+                     accumulation_step
+                     >= self.training_config.gradient_accumulation_steps
+                 ):
++                    if _count_nonfinite_grads(trainable_params)[0] > 0:
++                        optimizer.zero_grad(set_to_none=True)
++                        raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+                     torch.nn.utils.clip_grad_norm_(
+                         trainable_params, self.training_config.max_grad_norm
+                     )
+@@ -1268,6 +1247,9 @@
+                     accumulation_step = 0
+ 
+             if accumulation_step > 0:
++                if _count_nonfinite_grads(trainable_params)[0] > 0:
++                    optimizer.zero_grad(set_to_none=True)
++                    raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+                 torch.nn.utils.clip_grad_norm_(
+                     trainable_params, self.training_config.max_grad_norm
+                 )
+@@ -1290,6 +1272,8 @@
+                 accumulation_step = 0
+ 
+             epoch_time = time.time() - epoch_start_time
++            if num_updates == 0:
++                raise RuntimeError("No optimizer updates completed; training stopped before saving an adapter.")
+             avg_epoch_loss = epoch_loss / max(num_updates, 1)
+             yield (
+                 global_step,
+@@ -1362,7 +1346,7 @@
+ 
+     def training_step(self, batch: Dict[str, torch.Tensor]) -> torch.Tensor:
+         """Single LoKr training step."""
+-        if self.device_type in ("cuda", "xpu", "mps"):
++        if self.device_type in ("cuda", "xpu"):
+             autocast_ctx = torch.autocast(
+                 device_type=self.device_type, dtype=self.dtype
+             )
+@@ -1576,7 +1560,6 @@
+         accelerator = (
+             device_type if device_type in ("cuda", "xpu", "mps", "cpu") else "auto"
+         )
+-        manual_nonfinite_check = not precision.endswith("-mixed")
+ 
+         tb_logger = None
+         try:
+@@ -1604,11 +1587,6 @@
+             0.0,
+             f"🚀 Starting training (device: {device_type}, precision: {precision})...",
+         )
+-        if not manual_nonfinite_check:
+-            logger.info(
+-                "LoKr mixed precision detected: disabling pre-unscale non-finite grad checks; "
+-                "relying on AMP/GradScaler handling."
+-            )
+ 
+         if device_type == "mps" or precision.endswith("-mixed"):
+             self.module.model.decoder = self.module.model.decoder.to(
+@@ -1734,33 +1712,22 @@
+                     accumulation_step
+                     >= self.training_config.gradient_accumulation_steps
+                 ):
+-                    if manual_nonfinite_check:
+-                        nonfinite_grads, grad_tensors, nonfinite_details = (
+-                            _count_nonfinite_grads_detailed(
+-                                trainable_params,
+-                                param_name_lookup,
+-                                detail_limit=10,
++                    nonfinite_grads, grad_tensors, nonfinite_details = (
++                        _count_nonfinite_grads_detailed(
++                            trainable_params,
++                            param_name_lookup,
++                            detail_limit=10,
++                        )
++                    )
++                    if nonfinite_grads > 0:
++                        if nonfinite_details:
++                            logger.warning(
++                                f"LoKr non-finite gradients ({nonfinite_grads}/{grad_tensors}) at epoch "
++                                f"{epoch + 1}, step {global_step}. Top offending tensors:\n"
++                                + "\n".join(f"  - {d}" for d in nonfinite_details)
+                             )
+-                        )
+-                        if nonfinite_grads > 0:
+-                            if nonfinite_details:
+-                                logger.warning(
+-                                    f"LoKr non-finite gradients ({nonfinite_grads}/{grad_tensors}) at epoch "
+-                                    f"{epoch + 1}, step {global_step}. Top offending tensors:\n"
+-                                    + "\n".join(f"  - {d}" for d in nonfinite_details)
+-                                )
+-                            optimizer.zero_grad(set_to_none=True)
+-                            yield (
+-                                global_step,
+-                                float("nan"),
+-                                (
+-                                    f"⚠️ Non-finite gradients ({nonfinite_grads}/{grad_tensors}); "
+-                                    "skipping optimizer step (see logs for tensor names)"
+-                                ),
+-                            )
+-                            accumulated_loss = 0.0
+-                            accumulation_step = 0
+-                            continue
++                        optimizer.zero_grad(set_to_none=True)
++                        raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+ 
+                     self.fabric.clip_gradients(
+                         self.module.model.decoder,
+@@ -1795,33 +1762,22 @@
+                     accumulation_step = 0
+ 
+             if accumulation_step > 0:
+-                if manual_nonfinite_check:
+-                    nonfinite_grads, grad_tensors, nonfinite_details = (
+-                        _count_nonfinite_grads_detailed(
+-                            trainable_params,
+-                            param_name_lookup,
+-                            detail_limit=10,
++                nonfinite_grads, grad_tensors, nonfinite_details = (
++                    _count_nonfinite_grads_detailed(
++                        trainable_params,
++                        param_name_lookup,
++                        detail_limit=10,
++                    )
++                )
++                if nonfinite_grads > 0:
++                    if nonfinite_details:
++                        logger.warning(
++                            f"LoKr non-finite remainder gradients ({nonfinite_grads}/{grad_tensors}) at epoch "
++                            f"{epoch + 1}, step {global_step}. Top offending tensors:\n"
++                            + "\n".join(f"  - {d}" for d in nonfinite_details)
+                         )
+-                    )
+-                    if nonfinite_grads > 0:
+-                        if nonfinite_details:
+-                            logger.warning(
+-                                f"LoKr non-finite remainder gradients ({nonfinite_grads}/{grad_tensors}) at epoch "
+-                                f"{epoch + 1}, step {global_step}. Top offending tensors:\n"
+-                                + "\n".join(f"  - {d}" for d in nonfinite_details)
+-                            )
+-                        optimizer.zero_grad(set_to_none=True)
+-                        yield (
+-                            global_step,
+-                            float("nan"),
+-                            (
+-                                f"⚠️ Non-finite gradients ({nonfinite_grads}/{grad_tensors}); "
+-                                "skipping optimizer remainder step (see logs for tensor names)"
+-                            ),
+-                        )
+-                        accumulated_loss = 0.0
+-                        accumulation_step = 0
+-                        continue
++                    optimizer.zero_grad(set_to_none=True)
++                    raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+ 
+                 self.fabric.clip_gradients(
+                     self.module.model.decoder,
+@@ -1855,6 +1811,8 @@
+                 accumulation_step = 0
+ 
+             epoch_time = time.time() - epoch_start_time
++            if num_updates == 0:
++                raise RuntimeError("No optimizer updates completed; training stopped before saving an adapter.")
+             avg_epoch_loss = epoch_loss / max(num_updates, 1)
+ 
+             self.fabric.log("train/epoch_loss", avg_epoch_loss, step=epoch + 1)
+@@ -1981,6 +1939,9 @@
+                     accumulation_step
+                     >= self.training_config.gradient_accumulation_steps
+                 ):
++                    if _count_nonfinite_grads(trainable_params)[0] > 0:
++                        optimizer.zero_grad(set_to_none=True)
++                        raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+                     torch.nn.utils.clip_grad_norm_(
+                         trainable_params, self.training_config.max_grad_norm
+                     )
+@@ -2003,6 +1964,9 @@
+                     accumulation_step = 0
+ 
+             if accumulation_step > 0:
++                if _count_nonfinite_grads(trainable_params)[0] > 0:
++                    optimizer.zero_grad(set_to_none=True)
++                    raise FloatingPointError("Non-finite gradients; training stopped before saving an adapter.")
+                 torch.nn.utils.clip_grad_norm_(
+                     trainable_params, self.training_config.max_grad_norm
+                 )
+@@ -2025,6 +1989,8 @@
+                 accumulation_step = 0
+ 
+             epoch_time = time.time() - epoch_start_time
++            if num_updates == 0:
++                raise RuntimeError("No optimizer updates completed; training stopped before saving an adapter.")
+             avg_epoch_loss = epoch_loss / max(num_updates, 1)
+             yield (
+                 global_step,
+diff --git a/acestep/core/generation/handler/service_generate_execute.py b/acestep/core/generation/handler/service_generate_execute.py
+--- a/acestep/core/generation/handler/service_generate_execute.py
++++ b/acestep/core/generation/handler/service_generate_execute.py
+@@ -167,8 +167,13 @@
+                 self, payload=payload, generate_kwargs=generate_kwargs,
+                 seed_param=seed_param, flow_edit_ctx=flow_edit_ctx,
+             )
++        # The cached MLX decoder is a base-model copy, independent of PyTorch adapters.
++        use_mlx_dit = (
++            self.use_mlx_dit and self.mlx_decoder is not None
++            and not (getattr(self, "lora_loaded", False) and getattr(self, "use_lora", False))
++        )
+         dit_backend = (
+-            "MLX (native)" if (self.use_mlx_dit and self.mlx_decoder is not None) else f"PyTorch ({self.device})"
++            "MLX (native)" if use_mlx_dit else f"PyTorch ({self.device})"
+         )
+         logger.info(f"[service_generate] Generating audio... (DiT backend: {dit_backend})")
+         with torch.inference_mode():
+@@ -194,7 +199,7 @@
+                     precomputed_lm_hints_25Hz=payload["precomputed_lm_hints_25Hz"],
+                 )
+ 
+-                if self.use_mlx_dit and self.mlx_decoder is not None:
++                if use_mlx_dit:
+                     dcw_enabled = generate_kwargs["dcw_enabled"]
+                     if dcw_enabled and generate_kwargs.get("dcw_wavelet", "haar") != "haar":
+                         logger.info(

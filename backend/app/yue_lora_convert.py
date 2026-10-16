@@ -1,4 +1,4 @@
-"""Strict CPU conversion of standard YuE2 NAR LoRA factors from the pinned trainer.
+"""Strict CPU conversion of standard YuE2 planner/acoustic LoRA factors.
 
 The caller must hash the actual training base; trainer metadata has no base identity.
 """
@@ -29,7 +29,7 @@ NATIVE_REVISION = 'f2b4937306daa25f5c78520f3c626ed31495a37a'
 MAX_BYTES = 512 * 1024**2
 MAX_HEADER_BYTES = 4 * 1024**2
 _json: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-_KEY = re.compile(r'diffusion_model\.model\.layers\.(0|[1-9][0-9]*)\.(self_attn\.(?:[qkvo]_proj|qkv_proj)|mlp\.(?:gate|up|down|gate_up)_proj)\.(lora_down\.weight|lora_up\.weight|alpha)')
+_KEY = re.compile(r'(diffusion_model|text_encoders)\.model\.layers\.(0|[1-9][0-9]*)\.(self_attn\.(?:[qkvo]_proj|qkv_proj)|mlp\.(?:gate|up|down|gate_up)_proj)\.(lora_down\.weight|lora_up\.weight|alpha)')
 _DIMENSIONS = {'self_attn.q_proj': (2048, (('self_attn.q_proj', 2048),)),
     'self_attn.k_proj': (2048, (('self_attn.k_proj', 1024),)),
     'self_attn.v_proj': (2048, (('self_attn.v_proj', 1024),)),
@@ -50,13 +50,25 @@ class _Tensor(BaseModel):
 
 class _TrainerInfo(BaseModel):
     model_config = ConfigDict(allow_inf_nan=False)
-    kind: Literal['acoustic']
     rank: Annotated[int, Field(strict=True, ge=1, le=1024)]
     alpha: Annotated[float, Field(strict=True, gt=0, le=65536)]
     targets: Literal['attention', 'attention+mlp', 'mlp']
-    train_acoustic_head: StrictBool
     steps: Annotated[int, Field(strict=True, ge=0, le=100000)] | None = None
     final_loss: Annotated[float, Field(strict=True)] | None = None
+
+
+class _AcousticInfo(_TrainerInfo):
+    kind: Literal['acoustic']
+    train_acoustic_head: StrictBool
+
+
+class _PlannerInfo(_TrainerInfo):
+    kind: Literal['planner']
+    train_abc: StrictBool
+    train_semantic: StrictBool
+
+
+_trainer_info: TypeAdapter[_AcousticInfo | _PlannerInfo] = TypeAdapter(Annotated[_AcousticInfo | _PlannerInfo, Field(discriminator='kind')])
 
 
 def _unique(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -76,7 +88,7 @@ def _object(encoded: bytes | str) -> JsonObject:
     return checked
 
 
-def _load(data: bytes) -> tuple[dict[str, NDArray[np.float32]], _TrainerInfo]:
+def _load(data: bytes, target: Literal['ar', 'nar'] = 'nar') -> tuple[dict[str, NDArray[np.float32]], _AcousticInfo | _PlannerInfo]:
     if not 8 < len(data) <= MAX_BYTES:
         raise ValueError('Invalid checkpoint size')
     length = struct.unpack('<Q', data[:8])[0]
@@ -89,9 +101,12 @@ def _load(data: bytes) -> tuple[dict[str, NDArray[np.float32]], _TrainerInfo]:
     encoded_info = metadata.get('yue2_trainer')
     if not isinstance(encoded_info, str):
         raise ValueError('Trainer metadata required')
-    info = _TrainerInfo.model_validate(_object(encoded_info))
-    if info.train_acoustic_head:
-        raise ValueError('Acoustic head training is unsupported')
+    info = _trainer_info.validate_python(_object(encoded_info))
+    if target == 'nar':
+        if not isinstance(info, _AcousticInfo) or info.train_acoustic_head:
+            raise ValueError('Expected acoustic training without head training')
+    elif not isinstance(info, _PlannerInfo) or not info.train_abc or info.train_semantic:
+        raise ValueError('Expected planner ABC-only training')
     if not 1 <= len(header) <= 28 * 9 * 3 or any(len(name) > 256 for name in header):
         raise ValueError('Invalid tensor count')
     specs = {name: _Tensor.model_validate(spec) for name, spec in header.items()}
@@ -117,13 +132,14 @@ def _load(data: bytes) -> tuple[dict[str, NDArray[np.float32]], _TrainerInfo]:
     return tensors, info
 
 
-def _convert(tensors: dict[str, NDArray[np.float32]], info: _TrainerInfo) -> dict[str, NDArray[np.float32]]:
+def _convert(tensors: dict[str, NDArray[np.float32]], info: _AcousticInfo | _PlannerInfo) -> dict[str, NDArray[np.float32]]:
     groups: dict[tuple[int, str], dict[str, NDArray[np.float32]]] = {}
     for name, tensor in tensors.items():
         match = _KEY.fullmatch(name)
-        if match is None or int(match[1]) >= 28:
-            raise ValueError('Unsupported NAR trainer tensor')
-        layer, projection, factor = int(match[1]), match[2], match[3]
+        prefix = 'diffusion_model' if info.kind == 'acoustic' else 'text_encoders'
+        if match is None or match[1] != prefix or int(match[2]) >= 28:
+            raise ValueError('Unsupported trainer tensor or stage')
+        layer, projection, factor = int(match[2]), match[3], match[4]
         if (info.targets == 'attention' and not projection.startswith('self_attn.')) or (info.targets == 'mlp' and not projection.startswith('mlp.')):
             raise ValueError('Tensor does not match training targets')
         groups.setdefault((layer, projection), {})[factor] = tensor
@@ -139,7 +155,8 @@ def _convert(tensors: dict[str, NDArray[np.float32]], info: _TrainerInfo) -> dic
             raise ValueError('LoRA alpha mismatch')
         offset = 0
         for target, width in splits:
-            prefix = f'layers.{layer}.nar_{target}.'
+            native_target = 'nar_' + target if info.kind == 'acoustic' else target
+            prefix = f'layers.{layer}.{native_target}.'
             if prefix + 'lora_A' in output:
                 raise ValueError('Overlapping fused and unfused projections')
             output[prefix + 'lora_A'] = down
@@ -152,19 +169,28 @@ def _convert(tensors: dict[str, NDArray[np.float32]], info: _TrainerInfo) -> dic
     return output
 
 
-def validate_training_checkpoint(path: Path, *, max_steps: int, rank: int) -> None:
+def validate_training_checkpoint(path: Path, *, max_steps: int, rank: int, target: Literal['ar', 'nar'] = 'nar') -> None:
     """Require a completed run with finite loss and changed initially-zero factors."""
     if path.is_symlink() or not 8 < path.stat().st_size <= MAX_BYTES:
         raise ValueError('Invalid training checkpoint')
     with path.open('rb') as handle:
-        tensors, info = _load(handle.read(MAX_BYTES + 1))
+        tensors, info = _load(handle.read(MAX_BYTES + 1), target)
     if info.steps != max_steps or info.rank != rank or info.final_loss is None:
         raise ValueError('Incomplete training checkpoint')
     if not any(np.any(tensor != 0) for name, tensor in tensors.items() if name.endswith('.lora_down.weight')):
         raise ValueError('Training did not change the initially-zero LoRA factors')
+    _convert(tensors, info)
 
 
 def convert_nar(source: Path, destination: Path, *, base_sha256: str) -> None:
+    _convert_file(source, destination, base_sha256=base_sha256, target='nar')
+
+
+def convert_ar(source: Path, destination: Path, *, base_sha256: str) -> None:
+    _convert_file(source, destination, base_sha256=base_sha256, target='ar')
+
+
+def _convert_file(source: Path, destination: Path, *, base_sha256: str, target: Literal['ar', 'nar']) -> None:
     """Convert a verified run's checkpoint, refusing to replace any destination."""
     if base_sha256 != BASE_SHA256:
         raise ValueError('Training base identity does not match the pinned YuE2 BF16 base')
@@ -176,11 +202,11 @@ def convert_nar(source: Path, destination: Path, *, base_sha256: str) -> None:
         if not 8 < os.fstat(handle.fileno()).st_size <= MAX_BYTES:
             raise ValueError('Invalid checkpoint size')
         data = handle.read(MAX_BYTES + 1)
-    tensors, info = _load(data)
+    tensors, info = _load(data, target)
     converted = _convert(tensors, info)
     provenance = {'base_repository': BASE_REPOSITORY, 'base_revision': BASE_REVISION, 'base_sha256': base_sha256,
         'trainer_revision': TRAINER_REVISION, 'comfy_revision': COMFY_REVISION, 'native_revision': NATIVE_REVISION,
-        'source_sha256': hashlib.sha256(data).hexdigest(), 'stage': 'nar', 'alpha_folded_into_B': True}
+        'source_sha256': hashlib.sha256(data).hexdigest(), 'stage': target, 'alpha_folded_into_B': True}
     header: JsonObject = {'__metadata__': {'openfabric_yue2_conversion': json.dumps(provenance, sort_keys=True)}}
     chunks: list[bytes] = []
     offset = 0

@@ -29,8 +29,8 @@ it('validates bounded variation counts before preview can reach the server', asy
 
 it('submits the original brief and ordered selections to a read-only preview', async () => {
   const fetch = response({})
-  await expect(queue.previewMusicQueue({ brief, selections: [{ engine: 'heartmula', variations: 3 }, { engine: 'ace_step', variations: 1 }] })).rejects.toThrow()
-  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/music-queue/preview', expect.objectContaining({ method: 'POST', body: JSON.stringify({ brief, selections: [{ engine: 'heartmula', variations: 3 }, { engine: 'ace_step', variations: 1 }] }) }))
+  await expect(queue.previewMusicQueue({ brief, selections: [{ engine: 'yue2', variations: 3 }, { engine: 'ace_step', variations: 1 }] })).rejects.toThrow()
+  expect(fetch).toHaveBeenCalledExactlyOnceWith('/api/music-queue/preview', expect.objectContaining({ method: 'POST', body: JSON.stringify({ brief, selections: [{ engine: 'yue2', variations: 3 }, { engine: 'ace_step', variations: 1 }] }) }))
 })
 
 it('uses the durable snapshot and revisioned control endpoints', async () => {

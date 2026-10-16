@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 import unittest
 import zipfile
@@ -12,7 +13,7 @@ import httpx
 
 from app import lora_datasets as library
 from app.atomic_files import read_object, write_object
-from app.lora_dataset_contracts import CreateLoraDatasetRequest
+from app.lora_dataset_contracts import CreateLoraDatasetRequest, LoraDatasetRevision, RemoveLoraDatasetRecordsResponse
 from app.orchestrator.state import ModelStatus
 from app.api import routes_lora_library as routes
 
@@ -50,6 +51,63 @@ class DatasetLibraryRouteTests(unittest.IsolatedAsyncioTestCase):
         if endpoint == 'v1/dataset/preprocess_async':
             return {'task_id': 'pre-1', 'message': 'started', 'total': 1}
         return {}
+
+    async def test_remove_records_preserves_dataset_files_and_does_not_rediscover_them(self) -> None:
+        entry = self.entry()
+        entry = library.trash_dataset(entry.id, LoraDatasetRevision(revision=entry.revision))
+        dataset = library.confined_path(entry.dataset_path)
+        original = dataset.read_bytes()
+        with patch.object(library, '_native', side_effect=self.native):
+            response = await self.client.post('/api/lora-datasets/remove-records', json={'records': [{'id': entry.id, 'revision': entry.revision}]})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json(), {'removed_ids': [entry.id]})
+        self.assertEqual(dataset.read_bytes(), original)
+        self.assertEqual((dataset.parent / 'clip.wav').read_bytes(), b'audio')
+        self.assertEqual((await self.client.get('/api/lora-datasets')).json()['datasets'], [])
+
+    async def test_remove_records_rejects_busy_engine_origin_and_stale_snapshot(self) -> None:
+        entry = self.entry()
+        entry = library.trash_dataset(entry.id, LoraDatasetRevision(revision=entry.revision))
+        body = {'records': [{'id': entry.id, 'revision': entry.revision}]}
+        catalog = library._catalog_path()
+        original = catalog.read_bytes()
+        for failure in ({'status': 'running'}, library.LoraDatasetError('dataset_native_unavailable', 503)):
+            fake = AsyncMock(return_value=failure) if isinstance(failure, dict) else AsyncMock(side_effect=failure)
+            with patch.object(library, '_native', fake):
+                response = await self.client.post('/api/lora-datasets/remove-records', json=body)
+            self.assertIn(response.status_code, (409, 503))
+            self.assertEqual(catalog.read_bytes(), original)
+        with patch.object(library, '_native', side_effect=self.native):
+            response = await self.client.post('/api/lora-datasets/remove-records', json=body, headers={'origin': 'https://foreign.example'})
+            self.assertEqual(response.status_code, 403)
+            response = await self.client.post('/api/lora-datasets/remove-records', json={'records': [{'id': entry.id, 'revision': entry.revision + 1}]})
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()['detail'], 'dataset_revision_conflict')
+        self.assertEqual(catalog.read_bytes(), original)
+
+    async def test_remove_records_validates_identifiers_revisions_and_duplicate_batch(self) -> None:
+        record = {'id': 'a' * 32, 'revision': 0}
+        with patch.object(library, 'remove_dataset_records') as remove:
+            for records in ([], [record, record], [{'id': '../escape', 'revision': 0}], [{'id': 'a' * 32}], [{'id': 'a' * 32, 'revision': True}]):
+                response = await self.client.post('/api/lora-datasets/remove-records', json={'records': records})
+                self.assertEqual(response.status_code, 422, response.text)
+                self.assertEqual(response.json()['detail'], 'dataset_request_invalid')
+            remove.assert_not_called()
+
+    async def test_remove_records_accepts_bounded_full_catalog_and_rejects_oversized_body(self) -> None:
+        records = [{'id': f'{index:032x}', 'revision': 0} for index in range(10000)]
+        encoded = json.dumps({'records': records}).encode()
+        self.assertGreater(len(encoded), 64 * 1024)
+        self.assertLess(len(encoded), 1024 * 1024)
+        result = RemoveLoraDatasetRecordsResponse(removed_ids=[record['id'] for record in records])
+        with patch.object(library, '_native', side_effect=self.native), patch.object(library, 'remove_dataset_records', return_value=result) as remove:
+            response = await self.client.post('/api/lora-datasets/remove-records', content=encoded, headers={'content-type': 'application/json'})
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(len(response.json()['removed_ids']), 10000)
+            remove.assert_called_once()
+            response = await self.client.post('/api/lora-datasets/remove-records', content=b'x' * (1024 * 1024 + 1))
+            self.assertEqual(response.status_code, 413)
+            remove.assert_called_once()
 
     async def test_busy_and_unqueryable_engine_block_rename_without_losing_data(self) -> None:
         entry = self.entry()

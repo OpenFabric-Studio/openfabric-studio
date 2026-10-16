@@ -9,6 +9,7 @@ import logging
 import os
 from pathlib import Path
 import re
+from typing import Annotated
 import uuid
 import zipfile
 
@@ -24,6 +25,7 @@ from .lora_dataset_contracts import (
     LoraDatasetSample, LoraDatasetOperationResponse, ScanLoraDatasetRequest,
     SaveLoraDatasetRequest, LoraPreprocessReceipt, LoraObservedTask, LoraDatasetMetadata,
     PreprocessLoraDatasetRequest, LoraDatasetTaskStarted, AutoLabelLoraDatasetRequest, UpdateLoraDatasetSampleRequest,
+    RemoveLoraDatasetRecordsRequest, RemoveLoraDatasetRecordsResponse,
 )
 from .job_lifecycle import run_owned_thread
 from .orchestrator.manager import manager
@@ -33,6 +35,7 @@ logger = logging.getLogger(__name__)
 native_lock = asyncio.Lock()
 _MAX_DOCUMENT_BYTES = 32 * 1024 * 1024
 _MAX_DATASETS = 10000
+_MAX_REMOVED_RECORDS = 100000
 
 
 class LoraDatasetError(Exception):
@@ -56,6 +59,7 @@ class _Catalog(BaseModel):
     workspace: LoraWorkspace = Field(default_factory=LoraWorkspace)
     dataset_hashes: dict[str, str] = Field(default_factory=dict)
     source_signatures: dict[str, SourceSignatures] = Field(default_factory=dict)
+    removed_dataset_paths: set[Annotated[str, Field(min_length=1, max_length=4096)]] = Field(default_factory=set, max_length=_MAX_REMOVED_RECORDS)
 
 
 class _Metadata(BaseModel):
@@ -139,9 +143,32 @@ def _relative(path: Path) -> str:
 
 
 def _read_dataset(path: Path) -> tuple[JsonObject, _DatasetDocument]:
+    result = _read_dataset_candidate(path)
+    if result is None:
+        raise LoraDatasetError('dataset_invalid', 422)
+    return result
+
+
+def _is_training_artifact(raw: JsonObject, path: Path) -> bool:
+    samples, count = raw.get('samples'), raw.get('num_samples')
+    # Empty samples are ambiguous without the native tensor manifest filename.
+    if (isinstance(samples, list) and isinstance(count, int) and not isinstance(count, bool)
+            and count == len(samples)
+            and (bool(samples) or path.name == 'manifest.json')
+            and all(isinstance(sample, str) and sample.endswith('.pt') for sample in samples)):
+        return True
+    if ('samples' not in raw and raw.get('peft_type') == 'LORA'
+            and isinstance(raw.get('r'), int) and isinstance(raw.get('target_modules'), list)):
+        return True
+    return bool(raw) and raw.keys() <= {'caption', 'bpm', 'keyscale', 'timesignature', 'language'}
+
+
+def _read_dataset_candidate(path: Path) -> tuple[JsonObject, _DatasetDocument] | None:
     if path.stat().st_size > _MAX_DOCUMENT_BYTES:
         raise LoraDatasetError('dataset_invalid', 422)
     raw = read_object(path)
+    if _is_training_artifact(raw, path):
+        return None
     return raw, _DatasetDocument.model_validate(raw)
 
 
@@ -169,13 +196,16 @@ def _refresh(catalog: _Catalog) -> list[LoraDatasetIssue]:
     issues: list[LoraDatasetIssue] = []
     for path in _discovery_paths(root):
         relative = _relative(path)
-        if relative in known:
+        if relative in known or relative in catalog.removed_dataset_paths:
             continue
         try:
             safe = confined_path(relative)
             if not safe.is_file():
                 continue
-            raw, document = _read_dataset(safe)
+            result = _read_dataset_candidate(safe)
+            if result is None:
+                continue
+            raw, document = result
             signatures = _source_signatures(raw)
         except LoraDatasetError as exc:
             issues.append(LoraDatasetIssue(path=relative, code='dataset_path_unsafe' if exc.code == 'dataset_path_unsafe' else 'dataset_invalid'))
@@ -192,9 +222,14 @@ def _refresh(catalog: _Catalog) -> list[LoraDatasetIssue]:
         catalog.datasets.append(entry)
         catalog.source_signatures[entry.id] = signatures
         known[relative] = entry
+    artifacts: set[str] = set()
     for entry in catalog.datasets:
         try:
-            raw, document = _read_dataset(confined_path(entry.dataset_path))
+            result = _read_dataset_candidate(confined_path(entry.dataset_path))
+            if result is None:
+                artifacts.add(entry.id)
+                continue
+            raw, document = result
             fingerprint = _content_hash(raw)
             previous = catalog.dataset_hashes.get(entry.id)
             if previous is not None and fingerprint != previous:
@@ -205,6 +240,12 @@ def _refresh(catalog: _Catalog) -> list[LoraDatasetIssue]:
             entry.available, entry.error_code = True, ''
         except (OSError, ValueError, LoraDatasetError):
             entry.available, entry.error_code = False, 'dataset_unavailable'
+    if artifacts:
+        catalog.datasets = [entry for entry in catalog.datasets if entry.id not in artifacts]
+        for identifier in artifacts:
+            catalog.dataset_hashes.pop(identifier, None)
+            catalog.source_signatures.pop(identifier, None)
+        _clear_workspace_dataset_references(catalog, artifacts)
     return issues[:10000]
 
 
@@ -302,6 +343,56 @@ def trash_dataset(identifier: str, body: LoraDatasetRevision) -> LoraDatasetEntr
 
 def restore_dataset(identifier: str, body: LoraDatasetRevision) -> LoraDatasetEntry:
     return _trash(identifier, body, False)
+
+
+def _clear_workspace_dataset_references(catalog: _Catalog, identifiers: set[str]) -> None:
+    workspace = catalog.workspace
+    before = workspace.model_dump_json()
+    if workspace.selected_dataset_id in identifiers:
+        workspace.selected_dataset_id = None
+        workspace.training_tensor_dir = ''
+        workspace.form.audio_dir = ''
+        workspace.form.output_dir = ''
+        workspace.form.tensor_dir = ''
+    if workspace.auto_label_task and workspace.auto_label_task.dataset_id in identifiers:
+        workspace.auto_label_task = None
+    if workspace.preprocess_task and workspace.preprocess_task.dataset_id in identifiers:
+        workspace.preprocess_task = None
+    if workspace.preprocess_receipt and workspace.preprocess_receipt.dataset_id in identifiers:
+        workspace.preprocess_receipt = None
+    if workspace.model_dump_json() != before:
+        workspace.revision += 1
+
+
+def remove_dataset_records(body: RemoveLoraDatasetRecordsRequest) -> RemoveLoraDatasetRecordsResponse:
+    """Forget a confirmed trash snapshot while preserving every dataset file."""
+    list_datasets()
+    path = _catalog_path()
+    with document_lock(path):
+        catalog = _read_catalog(path)
+        known = {entry.id: entry for entry in catalog.datasets}
+        selected: list[LoraDatasetEntry] = []
+        for record in body.records:
+            entry = known.get(record.id)
+            if entry is None:
+                raise LoraDatasetError('dataset_not_found', 404)
+            if entry.revision != record.revision:
+                raise LoraDatasetError('dataset_revision_conflict')
+            if not entry.trashed:
+                raise LoraDatasetError('dataset_not_trashed')
+            selected.append(entry)
+        removed_paths = catalog.removed_dataset_paths | {entry.dataset_path for entry in selected}
+        if len(removed_paths) > _MAX_REMOVED_RECORDS:
+            raise LoraDatasetError('dataset_catalog_full')
+        identifiers = {entry.id for entry in selected}
+        catalog.removed_dataset_paths = removed_paths
+        catalog.datasets = [entry for entry in catalog.datasets if entry.id not in identifiers]
+        for identifier in identifiers:
+            catalog.dataset_hashes.pop(identifier, None)
+            catalog.source_signatures.pop(identifier, None)
+        _clear_workspace_dataset_references(catalog, identifiers)
+        _write_catalog(path, catalog)
+        return RemoveLoraDatasetRecordsResponse(removed_ids=[entry.id for entry in selected])
 
 
 def get_workspace() -> LoraWorkspace:

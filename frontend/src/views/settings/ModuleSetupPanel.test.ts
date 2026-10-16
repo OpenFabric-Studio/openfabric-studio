@@ -91,7 +91,7 @@ it('selects the feature in the Settings link instead of an unrelated starter eng
   expect(node.querySelector<HTMLInputElement>('input[value="stable_audio3"]')?.checked).toBe(true)
   expect(node.querySelector<HTMLInputElement>('input[value="speech"]')?.checked).toBe(false)
   expect(node.querySelector('[data-selected-features]')?.textContent).toContain('Stable Audio 3')
-  expect(node.textContent).not.toContain('Model files for Stable Audio 3 and HeartMuLa still need separate setup')
+  expect(node.textContent).not.toContain('Model files for Stable Audio 3 still need separate setup')
   button(node, 'Review setup').click(); await settle()
   expect(api.planModules).toHaveBeenCalledWith({ features: ['stable_audio3'], download_models: true }, expect.any(AbortSignal))
 })
@@ -175,14 +175,14 @@ it('locks installed and ready choices, labels every choice and shows existing in
 })
 
 it('filters installed recommendations while preserving selectable missing and incomplete features', async () => {
-  vi.mocked(api.getModules).mockResolvedValue({ ...inventory, recommended_features: ['stable_audio3', 'speech', 'heartmula'], modules: [...inventory.modules, installedStable, { ...stableModule, id: 'heartmula', name: 'HeartMuLa' }] })
+  vi.mocked(api.getModules).mockResolvedValue({ ...inventory, recommended_features: ['stable_audio3', 'speech', 'kokoro'], modules: [...inventory.modules, installedStable, { ...stableModule, id: 'kokoro', name: 'Kokoro' }] })
   const node = await mount(); await openChoices(node)
   expect(node.querySelector<HTMLInputElement>('input[value="stable_audio3"]')?.checked).toBe(false)
   expect(node.querySelector<HTMLInputElement>('input[value="speech"]')?.checked).toBe(true)
-  expect(node.querySelector<HTMLInputElement>('input[value="heartmula"]')?.checked).toBe(true)
-  expect(node.querySelector('input[value="heartmula"]')?.closest('label')?.textContent).toContain('Not installed')
+  expect(node.querySelector<HTMLInputElement>('input[value="kokoro"]')?.checked).toBe(true)
+  expect(node.querySelector('input[value="kokoro"]')?.closest('label')?.textContent).toContain('Not installed')
   button(node, 'Review setup').click(); await settle()
-  expect(api.planModules).toHaveBeenCalledExactlyOnceWith({ features: ['speech', 'heartmula'], download_models: true }, expect.any(AbortSignal))
+  expect(api.planModules).toHaveBeenCalledExactlyOnceWith({ features: ['speech', 'kokoro'], download_models: true }, expect.any(AbortSignal))
 })
 
 it('requires explicit scoped dependency reinstallation and reviews preserved data before submission', async () => {
@@ -363,11 +363,11 @@ it('shows saved artifact bytes and retry attempts and the optional CPU setup sta
   expect(node.querySelector('#module-speaker_review')?.textContent).toContain('Weights must be selected explicitly.')
 })
 
-it('shows both additional music modules in Settings so generator setup links have targets', async () => {
-  const modules: ModuleInventory['modules'] = (['heartmula', 'stable_audio3'] as const).map(id => ({ id, name: id, description: 'Local music', state: 'partial', supported: true, managed: false, automation: 'manual', dependencies: [], capabilities: [], evidence: [], actions: [] }))
+it('shows the additional music module in Settings so generator setup links have targets', async () => {
+  const modules: ModuleInventory['modules'] = (['stable_audio3'] as const).map(id => ({ id, name: id, description: 'Local music', state: 'partial', supported: true, managed: false, automation: 'manual', dependencies: [], capabilities: [], evidence: [], actions: [] }))
   vi.mocked(api.getModules).mockResolvedValue({ ...inventory, modules })
   const node = await mount()
-  expect(node.querySelector('#module-heartmula')).not.toBeNull()
+  expect(node.querySelector('#module-heartmula')).toBeNull()
   expect(node.querySelector('#module-stable_audio3')).not.toBeNull()
 })
 
@@ -525,11 +525,11 @@ it('announces failed setup with a failure count and retry instead of manual prev
 })
 
 it('shows the structured failure, recovery and timestamped saved phase history', async () => {
-  vi.mocked(api.listModuleJobs).mockResolvedValue([{ ...manualJob, state: 'failed', features: ['heartmula'], steps: [{ module_id: 'heartmula', name: 'HeartMuLa', state: 'failed', detail: 'Converting model weights to MLX', last_output_at: '2026-10-15T15:50:20Z', failure: { code: 'installation_failed', summary: 'HeartMuLa model conversion could not finish.', recovery: 'Retry setup to reuse downloaded model files and repeat conversion.', phase: 'Converting model weights to MLX', retryable: true }, events: [{ at: '2026-10-15T15:50:00Z', detail: 'Checking downloaded model files' }, { at: '2026-10-15T15:50:10Z', detail: 'Converting model weights to MLX' }] }] }])
+  vi.mocked(api.listModuleJobs).mockResolvedValue([{ ...manualJob, state: 'failed', features: ['stable_audio3'], steps: [{ module_id: 'stable_audio3', name: 'Stable Audio 3', state: 'failed', detail: 'Preparing model files', last_output_at: '2026-10-15T15:50:20Z', failure: { code: 'installation_failed', summary: 'Model preparation could not finish.', recovery: 'Retry setup to reuse downloaded model files and repeat preparation.', phase: 'Preparing model files', retryable: true }, events: [{ at: '2026-10-15T15:50:00Z', detail: 'Checking downloaded model files' }, { at: '2026-10-15T15:50:10Z', detail: 'Preparing model files' }] }] }])
   const node = await mount()
   const current = node.querySelector('[data-current-job]')
-  expect(current?.textContent).toContain('HeartMuLa model conversion could not finish.')
-  expect(current?.textContent).toContain('Retry setup to reuse downloaded model files and repeat conversion.')
+  expect(current?.textContent).toContain('Model preparation could not finish.')
+  expect(current?.textContent).toContain('Retry setup to reuse downloaded model files and repeat preparation.')
   expect(current?.querySelector('[data-last-output]')?.textContent).toContain('Last installer output:')
   expect(current?.querySelector('[data-last-output] time')?.getAttribute('datetime')).toBe('2026-10-15T15:50:20Z')
   const technical = current?.querySelector('[data-job-technical]')
@@ -542,10 +542,10 @@ it('shows the structured failure, recovery and timestamped saved phase history',
 })
 
 it('shows live phase and last output without a made-up percentage during conversion', async () => {
-  vi.mocked(api.listModuleJobs).mockResolvedValue([{ ...manualJob, state: 'running', current_step: 0, features: ['heartmula'], steps: [{ module_id: 'heartmula', name: 'HeartMuLa', state: 'running', detail: 'Converting model weights to MLX', last_output_at: '2026-10-15T15:50:20Z' }] }])
+  vi.mocked(api.listModuleJobs).mockResolvedValue([{ ...manualJob, state: 'running', current_step: 0, features: ['stable_audio3'], steps: [{ module_id: 'stable_audio3', name: 'Stable Audio 3', state: 'running', detail: 'Preparing model files', last_output_at: '2026-10-15T15:50:20Z' }] }])
   const node = await mount()
   const current = node.querySelector('[data-current-job]')
-  expect(current?.textContent).toContain('Converting model weights to MLX')
+  expect(current?.textContent).toContain('Preparing model files')
   expect(current?.querySelector('[data-last-output] time')?.textContent).not.toBe('—')
   expect(current?.querySelector('[role="progressbar"]')).toBeNull()
   expect(current?.textContent).not.toContain('%')

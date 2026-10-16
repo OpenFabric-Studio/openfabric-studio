@@ -17,6 +17,14 @@ from app.module_runtime import RuntimeEvidence
 
 
 class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_catalog_only_exposes_remaining_music_engines(self) -> None:
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+            inventory = await catalog.inventory(self.environment)
+        identifiers = {module.id for module in inventory.modules}
+        self.assertNotIn('heartmula', identifiers)
+        self.assertNotIn('heartmula', self.environment.paths)
+        self.assertTrue({'ace_step', 'yue2', 'stable_audio3'}.issubset(identifiers))
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -106,6 +114,60 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reviewed.required_free_bytes, 0)
         self.assertTrue(any('already installed' in warning.lower() for warning in reviewed.warnings))
 
+    async def test_owned_native_tool_permission_repair_is_offered_without_reinstall(self) -> None:
+        status = await catalog.inventory(self.environment)
+        for module in status.modules:
+            if module.id in ('media', 'yue2'):
+                module.state = 'installed'
+        with patch.object(catalog, 'inventory', AsyncMock(return_value=status)), patch('app.module_install.native_tools_need_repair', return_value=True), patch.object(catalog, '_download_bytes', return_value=0):
+            reviewed = await catalog.plan(ModulePlanRequest(features=['yue2'], download_models=True), self.environment)
+        self.assertEqual(next(step for step in reviewed.steps if step.module_id == 'yue2').operation, 'verify')
+        self.assertTrue(reviewed.can_install)
+        self.assertEqual(reviewed.estimated_download_bytes, 0)
+
+    async def test_missing_native_score_prerequisites_offer_verification_even_when_inventory_is_ready(self) -> None:
+        from app import module_install, module_native_setup
+        from app.module_jobs import InstallContext, ModuleJobService
+        environment = replace(self.environment, platform='darwin', architecture='arm64')
+        engine = environment.paths['yue2']
+        binary_dir = engine / 'build/macos-metal-release/bin'; binary_dir.mkdir(parents=True)
+        for name in ('audiocpp_server', 'audiocpp_cli', 'audiocpp_gguf'):
+            path = binary_dir / name; path.write_bytes(b'existing binary'); path.chmod(0o755)
+        (engine / 'tools').mkdir(); (engine / 'tools/model_manager_v2.py').write_text('# pinned downloader')
+        (engine / 'model_specs').mkdir(); spec = engine / 'model_specs/sheetsage2.json'; spec.write_text('{"family":"sheetsage2"}')
+        context = InstallContext(ModuleJobService(environment), 'f' * 32)
+        module_install._record_owned(context, 'yue2', engine, module_install.load_manifest().engine.tag)
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(catalog, '_runtime_inventory', AsyncMock(return_value={})):
+            status = await catalog.inventory(environment)
+        for module in status.modules:
+            if module.id in ('yue2', 'media'):
+                module.state = 'ready'
+        for missing in ('cli', 'spec', 'model'):
+            cli = binary_dir / 'audiocpp_cli'; cli.write_bytes(b'existing binary'); cli.chmod(0o755)
+            spec.write_text('{"family":"sheetsage2"}')
+            if missing == 'cli':
+                cli.unlink()
+            elif missing == 'spec':
+                spec.unlink()
+            with self.subTest(missing=missing), patch.object(catalog, 'inventory', AsyncMock(return_value=status)), \
+                    patch.object(catalog, 'available_bytes', return_value=100 * 1024**3), \
+                    patch.object(module_native_setup, 'native_setup_present', return_value=missing != 'model'):
+                reviewed = await catalog.plan(ModulePlanRequest(features=['yue2'], download_models=True), environment)
+            self.assertEqual(next(step for step in reviewed.steps if step.module_id == 'yue2').operation, 'verify')
+            self.assertTrue(reviewed.can_install)
+            if missing != 'model':
+                self.assertEqual(reviewed.estimated_download_bytes, sum(file.bytes for file in module_install.load_manifest().engine.assets['darwin-arm64'].files))
+
+    async def test_fresh_native_setup_with_model_downloads_installs_the_engine(self) -> None:
+        environment = replace(self.environment, platform='darwin', architecture='arm64')
+        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), \
+                patch.object(catalog, '_runtime_inventory', AsyncMock(return_value={})), \
+                patch.object(catalog, 'available_bytes', return_value=100 * 1024**3):
+            reviewed = await catalog.plan(ModulePlanRequest(features=['yue2'], download_models=True), environment)
+        self.assertEqual(next(step for step in reviewed.steps if step.module_id == 'yue2').operation, 'install')
+        self.assertTrue(reviewed.can_install)
+        self.assertFalse(environment.paths['yue2'].exists())
+
     async def test_reinstallation_is_explicit_scoped_and_changes_review_token(self) -> None:
         with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
             status = await catalog.inventory(self.environment)
@@ -130,8 +192,8 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_managed_music_with_verified_environment_can_finish_missing_models_without_package_installation(self) -> None:
         environment = replace(self.environment, platform='darwin', architecture='arm64')
-        engine = environment.paths['heartmula']
-        for marker in catalog.DEFINITIONS['heartmula'].source_markers:
+        engine = environment.paths['stable_audio3']
+        for marker in catalog.DEFINITIONS['stable_audio3'].source_markers:
             path = engine / marker
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('# fixture source')
@@ -140,11 +202,11 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         python.write_text('fixture interpreter')
         with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(catalog, '_environment_receipt', return_value=True):
             status = await catalog.inventory(environment)
-            reviewed = await catalog.plan(ModulePlanRequest(features=['heartmula'], download_models=True), environment)
-        module = next(item for item in status.modules if item.id == 'heartmula')
+            reviewed = await catalog.plan(ModulePlanRequest(features=['stable_audio3'], download_models=True), environment)
+        module = next(item for item in status.modules if item.id == 'stable_audio3')
         self.assertEqual(module.state, 'partial')
         self.assertIn('verified_environment', module.capabilities)
-        self.assertEqual(next(step.operation for step in reviewed.steps if step.module_id == 'heartmula'), 'verify')
+        self.assertEqual(next(step.operation for step in reviewed.steps if step.module_id == 'stable_audio3'), 'verify')
 
     async def test_starter_selection_prefers_one_ready_then_installed_music_engine(self) -> None:
         from app import module_music_models
@@ -152,14 +214,12 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         ready = RuntimeEvidence(ready=True, installed=True)
         installed = RuntimeEvidence(installed=True)
         cases: tuple[tuple[dict[ModuleId, RuntimeEvidence], list[ModuleId]], ...] = (
-            ({'ace_step': ready, 'yue2': ready, 'stable_audio3': ready, 'heartmula': ready}, ['ace_step']),
-            ({'ace_step': installed, 'yue2': ready, 'stable_audio3': ready, 'heartmula': ready}, ['yue2']),
-            ({'ace_step': installed, 'yue2': installed, 'stable_audio3': ready, 'heartmula': ready}, ['stable_audio3']),
-            ({'ace_step': installed, 'heartmula': ready}, ['heartmula']),
-            ({'ace_step': installed, 'yue2': installed, 'stable_audio3': installed, 'heartmula': installed}, ['ace_step']),
-            ({'yue2': installed, 'stable_audio3': installed, 'heartmula': installed}, ['yue2']),
-            ({'stable_audio3': installed, 'heartmula': installed}, ['stable_audio3']),
-            ({'heartmula': installed}, ['heartmula']),
+            ({'ace_step': ready, 'yue2': ready, 'stable_audio3': ready}, ['ace_step']),
+            ({'ace_step': installed, 'yue2': ready, 'stable_audio3': ready}, ['yue2']),
+            ({'ace_step': installed, 'yue2': installed, 'stable_audio3': ready}, ['stable_audio3']),
+            ({'ace_step': installed, 'yue2': installed, 'stable_audio3': installed}, ['ace_step']),
+            ({'yue2': installed, 'stable_audio3': installed}, ['yue2']),
+            ({'stable_audio3': installed}, ['stable_audio3']),
             ({'speech': ready, 'video': ready}, ['ace_step']),
         )
         for runtimes, expected in cases:
@@ -182,7 +242,7 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
                 inventory = await catalog.inventory(environment)
                 self.assertEqual(inventory.model_dump().get('recommended_features'), expected)
 
-        unsupported_music = {'stable_audio3': RuntimeEvidence(ready=True, installed=True), 'heartmula': RuntimeEvidence(ready=True, installed=True)}
+        unsupported_music = {'stable_audio3': RuntimeEvidence(ready=True, installed=True)}
         with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(catalog, '_runtime_inventory', AsyncMock(return_value=unsupported_music)):
             inventory = await catalog.inventory(self.environment)
         self.assertEqual(inventory.model_dump().get('recommended_features'), ['ace_step'])
@@ -192,7 +252,7 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         inventory = ModuleInventory.model_validate(payload)
         self.assertEqual(inventory.model_dump().get('recommended_features'), [])
         self.assertIsNot(inventory.recommended_features, ModuleInventory.model_validate(payload).recommended_features)
-        for features in (['ace_step'] * 18, ['unknown']):
+        for features in (['ace_step'] * 17, ['unknown']):
             with self.subTest(features=features), self.assertRaises(ValidationError):
                 ModuleInventory.model_validate({**payload, 'recommended_features': features})
         maximum = ModuleInventory.model_validate({**payload, 'recommended_features': list(catalog.MODULE_IDS)})
@@ -248,17 +308,6 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(reviewed.required_free_bytes, 20 * 1024**3, 'cache plus installed models must both fit')
         self.assertFalse(reviewed.can_install)
         self.assertEqual(next(step for step in without_models.steps if step.module_id == 'ace_step').estimated_download_bytes, 0)
-
-    async def test_heart_conversion_plan_reserves_cache_originals_and_conversion_space(self) -> None:
-        from app import module_music_models
-        environment = replace(self.environment, platform='darwin', architecture='arm64', uv='/fixed/uv')
-        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(module_music_models, 'model_download_bytes', return_value=22 * 1024**3):
-            reviewed = await catalog.plan(ModulePlanRequest(features=['heartmula'], download_models=True), environment)
-        self.assertGreaterEqual(reviewed.required_free_bytes, 66 * 1024**3)
-        self.assertNotIn('does not fetch', ' '.join(reviewed.warnings))
-        with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(module_music_models, 'model_download_bytes', return_value=0), patch.object(module_music_models, 'conversion_required_bytes', return_value=44 * 1024**3):
-            conversion_only = await catalog.plan(ModulePlanRequest(features=['heartmula'], download_models=True), environment)
-        self.assertGreaterEqual(conversion_only.required_free_bytes, 44 * 1024**3, 'already downloaded originals still need conversion space')
 
     async def test_existing_native_engine_can_finish_models_automatically(self) -> None:
         from app import module_native_setup
@@ -389,18 +438,17 @@ class OptionalEngineCatalogTests(unittest.IsolatedAsyncioTestCase):
             linux = replace(mac, platform='linux', architecture='x86_64')
             with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
                 inventory = await catalog.inventory(mac)
-                reviewed = await catalog.plan(ModulePlanRequest(features=['heartmula', 'stable_audio3'], download_models=True), mac)
-                dependencies = await catalog.plan(ModulePlanRequest(features=['heartmula', 'stable_audio3']), mac)
+                reviewed = await catalog.plan(ModulePlanRequest(features=['stable_audio3'], download_models=True), mac)
+                dependencies = await catalog.plan(ModulePlanRequest(features=['stable_audio3']), mac)
             modules = {module.id: module for module in inventory.modules}
-            for identifier in ('heartmula', 'stable_audio3'):
+            for identifier in ('stable_audio3',):
                 self.assertTrue(modules[identifier].supported)
                 self.assertEqual(modules[identifier].state, 'missing')
                 self.assertIn('download', catalog.DEFINITIONS[identifier].guidance)
                 self.assertNotIn('No weights are downloaded', catalog.DEFINITIONS[identifier].guidance)
                 self.assertTrue(modules[identifier].licenses)
-            self.assertFalse(catalog.supported('heartmula', linux))
             self.assertFalse(catalog.supported('stable_audio3', linux))
-            self.assertEqual([step.module_id for step in reviewed.steps], ['media', 'heartmula', 'stable_audio3'])
+            self.assertEqual([step.module_id for step in reviewed.steps], ['media', 'stable_audio3'])
             self.assertGreater(reviewed.required_free_bytes, dependencies.required_free_bytes)
             self.assertTrue(any(row.scope == 'code' and row.declared_license == 'MIT' for row in modules['stable_audio3'].licenses))
 

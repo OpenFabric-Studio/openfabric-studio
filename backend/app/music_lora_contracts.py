@@ -7,8 +7,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts import Contract
 
-AdapterEngine = Literal['stable_audio3', 'yue2', 'heartmula']
-AdapterTarget = Literal['small-music', 'medium', 'ar', 'nar', 'heartmula-3b']
+AdapterEngine = Literal['stable_audio3', 'yue2']
+AdapterTarget = Literal['small-music', 'medium', 'ar', 'nar']
 
 
 class MusicLoraError(Exception):
@@ -36,7 +36,7 @@ class MusicAdapter(Contract):
 
     @model_validator(mode='after')
     def compatible_target(self) -> Self:
-        if not self.name.strip() or (self.engine, self.target) not in {('stable_audio3', 'small-music'), ('stable_audio3', 'medium'), ('yue2', 'ar'), ('yue2', 'nar'), ('heartmula', 'heartmula-3b')}:
+        if not self.name.strip() or (self.engine, self.target) not in {('stable_audio3', 'small-music'), ('stable_audio3', 'medium'), ('yue2', 'ar'), ('yue2', 'nar')}:
             raise ValueError('music_lora_target_mismatch')
         return self
 
@@ -47,7 +47,7 @@ class MusicAdapters(Contract):
 
 
 class MusicLoraCapability(Contract):
-    engine: Literal['ace_step', 'yue2', 'heartmula', 'stable_audio3']
+    engine: Literal['ace_step', 'yue2', 'stable_audio3']
     loading: bool
     training: bool
     reason: Literal['native', 'inference_only', 'unsupported_runtime', 'upgrade_required', 'experimental']

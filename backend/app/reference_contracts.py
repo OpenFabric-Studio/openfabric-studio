@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from .contracts import Contract
+from .music_score_contracts import MusicKey, MusicMeter, MusicTempo
 
 ReferenceId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 SubtitleLanguage = Annotated[str, Field(pattern=r'^[A-Za-z0-9][A-Za-z0-9_-]{0,34}$')]
@@ -17,7 +18,7 @@ ReferenceErrorCode = Literal[
     'whisper_missing', 'whisper_model_missing', 'separation_unavailable',
     'melody_unavailable', 'tool_failed', 'tool_timeout', 'invalid_audio',
     'source_missing', 'track_missing', 'import_interrupted', 'import_failed',
-    'invalid_abc', 'unsupported_abc', 'range_unavailable', 'lyrics_empty', 'busy',
+    'invalid_abc', 'unsupported_abc', 'range_unavailable', 'key_mode_mismatch', 'lyrics_empty', 'busy',
 ]
 
 
@@ -138,7 +139,9 @@ class ReferenceDeleteResponse(ReferenceContract):
 class ReferenceAbcRequest(ReferenceContract):
     abc: str = Field(min_length=1, max_length=100_000)
     transpose_semitones: int = Field(default=0, ge=-24, le=24, strict=True)
-    tempo_bpm: int | None = Field(default=None, ge=20, le=300, strict=True)
+    tempo_bpm: MusicTempo | None = None
+    target_key: MusicKey | None = None
+    time_signature: MusicMeter | None = None
     target_min_midi: int | None = Field(default=None, ge=24, le=96, strict=True)
     target_max_midi: int | None = Field(default=None, ge=24, le=96, strict=True)
 
@@ -148,6 +151,8 @@ class ReferenceAbcRequest(ReferenceContract):
             raise ValueError('Both range boundaries are required')
         if self.target_min_midi is not None and self.target_max_midi is not None and self.target_min_midi > self.target_max_midi:
             raise ValueError('Pitch range is inverted')
+        if self.target_key is not None and (self.transpose_semitones != 0 or self.target_min_midi is not None):
+            raise ValueError('Target key cannot be combined with transposition or pitch range')
         return self
 
 

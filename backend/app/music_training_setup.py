@@ -18,13 +18,12 @@ from .module_catalog import ModuleEnvironment, available_bytes, platform_key
 from .module_contracts import LicenseScope, ModuleLicenseDeclaration, ModulePlan, ModulePlanRequest, ModulePlanStep
 from .module_install import SourcePin, _uv_env, DownloadArtifact
 from .module_jobs import InstallContext, InstallOutcome, ModuleSetupError
-from .module_music_models import BundleId, ModelArtifact, _all_valid, _manifest, _path, _preflight, _publish, _valid_file
+from .module_music_models import ModelArtifact, _path, _preflight, _publish, _valid_file
 from .music_training_contracts import MusicTrainingEngine
 
 _ASSETS = Path(__file__).parent / 'assets'
-# These two session-owned receipts predate source-directory import checks.
+# This session-owned receipt predates source-directory import checks.
 _LEGACY_RECIPES: dict[MusicTrainingEngine, str] = {
-    'heartmula': 'dd282e0f77d6763bc1b2b6bbc17529d5b287ef21607168286c569f5e17ed443e',
     'yue2': '203b4f3261a6104e2d0207fc0e8a153b1c8b14f0fae983854d1eeb2d3fee7897',
 }
 
@@ -54,7 +53,6 @@ class TrainingRecipe:
 class TrainingAsset:
     artifact: ModelArtifact
     target: Path
-    reuse: Path | None = None
 
 
 class TrainingOwnership(BaseModel):
@@ -67,11 +65,6 @@ class TrainingOwnership(BaseModel):
 
 def recipes() -> dict[MusicTrainingEngine, TrainingRecipe]:
     return {
-        'heartmula': TrainingRecipe((
-            TrainingSource('simpletuner', SourcePin('https://github.com/bghira/SimpleTuner.git', 'a0e7ffadfcd0d3d0f68b400f9697c464da6f9408', '3.12.13'), 'simpletuner/helpers/models/heartmula/modeling_heartmula.py'),
-            TrainingSource('heartlib', SourcePin('https://github.com/HeartMuLa/heartlib.git', '5858ca8f1ffe58d62be7c007ea55f1033c5ca456', '3.12.13'), 'src/heartlib/heartcodec/modeling_heartcodec.py')),
-            (TrainingVenv('trainer-venv', 'music-training-heart-trainer-requirements.txt', ('simpletuner',), 'from simpletuner.helpers.models.heartmula.modeling_heartmula import HeartMuLaModel; from peft import LoraConfig'),
-             TrainingVenv('codec-venv', 'music-training-heart-codec-requirements.txt', ('heartlib/src/heartlib',), 'from heartcodec.modeling_heartcodec import HeartCodec'))),
         'yue2': TrainingRecipe((
             TrainingSource('trainer', SourcePin('https://github.com/speedyrulz/ComfyUI-YuE2-Trainer.git', '6a9355efff60589d93b41b569676f09d5db85d09', '3.12.13'), 'train_cli.py'),
             TrainingSource('comfy', SourcePin('https://github.com/Comfy-Org/ComfyUI.git', 'b058ec652802e1de24f1d429b3c7c1fb868f791c', '3.12.13'), 'comfy/ldm/yue2/model.py')),
@@ -87,58 +80,16 @@ def _python(root: Path, folder: str, platform: str) -> Path:
     return root / folder / ('Scripts/python.exe' if platform == 'win32' else 'bin/python')
 
 
-def _heart_components() -> tuple[list[ModelArtifact], ...]:
-    manifest = _manifest()
-    bundles: tuple[BundleId, ...] = ('heartmula', 'heartcodec', 'heart-tokenizer')
-    groups = tuple([item for item in manifest.bundles.get(bundle, []) if item.path.endswith(('.json', '.safetensors'))]
-        for bundle in bundles)
-    if tuple(len(group) for group in groups) != (6, 4, 1):
-        raise ModuleSetupError('artifact_integrity')
-    return groups
-
-
-def heart_model_paths(environment: ModuleEnvironment) -> tuple[Path, Path, Path]:
-    original = environment.paths['heartmula']
-    fallback = training_root(environment, 'heartmula') / 'models'
-    groups = _heart_components()
-    destinations = ('ckpt/HeartMuLa-oss-3B', 'ckpt/HeartCodec-oss-20260123', 'ckpt/tokenizer.json')
-    selected = [original if _all_valid(original, [item.path for item in group]) else fallback for group in groups]
-    return (_path(selected[0], destinations[0]), _path(selected[1], destinations[1]), _path(selected[2], destinations[2]))
-
-
 def _published_artifacts(engine: MusicTrainingEngine) -> list[ModelArtifact]:
-    if engine == 'yue2':
-        revision = '2f76ca75e6ee094169de899cc7fc99d6887e2196'
-        artifact = ModelArtifact(path='training-assets/yue2/' + revision + '/yue2_3b_bf16.safetensors',
-            url='https://huggingface.co/Comfy-Org/YuE2/resolve/' + revision + '/checkpoints/yue2_3b_bf16.safetensors',
-            sha256='33765adbf9813c9a50318218760b2fd819a319862460a04884607581961c6fee', bytes=7799983228)
-        return [artifact]
-    revision = 'e6020510612d6653b73d6cd54393ef80929e3c81'
-    output: list[ModelArtifact] = []
-    for name, size, digest in (
-        ('encoder.safetensors', 2148691856, '19b3c0284fecac70983731433a213ad20eb08d096be3b9a287078171de0d4e79'),
-        ('config.json', 2444, 'f0df2ae7cefd138058e6aa7db03553b22d01c9551396971ff1ab2ed8c40abb9b'),
-        ('LICENSE', 11357, 'c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4')):
-        artifact = ModelArtifact(path='encoder/' + name, url='https://huggingface.co/HeartMuLa/HeartCodec-oss-encoder/resolve/' + revision + '/' + name, sha256=digest, bytes=size)
-        output.append(artifact)
-    return output
+    revision = '2f76ca75e6ee094169de899cc7fc99d6887e2196'
+    artifact = ModelArtifact(path='training-assets/yue2/' + revision + '/yue2_3b_bf16.safetensors',
+        url='https://huggingface.co/Comfy-Org/YuE2/resolve/' + revision + '/checkpoints/yue2_3b_bf16.safetensors',
+        sha256='33765adbf9813c9a50318218760b2fd819a319862460a04884607581961c6fee', bytes=7799983228)
+    return [artifact]
 
 
 def training_assets(environment: ModuleEnvironment, engine: MusicTrainingEngine) -> list[TrainingAsset]:
-    root = training_root(environment, engine)
-    destination = environment.root if engine == 'yue2' else root
-    output = [TrainingAsset(item, _path(destination, item.path, writing=True)) for item in _published_artifacts(engine)]
-    if engine == 'yue2':
-        return output
-    original = environment.paths['heartmula']
-    for group in _heart_components():
-        if _all_valid(original, [item.path for item in group]):
-            output.extend(TrainingAsset(item, _path(original, item.path)) for item in group)
-        else:
-            for item in group:
-                source = _path(original, item.path)
-                output.append(TrainingAsset(item, _path(root, 'models/' + item.path, writing=True), source if _valid_file(source) else None))
-    return output
+    return [TrainingAsset(item, _path(environment.root, item.path, writing=True)) for item in _published_artifacts(engine)]
 
 
 def recipe_hash(engine: MusicTrainingEngine) -> str:
@@ -148,8 +99,6 @@ def recipe_hash(engine: MusicTrainingEngine) -> str:
     for venv in recipe.environments:
         digest.update((_ASSETS / venv.requirements).read_bytes())
     artifacts = _published_artifacts(engine)
-    if engine == 'heartmula':
-        artifacts.extend(item for group in _heart_components() for item in group)
     for artifact in artifacts:
         digest.update(artifact.model_dump_json().encode())
     return digest.hexdigest()
@@ -238,22 +187,18 @@ def prepared(environment: ModuleEnvironment, engine: MusicTrainingEngine) -> boo
 
 
 def _licenses(engine: MusicTrainingEngine) -> list[ModuleLicenseDeclaration]:
-    rows: list[tuple[str, str, LicenseScope, str, str]] = (
-        [('simpletuner', 'SimpleTuner model classes', 'code', 'AGPL-3.0-or-later', 'https://github.com/bghira/SimpleTuner/blob/a0e7ffadfcd0d3d0f68b400f9697c464da6f9408/LICENSE'),
-         ('heartlib-training', 'Official HeartLib codec source', 'code', 'Apache-2.0', 'https://github.com/HeartMuLa/heartlib/blob/5858ca8f1ffe58d62be7c007ea55f1033c5ca456/LICENSE'),
-         ('heart-training-models', 'HeartMuLa and HeartCodec original weights', 'model', 'Apache-2.0', 'https://huggingface.co/HeartMuLa/HeartMuLa-oss-3B'),
-         ('heartcodec-encoder', 'Official HeartCodec encoder', 'auxiliary', 'Apache-2.0', 'https://huggingface.co/HeartMuLa/HeartCodec-oss-encoder/blob/e6020510612d6653b73d6cd54393ef80929e3c81/LICENSE')]
-        if engine == 'heartmula' else
-        [('yue-trainer', 'Headless YuE2 trainer', 'code', 'Apache-2.0', 'https://github.com/speedyrulz/ComfyUI-YuE2-Trainer/blob/6a9355efff60589d93b41b569676f09d5db85d09/LICENSE'),
-         ('comfy-training', 'ComfyUI YuE2 model runtime', 'code', 'GPL-3.0', 'https://github.com/Comfy-Org/ComfyUI/blob/b058ec652802e1de24f1d429b3c7c1fb868f791c/LICENSE'),
-         ('yue-training-base', 'YuE2 BF16 training checkpoint', 'model', 'CC-BY-NC-4.0', 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE')])
+    rows: list[tuple[str, str, LicenseScope, str, str]] = [
+        ('yue-trainer', 'Headless YuE2 trainer', 'code', 'Apache-2.0', 'https://github.com/speedyrulz/ComfyUI-YuE2-Trainer/blob/6a9355efff60589d93b41b569676f09d5db85d09/LICENSE'),
+        ('comfy-training', 'ComfyUI YuE2 model runtime', 'code', 'GPL-3.0', 'https://github.com/Comfy-Org/ComfyUI/blob/b058ec652802e1de24f1d429b3c7c1fb868f791c/LICENSE'),
+        ('yue-training-base', 'YuE2 BF16 training checkpoint', 'model', 'CC-BY-NC-4.0', 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE')]
     return [ModuleLicenseDeclaration(component_id=identifier, name=name, scope=scope, status='declared', declared_license=license_name,
-        source_url=url, notes='Code and model terms are separate. YuE2 permits some creator output monetization; this does not establish commercial adapter redistribution rights.' if engine == 'yue2' else 'HeartLib includes MusicFM code under MIT; model and source-recording rights remain separate.', reviewed_at='2026-10-15')
+        source_url=url, notes='Code and model terms are separate. YuE2 permits some creator output monetization; this does not establish commercial adapter redistribution rights.', reviewed_at='2026-10-15')
         for identifier, name, scope, license_name, url in rows]
 
 
 def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePlan:
     from .module_catalog import approval_scope
+    from .module_install import native_tools_need_repair
     engine = request.music_training_engine
     if engine is None:
         raise ModuleSetupError('plan_changed')
@@ -262,23 +207,23 @@ def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePl
     missing = [item for item in assets if not _valid_file(item.target)]
     for item in missing:
         _preflight(environment.root, [str(item.target.relative_to(environment.root))])
-    size = sum(item.artifact.bytes for item in missing if item.reuse is None)
-    copies = sum(item.reuse.stat().st_size for item in missing if item.reuse is not None)
+    size = sum(item.artifact.bytes for item in missing)
     installed = environment_ready(environment, engine)
     owned = _owned(environment, engine)
     conflict = root.exists() and (not root.is_dir() or any(root.iterdir())) and owned is None
     support = platform_key(environment) == 'darwin-arm64'
     prerequisites = environment.uv is not None and shutil.which('git') is not None
-    operation: Literal['unsupported', 'manual', 'install', 'verify', 'reuse'] = 'unsupported' if not support else 'manual' if conflict or not installed and not prerequisites else 'install' if not installed else 'verify' if missing else 'reuse'
-    required = 2 * size + copies + (0 if installed else 8 * 1024**3)
+    repair = native_tools_need_repair(environment)
+    operation: Literal['unsupported', 'manual', 'install', 'verify', 'reuse'] = 'unsupported' if not support else 'manual' if conflict or not installed and not prerequisites else 'install' if not installed else 'verify' if missing or repair else 'reuse'
+    required = 2 * size + (0 if installed else 8 * 1024**3)
     spaces = [available_bytes(path) for path in {environment.root, root, *(item.target.parent for item in missing)}]
     free = min(space for space in spaces if space is not None) if all(space is not None for space in spaces) else None
     enough = free is not None and free >= required
     detail = ('Existing unowned training files were preserved; use a new managed location or review those files manually.' if conflict else
         'Prepare isolated pinned training dependencies and required models. Existing generation source, environments, models and user data are preserved.')
-    step = ModulePlanStep(module_id=engine, name=('HeartMuLa' if engine == 'heartmula' else 'YuE2') + ' training preparation',
+    step = ModulePlanStep(module_id=engine, name='YuE2 training preparation',
         operation=operation, estimated_download_bytes=size, detail=detail, actions=[], licenses=_licenses(engine))
-    warnings = ['Training environments are separate from generation. Installed original weights are reused read only; missing originals use a separate training model directory.',
+    warnings = ['Training environments and checkpoint files are separate from generation.',
         'Training setup is experimental on Apple Silicon. Installation does not establish musical quality or adapter compatibility.']
     if not installed:
         warnings.append('Pinned source and Python dependency download sizes are unknown. An additional 8 GiB free-space allowance is reserved; actual requirements may be larger.')
@@ -286,7 +231,7 @@ def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePl
         warnings.append('Managed training setup requires uv and Git.')
     if not enough:
         warnings.append('Insufficient or unverified free space in a training, model or cache location.')
-    canonical = {'scope': approval_scope(request, environment), 'steps': [step.model_dump(mode='json')], 'copies': copies}
+    canonical = {'scope': approval_scope(request, environment), 'steps': [step.model_dump(mode='json')], 'copies': 0}
     token = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     return ModulePlan(features=request.features, download_models=True, music_training_engine=engine, plan_token=token,
         steps=[step], estimated_download_bytes=size, download_size_unknown=not installed, required_free_bytes=required,
@@ -294,10 +239,11 @@ def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePl
 
 
 async def prepare(context: InstallContext, engine: MusicTrainingEngine) -> InstallOutcome:
-    from .module_install import _clone, download_artifact
+    from .module_install import _clone, download_artifact, repair_native_tools
     environment = context.environment
     if platform_key(environment) != 'darwin-arm64':
         raise ModuleSetupError('unsupported_platform')
+    repair_native_tools(context)
     root = training_root(environment, engine)
     owned = _owned(environment, engine)
     if root.exists() and (not root.is_dir() or any(root.iterdir())) and owned is None:
@@ -329,7 +275,7 @@ async def prepare(context: InstallContext, engine: MusicTrainingEngine) -> Insta
         for venv in recipes()[engine].environments:
             target = _path(root, venv.folder, writing=True)
             python = _python(root, venv.folder, environment.platform)
-            child_env = {**_uv_env(context), 'SIMPLETUNER_SKIP_TORCH': '1', 'PYTHONPATH': os.pathsep.join(str(_path(root, path)) for path in venv.pythonpath),
+            child_env = {**_uv_env(context), 'PYTHONPATH': os.pathsep.join(str(_path(root, path)) for path in venv.pythonpath),
                 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1'}
             context.update_detail(('Checking existing pinned training packages: ' if legacy_ready else 'Installing pinned isolated training packages: ') + venv.folder + '.')
             if not python.is_file():
@@ -347,10 +293,8 @@ async def prepare(context: InstallContext, engine: MusicTrainingEngine) -> Insta
         if _valid_file(item.target):
             continue
         context.update_detail('Preparing training model: ' + item.target.name + '.')
-        model_source = item.reuse
-        if model_source is None:
-            model_source = context.confined(environment.root / 'cache/music-models' / item.artifact.sha256 / item.target.name)
-            await download_artifact(DownloadArtifact(url=item.artifact.url, sha256=item.artifact.sha256, bytes=item.artifact.bytes), model_source, context, on_progress=context.update_download)
+        model_source = context.confined(environment.root / 'cache/music-models' / item.artifact.sha256 / item.target.name)
+        await download_artifact(DownloadArtifact(url=item.artifact.url, sha256=item.artifact.sha256, bytes=item.artifact.bytes), model_source, context, on_progress=context.update_download)
         if not _valid_file(model_source):
             raise ModuleSetupError('artifact_integrity')
         relative = str(item.target.relative_to(environment.root))

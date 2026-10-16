@@ -69,7 +69,7 @@ async function mount(path = '/voice-clone') {
     { path: '/audiobooks', name: 'audiobooks', component: view }, { path: '/music', name: 'music', component: view },
     { path: '/video', name: 'video', component: view }, { path: '/settings', name: 'settings', component: view },
     { path: '/music/ace-step', name: 'ace-step', component: view }, { path: '/music/yue2', name: 'yue2', component: view },
-    { path: '/music/heartmula', name: 'heartmula', component: view }, { path: '/music/stable-audio3', name: 'stable_audio3', component: view },
+    { path: '/music/stable-audio3', name: 'stable_audio3', component: view },
     { path: '/music/openrouter', name: 'openrouter-music', component: view },
     { path: '/ace-step/lora', name: 'ace-step-lora', component: view },
     { path: '/music/lora', name: 'music-lora', component: view },
@@ -310,7 +310,7 @@ it('opens the queue without starting an engine and marks all advanced generator 
   link('/music').click(); await settle()
   expect(router.currentRoute.value.name).toBe('music')
   expect(api.switchModel).not.toHaveBeenCalled()
-  for (const path of ['/music/ace-step', '/music/yue2', '/music/heartmula', '/music/stable-audio3', '/music/openrouter']) {
+  for (const path of ['/music/ace-step', '/music/yue2', '/music/stable-audio3', '/music/openrouter']) {
     await router.push(path); await settle()
     expect(link('/music').getAttribute('aria-current')).toBe('page')
   }

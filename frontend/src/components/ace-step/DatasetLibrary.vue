@@ -1,15 +1,31 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { LoraDatasetEntry } from '../../api/generated'
+import type { LoraDatasetEntry, LoraDatasetIssue } from '../../api/generated'
 
-const props = defineProps<{ datasets: LoraDatasetEntry[]; selectedId: string | null; disabled: boolean; loading: boolean; status?: string }>()
-const emit = defineEmits<{ select: [id: string]; create: [name: string]; rename: [name: string]; trash: []; restore: [id: string] }>()
+const props = withDefaults(defineProps<{ datasets: LoraDatasetEntry[]; selectedId: string | null; disabled: boolean; loading: boolean; status?: string; issues?: LoraDatasetIssue[] }>(), { issues: () => [] })
+const emit = defineEmits<{ select: [id: string]; create: [name: string]; rename: [name: string]; trash: []; restore: [id: string]; removeRecords: [ids: string[]] }>()
 const { t } = useI18n()
 const mode = ref<'new' | 'rename' | null>(null), name = ref('')
 const selected = computed(() => props.datasets.find(item => item.id === props.selectedId && !item.trashed))
 const active = computed(() => props.datasets.filter(item => !item.trashed))
 const trashed = computed(() => props.datasets.filter(item => item.trashed))
+const removal = ref<Pick<LoraDatasetEntry, 'id' | 'name' | 'revision'>[]>([])
+const cancelRemoval = ref<HTMLButtonElement | null>(null)
+const removalCurrent = computed(() => removal.value.length > 0 && removal.value.every(record => trashed.value.some(item => item.id === record.id && item.revision === record.revision && item.name === record.name)))
+const issueLabels = { dataset_invalid: 'loraRecovery.issueInvalid', dataset_path_unsafe: 'loraRecovery.unsafe', dataset_unavailable: 'loraRecovery.issueUnavailable' } as const
+watch(removalCurrent, value => { if (!value) removal.value = [] })
+async function askRemoval(records: LoraDatasetEntry[]) {
+  if (props.disabled || props.loading) return
+  removal.value = records.filter(item => item.trashed).map(({ id, name, revision }) => ({ id, name, revision }))
+  await nextTick()
+  cancelRemoval.value?.focus()
+}
+function confirmRemoval() {
+  if (props.disabled || props.loading || !removalCurrent.value) return
+  emit('removeRecords', removal.value.map(item => item.id))
+  removal.value = []
+}
 function change(event: Event) {
   if (event.target instanceof HTMLSelectElement && event.target.value) emit('select', event.target.value)
 }
@@ -47,7 +63,18 @@ function submit() {
     </form>
     <details v-if="trashed.length" class="space-y-2 text-sm text-text-dim">
       <summary class="cursor-pointer py-2">{{ t('loraRecovery.trashTitle', { count: trashed.length }) }}</summary>
-      <ul class="space-y-2"><li v-for="item in trashed" :key="item.id" class="flex items-center justify-between gap-3"><span>{{ item.name }}</span><button type="button" class="dataset-button" :disabled="disabled || loading" @click="emit('restore', item.id)">{{ t('loraRecovery.restore') }}</button></li></ul>
+      <button type="button" class="dataset-button" :disabled="disabled || loading" @click="askRemoval(trashed)">{{ t('loraRecovery.clearTrashRecords') }}</button>
+      <ul class="space-y-2"><li v-for="item in trashed" :key="item.id" class="flex flex-wrap items-center justify-between gap-3"><span>{{ item.name }}</span><div class="flex gap-2"><button type="button" class="dataset-button" :disabled="disabled || loading" @click="emit('restore', item.id)">{{ t('loraRecovery.restore') }}</button><button type="button" class="dataset-button" :aria-label="t('loraRecovery.removeRecordNamed', { name: item.name })" :disabled="disabled || loading" @click="askRemoval([item])">{{ t('loraRecovery.removeRecord') }}</button></div></li></ul>
+    </details>
+    <div v-if="removal.length" role="group" :aria-label="t('loraRecovery.removeRecordsTitle', { count: removal.length }, removal.length)" data-testid="remove-records-confirmation" class="space-y-3 rounded-lg border border-status-queued p-3 text-sm">
+      <p class="font-medium">{{ t('loraRecovery.removeRecordsTitle', { count: removal.length }, removal.length) }}</p>
+      <ul class="list-inside list-disc"><li v-for="item in removal" :key="item.id">{{ item.name }}</li></ul>
+      <p class="text-text-dim">{{ t('loraRecovery.removeRecordsHint') }}</p>
+      <div class="flex flex-wrap gap-2"><button ref="cancelRemoval" type="button" class="dataset-button" @click="removal = []">{{ t('loraRecovery.cancel') }}</button><button type="button" class="dataset-button" :disabled="disabled || loading || !removalCurrent" @click="confirmRemoval">{{ t('loraRecovery.confirmRemoveRecords') }}</button></div>
+    </div>
+    <details v-if="issues.length" class="space-y-2 text-sm text-status-queued">
+      <summary class="cursor-pointer py-2">{{ t('loraRecovery.issues', { count: issues.length }) }}</summary>
+      <ul class="space-y-2"><li v-for="issue in issues" :key="`${issue.code}:${issue.path}`"><span class="break-all font-medium">{{ issue.path }}</span><span> · {{ t(issueLabels[issue.code]) }}</span></li></ul>
     </details>
   </section>
 </template>

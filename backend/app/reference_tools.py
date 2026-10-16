@@ -30,7 +30,8 @@ _FLATS = ('C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B')
 _NOTE = re.compile(r'(?P<acc>\^\^|__|\^|_|=)?(?P<letter>[A-Ga-g])(?P<oct>[,\x27]*)(?P<duration>[0-9]+(?:/[0-9]+)?|/[0-9]+|/)?(?P<tie>-)?')
 _DURATION = re.compile(r'[0-9]+(?:/[0-9]+)?|/[0-9]+|/')
 _KEY = re.compile(r'([A-G])([#b]?)(m|min|minor|maj|major)?')
-_CHORD = re.compile(r'([A-G])([#b]?)(m|maj|min|dim|aug|sus[0-9]*|add[0-9]*|[0-9]*)?(?:/([A-G])([#b]?))?')
+_CHORD = re.compile(r'([A-G])([#b]?)((?:maj|min|dim|aug|sus|add|m)?[0-9]*)(?:/([A-G])([#b]?))?')
+_CHORD_LIKE = re.compile(r'[A-G](?:[#b0-9/+()°øΔ♯♭-]|(?:maj|min|dim|aug|sus|add|m|M)+(?:$|[^A-Za-z\s]))')
 
 
 @dataclass(frozen=True)
@@ -223,6 +224,11 @@ def transform_abc(request: ReferenceAbcRequest) -> ReferenceAbcResponse:
     score = _parse_score(request.abc)
     pitches = [note.midi for note in score.notes]
     shift = request.transpose_semitones
+    target_root = request.target_key.removesuffix('m') if request.target_key is not None else None
+    if target_root is not None and request.target_key is not None:
+        if request.target_key.endswith('m') != score.minor:
+            raise ReferenceToolError('key_mode_mismatch')
+        shift = (_pc(target_root) - _pc(score.key) + 6) % 12 - 6
     if request.target_min_midi is not None and request.target_max_midi is not None:
         valid = [extra for extra in range(-24, 25)
                  if min(pitches) + shift + extra >= request.target_min_midi
@@ -230,18 +236,28 @@ def transform_abc(request: ReferenceAbcRequest) -> ReferenceAbcResponse:
         if not valid:
             raise ReferenceToolError('range_unavailable')
         shift += min(valid, key=lambda amount: (abs(amount), amount))
-    prefer_flats = 'b' in score.key or shift < 0
+    prefer_flats = ((_MINOR if score.minor else _MAJOR)[target_root] < 0
+                    if target_root is not None else 'b' in score.key or shift < 0)
     names = _FLATS if prefer_flats else _SHARPS
-    replacements = [(note.start, note.end, _abc_note(note, shift, prefer_flats)) for note in score.notes]
-    for start, end, annotation in score.annotations:
-        match = _CHORD.fullmatch(annotation)
-        if match:
-            chord = names[(_pc(match[1] + match[2]) + shift) % 12] + (match[3] or '')
-            if match[4]:
-                chord += '/' + names[(_pc(match[4] + (match[5] or '')) + shift) % 12]
-            replacements.append((start, end, f'"{chord}"'))
-    key = names[(_pc(score.key) + shift) % 12] + ('m' if score.minor else '')
-    key_text = 'K:' + key
+    replacements: list[tuple[int, int, str]] = []
+    if shift != 0 or (target_root is not None and target_root != score.key):
+        replacements = [(note.start, note.end, _abc_note(note, shift, prefer_flats)) for note in score.notes]
+        for start, end, annotation in score.annotations:
+            match = _CHORD.fullmatch(annotation)
+            if match:
+                chord = names[(_pc(match[1] + match[2]) + shift) % 12] + (match[3] or '')
+                if match[4]:
+                    chord += '/' + names[(_pc(match[4] + (match[5] or '')) + shift) % 12]
+                replacements.append((start, end, f'"{chord}"'))
+            elif shift != 0 and _CHORD_LIKE.match(annotation):
+                raise ReferenceToolError('unsupported_abc')
+    key_start, key_end = score.headers['K']
+    if request.target_key is not None:
+        key_text = 'K:' + request.target_key
+    elif shift != 0:
+        key_text = 'K:' + names[(_pc(score.key) + shift) % 12] + ('m' if score.minor else '')
+    else:
+        key_text = score.text[key_start:key_end]
     if request.tempo_bpm is not None:
         tempo = f'Q:1/4={request.tempo_bpm}'
         tempo_span = score.headers.get('Q')
@@ -249,10 +265,29 @@ def transform_abc(request: ReferenceAbcRequest) -> ReferenceAbcResponse:
             replacements.append((*tempo_span, tempo))
         else:
             key_text = tempo + '\n' + key_text
-    replacements.append((*score.headers['K'], key_text))
+    if request.time_signature is not None:
+        meter = 'M:' + request.time_signature
+        meter_span = score.headers.get('M')
+        if 'L' not in score.headers:
+            original_meter = score.text[meter_span[0]:meter_span[1]].split(':', 1)[1].strip() if meter_span is not None else 'C'
+            original_length = '1/8'
+            if original_meter not in ('C', 'C|'):
+                beats, denominator = original_meter.split('/')
+                if int(beats) * 4 < int(denominator) * 3:
+                    original_length = '1/16'
+            # ABC derives an omitted L from M; freeze it before crossing the 3/4 threshold.
+            if original_length != ('1/16' if request.time_signature == '2/4' else '1/8'):
+                key_text = 'L:' + original_length + '\n' + key_text
+        if meter_span is not None:
+            replacements.append((*meter_span, meter))
+        else:
+            key_text = meter + '\n' + key_text
+    replacements.append((key_start, key_end, key_text))
     output = score.text
     for start, end, replacement in sorted(replacements, reverse=True):
         output = output[:start] + replacement + output[end:]
+    if len(output) > 100_000:
+        raise ReferenceToolError('size_limit')
     changed = score_pitches(output)
     if changed != [pitch + shift for pitch in pitches]:
         raise ReferenceToolError('invalid_abc')

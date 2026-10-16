@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from app import db, music_training, music_lora
 from app.music_lora_contracts import MusicAdapter, MusicLoraError
-from app.music_training_contracts import MusicLoraTrainingSample, MusicLoraTrainingRequest, MusicLoraTrainingStatus
+from app.music_training_contracts import MusicLoraTrainingSample, MusicLoraTrainingRequest, MusicLoraTrainingStatus, MusicLoraTrainingJob, YueLoraPairSettings
 from app.video_process import WorkerIdentity
 
 
@@ -30,12 +30,21 @@ def checkpoint_bytes() -> bytes:
     return struct.pack('<Q', len(header)) + header + bytes(131072)
 
 
+def paired_checkpoint(target: str, *, stage: str | None = None, base: str = BASE_SHA) -> bytes:
+    data = checkpoint_bytes()
+    length = struct.unpack('<Q', data[:8])[0]
+    header = json.loads(data[8:8 + length].replace(b'nar_', b'' if target == 'ar' else b'nar_'))
+    header['__metadata__']['openfabric_yue2_conversion'] = json.dumps({'base_sha256': base, 'stage': stage or target})
+    encoded = json.dumps(header).encode()
+    return struct.pack('<Q', len(encoded)) + encoded + data[8 + length:]
+
+
 class MusicTrainingJobsTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.adapter: MusicAdapter | None = None
-        status = MusicLoraTrainingStatus(engine='yue2', supported=True, installed=True, weights_ready=True, device='mps', validation='verified')
+        status = MusicLoraTrainingStatus(engine='yue2', supported=True, installed=True, weights_ready=True, paired_ready=True, device='mps', validation='verified')
         self.patches = [patch.object(db, '_db', None), patch.object(db, 'DATA_DIR', self.root),
             patch.object(db, 'DB_PATH', self.root / 'catalog.db'), patch.object(db, 'FILES_DIR', self.root / 'files'),
             patch.object(music_training, '_tasks', {}), patch.object(music_training, '_unverified', set()), patch.object(music_training, '_closing', False),
@@ -68,6 +77,282 @@ class MusicTrainingJobsTests(unittest.IsolatedAsyncioTestCase):
 
     def body(self) -> MusicLoraTrainingRequest:
         return MusicLoraTrainingRequest(engine='yue2', name='Test adapter', samples=[MusicLoraTrainingSample(track_id=self.track_id, caption='Jazz')], rank=8, max_steps=3)
+
+    def pair_body(self) -> MusicLoraTrainingRequest:
+        return self.body().model_copy(update={'yue_pair': YueLoraPairSettings(planner_steps=2)})
+
+    async def test_removed_engine_history_is_ignored_without_mutating_saved_records(self) -> None:
+        identifier = 'c' * 32
+        directory = music_training._directory(identifier, create=True)
+        sentinel = directory / '.music-training-package-original'
+        sentinel.mkdir()
+        (sentinel / 'keep.txt').write_text('retained original')
+        saved = {'id': identifier, 'status': 'running', 'created_at': '2026-10-15',
+            'request': {'engine': 'heartmula', 'name': 'Retired training', 'samples': [{'track_id': 1, 'caption': 'Piano'}]}}
+        payload = json.dumps(saved)
+        self.connection.execute('INSERT INTO music_training_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (identifier, payload, saved['created_at']))
+        self.connection.commit()
+        self.assertEqual(music_training.list_jobs().jobs, [])
+        self.assertFalse(music_training.list_jobs().history_incomplete)
+        self.assertFalse(music_training._planner_child_exists('d' * 32))
+        with self.assertRaises(MusicLoraError) as caught:
+            music_training.get(identifier)
+        self.assertEqual(caught.exception.code, 'music_training_job_not_found')
+        await music_training.recover()
+        self.assertFalse(music_training.work_busy())
+        self.assertEqual(self.connection.execute('SELECT payload_json FROM music_training_jobs WHERE id=?', (identifier,)).fetchone()['payload_json'], payload)
+        self.assertEqual((sentinel / 'keep.txt').read_text(), 'retained original')
+
+    async def test_retired_jobs_do_not_consume_the_supported_history_limit(self) -> None:
+        payload = json.dumps({'request': {'engine': 'heartmula'}})
+        self.connection.executemany('INSERT INTO music_training_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            [(f'{index:032x}', payload, '2026-10-16') for index in range(1000)])
+        supported = MusicLoraTrainingJob(id='f' * 32, status='cancelled', created_at='2026-10-15', request=self.body())
+        self.connection.execute('INSERT INTO music_training_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (supported.id, supported.model_dump_json(), supported.created_at))
+        self.connection.commit()
+        history = music_training.list_jobs()
+        self.assertEqual(history.jobs, [supported])
+        self.assertFalse(history.history_incomplete)
+
+    async def test_retired_worker_blocks_admission_until_verified_termination_without_mutating_artifacts(self) -> None:
+        identifier = 'e' * 32
+        directory = music_training._directory(identifier, create=True)
+        artifact = directory / 'completion.json'
+        artifact.write_bytes(b'retained original completion')
+        payload = json.dumps({'id': identifier, 'status': 'running', 'request': {'engine': 'heartmula'}})
+        identity = WorkerIdentity(pid=12345, token='a' * 32, receipt=str(directory / 'worker.json'))
+        self.connection.execute('INSERT INTO music_training_jobs(id,payload_json,worker_json,created_at) VALUES(?,?,?,?)',
+            (identifier, payload, identity.model_dump_json(), '2026-10-15'))
+        self.connection.commit()
+        with patch.object(music_training, 'prepare_worker') as prepare, patch.object(music_training, '_publish') as publish, \
+                patch.object(music_training, '_cleanup') as cleanup:
+            with patch.object(music_training, 'terminate_verified', new=AsyncMock(return_value=False)) as terminate:
+                await music_training.recover()
+                terminate.assert_awaited_once_with(identity)
+            self.assertTrue(music_training.work_busy())
+            with self.assertRaises(MusicLoraError) as caught:
+                await music_training.submit(self.body())
+            self.assertEqual(caught.exception.code, 'music_training_busy')
+            retained = self.connection.execute('SELECT payload_json,worker_json FROM music_training_jobs WHERE id=?', (identifier,)).fetchone()
+            self.assertEqual((retained['payload_json'], retained['worker_json']), (payload, identity.model_dump_json()))
+            with patch.object(music_training, 'terminate_verified', new=AsyncMock(return_value=True)) as terminate:
+                await music_training.recover()
+                terminate.assert_awaited_once_with(identity)
+            prepare.assert_not_called()
+            publish.assert_not_called()
+            cleanup.assert_not_called()
+        self.assertFalse(music_training.work_busy())
+        retained = self.connection.execute('SELECT payload_json,worker_json FROM music_training_jobs WHERE id=?', (identifier,)).fetchone()
+        self.assertEqual((retained['payload_json'], retained['worker_json']), (payload, None))
+        self.assertEqual(artifact.read_bytes(), b'retained original completion')
+
+    def pair_job(self) -> MusicLoraTrainingJob:
+        identifier = 'd' * 32
+        directory = music_training._directory(identifier, create=True)
+        job = MusicLoraTrainingJob(id=identifier, status='running', created_at='2026-10-16', request=self.pair_body())
+        self.connection.execute('INSERT INTO music_training_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (job.id, job.model_dump_json(), job.created_at))
+        self.connection.commit()
+        (directory / 'dataset.json').write_text('{}')
+        artifacts = []
+        for target in ('ar', 'nar'):
+            data = paired_checkpoint(target)
+            (directory / (target + '.safetensors')).write_bytes(data)
+            artifacts.append({'target': target, 'checkpoint': target + '.safetensors', 'sha256': hashlib.sha256(data).hexdigest()})
+        (directory / 'completion.json').write_text(json.dumps({'job_id': job.id, 'engine': 'yue2',
+            'request_sha256': music_training.fingerprint(job.request), 'dataset_sha256': hashlib.sha256(b'{}').hexdigest(),
+            'base_sha256': BASE_SHA, 'max_steps': 3, 'planner_steps': 2, 'artifacts': artifacts}))
+        return job
+
+    def pair_worker(self) -> None:
+        self.worker.write_text('import hashlib,json,sys\nfrom pathlib import Path\n'
+            'run=Path(sys.argv[1]);spec=json.loads((run/"request.json").read_text());artifacts=[]\n'
+            f'data={ {target: paired_checkpoint(target) for target in ("ar", "nar")}!r}\n'
+            'for target,content in data.items():\n'
+            ' (run/(target+".safetensors")).write_bytes(content);artifacts.append({"target":target,"checkpoint":target+".safetensors","sha256":hashlib.sha256(content).hexdigest()})\n'
+            '(run/"dataset.json").write_text("{}")\n'
+            f'(run/"completion.json").write_text(json.dumps({{"job_id":run.name,"engine":"yue2","request_sha256":spec["request_sha256"],"dataset_sha256":hashlib.sha256(b"{{}}").hexdigest(),"base_sha256":{BASE_SHA!r},"max_steps":3,"planner_steps":2,"artifacts":artifacts}}))\n')
+
+    async def test_pair_publication_recovers_only_the_missing_target_after_interruption(self) -> None:
+        job = self.pair_job()
+        registered: list[str] = []
+        def interrupt(path: Path, *, name: str, engine: str, target: str, source_job_id: str | None = None) -> MusicAdapter:
+            registered.append(target)
+            if target == 'nar':
+                raise OSError('interrupted second publication')
+            return music_lora.register_file(path, name=name, engine=engine, target=target, source_job_id=source_job_id)
+        with patch.object(music_training, 'register_file', side_effect=interrupt), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job):
+            with self.assertRaises(OSError):
+                music_training._publish(job)
+        self.assertEqual(registered, ['ar', 'nar'])
+        self.assertEqual([adapter.target for adapter in music_lora.list_adapters().adapters], ['ar'])
+        job.status = 'failed'
+        music_training._store(job)
+        with patch.object(music_training, 'register_file', side_effect=music_lora.register_file), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job), patch.object(music_training, 'prepare_worker') as prepare:
+            await music_training.recover()
+            await music_training.recover()
+        prepare.assert_not_called()
+        result = music_training.get(job.id)
+        self.assertEqual(result.status, 'done')
+        self.assertEqual({adapter.target for adapter in result.adapters}, {'ar', 'nar'})
+        self.assertEqual(result.adapter, next(adapter for adapter in result.adapters if adapter.target == 'nar'))
+        self.assertEqual(result.progress.target, 'nar')
+        self.assertEqual(len(music_lora.list_adapters().adapters), 2)
+
+    async def test_pair_validates_both_files_and_target_metadata_before_any_registration(self) -> None:
+        job = self.pair_job()
+        directory = music_training._directory(job.id)
+        receipt_path = directory / 'completion.json'
+        receipt = json.loads(receipt_path.read_bytes())
+        for kind in ('missing', 'duplicate', 'wrong-hash', 'swapped', 'wrong-stage', 'wrong-base', 'invalid-native', 'truncated-header', 'wrong-planner'):
+            changed = json.loads(json.dumps(receipt))
+            for target in ('ar', 'nar'):
+                (directory / (target + '.safetensors')).write_bytes(paired_checkpoint(target))
+            if kind == 'missing':
+                (directory / 'nar.safetensors').unlink()
+            elif kind == 'duplicate':
+                changed['artifacts'][1] = changed['artifacts'][0]
+            elif kind == 'wrong-hash':
+                changed['artifacts'][1]['sha256'] = '0' * 64
+            elif kind == 'swapped':
+                for item in changed['artifacts']:
+                    item['target'] = 'nar' if item['target'] == 'ar' else 'ar'
+            elif kind in ('wrong-stage', 'wrong-base', 'invalid-native', 'truncated-header'):
+                content = (paired_checkpoint('nar', stage='ar') if kind == 'wrong-stage' else
+                    paired_checkpoint('nar', base='0' * 64) if kind == 'wrong-base' else b'123' if kind == 'truncated-header' else
+                    paired_checkpoint('ar', stage='nar'))
+                (directory / 'nar.safetensors').write_bytes(content)
+                changed['artifacts'][1]['sha256'] = hashlib.sha256(content).hexdigest()
+            else:
+                changed['planner_steps'] = 3
+            receipt_path.write_text(json.dumps(changed))
+            with self.subTest(kind=kind), patch.object(music_training, 'register_file') as register:
+                with self.assertRaises((MusicLoraError, ValidationError, OSError)):
+                    music_training._publish(job)
+                register.assert_not_called()
+
+    async def test_pair_progress_resets_once_for_nar_and_survives_reload(self) -> None:
+        job = self.pair_job()
+        path = music_training._directory(job.id) / 'stage.json'
+        path.write_text(json.dumps({'stage': 'training', 'step': 1, 'total_steps': 3}))
+        self.assertEqual(music_training.get(job.id).progress.stage, 'preparing')
+        path.write_text(json.dumps({'stage': 'training', 'target': 'ar', 'step': 2, 'total_steps': 2}))
+        self.assertEqual(music_training.get(job.id).progress.target, 'ar')
+        path.write_text(json.dumps({'stage': 'loading', 'target': 'nar', 'step': None, 'total_steps': 3}))
+        self.assertEqual(music_training.get(job.id).progress.target, 'nar')
+        path.write_text(json.dumps({'stage': 'training', 'target': 'nar', 'step': 1, 'total_steps': 3}))
+        observed = music_training.get(job.id).progress
+        self.assertEqual(observed.step, 1)
+        for report in ({'stage': 'training', 'target': 'ar', 'step': 2, 'total_steps': 2},
+                {'stage': 'training', 'target': 'nar', 'step': 0, 'total_steps': 3},
+                {'stage': 'training', 'target': None, 'step': 2, 'total_steps': 3},
+                {'stage': 'training', 'target': 'nar', 'step': 2, 'total_steps': 2}):
+            path.write_text(json.dumps(report))
+            self.assertEqual(music_training.get(job.id).progress, observed)
+        saved = self.connection.execute('SELECT payload_json FROM music_training_jobs WHERE id=?', (job.id,)).fetchone()
+        self.assertEqual(MusicLoraTrainingJob.model_validate_json(saved['payload_json']).progress, observed)
+
+    async def test_pair_failed_publication_keeps_the_first_managed_adapter_link(self) -> None:
+        self.pair_worker()
+        def interrupt(path: Path, *, name: str, engine: str, target: str, source_job_id: str | None = None) -> MusicAdapter:
+            if target == 'nar':
+                raise OSError('interrupted second publication')
+            return music_lora.register_file(path, name=name, engine=engine, target=target, source_job_id=source_job_id)
+        with patch.object(music_training, 'prepare_worker', side_effect=self.command), \
+                patch.object(music_training, 'register_file', side_effect=interrupt), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job):
+            job = await music_training.submit(self.pair_body())
+            await music_training._tasks[job.id]
+        result = music_training.get(job.id)
+        self.assertEqual(result.status, 'failed')
+        self.assertEqual({adapter.target for adapter in result.adapters}, {'ar'})
+        self.assertIsNone(result.adapter)
+
+    async def test_recovery_interruption_keeps_the_first_managed_adapter_link(self) -> None:
+        job = self.pair_job()
+        def interrupt(path: Path, *, name: str, engine: str, target: str, source_job_id: str | None = None) -> MusicAdapter:
+            if target == 'nar':
+                raise OSError('interrupted recovery publication')
+            return music_lora.register_file(path, name=name, engine=engine, target=target, source_job_id=source_job_id)
+        with patch.object(music_training, 'register_file', side_effect=interrupt), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job):
+            await music_training.recover()
+        result = music_training.get(job.id)
+        self.assertEqual(result.status, 'failed')
+        self.assertEqual({adapter.target for adapter in result.adapters}, {'ar'})
+        self.assertIsNone(result.adapter)
+
+    async def test_pair_readiness_fails_closed_without_affecting_legacy_training(self) -> None:
+        current = MusicLoraTrainingStatus(engine='yue2', supported=True, installed=True, weights_ready=True)
+        with patch.object(music_training, 'status', return_value=current):
+            music_training._require_ready(self.body())
+            with self.assertRaises(MusicLoraError) as caught:
+                music_training._require_ready(self.pair_body())
+        self.assertEqual(caught.exception.code, 'yue_lora_score_unprepared')
+
+    async def test_completed_pair_keeps_both_adapters_and_the_nar_compatibility_alias(self) -> None:
+        self.pair_worker()
+        with patch.object(music_training, 'prepare_worker', side_effect=self.command), \
+                patch.object(music_training, 'register_file', side_effect=music_lora.register_file), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job):
+            job = await music_training.submit(self.pair_body())
+            await music_training._tasks[job.id]
+        result = music_training.get(job.id)
+        self.assertEqual(result.status, 'done')
+        self.assertEqual([adapter.target for adapter in result.adapters], ['ar', 'nar'])
+        self.assertEqual(result.adapter, result.adapters[1])
+        self.assertEqual((result.progress.target, result.progress.step, result.progress.total_steps), ('nar', 3, 3))
+
+    async def test_recovery_without_pair_receipt_never_accepts_first_adapter_as_finished(self) -> None:
+        job = self.pair_job()
+        directory = music_training._directory(job.id)
+        ar = music_lora.register_file(directory / 'ar.safetensors', name=job.request.name, engine='yue2', target='ar', source_job_id=job.id)
+        job.adapters = [ar]
+        music_training._store(job)
+        (directory / 'completion.json').unlink()
+        with patch.object(music_training, 'register_file', side_effect=music_lora.register_file), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job), patch.object(music_training, 'prepare_worker') as prepare:
+            await music_training.recover()
+        prepare.assert_not_called()
+        self.assertEqual(music_training.get(job.id).status, 'failed')
+        self.assertEqual(music_training.get(job.id).adapters, [ar])
+        self.assertEqual(len(music_lora.list_adapters().adapters), 1)
+
+    async def test_pair_cancel_during_second_publication_never_marks_partial_pair_done(self) -> None:
+        self.pair_worker()
+        started, release = threading.Event(), threading.Event()
+        def interrupt(path: Path, *, name: str, engine: str, target: str, source_job_id: str | None = None) -> MusicAdapter:
+            if target == 'nar':
+                started.set()
+                if not release.wait(10):
+                    raise TimeoutError('test publication was not released')
+                raise OSError('second publication interrupted')
+            return music_lora.register_file(path, name=name, engine=engine, target=target, source_job_id=source_job_id)
+        with patch.object(music_training, 'prepare_worker', side_effect=self.command), \
+                patch.object(music_training, 'register_file', side_effect=interrupt), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job):
+            job = await music_training.submit(self.pair_body())
+            async with asyncio.timeout(10):
+                while not started.is_set():
+                    await asyncio.sleep(.01)
+            cancel = asyncio.create_task(music_training.cancel(job.id))
+            await asyncio.sleep(.02)
+            self.assertFalse(cancel.done())
+            release.set()
+            await cancel
+        result = music_training.get(job.id)
+        self.assertEqual(result.status, 'cancelled')
+        self.assertEqual({adapter.target for adapter in result.adapters}, {'ar'})
+        self.assertIsNone(result.adapter)
+        with patch.object(music_training, 'register_file', side_effect=music_lora.register_file), \
+                patch.object(music_training, 'find_by_job', side_effect=music_lora.find_by_job), patch.object(music_training, 'prepare_worker') as prepare:
+            await music_training.recover()
+        prepare.assert_not_called()
+        self.assertEqual(music_training.get(job.id).status, 'done')
 
     def command(self, request: MusicLoraTrainingRequest, run: Path, sources: list[Path]) -> tuple[list[str], Path, dict[str, str]]:
         run.mkdir(parents=True, exist_ok=True)

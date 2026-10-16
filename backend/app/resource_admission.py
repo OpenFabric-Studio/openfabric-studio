@@ -70,6 +70,9 @@ async def reserve_native_control() -> NativeLease:
     async with admission_lock:
         from .music_queue_ownership import require_access
         require_access()
+        from .training_captions import work_busy as captions_busy
+        if captions_busy():
+            raise ResourceBusyError("native_model_busy")
         _native_inflight += 1
         return NativeLease()
 
@@ -92,6 +95,9 @@ async def reserve_native(video_busy: Callable[[], bool], *, model_id: str | None
         from .local_music import work_busy as local_music_busy
         from .stable_lora import work_busy as stable_lora_busy
         from .music_training import work_busy as music_training_busy
+        from .training_captions import work_busy as captions_busy
+        if captions_busy():
+            raise ResourceBusyError("native_model_busy")
         if local_music_busy() or stable_lora_busy() or music_training_busy() or video_busy() or optional_busy() or character_training_busy() or character_comparison_busy() or asr_busy() or speaker_busy() or audiobook_workflows_busy():
             raise ResourceBusyError("video_work_busy")
         if exclusive and model_id is not None and _native_models.get(model_id, 0):
@@ -109,3 +115,23 @@ async def native_admission(video_busy: Callable[[], bool]) -> AsyncIterator[None
         yield
     finally:
         await lease.release()
+
+
+async def reserve_idle_native() -> NativeLease:
+    """Reserve a local analysis batch before publishing its owned job registry."""
+    global _native_inflight
+    async with admission_lock:
+        require_setup_idle()
+        from .work_busy import other_work_busy
+        from .orchestrator.manager import manager
+        from .orchestrator.state import ModelStatus
+        from .stems import gpu_lock
+        from .video_jobs import work_busy as video_busy
+        if (_native_inflight or gpu_lock.locked() or video_busy()
+                or any(state.status in (ModelStatus.STARTING, ModelStatus.STOPPING)
+                    or state.status == ModelStatus.ERROR and identifier in manager._processes
+                    for identifier, state in manager.state.models.items())
+                or await other_work_busy()):
+            raise ResourceBusyError('native_model_busy')
+        _native_inflight += 1
+        return NativeLease()

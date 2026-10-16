@@ -158,7 +158,7 @@ it('opens cloud music without switching or stopping a running local model', asyn
   expect(api.switchModel).not.toHaveBeenCalled(); expect(api.stopActive).not.toHaveBeenCalled()
 })
 
-it.each(['heartmula', 'stable-audio3'])('opens %s without starting or stopping another engine', async slug => {
+it.each(['stable-audio3'])('opens %s without starting or stopping another engine', async slug => {
   const { node, router } = await mount('/music/ace-step', 'ace_step')
   const link = node.querySelector(`a[href="/music/${slug}"]`)
   if (!(link instanceof HTMLAnchorElement)) throw new Error(`Missing ${slug} selector`)
@@ -167,4 +167,11 @@ it.each(['heartmula', 'stable-audio3'])('opens %s without starting or stopping a
   expect(node.textContent).toContain(`${slug.replace('-', '_')} generator`)
   expect(api.switchModel).not.toHaveBeenCalled()
   expect(api.stopActive).not.toHaveBeenCalled()
+})
+
+it('offers only supported generation and training routes', async () => {
+  const { node, router } = await mount('/music')
+  expect([...node.querySelectorAll('a[data-model]')].map(link => link.getAttribute('data-model'))).toEqual(['stable_audio3', 'openrouter'])
+  expect(router.hasRoute('heartmula')).toBe(false)
+  expect(router.hasRoute('music-lora-heartmula')).toBe(false)
 })

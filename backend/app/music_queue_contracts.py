@@ -11,7 +11,7 @@ from .local_music_contracts import LocalMusicRequest
 from .music_lora_contracts import MusicAdapter, MusicAdapterSelection
 from .yue_contracts import YueSubmitRequest
 
-MusicQueueEngine = Literal['ace_step', 'yue2', 'heartmula', 'stable_audio3']
+MusicQueueEngine = Literal['ace_step', 'yue2', 'stable_audio3']
 MusicQueueId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 MusicQueueFingerprint = Annotated[str, Field(pattern=r'^[0-9a-f]{64}$')]
 MusicQueueSeed = Annotated[int, Field(ge=0, le=2147483647, strict=True)]
@@ -39,7 +39,7 @@ class MusicQueueBrief(MusicQueueContract):
     description: str = Field(min_length=1, max_length=3500)
     lyrics: str = Field(default='', max_length=20000)
     instrumental: bool = False
-    duration_seconds: int = Field(ge=10, le=380)
+    duration_seconds: int = Field(ge=10, le=600)
     bpm: float | None = Field(default=None, ge=20, le=300)
     key: str = Field(default='', max_length=80)
     language: str = Field(default='', max_length=80)
@@ -73,7 +73,7 @@ class MusicQueueEngineSelection(MusicQueueContract):
 
 class MusicQueuePreviewRequest(MusicQueueContract):
     brief: MusicQueueBrief
-    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=4)
+    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=3)
 
     @model_validator(mode='after')
     def unique_engines(self) -> Self:
@@ -95,7 +95,7 @@ class MusicQueueReadiness(MusicQueueContract):
 
 
 class MusicQueueCatalog(MusicQueueContract):
-    engines: list[MusicQueueReadiness] = Field(max_length=4)
+    engines: list[MusicQueueReadiness] = Field(max_length=3)
     adapters: list[MusicAdapter] = Field(default_factory=list, max_length=1000)
 
 
@@ -111,8 +111,8 @@ class MusicQueueModelPlan(MusicQueueContract):
     readiness: MusicQueueReadiness
     compatible: bool
     error_code: str = Field(default='', max_length=120)
-    effective_duration_seconds: int | None = Field(default=None, ge=10, le=380)
-    duration_mode: Literal['target', 'maximum', 'model_led']
+    effective_duration_seconds: int | None = Field(default=None, ge=10, le=600)
+    duration_mode: Literal['target', 'model_led']
     adjustments: list[MusicQueueAdjustment] = Field(default_factory=list, max_length=20)
     warnings: list[Annotated[str, Field(max_length=120)]] = Field(default_factory=list, max_length=20)
     adapters: list[MusicAdapter] = Field(default_factory=list, max_length=2)
@@ -128,17 +128,6 @@ class MusicQueueYueRequest(MusicQueueContract):
     request: YueSubmitRequest
 
 
-class MusicQueueHeartRequest(MusicQueueContract):
-    engine: Literal['heartmula']
-    request: LocalMusicRequest
-
-    @model_validator(mode='after')
-    def matching_engine(self) -> Self:
-        if self.request.engine != self.engine:
-            raise ValueError('music_queue_payload_engine_mismatch')
-        return self
-
-
 class MusicQueueStableRequest(MusicQueueContract):
     engine: Literal['stable_audio3']
     request: LocalMusicRequest
@@ -151,7 +140,7 @@ class MusicQueueStableRequest(MusicQueueContract):
 
 
 MusicQueuePayload: TypeAlias = Annotated[
-    MusicQueueAceRequest | MusicQueueYueRequest | MusicQueueHeartRequest | MusicQueueStableRequest,
+    MusicQueueAceRequest | MusicQueueYueRequest | MusicQueueStableRequest,
     Field(discriminator='engine'),
 ]
 
@@ -171,8 +160,8 @@ class MusicQueueNormalizedItem(MusicQueueContract):
 
 class MusicQueuePreview(MusicQueueContract):
     brief: MusicQueueBrief
-    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=4)
-    models: list[MusicQueueModelPlan] = Field(min_length=1, max_length=4)
+    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=3)
+    models: list[MusicQueueModelPlan] = Field(min_length=1, max_length=3)
     items: list[MusicQueueNormalizedItem] = Field(max_length=32)
     total_items: int = Field(ge=1, le=32)
     can_enqueue: bool
@@ -195,8 +184,8 @@ class MusicQueueBatch(MusicQueueContract):
     id: MusicQueueId
     created_at: str = Field(min_length=1, max_length=64)
     brief: MusicQueueBrief
-    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=4)
-    models: list[MusicQueueModelPlan] = Field(min_length=1, max_length=4)
+    selections: list[MusicQueueEngineSelection] = Field(min_length=1, max_length=3)
+    models: list[MusicQueueModelPlan] = Field(min_length=1, max_length=3)
     preview_fingerprint: MusicQueueFingerprint
     items: list[MusicQueueItem] = Field(max_length=1000)
 
@@ -246,7 +235,7 @@ class MusicQueueCancelRequest(MusicQueueContract):
 MUSIC_QUEUE_CLIENT_MODELS: list[type[BaseModel]] = [
     MusicQueueErrorResponse, MusicQueueBrief, MusicQueueEngineSelection, MusicQueuePreviewRequest,
     MusicQueueReadiness, MusicQueueCatalog, MusicQueueAdjustment, MusicQueueModelPlan,
-    MusicQueueAceRequest, MusicQueueYueRequest, MusicQueueHeartRequest, MusicQueueStableRequest,
+    MusicQueueAceRequest, MusicQueueYueRequest, MusicQueueStableRequest,
     MusicQueueNormalizedItem, MusicQueuePreview, MusicQueueItem, MusicQueueBatch, MusicQueueSnapshot,
     MusicQueueEnqueueRequest, MusicQueueControlRequest, MusicQueueReorderRequest,
     MusicQueueRetryRequest, MusicQueueCancelRequest,

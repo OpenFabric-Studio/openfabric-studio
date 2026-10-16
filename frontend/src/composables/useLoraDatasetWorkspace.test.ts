@@ -6,7 +6,7 @@ import { useLoraDatasetWorkspace } from './useLoraDatasetWorkspace'
 import { useLoraTrainingStore } from '../stores/loraTraining'
 import * as api from '../api/loraDataset'
 import * as native from '../api/aceStepTraining'
-import type { LoraDatasetEntry, LoraDatasetOperationResponse, LoraWorkspace, LoraWorkspaceForm } from '../api/generated'
+import type { LoraDatasetEntry, LoraDatasetOperationResponse, LoraDatasetsResponse, LoraWorkspace, LoraWorkspaceForm } from '../api/generated'
 import { i18n } from '../i18n'
 import { ApiError } from '../api/http'
 
@@ -14,6 +14,7 @@ vi.mock('../api/loraDataset', async original => ({ ...await original<typeof impo
   listLoraDatasets: vi.fn(), getLoraWorkspace: vi.fn(), saveLoraWorkspace: vi.fn(), createLoraDataset: vi.fn(),
   renameLoraDataset: vi.fn(), trashLoraDataset: vi.fn(), restoreLoraDataset: vi.fn(), loadLoraDataset: vi.fn(),
   saveLoraDataset: vi.fn(), scanLoraDataset: vi.fn(), uploadDatasetFiles: vi.fn(), updateLoraDatasetSample: vi.fn(),
+  removeLoraDatasetRecords: vi.fn(),
 }))
 vi.mock('../api/aceStepTraining', async original => ({ ...await original<typeof import('../api/aceStepTraining')>(),
   trainingStatus: vi.fn(), autoLabelStatus: vi.fn(), preprocessStatus: vi.fn(), latestAutoLabelStatus: vi.fn(),
@@ -59,6 +60,28 @@ beforeEach(() => {
   vi.mocked(native.getSamples).mockResolvedValue({ samples: [sample] })
 })
 afterEach(() => { unmount(); vi.clearAllTimers(); vi.useRealTimers() })
+
+it('reads workspace after catalog discovery has removed an invalid selected record', async () => {
+  workspace = { ...workspace, selected_dataset_id: other.id }
+  vi.mocked(api.listLoraDatasets).mockImplementation(async () => {
+    await Promise.resolve()
+    workspace = { ...workspace, revision: 2, selected_dataset_id: null }
+    return { datasets: [selected] }
+  })
+  await mount()
+  expect(library.selectedId.value).toBeNull()
+  await expect(library.persist()).resolves.toBe(true)
+  expect(api.saveLoraWorkspace).toHaveBeenCalledWith(expect.objectContaining({ revision: 2, selected_dataset_id: null }), expect.any(AbortSignal), false)
+  expect(library.error.value).toBe('')
+})
+
+it('does not fetch the workspace if catalog initialization completes after teardown', async () => {
+  const response = deferred<LoraDatasetsResponse>()
+  vi.mocked(api.listLoraDatasets).mockReturnValue(response.promise)
+  const initialization = mount(); await settle(); unmount()
+  response.resolve({ datasets: [selected] }); await initialization
+  expect(api.getLoraWorkspace).not.toHaveBeenCalled()
+})
 
 it('ignores a dataset load response that arrives after initialization was unmounted', async () => {
   const response = deferred<LoraDatasetOperationResponse>()
@@ -255,4 +278,158 @@ it('does not begin a queued dataset selection after its page has unmounted', asy
   response.resolve({ ...workspace, revision: 2 }); await persistence; await selection; await settle()
   expect(useLoraTrainingStore(pinia).datasetPath).toBe('datasets/new-page/dataset.json')
   expect(api.loadLoraDataset).toHaveBeenCalledOnce()
+})
+
+it('removes confirmed trash records atomically without changing the active dataset or samples', async () => {
+  const old = { ...other, trashed: true, revision: 3 }
+  const second = { ...old, id: 'c'.repeat(32), name: 'Third' }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old, second] })
+  vi.mocked(api.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [old.id, second.id] })
+  await mount()
+  const samples = [...useLoraTrainingStore(pinia).samples]
+  await library.removeRecords([old.id, second.id])
+  expect(api.removeLoraDatasetRecords).toHaveBeenCalledWith([{ id: old.id, revision: 3 }, { id: second.id, revision: 3 }], expect.any(AbortSignal))
+  expect(library.datasets.value).toEqual([selected])
+  expect(library.selectedId.value).toBe(selected.id)
+  expect(useLoraTrainingStore(pinia).samples).toEqual(samples)
+  expect(api.saveLoraWorkspace).not.toHaveBeenCalled()
+})
+it('refreshes the workspace revision after removal clears a retained preprocessing receipt', async () => {
+  const old = { ...other, trashed: true }
+  workspace.preprocess_receipt = { dataset_id: old.id, dataset_hash: 'a'.repeat(64), model_identity: 'b'.repeat(64), output_dir: `${old.audio_dir}/tensors`, task_id: 'old-preprocess' }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockImplementation(async () => {
+    workspace = { ...workspace, revision: (workspace.revision ?? 0) + 1, preprocess_receipt: null }
+    return { removed_ids: [old.id] }
+  })
+  await mount()
+  form.custom_tag = 'keep-this-draft'
+  const samples = [...useLoraTrainingStore(pinia).samples]
+  await library.removeRecords([old.id])
+  await expect(library.persist()).resolves.toBe(true)
+  expect(api.saveLoraWorkspace).toHaveBeenCalledWith(expect.objectContaining({ revision: 2, selected_dataset_id: selected.id, preprocess_receipt: null, form: expect.objectContaining({ custom_tag: 'keep-this-draft' }) }), expect.any(AbortSignal), false)
+  expect(library.error.value).toBe('')
+  expect(library.selectedId.value).toBe(selected.id)
+  expect(useLoraTrainingStore(pinia).samples).toEqual(samples)
+  expect(useLoraTrainingStore(pinia).datasetPath).toBe(selected.dataset_path)
+})
+it('does not replace a newer initialized workspace with an older post-removal sync response', async () => {
+  const old = { ...other, trashed: true }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [old.id] })
+  await mount()
+  const response = deferred<LoraWorkspace>()
+  vi.mocked(api.getLoraWorkspace).mockReturnValueOnce(response.promise)
+  const removal = library.removeRecords([old.id]); await settle()
+  const older = { ...workspace, revision: 2 }
+  workspace = { ...workspace, revision: 8 }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected] })
+  await library.initialize()
+  response.resolve(older); await removal
+  await expect(library.persist()).resolves.toBe(true)
+  expect(api.saveLoraWorkspace).toHaveBeenCalledWith(expect.objectContaining({ revision: 8 }), expect.any(AbortSignal), false)
+  expect(library.error.value).toBe('')
+})
+it('does not submit active, unknown or duplicate record IDs for trash clearing', async () => {
+  await mount()
+  await library.removeRecords([selected.id])
+  await library.removeRecords(['missing'])
+  await library.removeRecords([other.id, other.id])
+  expect(api.removeLoraDatasetRecords).not.toHaveBeenCalled()
+  expect(library.datasets.value).toEqual([selected, other])
+})
+it('removes only requested IDs acknowledged by the server', async () => {
+  const old = { ...other, trashed: true }
+  const second = { ...old, id: 'c'.repeat(32), name: 'Third' }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old, second] })
+  vi.mocked(api.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [old.id, selected.id] })
+  await mount(); await library.removeRecords([old.id, second.id])
+  expect(library.datasets.value).toEqual([selected, second])
+})
+it('keeps every record when a trash clear conflicts with another tab', async () => {
+  const old = { ...other, trashed: true }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockRejectedValue(new ApiError('dataset_revision_conflict', 409))
+  await mount(); await library.removeRecords([old.id])
+  expect(library.datasets.value).toEqual([selected, old])
+  expect(library.error.value).toContain('changed in another tab')
+})
+it('does not apply a completed trash clear after page teardown', async () => {
+  const old = { ...other, trashed: true }
+  const response = deferred<{ removed_ids: string[] }>()
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockReturnValue(response.promise)
+  await mount()
+  const removal = library.removeRecords([old.id]); await settle()
+  expect(library.disabled.value).toBe(true)
+  unmount(); response.resolve({ removed_ids: [old.id] }); await removal
+  expect(library.datasets.value).toEqual([selected, old])
+  expect(vi.mocked(api.removeLoraDatasetRecords).mock.calls[0]?.[1]?.aborted).toBe(true)
+})
+it('keeps a refreshed catalog when an older trash clear response arrives', async () => {
+  const old = { ...other, trashed: true }
+  const response = deferred<{ removed_ids: string[] }>()
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockReturnValue(response.promise)
+  await mount()
+  const removal = library.removeRecords([old.id]); await settle()
+  const restored = { ...other, revision: 3 }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, restored] })
+  await library.initialize()
+  response.resolve({ removed_ids: [old.id] }); await removal
+  expect(library.datasets.value).toEqual([selected, restored])
+})
+it('keeps confirmed record revisions across pending workspace persistence', async () => {
+  const old = { ...other, trashed: true }, changed = { ...old, revision: old.revision + 1 }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  await mount()
+  const response = deferred<LoraWorkspace>()
+  vi.mocked(api.saveLoraWorkspace).mockReturnValueOnce(response.promise)
+  const persistence = library.persist(); await settle()
+  const removal = library.removeRecords([old.id]); await settle()
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, changed] })
+  await library.refresh()
+  vi.mocked(api.removeLoraDatasetRecords).mockImplementation(async records => {
+    if (records.some(record => record.revision !== changed.revision)) throw new ApiError('dataset_revision_conflict', 409)
+    return { removed_ids: [old.id] }
+  })
+  response.resolve({ ...workspace, revision: 2 }); await persistence; await removal
+  expect(api.removeLoraDatasetRecords).toHaveBeenCalledWith([{ id: old.id, revision: old.revision }], expect.any(AbortSignal))
+  expect(library.datasets.value).toEqual([selected, changed])
+  expect(library.error.value).toContain('changed in another tab')
+})
+it('does not submit a trash clear if workspace generation changes while persistence is pending', async () => {
+  const old = { ...other, trashed: true }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [old.id] })
+  await mount()
+  const response = deferred<LoraWorkspace>()
+  vi.mocked(api.saveLoraWorkspace).mockReturnValueOnce(response.promise)
+  const persistence = library.persist(); await settle()
+  const removal = library.removeRecords([old.id]); await settle()
+  await library.initialize()
+  response.resolve({ ...workspace, revision: 2 }); await persistence; await removal
+  expect(api.removeLoraDatasetRecords).not.toHaveBeenCalled()
+  expect(library.datasets.value).toEqual([selected, old])
+})
+it('does not resurrect removed records from an older catalog refresh response', async () => {
+  const old = { ...other, trashed: true }
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, old] })
+  vi.mocked(api.removeLoraDatasetRecords).mockResolvedValue({ removed_ids: [old.id] })
+  await mount()
+  const response = deferred<LoraDatasetsResponse>()
+  vi.mocked(api.listLoraDatasets).mockReturnValueOnce(response.promise)
+  const refresh = library.refresh(); await settle()
+  await library.removeRecords([old.id])
+  response.resolve({ datasets: [selected, old] }); await refresh
+  expect(library.datasets.value).toEqual([selected])
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected, { ...other, name: 'New import' }] })
+  await library.refresh()
+  expect(library.datasets.value.map(record => record.name)).toEqual(['Selected', 'New import'])
+})
+it('retains structured issue reasons rather than discarding their file names', async () => {
+  const issues = [{ path: 'datasets/old/dataset.json', code: 'dataset_unavailable' }] as const
+  vi.mocked(api.listLoraDatasets).mockResolvedValue({ datasets: [selected], issues: [...issues] })
+  await mount()
+  expect(library.issues.value).toEqual(issues)
 })

@@ -2,14 +2,14 @@ import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import * as api from '../api/loraDataset'
 import { ApiError } from '../api/http'
-import type { LoraDatasetEntry, LoraDatasetOperationResponse, LoraWorkspace, LoraWorkspaceForm, UpdateLoraDatasetSampleRequest } from '../api/generated'
+import type { LoraDatasetEntry, LoraDatasetIssue, LoraDatasetOperationResponse, LoraWorkspace, LoraWorkspaceForm, UpdateLoraDatasetSampleRequest } from '../api/generated'
 import type { useLoraTrainingStore } from '../stores/loraTraining'
 import { parseDatasetSample } from '../api/aceStepTraining'
 
 export function useLoraDatasetWorkspace(store: ReturnType<typeof useLoraTrainingStore>, form: Required<LoraWorkspaceForm>, running: Readonly<Ref<boolean>>) {
   const { t } = useI18n()
   const datasets = ref<LoraDatasetEntry[]>([]), selectedId = ref<string | null>(null)
-  const busy = ref(false), ready = ref(false), error = ref(''), issues = ref(0), saved = ref(false), notice = ref('')
+  const busy = ref(false), ready = ref(false), error = ref(''), issues = ref<LoraDatasetIssue[]>([]), saved = ref(false), notice = ref('')
   const selected = computed(() => datasets.value.find(item => item.id === selectedId.value && !item.trashed))
   const disabled = computed(() => busy.value || !ready.value || (running.value && store.nativeBusy))
   let workspace: LoraWorkspace = { revision: 0, form: {} }, alive = true, generation = 0
@@ -37,18 +37,20 @@ export function useLoraDatasetWorkspace(store: ReturnType<typeof useLoraTraining
     notice.value = response.message === 'dataset_sources_changed' ? t('loraRecovery.sourcesChanged') : response.message === 'dataset_source_history_unavailable' ? t('loraRecovery.sourceHistory') : ''
   }
   async function refresh() {
+    const token = generation, previous = datasets.value
     const response = await api.listLoraDatasets(controller.signal)
-    if (!alive) return
-    datasets.value = response.datasets; issues.value = response.issues?.length ?? 0
+    if (!alive || token !== generation || datasets.value !== previous) return
+    datasets.value = response.datasets; issues.value = response.issues ?? []
   }
   async function syncWorkspace() {
+    const token = generation
     if (!alive) return
     await saving
-    if (!alive) return
+    if (!alive || token !== generation) return
     try {
       const current = await api.getLoraWorkspace(controller.signal)
-      if (alive) workspace = current
-    } catch (cause) { if (alive) error.value = message(cause) }
+      if (alive && token === generation) workspace = current
+    } catch (cause) { if (alive && token === generation) error.value = message(cause) }
   }
   function persist(flush = false): Promise<boolean> {
     if (!ready.value || !alive) return Promise.resolve(false)
@@ -112,6 +114,19 @@ export function useLoraDatasetWorkspace(store: ReturnType<typeof useLoraTraining
   async function restore(id: string) {
     await action(async () => { const entry = datasets.value.find(item => item.id === id); if (entry) replace(await api.restoreLoraDataset(entry.id, entry.revision, controller.signal)) })
   }
+  async function removeRecords(ids: string[]) {
+    const requested = new Set(ids), token = generation
+    const records = datasets.value.filter(item => requested.has(item.id) && item.trashed).map(({ id, revision }) => ({ id, revision }))
+    if (!records.length || requested.size !== ids.length || records.length !== ids.length) return
+    await action(async () => {
+      if (token !== generation) return
+      const response = await api.removeLoraDatasetRecords(records, controller.signal)
+      if (!alive || token !== generation) return
+      const removed = new Set(response.removed_ids.filter(id => requested.has(id)))
+      datasets.value = datasets.value.filter(item => !item.trashed || !removed.has(item.id))
+      await syncWorkspace()
+    })
+  }
   async function saveSnapshot(): Promise<boolean> {
     let success = false
     await action(async () => {
@@ -167,9 +182,11 @@ export function useLoraDatasetWorkspace(store: ReturnType<typeof useLoraTraining
     const token = ++generation
     busy.value = true; ready.value = false; error.value = ''
     try {
-      const [catalog, restored] = await Promise.all([api.listLoraDatasets(controller.signal), api.getLoraWorkspace(controller.signal)])
+      const catalog = await api.listLoraDatasets(controller.signal)
       if (!alive || token !== generation) return
-      datasets.value = catalog.datasets; issues.value = catalog.issues?.length ?? 0; workspace = restored
+      const restored = await api.getLoraWorkspace(controller.signal)
+      if (!alive || token !== generation) return
+      datasets.value = catalog.datasets; issues.value = catalog.issues ?? []; workspace = restored
       selectedId.value = restored.selected_dataset_id ?? null
       Object.assign(form, restored.form)
       const entry = selected.value
@@ -199,5 +216,5 @@ export function useLoraDatasetWorkspace(store: ReturnType<typeof useLoraTraining
   const flush = () => { if (timer && ready.value) void persist(true) }
   window.addEventListener('pagehide', flush)
   onBeforeUnmount(() => { flush(); alive = false; controller.abort(); if (timer) clearTimeout(timer); window.removeEventListener('pagehide', flush) })
-  return { datasets, selectedId, selected, busy, ready, disabled, error, issues, saved, notice, refresh, syncWorkspace, initialize, persist, select, create, rename, trash, restore, saveSnapshot, updateSample, upload, scan, apply }
+  return { datasets, selectedId, selected, busy, ready, disabled, error, issues, saved, notice, refresh, syncWorkspace, initialize, persist, select, create, rename, trash, restore, removeRecords, saveSnapshot, updateSample, upload, scan, apply }
 }

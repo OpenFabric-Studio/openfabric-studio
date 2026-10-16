@@ -12,7 +12,7 @@ const { t } = useI18n(), store = useModulesStore()
 const failedCount = computed(() => props.job.steps.filter(step => step.state === 'failed').length)
 const retryable = computed(() => props.job.steps.every(step => step.failure?.retryable !== false))
 const hasEvents = computed(() => props.job.steps.some(step => step.events?.length))
-const musicWorkspaces: Partial<Record<ModuleId, string>> = { ace_step: '/music/ace-step', yue2: '/music/yue2', heartmula: '/music/heartmula', stable_audio3: '/music/stable-audio3' }
+const musicWorkspaces: Partial<Record<ModuleId, string>> = { ace_step: '/music/ace-step', yue2: '/music/yue2', stable_audio3: '/music/stable-audio3' }
 function moduleInfo(id: ModuleId) { return store.inventory?.modules.find(module => module.id === id) }
 function jobDate(value: string): string { return formatCreated(Date.parse(value)).full }
 function bytes(value: number | null | undefined): string {

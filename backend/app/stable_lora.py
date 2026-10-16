@@ -263,6 +263,7 @@ async def _run(identifier: str) -> None:
 
 
 async def submit(request: StableLoraTrainingRequest) -> StableLoraTrainingJob:
+    from .music_lora_names import name_transaction, require_available
     from .resource_admission import admission_lock, native_work_inflight, require_setup_idle
     from .video_jobs import work_busy as video_busy
     from .work_busy import other_work_busy
@@ -274,13 +275,15 @@ async def submit(request: StableLoraTrainingRequest) -> StableLoraTrainingJob:
             raise MusicLoraError('stable_lora_busy')
         _require_ready(request)
         _sources(request)
-        identifier = uuid.uuid4().hex
-        _directory(identifier, create=True)
-        job = StableLoraTrainingJob(id=identifier, status='queued', created_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), request=request)
-        connection = db.get_db()
-        connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
-            (identifier, job.model_dump_json(exclude={'adapter'}), job.created_at))
-        connection.commit()
+        with name_transaction():
+            require_available('stable_audio3', request.name)
+            identifier = uuid.uuid4().hex
+            _directory(identifier, create=True)
+            job = StableLoraTrainingJob(id=identifier, status='queued', created_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), request=request)
+            connection = db.get_db()
+            connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+                (identifier, job.model_dump_json(exclude={'adapter'}), job.created_at))
+            connection.commit()
         _tasks[identifier] = asyncio.create_task(_run(identifier))
         return job
 

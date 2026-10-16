@@ -17,7 +17,7 @@ from app.generation_contracts import AceGenerationSettings
 from app.local_music_contracts import LocalMusicJob, LocalMusicRequest
 from app.local_music_contracts import LocalMusicError
 from app.music_queue_contracts import (
-    MusicQueueAceRequest, MusicQueueError, MusicQueueHeartRequest, MusicQueueItem,
+    MusicQueueAceRequest, MusicQueueError, MusicQueueStableRequest, MusicQueueItem,
     MusicQueueYueRequest,
 )
 from app.orchestrator.state import ModelStatus
@@ -88,7 +88,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
             payload = MusicQueueYueRequest(engine='yue2', request=YueSubmitRequest(lyrics='A lyric', seed=71,
                 options=YueOptions(style='Warm jazz'), precision='q4_0'))
         else:
-            payload = MusicQueueHeartRequest(engine='heartmula', request=LocalMusicRequest(engine='heartmula',
+            payload = MusicQueueStableRequest(engine='stable_audio3', request=LocalMusicRequest(engine='stable_audio3',
                 title='Fixture', prompt='Warm jazz', duration_seconds=60, seed=71))
         return MusicQueueItem(id='b' * 32, batch_id='c' * 32, engine=payload.engine,
             payload=payload, variation_index=1, resolved_seed=71, child_job_id=child)
@@ -126,7 +126,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
     async def test_first_local_item_stops_existing_exact_native_instances(self) -> None:
         await self.manager.switch_to('ace_step')
         await self.manager.switch_to('yue2')
-        await self.session.ensure(self.item('heartmula').payload)
+        await self.session.ensure(self.item('stable_audio3').payload)
         self.assertEqual(self.events[-2:], ['unload:ace_step', 'unload:yue2'])
         self.assertEqual(self.instances, {})
 
@@ -167,7 +167,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.manager.stop_owned.assert_not_awaited()
 
     async def test_local_quarantine_blocks_even_with_failed_published_status(self) -> None:
-        item = self.item('heartmula')
+        item = self.item('stable_audio3')
         job = LocalMusicJob(id='a' * 32, status='failed', created_at='today', request=item.payload.request,
             error_code='local_music_worker_unverified')
         self.enterContext(patch.object(engines.local_music, 'get', return_value=job))
@@ -243,7 +243,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         await self.session.close()
 
     async def test_local_request_uses_existing_async_worker_service(self) -> None:
-        item = self.item('heartmula')
+        item = self.item('stable_audio3')
         await self.session.ensure(item.payload)
         job = LocalMusicJob(id='a' * 32, status='done', created_at='today', request=item.payload.request)
         submitted = self.enterContext(patch.object(engines.local_music, 'submit', new=AsyncMock(return_value=job)))
@@ -360,7 +360,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.events[-1], 'unload:ace_step')
 
     async def test_safe_local_rejection_is_normalized_without_internal_error(self) -> None:
-        item = self.item('heartmula')
+        item = self.item('stable_audio3')
         await self.session.ensure(item.payload)
         self.enterContext(patch.object(engines.local_music, 'submit', new=AsyncMock(
             side_effect=LocalMusicError('local_music_weights_missing', 409))))
@@ -466,7 +466,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.manager.stop_owned.assert_not_awaited()
 
     async def test_missing_local_retained_job_is_safe_retry_error(self) -> None:
-        item = self.item('heartmula')
+        item = self.item('stable_audio3')
         job = LocalMusicJob(id='a' * 32, status='failed', created_at='today', request=item.payload.request,
             error_code='local_music_save_failed')
         self.enterContext(patch.object(engines.local_music, 'get', return_value=job))

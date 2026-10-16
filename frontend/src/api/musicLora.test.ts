@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { importMusicAdapter, listMusicAdapters, musicAdapterFileUrl, musicLoraCapabilities } from './musicLora'
+import { importMusicAdapter, listMusicAdapters, musicAdapterFileUrl, musicLoraCapabilities, musicLoraNameKey } from './musicLora'
 const adapter = { id: 'a'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Piano style', sha256: 'b'.repeat(64), created_at: '2026-10-14', source_job_id: null } as const
 afterEach(() => vi.unstubAllGlobals())
 function response(value: unknown) { const fetch = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(value))); vi.stubGlobal('fetch', fetch); return fetch }
@@ -24,8 +24,10 @@ it('rejects unsupported file types before import and validates adapter IDs for e
 it('decodes incomplete history and exact runtime capabilities and rejects invented engines', async () => {
   response({ adapters: [adapter], history_incomplete: true })
   await expect(listMusicAdapters()).resolves.toMatchObject({ history_incomplete: true, adapters: [adapter] })
-  response({ engines: [{ engine: 'heartmula', loading: false, training: false, reason: 'unsupported_runtime' }] })
-  await expect(musicLoraCapabilities()).resolves.toMatchObject({ engines: [{ engine: 'heartmula', training: false }] })
+  response({ engines: [{ engine: 'yue2', loading: false, training: false, reason: 'unsupported_runtime' }] })
+  await expect(musicLoraCapabilities()).resolves.toMatchObject({ engines: [{ engine: 'yue2', training: false }] })
   response({ adapters: [{ ...adapter, engine: 'invented' }], history_incomplete: false })
   await expect(listMusicAdapters()).rejects.toThrow()
 })
+
+it.each([['  ＰＩＡＮＯ ', 'piano'], ['Warm\t  strings', 'warm strings']])('normalizes the known-name UI comparison for %s', (name, key) => { expect(musicLoraNameKey(name)).toBe(key) })

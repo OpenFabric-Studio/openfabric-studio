@@ -23,14 +23,14 @@ const adapter: MusicAdapter = { id: 'a'.repeat(32), engine: 'stable_audio3', tar
 const request = { name: 'Piano', variant: 'small-music', samples: [{ track_id: 42, caption: 'Solo piano' }], max_steps: 1000, rank: 16, learning_rate: 0.0001, seed: 42 } as const
 function job(status: StableLoraTrainingJob['status'] = 'running'): StableLoraTrainingJob { return { id: 'c'.repeat(32), status, stage: status === 'done' ? 'done' : 'training', created_at: 'now', request: { ...request, samples: [...request.samples] }, adapter: status === 'done' ? adapter : null, error_code: null } }
 async function settle() { for (let index = 0; index < 14; index++) await nextTick() }
-async function mount(engine: 'stable_audio3' | 'yue2' | 'heartmula' = 'stable_audio3') { const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicLoraPage }, { path: '/ace-step/lora', component: { render: () => null } }, { path: '/settings', component: { render: () => null } }] }); await router.push('/'); const node = document.body.appendChild(document.createElement('div')); app = createApp(MusicLoraPage, { engine }).use(router).use(i18n); app.mount(node); await settle(); return node }
+async function mount(engine: 'stable_audio3' | 'yue2' = 'stable_audio3') { const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicLoraPage }, { path: '/ace-step/lora', component: { render: () => null } }, { path: '/settings', component: { render: () => null } }] }); await router.push('/'); const node = document.body.appendChild(document.createElement('div')); app = createApp(MusicLoraPage, { engine }).use(router).use(i18n); app.mount(node); await settle(); return node }
 function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label || item.getAttribute('aria-label') === label); if (!found) throw new Error(`Missing ${label}`); return found }
 async function input(node: ParentNode, name: string, value: string) { const element = node.querySelector(`[name="${name}"]`); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error(`Missing ${name}`); element.value = value; element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); await settle() }
 beforeEach(() => {
   vi.resetAllMocks()
   vi.mocked(modules.listModuleJobs).mockResolvedValue([])
   vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [], issues: [] })
-  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }, { engine: 'heartmula', loading: false, training: false, reason: 'unsupported_runtime' }] })
+  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }] })
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [], history_incomplete: false })
   vi.mocked(adapters.importMusicAdapter).mockResolvedValue(adapter)
   vi.mocked(training.stableLoraStatus).mockResolvedValue({ supported: true, installed: true, small_weights_ready: true, medium_weights_ready: false })
@@ -286,23 +286,51 @@ it('offers YuE native imports without Stable Audio training controls or requests
   expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
 })
 
-it('imports a HeartMuLa fallback result through its matching validated adapter target', async () => {
-  const heartAdapter: MusicAdapter = { ...adapter, engine: 'heartmula', target: 'heartmula-3b', name: 'Vocal style' }
-  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'heartmula', loading: true, training: true, reason: 'experimental' }] })
-  vi.mocked(adapters.importMusicAdapter).mockResolvedValue(heartAdapter)
-  const node = await mount('heartmula')
-  expect(node.querySelector('[data-model-training]')).not.toBeNull()
-  await input(node, 'import-name', 'Vocal style')
-  const target = node.querySelector('[name="import-target"]')
-  if (!(target instanceof HTMLSelectElement)) throw new Error('Missing HeartMuLa import target')
-  expect([...target.options].map(option => option.value)).toEqual(['heartmula-3b'])
-  const file = new File(['native checkpoint'], 'adapter.safetensors')
-  const picker = node.querySelector('input[type="file"]')
-  if (!(picker instanceof HTMLInputElement)) throw new Error('Missing HeartMuLa adapter upload')
-  const transfer = new DataTransfer(); transfer.items.add(file); picker.files = transfer.files; picker.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+it('shows the server duplicate-name decision next to the Stable Audio training name', async () => {
+  const node = await mount()
+  await input(node, 'training-name', 'Piano')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'caption-42', 'Solo piano')
+  vi.mocked(training.submitStableLora).mockRejectedValue(new ApiError('music_lora_name_exists', 409))
+  button(node, 'Start training').click(); await settle()
+  expect(node.querySelector('[name="training-name"]')?.getAttribute('aria-invalid')).toBe('true')
+  expect(node.querySelector('[data-training-name-error]')?.textContent).toContain('already used for this model')
+})
+it('shows duplicate-name import errors beside the import name and preserves the selected checkpoint', async () => {
+  const node = await mount()
+  await input(node, 'import-name', 'Piano')
+  const field = node.querySelector('input[type="file"]')
+  if (!(field instanceof HTMLInputElement)) throw new Error('Missing adapter checkpoint field')
+  const file = new File(['123456789'], 'piano.safetensors'); const transfer = new DataTransfer(); transfer.items.add(file); field.files = transfer.files; field.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  vi.mocked(adapters.importMusicAdapter).mockRejectedValue(new ApiError('music_lora_name_exists', 409))
   button(node, 'Import adapter').click(); await settle()
-  expect(adapters.importMusicAdapter).toHaveBeenCalledExactlyOnceWith(file, { engine: 'heartmula', target: 'heartmula-3b', name: 'Vocal style' }, expect.any(AbortSignal))
-  expect(node.querySelector(`a[href="/api/music-lora/adapters/${heartAdapter.id}/file"]`)).not.toBeNull()
-  expect(node.querySelector('form[data-training]')).toBeNull()
-  expect(training.stableLoraStatus).not.toHaveBeenCalled(); expect(training.listStableLora).not.toHaveBeenCalled()
+  expect(node.querySelector('[name="import-name"]')?.getAttribute('aria-invalid')).toBe('true')
+  expect(node.querySelector('[data-import-name-error]')?.textContent).toContain('already used for this model')
+  expect(field.files?.[0]).toBe(file)
+})
+it('blocks a known completed Stable name immediately and allows a reviewed new name', async () => {
+  vi.mocked(training.listStableLora).mockResolvedValue({ jobs: [job('done')], history_incomplete: false })
+  const node = await mount()
+  await input(node, 'training-name', '  ＰＩＡＮＯ  ')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle(); await input(node, 'caption-42', 'Solo piano')
+  expect(node.querySelector('[data-training-name-error]')?.textContent).toContain('already used for this model')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(node.querySelector('[name="training-name"]')?.hasAttribute('disabled')).toBe(false)
+  expect(training.submitStableLora).not.toHaveBeenCalled()
+  await input(node, 'training-name', 'Piano second approach')
+  expect(node.querySelector('[data-training-name-error]')).toBeNull()
+  expect(button(node, 'Start training').disabled).toBe(false)
+})
+it('blocks imported names across Stable base variants and releases the control when edited', async () => {
+  vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ ...adapter, name: 'Warm piano', target: 'medium' }], history_incomplete: false })
+  const node = await mount()
+  await input(node, 'import-name', ' WARM   piano ')
+  const field = node.querySelector('input[type="file"]')
+  if (!(field instanceof HTMLInputElement)) throw new Error('Missing adapter checkpoint field')
+  const transfer = new DataTransfer(); transfer.items.add(new File(['native checkpoint'], 'piano.safetensors')); field.files = transfer.files; field.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  expect(button(node, 'Import adapter').disabled).toBe(true)
+  expect(node.querySelector('[data-import-name-error]')?.textContent).toContain('already used for this model')
+  expect(adapters.importMusicAdapter).not.toHaveBeenCalled()
+  await input(node, 'import-name', 'Warm piano alternate')
+  expect(button(node, 'Import adapter').disabled).toBe(false)
 })

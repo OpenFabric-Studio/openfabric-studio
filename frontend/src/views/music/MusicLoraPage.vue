@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import * as library from '../../api/musicLora'
-import { musicAdapterFileUrl } from '../../api/musicLora'
+import { musicAdapterFileUrl, musicLoraNameKey } from '../../api/musicLora'
 import * as training from '../../api/stableLora'
 import { ApiError } from '../../api/http'
 import { pendingMusicAdapter } from '../../composables/generationDrafts'
@@ -25,13 +25,21 @@ const capabilities = ref<MusicLoraCapabilities['engines']>([]), adapters = ref<M
 const status = ref<StableLoraTrainingStatus | null>(null), jobs = ref<StableLoraTrainingJob[]>([])
 const historyKnown = ref(false), reconnecting = ref(false)
 const adapterHistoryIncomplete = ref(false), trainingHistoryIncomplete = ref(false), busy = ref(false), error = ref('')
+const nameArea = ref<'training' | 'import' | null>(null)
+const nameError = computed(() => [t('musicLora.errors.nameExists'), t('musicLora.errors.nameUnavailable')].includes(error.value) ? error.value : '')
 const importEngine = computed<MusicAdapter['engine']>(() => props.engine)
-const importTarget = ref<MusicAdapter['target']>(props.engine === 'yue2' ? 'ar' : props.engine === 'heartmula' ? 'heartmula-3b' : 'small-music'), importName = ref(''), importFile = ref<File | null>(null)
+const importTarget = ref<MusicAdapter['target']>(props.engine === 'yue2' ? 'ar' : 'small-music'), importName = ref(''), importFile = ref<File | null>(null)
 const modelCapabilities = computed(() => capabilities.value.filter(value => value.engine === props.engine))
 const modelAdapters = computed(() => adapters.value.filter(value => value.engine === props.engine))
+const modelHistoryNames = ref<string[]>([])
+const knownNames = computed(() => [...modelAdapters.value.map(adapter => adapter.name), ...jobs.value.map(job => job.request.name), ...modelHistoryNames.value].map(musicLoraNameKey))
+const trainingNameTaken = computed(() => !!musicLoraNameKey(name.value) && knownNames.value.includes(musicLoraNameKey(name.value)))
+const importNameTaken = computed(() => !!musicLoraNameKey(importName.value) && knownNames.value.includes(musicLoraNameKey(importName.value)))
+const trainingNameError = computed(() => trainingNameTaken.value ? t('musicLora.errors.nameExists') : nameArea.value === 'training' ? nameError.value : '')
+const importNameError = computed(() => importNameTaken.value ? t('musicLora.errors.nameExists') : nameArea.value === 'import' ? nameError.value : '')
 const fileInput = ref<HTMLInputElement | null>(null)
-const importTargets = computed<MusicAdapter['target'][]>(() => importEngine.value === 'stable_audio3' ? ['small-music', 'medium'] : importEngine.value === 'heartmula' ? ['heartmula-3b'] : ['ar', 'nar'])
-const canImport = computed(() => modelCapabilities.value.some(value => value.loading) && !!importFile.value && /\.safetensors$/i.test(importFile.value.name) && importFile.value.size > 8 && importFile.value.size <= 512 * 1024 * 1024 && importName.value.trim().length > 0 && importName.value.length <= 120)
+const importTargets = computed<MusicAdapter['target'][]>(() => importEngine.value === 'stable_audio3' ? ['small-music', 'medium'] : ['ar', 'nar'])
+const canImport = computed(() => !importNameTaken.value && modelCapabilities.value.some(value => value.loading) && !!importFile.value && /\.safetensors$/i.test(importFile.value.name) && importFile.value.size > 8 && importFile.value.size <= 512 * 1024 * 1024 && importName.value.trim().length > 0 && importName.value.length <= 120)
 const name = ref(''), variant = ref<NonNullable<StableLoraTrainingRequest['variant']>>('small-music')
 const samples = ref<Array<StableLoraSample & { title: string }>>([]), pickerOpen = ref(false)
 const selectedTrackIds = computed(() => samples.value.flatMap(sample => sample.track_id == null ? [] : [sample.track_id]))
@@ -42,7 +50,7 @@ const weightsReady = computed(() => variant.value === 'small-music' ? status.val
 const stableCapability = computed(() => capabilities.value.find(engine => engine.engine === 'stable_audio3'))
 const ready = computed(() => status.value?.supported && status.value.installed && weightsReady.value && stableCapability.value?.training)
 const setupRequired = computed(() => status.value && (!status.value.supported || !status.value.installed || !weightsReady.value || stableCapability.value?.training === false))
-const canTrain = computed(() => ready.value && historyKnown.value && !active.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
+const canTrain = computed(() => ready.value && historyKnown.value && !active.value && !trainingNameTaken.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
   && samples.value.every(sample => sample.caption.trim().length > 0 && sample.caption.length <= 4000)
   && Number.isInteger(maxSteps.value) && maxSteps.value >= 1 && maxSteps.value <= 100000
   && Number.isFinite(learningRate.value) && learningRate.value >= 0.0000001 && learningRate.value <= 0.01
@@ -60,6 +68,7 @@ const trainingRequirement = computed(() => {
   if (!historyKnown.value) return t('musicLora.simple.checkHistory')
   if (!ready.value) return t(setupRequired.value ? 'musicLora.simple.finishSetup' : 'musicLora.simple.refreshSetup')
   if (!name.value.trim()) return t('musicLora.simple.enterName')
+  if (trainingNameTaken.value) return t('musicLora.errors.nameExists')
   if (!samples.value.length) return t('musicLora.simple.addTracks')
   if (samples.value.some(sample => !sample.caption.trim())) return t('musicLora.simple.addCaptions')
   return canTrain.value ? '' : t('musicLora.simple.checkSettings')
@@ -68,6 +77,8 @@ let alive = true, generation = 0, controller: AbortController | undefined
 function ongoing(job: StableLoraTrainingJob): boolean { return job.status === 'queued' || job.status === 'running' }
 function errorText(code: string | null | undefined, fallback: string): string {
   switch (code) {
+    case 'music_lora_name_exists': return t('musicLora.errors.nameExists')
+    case 'music_lora_name_unavailable': return t('musicLora.errors.nameUnavailable')
     case 'music_lora_format_invalid':
     case 'music_lora_target_mismatch': return t('musicLora.errors.format')
     case 'music_lora_adapter_not_found': return t('musicLora.errors.missing')
@@ -120,6 +131,7 @@ function fileChanged(event: Event) {
 function importAdapter() {
   if (!canImport.value || !importFile.value) return
   const file = importFile.value, metadata = { engine: importEngine.value, target: importTarget.value, name: importName.value.trim() }
+  nameArea.value = 'import'
   return action(async (signal, isCurrent) => {
     const response = await library.importMusicAdapter(file, metadata, signal)
     if (!isCurrent()) return
@@ -148,6 +160,7 @@ function removeSample(sample: StableLoraSample) {
 function start() {
   if (!canTrain.value) return
   const request: StableLoraTrainingRequest = { name: name.value.trim(), variant: variant.value, samples: samples.value.map(sample => ({ ...(sample.dataset ? { dataset: sample.dataset } : { track_id: sample.track_id }), caption: sample.caption.trim() })), max_steps: maxSteps.value, rank: rank.value, learning_rate: learningRate.value, seed: seed.value }
+  nameArea.value = 'training'
   return action(async (signal, isCurrent) => {
     historyKnown.value = false
     const response = await training.submitStableLora(request, signal)
@@ -176,7 +189,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
     </header>
     <p v-if="busy" role="status" class="text-sm text-text-dim">{{ t('musicLora.working') }}</p>
     <p v-if="reconnecting" role="status" class="text-sm text-status-queued">{{ t('loraWorkspace.reconnecting') }}</p>
-    <p v-if="error" role="alert" class="text-sm text-status-failed">{{ error }}</p>
+    <p v-if="error && !nameError" role="alert" class="text-sm text-status-failed">{{ error }}</p>
     <p v-if="adapterHistoryIncomplete || trainingHistoryIncomplete" role="alert" class="text-sm text-status-queued">{{ t('musicLora.historyIncomplete') }}</p>
 
     <div v-if="props.engine === 'stable_audio3'" data-stable-readiness data-engine="stable_audio3" class="space-y-2 rounded-xl border border-border bg-panel p-4">
@@ -189,7 +202,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       </div>
       <MusicTrainingSetup v-if="status" :variant="variant" :supported="status.supported" :installed="status.installed" :ready="!!weightsReady" @refresh="refresh" />
     </div>
-    <ModelLoraTraining v-else :engine="props.engine" @registered="refresh" />
+    <ModelLoraTraining v-else :engine="props.engine" :managed-names="modelAdapters.map(adapter => adapter.name)" @registered="refresh" @history-names="modelHistoryNames = $event" />
     <section v-if="props.engine !== 'stable_audio3'" class="space-y-3 rounded-xl border border-border bg-panel p-5">
       <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="font-semibold text-text">{{ t('musicLora.capability') }}</h3><button type="button" class="lora-button" :disabled="busy" @click="refresh">{{ t('musicLora.refresh') }}</button></div>
       <div class="overflow-x-auto"><table class="w-full text-left text-sm"><thead class="text-text-dim"><tr><th scope="col" class="p-2">{{ t('musicLora.engine') }}</th><th scope="col" class="p-2">{{ t('musicLora.loading') }}</th><th scope="col" class="p-2">{{ t('musicLora.training') }}</th><th scope="col" class="p-2"><span class="sr-only">{{ t('musicLora.capability') }}</span></th></tr></thead><tbody><tr v-for="engine in modelCapabilities" :key="engine.engine" :data-engine="engine.engine" class="border-t border-border"><th scope="row" class="p-2 font-medium text-text">{{ t(`musicLora.engines.${engine.engine}`) }}</th><td class="p-2 text-text-dim">{{ t(engine.loading ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-text-dim">{{ t(engine.training ? 'musicLora.supported' : 'musicLora.unsupported') }}</td><td class="p-2 text-xs text-text-dim">{{ t(`musicLora.reasons.${engine.reason}`) }}</td></tr></tbody></table></div>
@@ -199,7 +212,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       <fieldset class="min-w-0 space-y-4">
         <legend class="mb-3 font-semibold text-text">{{ t('musicLora.simple.nameStep') }}</legend>
         <div class="grid gap-4 sm:grid-cols-2">
-          <label class="lora-label">{{ t('musicLora.name') }}<input v-model="name" name="training-name" maxlength="120" required class="lora-input" :disabled="busy" /></label>
+          <label class="lora-label">{{ t('musicLora.name') }}<input v-model="name" name="training-name" maxlength="120" required class="lora-input" :disabled="busy" :aria-invalid="trainingNameError ? true : undefined" :aria-describedby="trainingNameError ? 'training-name-error' : undefined" @input="nameError && nameArea === 'training' && (error = '')" /><span class="text-xs">{{ t('musicLora.nameUnique') }}</span><span v-if="trainingNameError" id="training-name-error" data-training-name-error role="alert" class="text-status-failed">{{ trainingNameError }}</span></label>
           <label class="lora-label">{{ t('musicLora.simple.baseModel') }}<select v-model="variant" name="training-variant" class="lora-input" :disabled="busy"><option value="small-music">{{ t('musicLora.targets.small-music') }}</option><option value="medium">{{ t('musicLora.targets.medium') }}</option></select><span class="text-xs leading-relaxed">{{ t('musicLora.simple.baseHint') }}</span></label>
         </div>
       </fieldset>
@@ -249,7 +262,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       <form v-if="modelCapabilities.some(value => value.loading)" class="space-y-4 rounded-xl border border-border bg-panel p-4" @submit.prevent="importAdapter">
         <h3 class="font-semibold text-text">{{ t('musicLora.import') }}</h3><p class="text-xs leading-relaxed text-text-dim">{{ t('musicLora.formatHint') }}</p>
         <label class="lora-label">{{ t('musicLora.target') }}<select v-model="importTarget" name="import-target" class="lora-input" :disabled="busy"><option v-for="target in importTargets" :key="target" :value="target">{{ t(`musicLora.targets.${target}`) }}</option></select></label>
-        <label class="lora-label">{{ t('musicLora.name') }}<input v-model="importName" name="import-name" maxlength="120" required class="lora-input" :disabled="busy" /></label>
+        <label class="lora-label">{{ t('musicLora.name') }}<input v-model="importName" name="import-name" maxlength="120" required class="lora-input" :disabled="busy" :aria-invalid="importNameError ? true : undefined" :aria-describedby="importNameError ? 'import-name-error' : undefined" @input="nameError && nameArea === 'import' && (error = '')" /><span class="text-xs">{{ t('musicLora.nameUnique') }}</span><span v-if="importNameError" id="import-name-error" data-import-name-error role="alert" class="text-status-failed">{{ importNameError }}</span></label>
         <label class="lora-label">{{ t('musicLora.file') }}<input ref="fileInput" type="file" accept=".safetensors" required class="lora-input" :disabled="busy" @change="fileChanged" /></label>
         <button type="submit" class="lora-button" :disabled="busy || !canImport">{{ t('musicLora.importAction') }}</button>
       </form>

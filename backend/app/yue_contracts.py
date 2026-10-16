@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .contracts import SavedTrack
 from .generation_contracts import GenerationContract, YueGenerationSettings
 from .music_lora_contracts import MusicAdapterSelection
+from .music_score_contracts import MusicKey, MusicMeter, MusicTempo
 
 YueRunId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 
@@ -19,6 +20,9 @@ class YueOptions(GenerationContract):
     # Upper bounds below are application resource limits, not native maxima.
     num_inference_steps: int = Field(default=8, ge=1, le=256)
     abc: str | None = Field(default=None, max_length=100_000)
+    bpm: MusicTempo | None = None
+    key_scale: MusicKey | None = None
+    time_signature: MusicMeter | None = None
     semantic_temperature: float | None = Field(default=None, ge=0, le=5)
     semantic_top_p: float | None = Field(default=None, gt=0, le=1)
     semantic_top_k: int | None = Field(default=None, ge=1, le=100_000)
@@ -34,6 +38,11 @@ class YueOptions(GenerationContract):
     abc_min_tokens: int | None = Field(default=None, ge=0, le=4096)
     abc_max_tokens: int | None = Field(default=None, ge=1, le=4096)
 
+    @field_validator('abc')
+    @classmethod
+    def blank_score(cls, value: str | None) -> str | None:
+        return value if value is not None and value.strip() else None
+
     @model_validator(mode='after')
     def compatible_options(self) -> YueOptions:
         for minimum, maximum in ((self.semantic_min_tokens, self.semantic_max_tokens),
@@ -42,6 +51,8 @@ class YueOptions(GenerationContract):
                 raise ValueError('Minimum token count exceeds maximum')
         if self.abc and self.cot == 'off':
             raise ValueError('External ABC requires melody planning')
+        if self.abc and any(value is not None for value in (self.bpm, self.key_scale, self.time_signature)):
+            raise ValueError('Apply musical choices to the external score before generation')
         if not self.style.strip():
             raise ValueError('Style is empty')
         return self
