@@ -14,7 +14,6 @@ const models = [
   { engine: 'ace_step', route: 'music-lora-ace-step' },
   { engine: 'stable_audio3', route: 'music-lora-stable-audio3' },
   { engine: 'yue2', route: 'music-lora-yue2' },
-  { engine: 'heartmula', route: 'music-lora-heartmula' },
 ]
 onMounted(async () => {
   try { const value = await musicLoraCapabilities(controller.signal); if (!controller.signal.aborted) capabilities.value = value.engines }

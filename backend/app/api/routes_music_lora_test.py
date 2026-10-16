@@ -23,6 +23,8 @@ class MusicLoraApiTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temporary.cleanup)
         self.patch = patch.object(music_lora.db, 'DATA_DIR', Path(self.temporary.name))
         self.patch.start(); self.addCleanup(self.patch.stop)
+        database = patch.object(music_lora.db, 'DB_PATH', Path(self.temporary.name) / 'catalog.db')
+        database.start(); self.addCleanup(database.stop)
         app = FastAPI(); app.include_router(router)
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:9000')
         self.addAsyncCleanup(self.client.aclose)
@@ -77,10 +79,8 @@ class MusicLoraApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(capabilities['stable_audio3']['training'])
         self.assertTrue(capabilities['yue2']['loading'])
         self.assertTrue(capabilities['yue2']['training'])
-        self.assertTrue(capabilities['heartmula']['loading'])
-        self.assertTrue(capabilities['heartmula']['training'])
+        self.assertNotIn('heartmula', capabilities)
         self.assertEqual(capabilities['yue2']['reason'], 'experimental')
-        self.assertEqual(capabilities['heartmula']['reason'], 'experimental')
 
     async def test_upload_cancellation_drains_import_before_closing_input(self) -> None:
         started, released = threading.Event(), threading.Event()

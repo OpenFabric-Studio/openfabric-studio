@@ -3,7 +3,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import HelpModal from '../../components/shared/HelpModal.vue'
 
-defineProps<{ engine: 'stable_audio3' | 'heartmula' | 'yue2' }>()
+defineProps<{ engine: 'stable_audio3' | 'yue2' }>()
 const { t } = useI18n()
 const open = ref(false)
 </script>
@@ -18,8 +18,8 @@ const open = ref(false)
       <div><dt class="font-semibold text-text">{{ t('musicLora.name') }}</dt><dd>{{ t('musicLora.help.name') }}</dd></div>
       <div v-if="engine === 'stable_audio3'"><dt class="font-semibold text-text">{{ t('musicLora.simple.baseModel') }}</dt><dd>{{ t('musicLora.help.base') }}</dd></div>
       <div><dt class="font-semibold text-text">{{ t('musicLora.help.musicTitle') }}</dt><dd>{{ t('musicLora.help.music') }} {{ t(engine === 'stable_audio3' ? 'musicLora.simple.audioNote' : 'musicLora.help.excerpts') }}</dd></div>
-      <div v-if="engine === 'heartmula'"><dt class="font-semibold text-text">{{ t('musicLora.help.lyricsTitle') }}</dt><dd>{{ t('musicLora.help.lyrics') }}</dd></div>
-      <div v-if="engine === 'yue2'"><dt class="font-semibold text-text">{{ t('musicLora.engines.yue2') }}</dt><dd>{{ t('musicLora.modelTraining.acoustic') }}</dd></div>
+      <div v-if="engine !== 'stable_audio3'"><dt class="font-semibold text-text">{{ t('musicLora.help.lyricsTitle') }}</dt><dd>{{ t('musicLora.help.lyrics') }}</dd></div>
+      <div v-if="engine === 'yue2'"><dt class="font-semibold text-text">{{ t('musicLora.engines.yue2') }}</dt><dd>{{ t('musicLora.modelTraining.acoustic') }} {{ t('musicLora.help.pairPhases') }}</dd></div>
       <div><dt class="font-semibold text-text">{{ t('musicLora.steps') }}</dt><dd>{{ t('musicLora.help.steps') }}</dd></div>
       <div><dt class="font-semibold text-text">{{ t('musicLora.rank') }}</dt><dd>{{ t('musicLora.help.rank') }}</dd></div>
       <div v-if="engine !== 'stable_audio3'"><dt class="font-semibold text-text">{{ t('musicLora.modelTraining.seconds') }}</dt><dd>{{ t('musicLora.help.seconds') }}</dd></div>

@@ -1,5 +1,7 @@
 # Automatic music setup
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Make the automatic music setup finish installation and required model placement, rather than return a generic manual preview instruction after package checks.
 
 **Scope:** Existing reviewed setup jobs, installed external music environments, managed ACE-Step/HeartMuLa/Stable Audio 3 installs, model download defaults, progress and documentation. Preserve existing data and source checkouts. Model quality and GPU performance remain separate from installation success.

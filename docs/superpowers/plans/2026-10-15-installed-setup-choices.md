@@ -1,5 +1,7 @@
 # Installed setup choices implementation plan
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Show existing installations everywhere in setup, prevent accidental installation again, and require explicit reviewed dependency reinstallation.
 
 **Design:** The existing catalog remains authoritative. Complete installed/ready modules get locked ordinary choices; incomplete modules remain selectable. Existing dependencies are reused without running installers. A separate per-module Reinstall dependencies action is available only for app-managed Python engines supported by the existing installer. It force reinstalls packages in that engine's isolated environment, preserving source, models, datasets, checkpoints and configuration. External/native/system tools do not gain destructive replacement support.

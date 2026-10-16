@@ -1,5 +1,7 @@
 # Mac-first music LoRA training paths
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 Status: approved by the maintainer on 2026-10-15. Implementation proceeds in the reviewed Stable Audio 3 → HeartMuLa → YuE2 stages.
 
 ## Requested outcome

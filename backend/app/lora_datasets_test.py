@@ -9,7 +9,10 @@ from unittest.mock import patch
 
 from app import lora_datasets as library
 from app.atomic_files import read_object, write_object
-from app.lora_dataset_contracts import CreateLoraDatasetRequest, RenameLoraDatasetRequest, LoraDatasetRevision, LoraWorkspace
+from app.lora_dataset_contracts import (
+    CreateLoraDatasetRequest, RenameLoraDatasetRequest, LoraDatasetRevision, LoraWorkspace,
+    LoraDatasetEntry, LoraObservedTask, LoraPreprocessReceipt,
+)
 
 
 class DatasetLibraryTests(unittest.TestCase):
@@ -42,6 +45,108 @@ class DatasetLibraryTests(unittest.TestCase):
         self.assertEqual((entry.name, entry.sample_count, entry.labeled_count), ('Saved work', 1, 1))
         self.assertEqual(library.list_datasets().datasets[0].id, entry.id)
         self.assertEqual(path.read_bytes(), original)
+
+    def test_native_training_metadata_is_not_discovered_as_datasets_or_issues(self) -> None:
+        originals: dict[Path, bytes] = {}
+        for index in range(3):
+            folder = self.datasets / f'training-{index}'
+            folder.mkdir()
+            manifest = folder / 'manifest.json'
+            write_object(manifest, {'metadata': {'name': 'Prepared tensors'},
+                'samples': [f'clip-{sample}.pt' for sample in range(index)], 'num_samples': index})
+            adapter = folder / 'adapter_config.json'
+            write_object(adapter, {'peft_type': 'LORA', 'r': 64, 'lora_alpha': 128,
+                'target_modules': ['q_proj', 'v_proj'], 'base_model_name_or_path': '/model/checkpoint'})
+            originals[manifest] = manifest.read_bytes()
+            originals[adapter] = adapter.read_bytes()
+        response = library.list_datasets()
+        self.assertEqual(response.datasets, [])
+        self.assertEqual(response.issues, [])
+        for path, original in originals.items():
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_discovery_classifies_content_without_restricting_legacy_filenames(self) -> None:
+        original = read_object(self.legacy())
+        for name in ('manifest.json', 'adapter_config.json', 'custom-name.json'):
+            write_object(self.datasets / name, original)
+        write_object(self.datasets / 'empty.json', {'metadata': {'name': 'Empty saved dataset'}, 'samples': []})
+        response = library.list_datasets()
+        self.assertEqual(len(response.datasets), 5)
+        self.assertEqual(response.issues, [])
+        empty = next(entry for entry in response.datasets if entry.name == 'Empty saved dataset')
+        self.assertEqual(empty.sample_count, 0)
+
+    def test_native_caption_sidecars_are_preserved_without_dataset_warnings(self) -> None:
+        path = self.datasets / 'song.json'
+        write_object(path, {'caption': 'Piano and drums', 'bpm': 120, 'keyscale': 'C major',
+            'timesignature': '4', 'language': 'ja'})
+        original = path.read_bytes()
+        self.assertTrue(library._is_training_artifact(read_object(path), path))
+        response = library.list_datasets()
+        self.assertEqual(response.datasets, [])
+        self.assertEqual(response.issues, [])
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_empty_saved_dataset_with_top_level_count_is_preserved(self) -> None:
+        path = self.datasets / 'legacy-empty.json'
+        write_object(path, {'metadata': {'name': 'Empty legacy dataset'}, 'samples': [], 'num_samples': 0})
+        original = path.read_bytes()
+        response = library.list_datasets()
+        self.assertEqual(response.issues, [])
+        self.assertEqual([(entry.name, entry.sample_count) for entry in response.datasets], [('Empty legacy dataset', 0)])
+        self.assertEqual(library.list_datasets().datasets, response.datasets)
+        self.assertEqual(path.read_bytes(), original)
+
+    def test_malformed_datasets_are_reported_even_with_training_metadata_names(self) -> None:
+        (self.datasets / 'broken.json').write_text('{broken', encoding='utf-8')
+        write_object(self.datasets / 'manifest.json', {'metadata': {'name': 'Broken'},
+            'samples': [{'id': 'missing-audio'}], 'num_samples': 1})
+        write_object(self.datasets / 'adapter_config.json', {'metadata': {'name': 'Broken'},
+            'samples': [{'id': 'missing-audio'}], 'peft_type': 'LORA', 'r': 64})
+        response = library.list_datasets()
+        self.assertEqual(response.datasets, [])
+        self.assertEqual({issue.path for issue in response.issues},
+            {'datasets/broken.json', 'datasets/manifest.json', 'datasets/adapter_config.json'})
+
+    def test_proven_training_artifact_catalog_entries_are_removed_without_touching_saved_work(self) -> None:
+        good = library.list_datasets()
+        self.assertEqual(good.datasets, [])
+        good_path = self.legacy()
+        real = library.list_datasets().datasets[0]
+        missing = real.model_copy(update={'id': 'a' * 32, 'dataset_path': 'datasets/missing.json', 'name': 'Missing saved work'})
+        folder = self.datasets / 'tensors'
+        folder.mkdir()
+        manifest = folder / 'manifest.json'
+        write_object(manifest, {'metadata': {'name': 'Empty preprocessing result'}, 'samples': [], 'num_samples': 0})
+        original = manifest.read_bytes()
+        artifact = LoraDatasetEntry(id='b' * 32, name='False dataset', dataset_path='datasets/tensors/manifest.json',
+            audio_dir='datasets/tensors', sample_count=0, labeled_count=0, revision=0)
+        catalog = library._read_catalog(library._catalog_path())
+        catalog.datasets.extend([missing, artifact])
+        catalog.dataset_hashes[artifact.id] = 'c' * 64
+        catalog.source_signatures[artifact.id] = {}
+        catalog.workspace = LoraWorkspace(revision=4, selected_dataset_id=artifact.id,
+            auto_label_task=LoraObservedTask(task_id='real-label-job', dataset_id=real.id, dataset_path=real.dataset_path),
+            preprocess_task=LoraObservedTask(task_id='false-job', dataset_id=artifact.id, dataset_path=artifact.dataset_path),
+            preprocess_receipt=LoraPreprocessReceipt(dataset_id=artifact.id, dataset_hash='d' * 64,
+                model_identity='model', output_dir='datasets/tensors'), training_tensor_dir='datasets/tensors')
+        library._write_catalog(library._catalog_path(), catalog)
+        response = library.list_datasets()
+        self.assertEqual({entry.id for entry in response.datasets}, {real.id, missing.id})
+        self.assertEqual(response.issues, [])
+        preserved = next(entry for entry in response.datasets if entry.id == missing.id)
+        self.assertFalse(preserved.available)
+        refreshed = library._read_catalog(library._catalog_path())
+        self.assertNotIn(artifact.id, refreshed.dataset_hashes)
+        self.assertNotIn(artifact.id, refreshed.source_signatures)
+        self.assertIsNone(refreshed.workspace.selected_dataset_id)
+        self.assertIsNone(refreshed.workspace.preprocess_task)
+        self.assertIsNone(refreshed.workspace.preprocess_receipt)
+        self.assertEqual(refreshed.workspace.training_tensor_dir, '')
+        self.assertEqual(refreshed.workspace.auto_label_task, catalog.workspace.auto_label_task)
+        self.assertEqual(refreshed.workspace.revision, 5)
+        self.assertTrue(good_path.is_file())
+        self.assertEqual(manifest.read_bytes(), original)
 
     def test_saved_snapshot_reads_without_native_builder_and_checks_revision(self) -> None:
         path = self.legacy()

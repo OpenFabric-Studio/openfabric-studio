@@ -16,6 +16,7 @@ from ..lora_dataset_contracts import (
     LoraDatasetEntry, LoraDatasetsResponse, LoraWorkspace,
     LoraDatasetOperationResponse, ScanLoraDatasetRequest, SaveLoraDatasetRequest,
     PreprocessLoraDatasetRequest, LoraDatasetTaskStarted, AutoLabelLoraDatasetRequest, UpdateLoraDatasetSampleRequest,
+    RemoveLoraDatasetRecordsRequest, RemoveLoraDatasetRecordsResponse,
 )
 from ..module_security import require_local_origin
 from ..resource_admission import ResourceBusyError, reserve_native, reserve_native_control
@@ -30,13 +31,14 @@ class DatasetRoute(APIRoute):
             if request.method not in {'GET', 'HEAD', 'OPTIONS'}:
                 require_local_origin(request)
             count = 0
+            limit = 1024 * 1024 if request.url.path == '/api/lora-datasets/remove-records' else 64 * 1024
             async def receive() -> Message:
                 nonlocal count
                 message = await request.receive()
                 body: object = message.get('body', b'')
                 if isinstance(body, bytes):
                     count += len(body)
-                if count > 64 * 1024:
+                if count > limit:
                     raise HTTPException(413, 'dataset_request_too_large')
                 return message
             try:
@@ -70,6 +72,13 @@ async def create(body: CreateLoraDatasetRequest) -> LoraDatasetEntry:
 @router.get('/workspace', response_model=LoraWorkspace)
 async def workspace() -> LoraWorkspace:
     return library.get_workspace()
+
+
+@router.post('/remove-records', response_model=RemoveLoraDatasetRecordsResponse)
+async def remove_records(body: RemoveLoraDatasetRecordsRequest) -> RemoveLoraDatasetRecordsResponse:
+    async with library.native_lock:
+        await library.require_native_idle()
+        return library.remove_dataset_records(body)
 
 
 @router.put('/workspace', response_model=LoraWorkspace)

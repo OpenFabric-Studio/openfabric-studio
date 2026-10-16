@@ -109,6 +109,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
     preprocessTaskId: '',
     preprocessCurrent: 0,
     preprocessTotal: 0,
+    preprocessNumTensors: null as number | null,
     preprocessOutputDir: '',
     preprocessTaskOutputDir: '',
     preprocessError: '',
@@ -182,6 +183,7 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
       this.preprocessSubmissionUnknown = false
       this.preprocessCurrent = 0
       this.preprocessTotal = 0
+      this.preprocessNumTensors = null
       this.preprocessError = ''
       this.discoveredPreprocess = null
       this.trainingTensorDir = context.trainingTensorDir || ''
@@ -377,6 +379,8 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
         this.preprocessRunning = true
         this.preprocessCurrent = 0
         this.preprocessTotal = res.total
+        this.preprocessNumTensors = null
+        this.preprocessOutputDir = ''
         if (this._backgroundWatching) this._pollPreprocess(req.output_dir)
       } catch (err) {
         if (datasetGeneration !== this._datasetGeneration || datasetPath !== this.datasetPath) return
@@ -422,13 +426,14 @@ export const useLoraTrainingStore = defineStore('loraTraining', {
           if (st.status === 'completed') {
             this.preprocessRunning = false
             const produced = st.result?.num_tensors
-            const message = st.result?.message || st.progress
-            if (produced === 0) {
-              this.preprocessError = message || t('storeErrors.preprocessFailed')
+            this.preprocessNumTensors = produced ?? null
+            if (produced == null || produced <= 0) {
+              this.preprocessOutputDir = ''
+              this.preprocessError = produced === 0 ? t('lora.preprocessNoTensors') : t('storeErrors.preprocessFailed')
               return false
             }
             this.preprocessOutputDir = st.result?.output_dir || outputDir
-            if (message && /failed/i.test(message)) this.preprocessError = message
+            this.preprocessError = produced < st.total ? t('lora.preprocessPartial') : ''
             return false
           }
           if (st.status === 'failed') {

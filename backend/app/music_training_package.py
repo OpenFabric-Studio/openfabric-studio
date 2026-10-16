@@ -1,13 +1,16 @@
 """Local, immutable NVIDIA packages; preparing an archive never contacts a service."""
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import math
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import tempfile
+import wave
 import zipfile
 
 import soundfile as sf
@@ -19,8 +22,8 @@ from .music_training_setup import _licenses, recipes, training_assets
 _BACKEND = Path(__file__).resolve().parents[1]
 _REPOSITORY = _BACKEND.parent
 _LICENSE_FILES = ('LICENSE', 'LICENSE-MIT', 'NOTICE')
-_COMMON = ('scripts/stable_lora_worker.py',)
-_HEART = ('scripts/heart_lora_worker.py', 'app/heart_lora_conversion.py')
+_COMMON = ('scripts/stable_lora_worker.py', 'app/__init__.py', 'app/orchestrator/__init__.py',
+           'app/orchestrator/windows_job.py', 'app/orchestrator/windows_supervisor.py')
 _YUE = ('scripts/yue_lora_worker.py', 'app/yue_lora_convert.py', 'app/yue_lora_runtime.py',
         'app/contracts.py', 'app/music_lora_contracts.py', 'app/music_training_contracts.py', 'app/music_training_source_contracts.py')
 
@@ -45,6 +48,42 @@ def _license_directory() -> Path:
     raise ValueError('music_training_package_licenses_missing')
 
 
+def _command(argv: list[str], *, timeout: float) -> None:
+    from .video_process import run_owned_command
+    environment = {**os.environ, 'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1'}
+    result = asyncio.run(run_owned_command(argv, timeout=timeout, max_bytes=2 * 1024**2,
+        env=environment, stderr=subprocess.STDOUT))
+    if result.returncode != 0:
+        raise ValueError('music_training_package_preparation_failed')
+
+
+def _prepare_pair_sample(staging: Path, source: Path, index: int, seconds: int) -> dict[str, object]:
+    from .yue_lora_runtime import default_environment, score_argv, score_ready, validate_score
+    environment = default_environment()
+    if not score_ready(environment):
+        raise ValueError('yue_lora_score_runtime_unprepared')
+    formats = {'.wav': 'wav', '.mp3': 'mp3', '.flac': 'flac'}
+    if source.suffix.lower() not in formats:
+        raise ValueError('music_training_package_audio_invalid')
+    excerpt = staging / f'excerpts/{index:03d}.wav'
+    excerpt.parent.mkdir(exist_ok=True)
+    _command([str(environment.ffmpeg), '-nostdin', '-v', 'error', '-xerror', '-protocol_whitelist', 'file,pipe',
+        '-f', formats[source.suffix.lower()], '-i', str(source), '-t', str(seconds), '-map', '0:a:0',
+        '-ac', '2', '-ar', '48000', '-c:a', 'pcm_s16le', '-f', 'wav', str(excerpt)], timeout=120)
+    with wave.open(str(excerpt)) as audio:
+        if (audio.getnchannels() != 2 or audio.getsampwidth() != 2 or audio.getframerate() != 48000
+                or not .1 <= audio.getnframes() / 48000 <= seconds + .01):
+            raise ValueError('music_training_package_audio_invalid')
+    score = staging / f'scores/{index:03d}.abc'
+    score.parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='.score-', dir=staging) as temporary:
+        output = Path(temporary)
+        _command(score_argv(excerpt, output, environment), timeout=1800)
+        score.write_text(validate_score(output / 'score.abc') + '\n', encoding='utf-8')
+    return {'path': excerpt.relative_to(staging).as_posix(), 'sha256': _digest(excerpt), 'bytes': excerpt.stat().st_size,
+        'score_path': score.relative_to(staging).as_posix(), 'score_sha256': _digest(score)}
+
+
 def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newdestination: Path) -> Path:
     """Copy reviewed sources/settings/original audio and atomically publish a new ZIP."""
     if (not newdestination.is_absolute() or newdestination.is_symlink() or newdestination.exists()
@@ -56,7 +95,8 @@ def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newd
     for source in sources:
         if not source.is_absolute() or source.is_symlink() or source.resolve() != source or not source.is_file():
             raise ValueError('music_training_package_source_unsafe')
-    if shutil.disk_usage(newdestination.parent).free < sum(source.stat().st_size for source in sources) * 2 + 32 * 1024**2:
+    excerpt_bytes = len(sources) * request.segment_seconds * 48000 * 2 * 2 if request.yue_pair is not None else 0
+    if shutil.disk_usage(newdestination.parent).free < (sum(source.stat().st_size for source in sources) + excerpt_bytes) * 2 + 32 * 1024**2:
         raise ValueError('music_training_package_disk_space')
     with tempfile.TemporaryDirectory(prefix='.music-training-package-', dir=newdestination.parent) as temporary:
         staging = Path(temporary)
@@ -67,7 +107,7 @@ def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newd
             if (not math.isfinite(info.duration) or info.duration <= .1 or not 8000 <= info.samplerate <= 192000
                     or info.channels not in (1, 2)):
                 raise ValueError('music_training_package_audio_invalid')
-            if request.engine == 'heartmula' and sample.lyrics.strip() and info.duration > request.segment_seconds + 1 / info.samplerate:
+            if request.yue_pair is not None and sample.lyrics.strip() and info.duration > request.segment_seconds + 1 / info.samplerate:
                 raise ValueError('music_training_package_lyrics_require_matching_trimmed_clip')
             extension = source.suffix.lower()
             if not 2 <= len(extension) <= 6 or not extension[1:].isalnum():
@@ -77,18 +117,19 @@ def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newd
             _copy(source, copied)
             if _digest(source) != before or _digest(copied) != before:
                 raise ValueError('music_training_package_source_changed')
-            samples.append({'path': relative, 'sha256': before, 'bytes': copied.stat().st_size,
+            entry: dict[str, object] = {'path': relative, 'sha256': before, 'bytes': copied.stat().st_size,
                 'original_duration_seconds': info.duration, 'offset_seconds': 0, 'segment_seconds': request.segment_seconds,
-                'sample_index': index})
-        for name in _COMMON + (_HEART if request.engine == 'heartmula' else _YUE):
+                'sample_index': index}
+            if request.yue_pair is not None:
+                entry.update({'original_path': relative, 'original_sha256': before})
+                entry.update(_prepare_pair_sample(staging, copied, index, request.segment_seconds))
+            samples.append(entry)
+        for name in _COMMON + _YUE:
             _copy(_BACKEND / name, staging / 'backend' / name)
         _copy(_BACKEND / 'scripts/music_training_package_bootstrap.py', staging / 'bootstrap.py')
         license_directory = _license_directory()
         for name in _LICENSE_FILES:
             _copy(license_directory / name, staging / name)
-        if request.engine == 'heartmula':
-            for name in ('heart-lora-heartlib-LICENSE.txt', 'heart-lora-NOTICE.txt'):
-                _copy(Path(__file__).parent / 'assets' / name, staging / 'third-party' / name)
         recipe = recipes()[request.engine]
         environments: list[dict[str, object]] = []
         for descriptor in recipe.environments:
@@ -102,15 +143,16 @@ def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newd
         (staging / 'README.txt').write_text(
             'OpenFabric Studio portable NVIDIA training package\n\n'
             'CUDA execution is UNVERIFIED. The same pinned model boundary was tested on Apple Silicon; CUDA needs its own train/load/preview evidence.\n'
-            'This archive contains the selected original recordings, captions and reviewed settings. No upload occurs automatically.\n'
+            'This archive contains the selected original recordings, captions and reviewed settings. Paired YuE also includes the exact bounded WAV excerpts and checked ABC scores prepared locally with the installed native GGUF CLI. No upload occurs automatically.\n'
             'Install Python 3.12, uv and Git; YuE2 also needs FFmpeg. Use a CUDA GPU with BF16 support.\n'
             'Run: python bootstrap.py --check\n'
             'Then: python bootstrap.py\n'
             'The second command installs pinned environments, prints model download sizes and terms, downloads verified weights, and starts a fresh run.\n'
             'Weights are not included. Code/model/recording rights are separate; see manifest.json license declarations and the bundled notices.\n'
-            'HeartMuLa lyrics must match the entire selected short clip; long vocal clips are rejected. Empty-lyrics clips use the first selected segment.\n'
+            'Paired YuE lyrics must match the entire selected short clip; longer vocal recordings are rejected. Empty-lyrics clips use the first selected segment.\n'
             'Keep completed checkpoints. Rerunning creates a new run and does not resume optimizer state.\n'
-            'Import runs/<id>/adapter.safetensors through OpenFabric Studio; its registry validates format, finite values and base identity before use.\n', encoding='utf-8')
+            'A paired YuE run trains AR then NAR and requires both runs/<id>/adapter-ar.safetensors and adapter-nar.safetensors. Its checked scores need no native CLI or extra transcription weights on NVIDIA.\n'
+            'Legacy single-adapter runs produce runs/<id>/adapter.safetensors. Import the named outputs through OpenFabric Studio; its registry validates format, finite values and base identity before use.\n', encoding='utf-8')
         files = [{'path': path.relative_to(staging).as_posix(), 'sha256': _digest(path), 'bytes': path.stat().st_size}
                  for path in sorted(staging.rglob('*')) if path.is_file()]
         manifest = {'schema_version': 1, 'engine': request.engine, 'nvidia_validation': 'unverified',

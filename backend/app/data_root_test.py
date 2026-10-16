@@ -32,6 +32,21 @@ from app.data_root import (
 
 
 class DataRootTests(unittest.TestCase):
+    def test_dataset_library_is_moved_with_active_and_trashed_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            for relative in ('Neo.json', 'trash/archived.json'):
+                metadata = src / 'lora-datasets' / relative
+                metadata.parent.mkdir(parents=True, exist_ok=True)
+                metadata.write_text(json.dumps({'source': str(src / 'files' / 'recording.wav'), 'name': relative}))
+            self.assertTrue(has_library(src))
+            migrate_library(src, dest)
+            for relative in ('Neo.json', 'trash/archived.json'):
+                restored = json.loads((dest / 'lora-datasets' / relative).read_text())
+                self.assertEqual(restored['source'], str(dest / 'files' / 'recording.wav'))
+                self.assertEqual(restored['name'], relative)
+            self.assertFalse((src / 'lora-datasets').exists())
+
     def test_music_worker_receipts_follow_the_relocated_library(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
@@ -788,7 +803,7 @@ class MusicLibraryRelocationTests(unittest.IsolatedAsyncioTestCase):
         connection.execute('INSERT INTO stable_lora_jobs(id,payload_json,created_at) VALUES(?,?,?)',
             (training.id, training.model_dump_json(), training.created_at))
         generated = LocalMusicJob(id='b' * 32, status='running', created_at='2026-10-14',
-            request=LocalMusicRequest(engine='heartmula', prompt='Jazz', duration_seconds=5))
+            request=LocalMusicRequest(engine='stable_audio3', prompt='Jazz', duration_seconds=5))
         local_music._artifact(generated.id, 'output.wav', create=True).write_bytes(audio_bytes())
         connection.execute('INSERT INTO local_music_jobs(id,payload_json,created_at) VALUES(?,?,?)',
             (generated.id, generated.model_dump_json(), generated.created_at))

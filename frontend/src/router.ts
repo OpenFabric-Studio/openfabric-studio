@@ -10,7 +10,6 @@ export const appRoutes: RouteRecordRaw[] = [
         { path: 'ace-step', name: 'ace-step', component: () => import('./views/ace-step/AceStepPage.vue') },
         { path: 'openrouter', name: 'openrouter-music', component: () => import('./views/music/CloudMusicPanel.vue') },
         { path: 'yue2', name: 'yue2', component: () => import('./views/yue2/Yue2Page.vue') },
-        { path: 'heartmula', name: 'heartmula', component: () => import('./views/music/LocalMusicPanel.vue'), props: { engine: 'heartmula' } },
         { path: 'stable-audio3', name: 'stable_audio3', component: () => import('./views/music/LocalMusicPanel.vue'), props: { engine: 'stable_audio3' } },
         {
           path: 'lora', component: () => import('./views/music/LoraWorkspacePage.vue'),
@@ -19,7 +18,6 @@ export const appRoutes: RouteRecordRaw[] = [
             { path: 'ace-step', name: 'music-lora-ace-step', component: () => import('./views/ace-step/LoraTrainingPage.vue') },
             { path: 'stable-audio3', name: 'music-lora-stable-audio3', component: () => import('./views/music/MusicLoraPage.vue'), props: { engine: 'stable_audio3' } },
             { path: 'yue2', name: 'music-lora-yue2', component: () => import('./views/music/MusicLoraPage.vue'), props: { engine: 'yue2' } },
-            { path: 'heartmula', name: 'music-lora-heartmula', component: () => import('./views/music/MusicLoraPage.vue'), props: { engine: 'heartmula' } },
           ],
         },
       ],

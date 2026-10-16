@@ -19,6 +19,7 @@ test('shutdown awaits aborted setup cleanup before stopping the backend', async 
 });
 
 test('fixed optional setup wrappers preserve operator flags and the video CLI contract', () => {
+  assert.throws(() => setupCommand('/repo', 'heartmula', [], { PYTHON_BIN: '/python' }), /Unsupported/);
   const singing = setupCommand('/repo', 'singing', ['--root', '/selected', '--download-models'], { PYTHON_BIN: '/python' }, 'win32');
   assert.equal(singing.command, '/python');
   assert.deepEqual(singing.args.slice(1), ['--feature', 'singing', '--install', '--root', '/selected', '--download-models']);
@@ -31,7 +32,7 @@ test('fixed optional setup wrappers preserve operator flags and the video CLI co
   assert.deepEqual(kokoro.args.slice(1), ['--feature', 'kokoro', '--install']);
   const wan = setupCommand('/repo', 'wan22', ['--download-models'], { PYTHON_BIN: '/python' });
   assert.deepEqual(wan.args.slice(1), ['--feature', 'wan22', '--install', '--download-models']);
-  for (const feature of ['heartmula', 'stable_audio3']) {
+  for (const feature of ['stable_audio3']) {
     const music = setupCommand('/repo', feature, ['--root', '/selected'], { PYTHON_BIN: '/python' });
     assert.match(music.args[0], /setup_modules\.py$/);
     assert.deepEqual(music.args.slice(1), ['--feature', feature, '--install', '--root', '/selected']);

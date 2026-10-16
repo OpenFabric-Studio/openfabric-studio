@@ -22,13 +22,13 @@ class LocalMusicApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_foreign_origin_is_refused_before_generation(self) -> None:
         with patch('app.local_music.submit', new=AsyncMock()) as submit:
-            response = await self.client.post('/api/local-music/jobs', json={'engine': 'heartmula', 'prompt': 'Jazz', 'duration_seconds': 10}, headers={'origin': 'https://evil.example'})
+            response = await self.client.post('/api/local-music/jobs', json={'engine': 'stable_audio3', 'prompt': 'Jazz', 'duration_seconds': 10}, headers={'origin': 'https://evil.example'})
         self.assertEqual(response.status_code, 403)
         submit.assert_not_awaited()
 
     async def test_bounded_invalid_request_does_not_echo_prompt(self) -> None:
         sentinel = 'private prompt content'
-        response = await self.client.post('/api/local-music/jobs', json={'engine': 'heartmula', 'prompt': sentinel})
+        response = await self.client.post('/api/local-music/jobs', json={'engine': 'stable_audio3', 'prompt': sentinel})
         self.assertEqual(response.status_code, 422)
         self.assertNotIn(sentinel, response.text)
         response = await self.client.post('/api/local-music/jobs', content=b' ' * 131073, headers={'content-type': 'application/json'})

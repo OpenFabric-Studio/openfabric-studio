@@ -169,6 +169,7 @@ def snapshot_from_params(engine: GenerationEngine, params: JsonObject, lyrics: s
                 values['duration'] = min(300, max(10, duration))
         return AceGenerationSettings.model_validate(_validated_fields(AceGenerationSettings, values))
     mapping = {'style': 'style', 'cot': 'cot', 'precision': 'precision', 'abc': 'abc',
+               'bpm': 'bpm', 'keyScale': 'key_scale', 'timeSignature': 'time_signature',
                'cfgScale': 'cfg_scale', 'numInferenceSteps': 'num_inference_steps', 'batchSize': 'batch_size'}
     values = {name: params[key] for name, key in mapping.items() if key in params}
     values.update({'engine': engine, 'title': title.strip()[:500], 'lyrics': lyrics[:100_000], 'seed': seed,
@@ -345,8 +346,9 @@ def import_presets(connection: sqlite3.Connection, request: ImportGenerationPres
     with _transaction(connection):
         for legacy in request.presets:
             settings = TypeAdapter(JsonObject).validate_json(legacy.settings.model_dump_json())
-            # Preserve fingerprints written before the optional YuE adapter fields existed.
-            for field in ('arAdapter', 'narAdapter'):
+            # New optional YuE fields must not change an unchanged legacy import's identity.
+            optional = ('arAdapter', 'narAdapter', 'bpm', 'keyScale', 'timeSignature') if legacy.settings.engine == 'yue2' else ()
+            for field in optional:
                 if settings.get(field) is None:
                     settings.pop(field, None)
             fingerprint = hashlib.sha256(json.dumps({'name': legacy.name, 'settings': settings},

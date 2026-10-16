@@ -1,39 +1,123 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { createApp, nextTick, type App } from 'vue'
+import { createApp, h, KeepAlive, nextTick, ref, type App } from 'vue'
 import { createPinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n } from '../../i18n'
 import * as api from '../../api/musicTraining'
 import * as tracks from '../../api/tracks'
+import * as captions from '../../api/trainingCaptions'
+import * as modules from '../../api/modules'
 import * as datasets from '../../api/loraDataset'
 import { parseLoraDatasetOperationResponse, type MusicLoraTrainingJob } from '../../api/generated'
 import { pendingMusicAdapter } from '../../composables/generationDrafts'
+import { ApiError } from '../../api/http'
+import { hasOpenDialog } from '../../composables/useDialogA11y'
 import ModelLoraTraining from './ModelLoraTraining.vue'
-vi.mock('../../api/musicTraining', () => ({ musicTrainingStatus: vi.fn(), listMusicTraining: vi.fn(), submitMusicTraining: vi.fn(), createMusicTrainingPackage: vi.fn(), musicTrainingPackageUrl: (id: string) => `/api/music-lora/training/jobs/${id}/package`, cancelMusicTraining: vi.fn() }))
-vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(async () => []) }))
+vi.mock('../../api/musicTraining', () => ({ musicTrainingStatus: vi.fn(), listMusicTraining: vi.fn(), submitMusicTraining: vi.fn(), createMusicTrainingPackage: vi.fn(), musicTrainingPackageUrl: (id: string) => `/api/music-lora/training/jobs/${id}/package`, cancelMusicTraining: vi.fn(), trainMissingMusicPlanner: vi.fn() }))
+vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(async () => []), planModules: vi.fn(), installModules: vi.fn(), controlModuleJob: vi.fn() }))
 vi.mock('../../api/tracks', () => ({ listTracks: vi.fn(), uploadTrack: vi.fn() }))
+vi.mock('../../api/trainingCaptions', () => ({ listTrainingCaptions: vi.fn(), submitTrainingCaptions: vi.fn(), getTrainingCaptions: vi.fn(), cancelTrainingCaptions: vi.fn() }))
 vi.mock('../../api/loraDataset', () => ({ listLoraDatasets: vi.fn(), readSavedLoraDataset: vi.fn() }))
 let app: App | undefined
 const request = { engine: 'yue2', name: 'Warm strings', samples: [{ track_id: 42, caption: 'Warm strings', lyrics: '', instrumental: false }], max_steps: 1000, rank: 16, learning_rate: 0.0001, seed: 42, segment_seconds: 12 } as const
+const yuePair = { planner_steps: 100, planner_learning_rate: 0.00005 }
 const job = (status: MusicLoraTrainingJob['status'] = 'running'): MusicLoraTrainingJob => ({ id: 'c'.repeat(32), status, created_at: '2026-10-15T18:00:00Z', request: { ...request, samples: [...request.samples] }, progress: { stage: 'training', step: 2, total_steps: 1000, loss: 0.42 }, adapter: null, error_code: null })
 async function settle() { for (let i = 0; i < 16; i++) await nextTick() }
-async function mount(engine: 'yue2' | 'heartmula' = 'yue2', onRegistered = vi.fn()) {
+async function mount(engine: 'yue2' = 'yue2', onRegistered = vi.fn(), managedNames: string[] = []) {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: ModelLoraTraining }, { path: '/settings', component: { render: () => null } }, { path: '/music/:engine', component: { render: () => null } }] }); await router.push('/')
-  const node = document.body.appendChild(document.createElement('div')); app = createApp(ModelLoraTraining, { engine, onRegistered }).use(createPinia()).use(router).use(i18n); app.mount(node); await settle(); return node
+  const node = document.body.appendChild(document.createElement('div')); app = createApp(ModelLoraTraining, { engine, onRegistered, managedNames }).use(createPinia()).use(router).use(i18n); app.mount(node); await settle(); return node
 }
 function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
 async function input(node: ParentNode, name: string, value: string) { const field = node.querySelector(`[name="${name}"]`); if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) throw new Error(`Missing ${name}`); field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); await settle() }
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: true, device: 'mps', validation: 'experimental' }, { engine: 'heartmula', supported: true, installed: true, weights_ready: true, device: 'mps', validation: 'experimental' }] })
+  vi.mocked(captions.listTrainingCaptions).mockResolvedValue({ jobs: [] })
+  vi.mocked(captions.submitTrainingCaptions).mockRejectedValue(new ApiError('training_caption_busy', 409))
+  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: true, paired_ready: true, device: 'mps', validation: 'experimental' }] })
   vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [], history_incomplete: false }); vi.mocked(api.submitMusicTraining).mockResolvedValue(job('queued')); vi.mocked(api.cancelMusicTraining).mockResolvedValue(job('cancelled'))
   vi.mocked(api.createMusicTrainingPackage).mockResolvedValue({ ...job('queued'), kind: 'nvidia-package', package_sha256: null })
   vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [], issues: [] })
   vi.mocked(tracks.listTracks).mockResolvedValue([{ id: 42, short_id: 42, model: 'upload', title: 'String recording', created_at: 'now', lyrics: '', seed: null, duration_ms: 12000, wall_ms: null, params: {}, filename: 'strings.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }])
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); pendingMusicAdapter.value = null; vi.useRealTimers() })
-it.each(['heartmula', 'yue2'] as const)('explains the %s training options without starting work', async engine => {
+it('analyzes added training audio and submits editable captions without inventing lyrics', async () => {
+  vi.mocked(captions.submitTrainingCaptions).mockImplementation(async request => ({ id: 'e'.repeat(32), status: 'done', request, items: request.samples.map(source => ({ source, status: 'done', caption: 'Layered strings with warm percussion', error_code: null })), created_at: 'now', updated_at: 'now', error_code: null }))
+  const node = await mount()
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  expect(captions.submitTrainingCaptions).toHaveBeenCalledExactlyOnceWith({ samples: [{ track_id: 42 }], segment_seconds: 12 }, expect.any(AbortSignal))
+  const field = node.querySelector('[name="model-caption-42"]')
+  expect(field).toBeInstanceOf(HTMLTextAreaElement)
+  if (!(field instanceof HTMLTextAreaElement)) throw new Error('Missing training caption')
+  expect(field.value).toBe('Layered strings with warm percussion')
+  await input(node, 'model-training-name', 'Automatically captioned strings')
+  button(node, 'Start training').click(); await settle()
+  expect(api.submitMusicTraining).toHaveBeenCalledWith(expect.objectContaining({ samples: [{ track_id: 42, caption: 'Layered strings with warm percussion', lyrics: '', instrumental: false }] }), expect.any(AbortSignal))
+})
+it('keeps training blocked while captions are running even after a manual description is entered', async () => {
+  const request = { samples: [{ track_id: 42 }], segment_seconds: 12 }
+  vi.mocked(captions.submitTrainingCaptions).mockResolvedValue({ id: 'e'.repeat(32), status: 'running', request, items: [{ source: { track_id: 42 }, status: 'running', caption: '' }], created_at: 'now', updated_at: 'now' })
+  const node = await mount()
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-training-name', 'Manual description during analysis')
+  await input(node, 'model-caption-42', 'My own strings caption')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(button(node, 'Create NVIDIA package').disabled).toBe(true)
+})
+it('adds multiple uploaded recordings to one paired YuE training request', async () => {
+  const node = await mount()
+  const control = node.querySelector('input[name="training-audio-files"]')
+  expect(control).toBeInstanceOf(HTMLInputElement)
+  if (!(control instanceof HTMLInputElement)) throw new Error('Missing multiple audio import')
+  expect(control.multiple).toBe(true)
+  const [source] = await tracks.listTracks()
+  if (!source) throw new Error('Missing library fixture')
+  vi.mocked(tracks.uploadTrack)
+    .mockResolvedValueOnce({ ...source, id: 51, title: 'Verse recording' })
+    .mockResolvedValueOnce({ ...source, id: 52, title: 'Chorus recording' })
+  Object.defineProperty(control, 'files', { configurable: true, value: [new File(['verse'], 'verse.wav'), new File(['chorus'], 'chorus.flac')] })
+  control.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  expect(tracks.uploadTrack).toHaveBeenCalledTimes(2)
+  expect(node.textContent).toContain('Selected tracks: 2')
+  expect(node.textContent).toContain('Verse recording')
+  expect(node.textContent).toContain('Chorus recording')
+  await input(node, 'model-training-name', 'New paired adapter')
+  await input(node, 'model-caption-51', 'Warm strings in the verse')
+  await input(node, 'model-caption-52', 'Layered strings in the chorus')
+  button(node, 'Start training').click(); await settle()
+  expect(api.submitMusicTraining).toHaveBeenCalledWith(expect.objectContaining({
+    engine: 'yue2', yue_pair: yuePair,
+    samples: [
+      { track_id: 51, caption: 'Warm strings in the verse', lyrics: '', instrumental: false },
+      { track_id: 52, caption: 'Layered strings in the chorus', lyrics: '', instrumental: false },
+    ],
+  }), expect.any(AbortSignal))
+})
+it('prevents training or changing library selection while an import is in progress', async () => {
+  const node = await mount()
+  await input(node, 'model-training-name', 'Import in progress')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-caption-42', 'Warm strings')
+  expect(button(node, 'Start training').disabled).toBe(false)
+  const [source] = await tracks.listTracks()
+  if (!source) throw new Error('Missing library fixture')
+  let finish: ((value: typeof source) => void) | undefined
+  vi.mocked(tracks.uploadTrack).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const control = node.querySelector('input[name="training-audio-files"]')
+  if (!(control instanceof HTMLInputElement)) throw new Error('Missing audio importer')
+  Object.defineProperty(control, 'files', { configurable: true, value: [new File(['chorus'], 'chorus.wav')] })
+  control.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(button(node, 'Create NVIDIA package').disabled).toBe(true)
+  expect(button(node, 'Add or upload a library track').disabled).toBe(true)
+  button(node, 'Start training').click(); await settle()
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+  if (!finish) throw new Error('Missing upload resolver')
+  finish({ ...source, id: 52, title: 'Chorus' }); await settle()
+  await input(node, 'model-caption-52', 'Layered strings')
+  expect(button(node, 'Start training').disabled).toBe(false)
+})
+it.each(['yue2'] as const)('explains the %s training options without starting work', async engine => {
   const node = await mount(engine)
   const info = node.querySelector('[aria-label="About training options"]')
   if (!(info instanceof HTMLButtonElement)) throw new Error('Missing training info button')
@@ -42,20 +126,22 @@ it.each(['heartmula', 'yue2'] as const)('explains the %s training options withou
   expect(dialog?.textContent).toContain('Excerpt length in seconds')
   expect(dialog?.textContent).toContain('Learning rate')
   expect(dialog?.textContent).toContain('Optional NVIDIA fallback')
-  expect(dialog?.textContent).toContain(engine === 'heartmula' ? 'exact words sung in it' : 'composition planner stays unchanged')
+  expect(dialog?.textContent).toContain('Planner (AR)')
   expect(api.submitMusicTraining).not.toHaveBeenCalled()
   expect(api.createMusicTrainingPackage).not.toHaveBeenCalled()
 })
-it('teaches the acoustic scope and submits reviewed tracks through the owned training API', async () => {
+it('starts one paired YuE job with conservative planner defaults and reviewed tracks', async () => {
   const node = await mount()
-  expect(node.textContent).toContain('composition planner stays unchanged')
+  expect(node.textContent).toContain('Planner (AR)')
+  expect(node.textContent).toContain('local musical patterns')
+  expect(node.textContent).not.toContain('planner stays unchanged')
   expect(api.submitMusicTraining).not.toHaveBeenCalled()
   await input(node, 'model-training-name', 'Warm strings')
   button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
   expect(button(node, 'Start training').disabled).toBe(true)
   await input(node, 'model-caption-42', 'Warm strings')
   button(node, 'Start training').click(); await settle()
-  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, samples: [...request.samples] }, expect.any(AbortSignal))
+  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, yue_pair: yuePair, samples: [...request.samples] }, expect.any(AbortSignal))
 })
 it('restores progress after reload and cancels only when requested', async () => {
   vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [job()], history_incomplete: false })
@@ -65,8 +151,8 @@ it('restores progress after reload and cancels only when requested', async () =>
   button(node, 'Cancel training').click(); await settle()
   expect(api.cancelMusicTraining).toHaveBeenCalledWith(job().id, expect.any(AbortSignal))
 })
-it('keeps vocal excerpts and matching lyrics explicit on HeartMuLa', async () => {
-  const node = await mount('heartmula')
+it('keeps vocal excerpts and matching lyrics explicit on YuE', async () => {
+  const node = await mount('yue2')
   expect(node.textContent).toContain('matching lyrics')
   expect(node.textContent).toContain('12 seconds')
   expect(node.textContent).not.toContain('composition planner')
@@ -83,13 +169,13 @@ it('reconnects after an uncertain submission without resubmitting on its own', a
   expect(node.textContent).toContain('2 / 1000')
   expect(node.textContent).not.toContain('/private/token')
 })
-it('creates a downloadable NVIDIA package from reviewed recordings without local training setup', async () => {
-  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'heartmula', supported: false, installed: false, weights_ready: false, device: null, validation: 'experimental' }] })
+it.each(['yue2'] as const)('creates a downloadable %s NVIDIA package from reviewed recordings without local training setup', async engine => {
+  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine, supported: false, installed: false, weights_ready: false, device: null, validation: 'experimental' }] })
   const dataset = { id: 'a'.repeat(32), name: 'Reviewed vocals', dataset_path: 'datasets/vocals/dataset.json', audio_dir: 'datasets/vocals', sample_count: 1, labeled_count: 1, revision: 7, available: true, trashed: false }
   const snapshot = parseLoraDatasetOperationResponse({ dataset, samples: [{ id: 'clip', filename: 'vocals.wav', caption: 'Warm piano', labeled: true, is_instrumental: false, raw_lyrics: 'Hello there' }], metadata: {} })
   vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [dataset], issues: [] })
   vi.mocked(datasets.readSavedLoraDataset).mockResolvedValue(snapshot)
-  const node = await mount('heartmula')
+  const node = await mount(engine)
   const fallback = node.querySelector('details[data-nvidia-fallback]')
   expect(fallback).toBeInstanceOf(HTMLDetailsElement)
   expect(fallback?.hasAttribute('open')).toBe(false)
@@ -101,7 +187,7 @@ it('creates a downloadable NVIDIA package from reviewed recordings without local
   expect(button(node, 'Start training').disabled).toBe(true)
   expect(button(node, 'Create NVIDIA package').disabled).toBe(false)
   button(node, 'Create NVIDIA package').click(); await settle()
-  expect(api.createMusicTrainingPackage).toHaveBeenCalledExactlyOnceWith({ ...request, engine: 'heartmula', samples: [{ dataset: { dataset_id: dataset.id, revision: 7, sample_id: 'clip' }, caption: 'Warm piano', lyrics: 'Hello there', instrumental: false }] }, expect.any(AbortSignal))
+  expect(api.createMusicTrainingPackage).toHaveBeenCalledExactlyOnceWith({ ...request, engine, ...(engine === 'yue2' ? { yue_pair: yuePair } : {}), samples: [{ dataset: { dataset_id: dataset.id, revision: 7, sample_id: 'clip' }, caption: 'Warm piano', lyrics: 'Hello there', instrumental: false }] }, expect.any(AbortSignal))
   expect(api.submitMusicTraining).not.toHaveBeenCalled()
 })
 it('restores package history with an explicit download and never announces adapter registration', async () => {
@@ -128,17 +214,17 @@ it.each(['unknown history', 'active job'] as const)('keeps NVIDIA packaging disa
   expect(api.createMusicTrainingPackage).not.toHaveBeenCalled()
 })
 it('clears mismatching lyrics when an instrumental clip is selected and submits the review', async () => {
-  const node = await mount('heartmula')
+  const node = await mount('yue2')
   await input(node, 'model-training-name', 'Warm strings')
   button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
   await input(node, 'model-caption-42', 'Warm piano')
   await input(node, 'model-lyrics-42', 'Previous lyrics')
-  const instrumental = node.querySelector('input[type="checkbox"]')
+  const instrumental = node.querySelector('input[name="model-instrumental-42"]')
   if (!(instrumental instanceof HTMLInputElement)) throw new Error('Missing instrumental selection')
   instrumental.click(); await settle()
   expect(node.querySelector('[name="model-lyrics-42"]')).toBeNull()
   button(node, 'Start training').click(); await settle()
-  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, engine: 'heartmula', samples: [{ track_id: 42, caption: 'Warm piano', lyrics: '', instrumental: true }] }, expect.any(AbortSignal))
+  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, yue_pair: yuePair, samples: [{ track_id: 42, caption: 'Warm piano', lyrics: '', instrumental: true }] }, expect.any(AbortSignal))
 })
 it('opens adapter and base previews without starting generation', async () => {
   const completed: MusicLoraTrainingJob = { ...job('done'), adapter: { id: 'a'.repeat(32), engine: 'yue2', target: 'nar', name: 'Warm strings', sha256: 'f'.repeat(64), created_at: '2026-10-15', source_job_id: job().id } }
@@ -149,17 +235,6 @@ it('opens adapter and base previews without starting generation', async () => {
   expect(pendingMusicAdapter.value).toEqual({ engine: 'yue2', target: 'nar', selection: { id: 'a'.repeat(32), strength: 1 } })
   links.find(link => link.textContent === 'Compare base model')?.click(); await settle()
   expect(pendingMusicAdapter.value).toEqual({ engine: 'yue2', target: 'nar', selection: null })
-  expect(api.submitMusicTraining).not.toHaveBeenCalled()
-})
-it('compares the HeartMuLa base at zero adapter strength in the same corrected runtime', async () => {
-  const completed: MusicLoraTrainingJob = { ...job('done'), request: { ...job().request, engine: 'heartmula' }, adapter: { id: 'a'.repeat(32), engine: 'heartmula', target: 'heartmula-3b', name: 'Warm voice', sha256: 'f'.repeat(64), created_at: '2026-10-15', source_job_id: job().id } }
-  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [completed], history_incomplete: false })
-  const node = await mount('heartmula')
-  const compare = [...node.querySelectorAll('a')].find(link => link.textContent === 'Compare base model')
-  if (!compare) throw new Error('Missing HeartMuLa base comparison')
-  compare.click(); await settle()
-  expect(pendingMusicAdapter.value).toEqual({ engine: 'heartmula', target: 'heartmula-3b', selection: { id: 'a'.repeat(32), strength: 0 } })
-  expect(node.textContent).toContain('strength 0 in the same corrected runtime')
   expect(api.submitMusicTraining).not.toHaveBeenCalled()
 })
 it('sends a validated package request and constrains package download IDs', async () => {
@@ -176,4 +251,242 @@ it('sends a validated package request and constrains package download IDs', asyn
     expect(actual.musicTrainingPackageUrl(queued.id)).toBe(`/api/music-lora/training/jobs/${queued.id}/package`)
     expect(() => actual.musicTrainingPackageUrl('../outside')).toThrow('Invalid music training job ID')
   } finally { fetch.mockRestore() }
+})
+
+it('keeps separate planner and acoustic controls in one YuE submission', async () => {
+  const node = await mount()
+  await input(node, 'model-training-name', 'Warm strings')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-caption-42', 'Warm strings')
+  await input(node, 'model-training-planner-steps', '8')
+  await input(node, 'model-training-planner-learning-rate', '0.00002')
+  await input(node, 'model-training-steps', '20')
+  await input(node, 'model-training-learning-rate', '0.00008')
+  button(node, 'Start training').click(); await settle()
+  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, samples: [...request.samples], max_steps: 20, learning_rate: 0.00008, yue_pair: { planner_steps: 8, planner_learning_rate: 0.00002 } }, expect.any(AbortSignal))
+})
+it.each(['0', '100001', '1.5'])('does not submit invalid planner steps %s', async value => {
+  const node = await mount()
+  await input(node, 'model-training-name', 'Warm strings')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-caption-42', 'Warm strings')
+  await input(node, 'model-training-planner-steps', value)
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(button(node, 'Create NVIDIA package').disabled).toBe(true)
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+})
+it('retains optional matching clip lyrics from a saved YuE dataset', async () => {
+  const dataset = { id: 'a'.repeat(32), name: 'Reviewed vocals', dataset_path: 'datasets/vocals/dataset.json', audio_dir: 'datasets/vocals', sample_count: 1, labeled_count: 1, revision: 7, available: true, trashed: false }
+  const snapshot = parseLoraDatasetOperationResponse({ dataset, samples: [{ id: 'clip', filename: 'vocals.wav', caption: 'Warm piano', labeled: true, is_instrumental: false, raw_lyrics: 'Hello there' }], metadata: {} })
+  vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [dataset], issues: [] })
+  vi.mocked(datasets.readSavedLoraDataset).mockResolvedValue(snapshot)
+  const node = await mount()
+  await input(node, 'model-training-name', 'Warm strings')
+  button(node, 'Add a saved dataset').click(); await settle(); button(node, 'Add up to 1 recordings').click(); await settle()
+  const field = node.querySelector(`[name="model-lyrics-${dataset.id}-clip"]`)
+  expect(field).toBeInstanceOf(HTMLTextAreaElement)
+  if (!(field instanceof HTMLTextAreaElement)) throw new Error('Missing clip lyrics')
+  expect(field.value).toBe('Hello there')
+  expect(node.textContent).toContain('Longer clips with lyrics are rejected')
+  button(node, 'Start training').click(); await settle()
+  expect(api.submitMusicTraining).toHaveBeenCalledExactlyOnceWith({ ...request, yue_pair: yuePair, samples: [{ dataset: { dataset_id: dataset.id, revision: 7, sample_id: 'clip' }, caption: 'Warm piano', lyrics: 'Hello there', instrumental: false }] }, expect.any(AbortSignal))
+})
+it('exports both named targets and previews the completed YuE pair without submitting', async () => {
+  const ar = { id: 'a'.repeat(32), engine: 'yue2', target: 'ar', name: 'Warm strings AR', sha256: 'e'.repeat(64), created_at: '2026-10-15', source_job_id: job().id } as const
+  const nar = { ...ar, id: 'b'.repeat(32), target: 'nar', name: 'Warm strings NAR', sha256: 'f'.repeat(64) } as const
+  const completed = { ...job('done'), request: { ...job().request, yue_pair: yuePair }, adapters: [ar, nar], adapter: nar }
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [completed], history_incomplete: false })
+  const node = await mount()
+  const links = [...node.querySelectorAll('a')]
+  expect(links.find(link => link.getAttribute('href') === `/api/music-lora/adapters/${ar.id}/file`)?.textContent).toContain('Warm strings AR')
+  expect(links.find(link => link.getAttribute('href') === `/api/music-lora/adapters/${nar.id}/file`)?.textContent).toContain('Warm strings NAR')
+  links.find(link => link.textContent === 'Preview with adapter')?.click(); await settle()
+  expect(pendingMusicAdapter.value).toEqual({ engine: 'yue2', target: 'nar', selection: { id: nar.id, strength: 1 }, pair: { ar: { id: ar.id, strength: 1 }, nar: { id: nar.id, strength: 1 } } })
+  links.find(link => link.textContent === 'Compare base model')?.click(); await settle()
+  expect(pendingMusicAdapter.value).toEqual({ engine: 'yue2', target: 'nar', selection: null, pair: { ar: null, nar: null } })
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+})
+it.each([false, null, undefined])('requires paired readiness before starting a new YuE job: %s', async pairedReady => {
+  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: true, paired_ready: pairedReady, device: 'mps' }] })
+  const node = await mount()
+  await input(node, 'model-training-name', 'Warm strings')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-caption-42', 'Warm strings')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(node.textContent).toContain('Prepare automatic score extraction')
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+})
+
+it('offers automatic score preparation when YuE training files are already ready', async () => {
+  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: true, paired_ready: false, device: 'mps', error_code: 'yue_lora_score_runtime_unprepared' }] })
+  const node = await mount()
+  expect(node.querySelectorAll('[data-training-setup]')).toHaveLength(1)
+  expect(node.textContent).toContain('Prepare automatic score extraction')
+  expect(node.textContent).not.toContain('Prepare training files to get started')
+  expect([...node.querySelectorAll('button')].some(item => item.textContent?.trim() === 'Prepare training')).toBe(false)
+  const prepare = button(node, 'Prepare automatic score extraction')
+  expect(prepare.disabled).toBe(false)
+  prepare.click(); await settle()
+  expect(modules.planModules).toHaveBeenCalledExactlyOnceWith({ features: ['yue2'], download_models: true }, expect.any(AbortSignal))
+  expect(modules.installModules).not.toHaveBeenCalled()
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+})
+it('keeps the training setup action when YuE BF16 weights are missing', async () => {
+  vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: false, paired_ready: false, device: 'mps' }] })
+  const node = await mount()
+  expect(button(node, 'Prepare training').disabled).toBe(false)
+  expect(node.textContent).not.toContain('Prepare automatic score extraction')
+})
+
+function eligibleNar() {
+  return { ...job('done'), can_train_missing_ar: true, adapter: { id: 'a'.repeat(32), engine: 'yue2', target: 'nar', name: 'Warm strings', sha256: 'f'.repeat(64), created_at: '2026-10-15', source_job_id: job().id } as const }
+}
+it('reviews the original NAR source and trains only its missing AR after an explicit start', async () => {
+  const source = eligibleNar()
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [source], history_incomplete: false })
+  vi.mocked(api.trainMissingMusicPlanner).mockResolvedValue({ ...job('queued'), id: 'd'.repeat(32), request: { ...request, samples: [...request.samples], max_steps: 120, learning_rate: 0.00004, yue_ar_source_job_id: source.id } })
+  const node = await mount()
+  const open = button(node, 'Train missing AR'); open.focus(); open.click(); await settle()
+  const dialog = document.querySelector('[role="dialog"]')
+  expect(dialog?.textContent).toContain('Warm strings')
+  expect(dialog?.textContent).toContain('Track #42')
+  expect(dialog?.textContent).toContain('12')
+  expect(dialog?.textContent).toContain('existing NAR adapter is preserved')
+  expect(api.trainMissingMusicPlanner).not.toHaveBeenCalled()
+  await input(document, 'missing-ar-steps', '120')
+  await input(document, 'missing-ar-learning-rate', '0.00004')
+  const start = button(document, 'Start AR training'); start.click(); start.click(); await settle()
+  expect(api.trainMissingMusicPlanner).toHaveBeenCalledExactlyOnceWith(source.id, { planner_steps: 120, planner_learning_rate: 0.00004 }, expect.any(AbortSignal))
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(node.textContent).toContain('AR only')
+})
+it('does not infer AR eligibility from an older server or incomplete history', async () => {
+  const old = { ...eligibleNar(), can_train_missing_ar: undefined }
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [old], history_incomplete: false })
+  const node = await mount()
+  expect(node.textContent).not.toContain('Train missing AR')
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: true })
+  button(node, 'Refresh').click(); await settle()
+  const action = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === 'Train missing AR')
+  expect(action?.disabled ?? true).toBe(true)
+})
+it('restores focus after cancelling the missing AR review without submitting', async () => {
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  const node = await mount()
+  const open = button(node, 'Train missing AR'); open.focus(); open.click(); await settle()
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(document.activeElement).toBe(open)
+  expect(api.trainMissingMusicPlanner).not.toHaveBeenCalled()
+})
+it('does not resubmit an uncertain AR start until saved history has been rechecked', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  vi.mocked(api.trainMissingMusicPlanner).mockRejectedValue(new Error('/private/internal'))
+  const node = await mount()
+  button(node, 'Train missing AR').click(); await settle()
+  vi.mocked(api.listMusicTraining).mockRejectedValue(new Error('offline'))
+  button(document, 'Start AR training').click(); await settle()
+  expect(button(document, 'Start AR training').disabled).toBe(true)
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(button(document, 'Start AR training').disabled).toBe(true)
+  expect(api.trainMissingMusicPlanner).toHaveBeenCalledTimes(1)
+  expect(document.body.textContent).not.toContain('/private/internal')
+})
+it.each(['yue2'] as const)('shows a duplicate-name error beside the %s training name without leaking internals', async engine => {
+  const node = await mount(engine)
+  await input(node, 'model-training-name', 'Warm strings')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle()
+  await input(node, 'model-caption-42', 'Warm strings')
+  vi.mocked(api.submitMusicTraining).mockRejectedValue(new ApiError('music_lora_name_exists', 409))
+  button(node, 'Start training').click(); await settle()
+  expect(node.querySelector('[name="model-training-name"]')?.getAttribute('aria-invalid')).toBe('true')
+  expect(node.querySelector('[data-name-error]')?.textContent).toContain('already used for this model')
+  expect(node.textContent).not.toContain('music_lora_name_exists')
+})
+it('aborts an AR start on teardown and ignores a late response without restarting polling', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  let complete: ((value: MusicLoraTrainingJob) => void) | undefined
+  vi.mocked(api.trainMissingMusicPlanner).mockImplementation(() => new Promise(resolve => { complete = resolve }))
+  const registered = vi.fn(), node = await mount('yue2', registered)
+  button(node, 'Train missing AR').click(); await settle(); button(document, 'Start AR training').click(); await settle()
+  const signal = vi.mocked(api.trainMissingMusicPlanner).mock.calls[0]?.[2]
+  expect(signal?.aborted).toBe(false)
+  const historyCalls = vi.mocked(api.listMusicTraining).mock.calls.length, registeredCalls = registered.mock.calls.length
+  app?.unmount(); app = undefined
+  expect(signal?.aborted).toBe(true)
+  if (!complete) throw new Error('Missing deferred AR response')
+  complete({ ...job('queued'), id: 'd'.repeat(32) }); await settle(); await vi.advanceTimersByTimeAsync(5000)
+  expect(api.listMusicTraining).toHaveBeenCalledTimes(historyCalls)
+  expect(registered).toHaveBeenCalledTimes(registeredCalls)
+  expect(vi.getTimerCount()).toBe(0)
+})
+it.each(['0', '1.5', '100001'])('keeps invalid missing AR steps %s from starting work', async value => {
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  const node = await mount()
+  button(node, 'Train missing AR').click(); await settle(); await input(document, 'missing-ar-steps', value)
+  expect(button(document, 'Start AR training').disabled).toBe(true)
+  expect(api.trainMissingMusicPlanner).not.toHaveBeenCalled()
+})
+it('blocks a new paired YuE name while allowing its existing family to train missing AR', async () => {
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  const node = await mount()
+  await input(node, 'model-training-name', ' WARM  strings ')
+  button(node, 'Add or upload a library track').click(); await settle(); button(document, i18n.global.t('library.addToTraining')).click(); await settle(); await input(node, 'model-caption-42', 'Warm strings')
+  expect(node.querySelector('[data-name-error]')?.textContent).toContain('already used for this model')
+  expect(button(node, 'Start training').disabled).toBe(true)
+  expect(button(node, 'Create NVIDIA package').disabled).toBe(true)
+  button(node, 'Train missing AR').click(); await settle()
+  expect(button(document, 'Start AR training').disabled).toBe(false)
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+})
+
+it('checks imported names supplied by the selected model library before a fresh run', async () => {
+  const node = await mount('yue2', vi.fn(), ['Imported voice'])
+  await input(node, 'model-training-name', ' IMPORTED  voice ')
+  expect(node.querySelector('[data-name-error]')?.textContent).toContain('already used for this model')
+  expect(api.submitMusicTraining).not.toHaveBeenCalled()
+  await input(node, 'model-training-name', 'New voice')
+  expect(node.querySelector('[data-name-error]')).toBeNull()
+})
+
+it('releases missing AR dialog ownership when its cached model tab is deactivated', async () => {
+  vi.useFakeTimers()
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [eligibleNar()], history_incomplete: false })
+  const visible = ref(true)
+  const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { render: () => null } }, { path: '/music/:engine', component: { render: () => null } }] }); await router.push('/')
+  const node = document.body.appendChild(document.createElement('div'))
+  app = createApp({ render: () => h(KeepAlive, null, { default: () => visible.value ? h(ModelLoraTraining, { engine: 'yue2' }) : h('button', { id: 'other-model-control' }, 'Other model') }) }).use(createPinia()).use(router).use(i18n); app.mount(node); await settle()
+  button(node, 'Train missing AR').click(); await settle()
+  expect(hasOpenDialog()).toBe(true)
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  visible.value = false; await settle()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(hasOpenDialog()).toBe(false)
+  const other = document.querySelector('#other-model-control')
+  if (!(other instanceof HTMLButtonElement)) throw new Error('Missing active model control')
+  other.focus()
+  const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }); window.dispatchEvent(escape); await settle()
+  expect(escape.defaultPrevented).toBe(false)
+  expect(document.activeElement).toBe(other)
+  visible.value = true; await settle()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  expect(button(node, 'Train missing AR').disabled).toBe(false)
+  expect(api.trainMissingMusicPlanner).not.toHaveBeenCalled()
+  expect(api.cancelMusicTraining).not.toHaveBeenCalled()
+  const queued = { ...job('queued'), id: 'd'.repeat(32), request: { ...job().request, yue_ar_source_job_id: eligibleNar().id, max_steps: 100 } }
+  vi.mocked(api.trainMissingMusicPlanner).mockResolvedValueOnce(queued)
+  button(node, 'Train missing AR').click(); await settle(); button(document, 'Start AR training').click(); await settle()
+  expect(api.trainMissingMusicPlanner).toHaveBeenCalledTimes(1)
+  visible.value = false; await settle()
+  const historyCalls = vi.mocked(api.listMusicTraining).mock.calls.length
+  vi.mocked(api.listMusicTraining).mockResolvedValue({ jobs: [{ ...queued, status: 'running', progress: { stage: 'training', target: 'ar', step: 3, total_steps: 100 } }], history_incomplete: false })
+  await vi.advanceTimersByTimeAsync(2500); await settle()
+  expect(api.listMusicTraining).toHaveBeenCalledTimes(historyCalls + 1)
+  expect(api.cancelMusicTraining).not.toHaveBeenCalled()
+  visible.value = true; await settle()
+  expect(node.textContent).toContain('3 / 100')
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
 })

@@ -108,7 +108,6 @@ WAN22_DIR = _env_path("OPENFABRIC_WAN22_DIR", engine_default('mlx-video', str(_R
 RVC_DIR = _env_path("OPENFABRIC_RVC_DIR", engine_default('rvc', str(_REPO_ROOT / "external" / "rvc")))
 
 # Optional music engines run in their own checkout environments and local caches.
-HEARTMULA_DIR = _env_path_prefer("OPENFABRIC_HEARTMULA_DIR", "HEARTMULA_DIR", default=engine_default('heartlib-mlx', str(_REPO_ROOT / 'external/heartlib-mlx')))
 STABLE_AUDIO3_DIR = _env_path_prefer("OPENFABRIC_STABLE_AUDIO3_DIR", "STABLE_AUDIO3_DIR", default=engine_default('stable-audio-3', str(_REPO_ROOT / 'external/stable-audio-3')))
 
 # MuScriptor (audio -> MIDI) is loaded into YuE2's own audiocpp_server rather

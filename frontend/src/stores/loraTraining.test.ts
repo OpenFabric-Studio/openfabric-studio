@@ -85,6 +85,67 @@ it('retries preprocessing observation and keeps the original destination', async
   expect(api.startPreprocess).not.toHaveBeenCalled()
 })
 
+it('reports zero produced tensors as a failure after reconnecting to completed attempts', async () => {
+  const store = useLoraTrainingStore()
+  store.restoreRecoveryContext({ datasetPath: '/datasets/voice.json', preprocessTaskId: 'preprocess', preprocessOutputDir: '/tensors' })
+  vi.mocked(api.preprocessStatus).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ...preprocess, status: 'completed', current: 4,
+    result: { message: '✅ Preprocessed 0/4 samples (4 failed). CPU offload enabled.', num_tensors: 0, output_dir: '/tensors' } })
+  await store.startBackgroundTasks()
+  expect(store.preprocessReconnecting).toBe(true)
+  await vi.advanceTimersByTimeAsync(2000)
+  expect(store.preprocessNumTensors).toBe(0)
+  expect(store.preprocessCurrent).toBe(4)
+  expect(store.preprocessError).toBe('No training tensors were created. Check the backend log and retry preprocessing.')
+  expect(store.preprocessOutputDir).toBe('')
+  expect(store.preprocessRunning).toBe(false)
+  expect(store.preprocessReconnecting).toBe(false)
+})
+
+it('reports partial tensor production using counts while retaining usable output', async () => {
+  const store = useLoraTrainingStore()
+  store.preprocessTaskId = 'preprocess'; store.preprocessRunning = true; store.preprocessTaskOutputDir = '/tensors'
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ ...preprocess, status: 'completed', current: 4,
+    result: { message: '✅ Preprocessed 2/4 samples (2 failed)', num_tensors: 2, output_dir: '/tensors' } })
+  await store.startBackgroundTasks()
+  expect(store.preprocessNumTensors).toBe(2)
+  expect(store.preprocessError).toBe('Some samples did not produce training tensors. Review the backend log before training with this partial dataset.')
+  expect(store.preprocessOutputDir).toBe('/tensors')
+})
+
+it('does not treat normal native notes containing failed as a preprocessing failure', async () => {
+  const store = useLoraTrainingStore()
+  store.preprocessTaskId = 'preprocess'; store.preprocessRunning = true
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ ...preprocess, status: 'completed', current: 4,
+    result: { message: '✅ Preprocessed 4/4 samples (0 failed). CPU offload enabled.', num_tensors: 4, output_dir: '/tensors' } })
+  await store.startBackgroundTasks()
+  expect(store.preprocessNumTensors).toBe(4)
+  expect(store.preprocessError).toBe('')
+  expect(store.preprocessOutputDir).toBe('/tensors')
+})
+
+it('does not mark completed preprocessing ready without a confirmed result', async () => {
+  const store = useLoraTrainingStore()
+  store.preprocessTaskId = 'preprocess'; store.preprocessRunning = true; store.preprocessTaskOutputDir = '/tensors'
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ ...preprocess, status: 'completed', current: 4 })
+  await store.startBackgroundTasks()
+  expect(store.preprocessNumTensors).toBeNull()
+  expect(store.preprocessError).toBe('Preprocessing failed')
+  expect(store.preprocessOutputDir).toBe('')
+})
+
+it('clears prior confirmed tensors when a new preprocessing task is accepted', async () => {
+  const store = useLoraTrainingStore()
+  store.preprocessTaskId = 'preprocess'; store.preprocessRunning = true
+  vi.mocked(api.preprocessStatus).mockResolvedValue({ ...preprocess, status: 'completed', result: { message: '', num_tensors: 4, output_dir: '/tensors' } })
+  await store.startBackgroundTasks(); store.stopBackgroundTasks()
+  vi.mocked(api.startPreprocess).mockResolvedValue({ task_id: 'new-preprocess', total: 4, message: '' })
+  await store.startPreprocess({ output_dir: '/new-tensors' })
+  expect(store.preprocessNumTensors).toBeNull()
+  expect(store.preprocessOutputDir).toBe('')
+  store.restoreRecoveryContext({ datasetPath: '/datasets/other.json' })
+  expect(store.preprocessNumTensors).toBeNull()
+})
+
 it('retries failed initial training discovery before a running job is known', async () => {
   const store = useLoraTrainingStore()
   vi.mocked(api.trainingStatus).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({ ...training, is_training: true, status: 'Training', current_step: 17 })

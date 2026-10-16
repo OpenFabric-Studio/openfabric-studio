@@ -17,6 +17,11 @@ _TERMINAL_SQL = "'done','failed','cancelled','interrupted','blocked'"
 _ITEM_MUTABLE = {'child_job_id', 'status', 'tracks', 'error_code'}
 _MAX_ITEMS = 1000
 _MAX_BATCHES = 1000
+# Preserve retired plans verbatim; they must never enter executable queue state.
+_RETIRED_BATCH_SQL = """(EXISTS(SELECT 1 FROM json_each(b.body_json,'$.selections') s
+    WHERE json_extract(s.value,'$.engine')='heartmula') OR EXISTS(
+    SELECT 1 FROM music_queue_items i WHERE i.batch_id=b.id
+    AND json_extract(i.body_json,'$.engine')='heartmula'))"""
 
 
 @contextmanager
@@ -109,12 +114,12 @@ def _snapshot(connection: sqlite3.Connection) -> MusicQueueSnapshot:
         raise MusicQueueError('music_queue_invalid_state', 503)
     unfinished = f'''EXISTS(SELECT 1 FROM music_queue_items i WHERE i.batch_id=b.id
         AND (i.status NOT IN ({_TERMINAL_SQL}) OR i.id=?))'''
-    pending = connection.execute(f'''SELECT b.* FROM music_queue_briefs b WHERE {unfinished}
+    pending = connection.execute(f'''SELECT b.* FROM music_queue_briefs b WHERE NOT {_RETIRED_BATCH_SQL} AND {unfinished}
         ORDER BY b.ordinal LIMIT ?''', (control['active_item_id'], _MAX_BATCHES + 1)).fetchall()
     if len(pending) > _MAX_BATCHES:
         raise MusicQueueError('music_queue_capacity_exceeded')
     remaining = _MAX_BATCHES - len(pending)
-    completed = connection.execute(f'''SELECT b.* FROM music_queue_briefs b WHERE NOT {unfinished}
+    completed = connection.execute(f'''SELECT b.* FROM music_queue_briefs b WHERE NOT {_RETIRED_BATCH_SQL} AND NOT {unfinished}
         ORDER BY b.ordinal DESC LIMIT ?''', (control['active_item_id'], remaining + 1)).fetchall()
     rows = sorted([*pending, *completed[:remaining]], key=lambda row: _integer(row, 'ordinal'))
     batches: list[MusicQueueBatch] = []
@@ -129,9 +134,12 @@ def _snapshot(connection: sqlite3.Connection) -> MusicQueueSnapshot:
                     item.tracks = [track_response(track)]
             value.items.append(item)
         batches.append(value)
-    return MusicQueueSnapshot.model_validate({'revision': control['revision'], 'status': control['status'],
-        'active_item_id': control['active_item_id'], 'error_code': control['error_code'],
-        'history_incomplete': len(completed) > remaining, 'batches': batches})
+    retired = connection.execute(f'SELECT 1 FROM music_queue_briefs b WHERE {_RETIRED_BATCH_SQL} LIMIT 1').fetchone() is not None
+    retired_active = connection.execute(f'''SELECT 1 FROM music_queue_items a JOIN music_queue_briefs b ON b.id=a.batch_id
+        WHERE a.id=? AND {_RETIRED_BATCH_SQL}''', (control['active_item_id'],)).fetchone() is not None
+    return MusicQueueSnapshot.model_validate({'revision': control['revision'], 'status': 'paused' if retired_active else control['status'],
+        'active_item_id': None if retired_active else control['active_item_id'], 'error_code': '' if retired_active else control['error_code'],
+        'history_incomplete': retired or len(completed) > remaining, 'batches': batches})
 
 
 def snapshot() -> MusicQueueSnapshot:
@@ -169,7 +177,8 @@ def _revision(connection: sqlite3.Connection, revision: int | None) -> int:
 
 
 def _capacity(connection: sqlite3.Connection) -> None:
-    row = connection.execute(f'SELECT count(*) AS count FROM music_queue_items WHERE status NOT IN ({_TERMINAL_SQL})').fetchone()
+    row = connection.execute(f'''SELECT count(*) AS count FROM music_queue_items a JOIN music_queue_briefs b ON b.id=a.batch_id
+        WHERE a.status NOT IN ({_TERMINAL_SQL}) AND NOT {_RETIRED_BATCH_SQL}''').fetchone()
     if row is None or _integer(row, 'count') > _MAX_ITEMS:
         raise MusicQueueError('music_queue_capacity_exceeded')
 

@@ -1,5 +1,7 @@
 # Setup recovery and useful feedback
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Repair the actual HeartMuLa failure, preserve completed setup work and make the current result actionable.
 
 **Evidence:** Job `b46472a3c51d4045a0ff7e3d21002380` failed validation after its converter successfully saved 289 tensors. MLX writes valid safetensors with null metadata; the app rejected it. Import-generated Python caches also changed the dependency fingerprint, incorrectly revoking environment verification. The screen displayed generic instructions and repeated full historical cards.

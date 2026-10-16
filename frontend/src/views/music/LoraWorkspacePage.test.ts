@@ -26,7 +26,7 @@ async function mount(path = '/music/lora') {
 }
 beforeEach(() => {
   vi.clearAllMocks()
-  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }, { engine: 'heartmula', loading: false, training: false, reason: 'unsupported_runtime' }] })
+  vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }] })
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [], history_incomplete: false })
 })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
@@ -34,7 +34,7 @@ afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren
 it('opens an explanatory home with one route tab for each supported music model', async () => {
   const { node } = await mount()
   const tabs = [...node.querySelectorAll('[role="tab"]')]
-  expect(tabs.map(tab => tab.textContent?.trim())).toEqual(['Overview', 'ACE-Step', 'Stable Audio 3', 'YuE', 'HeartMuLa'])
+  expect(tabs.map(tab => tab.textContent?.trim())).toEqual(['Overview', 'ACE-Step', 'Stable Audio 3', 'YuE'])
   expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
   expect(node.textContent).toContain('Start with the sound you want to teach')
   expect(node.textContent).toContain('Gradient accumulation')
@@ -79,7 +79,7 @@ it('observes an active Stable Audio job while another model tab is open', async 
   vi.mocked(training.listStableLora).mockResolvedValue({ jobs: [job], history_incomplete: false })
   const { node, router } = await mount('/music/lora/stable-audio3')
   expect(node.textContent).toContain('Evening piano')
-  await router.push('/music/lora/heartmula'); for (let n = 0; n < 12; n++) await nextTick()
+  await router.push('/music/lora/yue2'); for (let n = 0; n < 12; n++) await nextTick()
   const before = vi.mocked(training.listStableLora).mock.calls.length
   await vi.advanceTimersByTimeAsync(2500)
   expect(training.listStableLora).toHaveBeenCalledTimes(before + 1)

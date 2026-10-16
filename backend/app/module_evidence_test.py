@@ -67,7 +67,7 @@ class ModuleEvidenceTests(unittest.TestCase):
         from app.module_catalog import DEFINITIONS
         with tempfile.TemporaryDirectory() as temporary:
             environment = ModuleEnvironment.for_root(Path(temporary), platform='darwin', architecture='arm64')
-            for identifier in ('heartmula', 'stable_audio3'):
+            for identifier in ('stable_audio3',):
                 engine = environment.paths[identifier]
                 for marker in DEFINITIONS[identifier].source_markers:
                     path = engine / marker
@@ -77,13 +77,42 @@ class ModuleEvidenceTests(unittest.TestCase):
                 python.parent.mkdir(parents=True)
                 python.write_text('interpreter')
                 (engine / '.venv/lib/python3.11/site-packages').mkdir(parents=True)
-                root = engine / ('src/heartlib_mlx' if identifier == 'heartmula' else 'optimized/mlx')
+                root = engine / 'optimized/mlx'
                 nested = root / 'nested.py'
                 nested.write_text('# decoder before')
                 record_capability_success(identifier, environment=environment, service_identity='local-test')
                 self.assertTrue(capability_verified(environment, identifier, 'local-test'))
                 nested.write_text('# decoder after')
                 self.assertFalse(capability_verified(environment, identifier, 'local-test'))
+
+    def test_ace_training_changes_invalidate_verification(self) -> None:
+        from app.module_catalog import DEFINITIONS
+        with tempfile.TemporaryDirectory() as temporary:
+            environment = ModuleEnvironment.for_root(Path(temporary), platform='darwin', architecture='arm64')
+            engine = environment.paths['ace_step']
+            for marker in DEFINITIONS['ace_step'].source_markers:
+                path = engine / marker
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('# source')
+            python = engine_python(engine, environment.platform)
+            python.parent.mkdir(parents=True)
+            python.write_text('interpreter')
+            (engine / '.venv/lib/python3.12/site-packages').mkdir(parents=True)
+            for relative in ('acestep/training/dataset_builder_modules/preprocess_audio.py',
+                             'acestep/training/data_module.py', 'acestep/core/generation/handler/io_audio.py',
+                             'acestep/training/trainer.py', 'acestep/core/generation/handler/service_generate_execute.py'):
+                source = engine / relative
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text('# audio reader before')
+                fingerprint = environment_fingerprint(environment, 'ace_step')
+                assert fingerprint is not None
+                receipt = VerificationReceipt(root=str(engine.resolve()), fingerprint=fingerprint, environment_verified=True)
+                marker = environment.root / '.setup/verification/ace_step.json'
+                marker.parent.mkdir(parents=True, exist_ok=True)
+                marker.write_text(receipt.model_dump_json())
+                self.assertTrue(environment_verified(environment, 'ace_step'))
+                source.write_text('# audio reader after')
+                self.assertFalse(environment_verified(environment, 'ace_step'), relative)
 
     def test_receipt_is_bound_to_packages_checkout_and_service(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

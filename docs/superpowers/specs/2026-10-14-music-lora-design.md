@@ -1,5 +1,7 @@
 # Music LoRA support
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 The user requested both adapter loading and training where supported. Reuse ACE-Step's existing loading and dataset/training/export workflow. Add native Stable Audio 3 MLX training and inference, and YuE2 audio.cpp AR/NAR adapter inference. HeartMuLa's pinned MLX port has no adapter API or trainer; show this limitation. Do not adopt the experimental CUDA HeartMuLa trainer or add app-owned model surgery.
 
 ## Boundary and storage

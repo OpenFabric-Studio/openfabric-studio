@@ -31,7 +31,7 @@ Derived from [mchosc/remiqora](https://github.com/mchosc/remiqora), itself based
 | Area | Direction |
 |------|-----------|
 | **Voice** | Clone singing voices; preview speech narrators and create recoverable audiobooks. |
-| **Music** | One brief, per-model variations and a saved sequential queue for ACE-Step / YuE2 and optional HeartMuLa / Stable Audio 3 on Apple Silicon; stems and DAW mixing. |
+| **Music** | One brief, per-model variations and a saved sequential queue for ACE-Step / YuE2 and optional Stable Audio 3 on Apple Silicon; stems and DAW mixing. |
 | **Video / characters** | Silent videos and reels. A local character LoRA trains on this Mac when the video engine Python is configured. A locked still is not training. |
 
 Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI) for reusable ideas — always attributed. Reusing source requires checking its exact license and preserving its notices.
@@ -44,7 +44,6 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 |--------|----------------|
 | **ACE-Step 1.5** | Text/style music generation, covers, section edits |
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
-| **HeartMuLa (experimental)** | Local lyrics/style songs through a pinned community MLX port; explicit converted weights |
 | **Stable Audio 3 (experimental)** | Local Small Music / Medium instrumental generation through the official Apple Silicon MLX runtime |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
 | **Artist production (experimental)** | Local consent/QC, pinned guide conversion, source lineage, release review and configurable accounting |
@@ -101,7 +100,7 @@ Open **http://127.0.0.1:9000** when the launcher reports that the backend is run
 
 Optional singing and speech CLI wrappers are `setup_voice.bat` / `./setup_voice.sh` and `setup_speech.bat` / `./setup_speech.sh`. They use the same reviewed catalog as Settings; model downloads require explicit `--download-models`. Preview a CLI plan without installing with the backend environment’s Python and `backend/scripts/setup_modules.py --feature singing`. Kokoro, Chatterbox, Wan 2.2 TI2V-5B, and RVC use `./setup_kokoro.sh`, `./setup_chatterbox.sh`, `./setup_wan22.sh`, and `./setup_rvc.sh` (and the matching `.bat` files). Those wrappers clone and install only. They do not download weights. After the weights are on disk, call POST /api/local-engines/kokoro, /chatterbox, /wan (body engine wan22), or /rvc. Song videos stay on LTX.
 
-HeartMuLa and Stable Audio 3 have their own generation pages under Music. Install their isolated dependencies in Settings or with `./setup_heartmula.sh` / `./setup_stable_audio3.sh`, then follow [local music model setup](docs/local-music.md). Both integrations require Apple Silicon macOS and explicitly installed weights; generation runs offline. Stable Audio 3's weights have Stability Community terms and its text encoder has Gemma terms. Integration tests use mocked model boundaries; real generation quality and hardware performance remain unverified. Tools → LoRA training provides managed Stable Audio 3 and YuE adapters plus Stable MLX training; ACE-Step keeps its existing workflow. HeartMuLa's selected MLX port has no adapter or trainer API. See [music LoRA setup and limits](docs/local-music.md#music-lora-adapters-and-training).
+Stable Audio 3 has its own generation page under Music. Install its isolated dependencies in Settings or with `./setup_stable_audio3.sh`, then follow [local music model setup](docs/local-music.md). This integration requires Apple Silicon macOS and explicitly installed weights; generation runs offline. Stable Audio 3's weights have Stability Community terms and its text encoder has Gemma terms. Tools → LoRA training provides Stable Audio 3 MLX training and paired YuE2 AR/NAR training; ACE-Step keeps its existing workflow. See [music LoRA setup and limits](docs/local-music.md#music-lora-adapters-and-training) for measured evidence and remaining limits.
 
 The local LTX video engine currently requires **Apple Silicon macOS**. Optional OpenRouter picture generation uses a cloud provider and local FFmpeg conformance/export; it does not require a local GPU. CPU-only Seed-VC singing **training** is unsupported; conversion and training have different hardware requirements. Linux/Intel Mac desktop first-run installation is unavailable; use the source route. Clean Windows/Linux installations and GPU workflows still require real platform verification. See [platform setup and troubleshooting](docs/platform-setup.md).
 

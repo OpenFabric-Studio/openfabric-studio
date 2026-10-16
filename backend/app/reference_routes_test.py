@@ -39,6 +39,29 @@ class ReferenceRouteTests(unittest.TestCase):
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json(), {'detail': 'unsupported_abc'})
 
+    def test_score_controls_transform_notes_chords_meter_and_tempo(self) -> None:
+        response = self.client.post('/api/references/tools/abc', json={'abc': 'X:1\nK:C\n"C/G" C E G', 'target_key': 'Bb', 'time_signature': '6/8', 'tempo_bpm': 112})
+        self.assertEqual(response.status_code, 200)
+        result = response.json()
+        self.assertEqual(score_pitches(result['abc']), [58, 62, 65])
+        self.assertIn('K:Bb\n', result['abc'])
+        self.assertIn('M:6/8\n', result['abc'])
+        self.assertIn('Q:1/4=112\n', result['abc'])
+        self.assertIn('"Bb/F"', result['abc'])
+
+    def test_mode_conversion_returns_stable_public_error(self) -> None:
+        response = self.client.post('/api/references/tools/abc', json={'abc': 'X:1\nK:C\nC D E', 'target_key': 'Am'})
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json(), {'detail': 'key_mode_mismatch'})
+
+    def test_score_control_validation_rejects_unsupported_and_ambiguous_values(self) -> None:
+        settings_cases: list[dict[str, object]] = [{'target_key': 'Ddor'}, {'target_key': 'c'}, {'time_signature': '5/4'}, {'tempo_bpm': True}, {'target_key': 'D', 'transpose_semitones': 1}, {'target_key': 'D', 'target_min_midi': 48, 'target_max_midi': 72}]
+        for settings in settings_cases:
+            with self.subTest(settings=settings):
+                response = self.client.post('/api/references/tools/abc', json={'abc': 'X:1\nK:C\nC D E', **settings})
+                self.assertEqual(response.status_code, 422)
+                self.assertEqual(response.json(), {'detail': 'invalid_reference_request'})
+
     def test_internal_storage_details_are_never_returned(self) -> None:
         with patch.object(reference_imports, 'list_imports', side_effect=OSError('secret/local/path')):
             response = self.client.get('/api/references/imports')

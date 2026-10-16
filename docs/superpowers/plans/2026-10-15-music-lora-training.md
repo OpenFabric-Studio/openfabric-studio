@@ -1,5 +1,7 @@
 # Mac-first music LoRA training Implementation Plan
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Prepare and train usable model-specific adapters for Stable Audio 3, HeartMuLa and YuE2, on this Mac where verified, with portable NVIDIA fallback.

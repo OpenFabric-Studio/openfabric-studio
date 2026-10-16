@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from array import array
+from contextlib import nullcontext
 import sys
 import hashlib
 import json
@@ -62,8 +63,6 @@ def _target(engine: str, target: str) -> tuple[AdapterEngine, AdapterTarget]:
         return 'stable_audio3', 'small-music' if target == 'small-music' else 'medium'
     if engine == 'yue2' and target in ('ar', 'nar'):
         return 'yue2', 'ar' if target == 'ar' else 'nar'
-    if engine == 'heartmula' and target == 'heartmula-3b':
-        return 'heartmula', 'heartmula-3b'
     raise MusicLoraError('music_lora_target_mismatch', 422)
 
 
@@ -91,10 +90,6 @@ def _pairs(tensors: dict[str, _Tensor], prefix: str) -> None:
 
 
 def _validate_native(tensors: dict[str, _Tensor], metadata: JsonObject, engine: AdapterEngine, target: AdapterTarget) -> None:
-    if engine == 'heartmula':
-        from .heart_lora_contracts import validate_heart_adapter
-        validate_heart_adapter({name: tensor.shape for name, tensor in tensors.items()}, metadata)
-        return
     if engine == 'yue2':
         nar = 'nar_' if target == 'nar' else ''
         pattern = r'layers\.([0-9]+)\.' + nar + r'(self_attn\.[qkvo]_proj|mlp\.(gate|up|down)_proj)\.lora_[AB]'
@@ -228,6 +223,14 @@ def _digest(path: Path) -> str:
     return checksum.hexdigest()
 
 
+def validate_file(path: Path, *, engine: str, target: str) -> None:
+    """Validate all artifacts in a multi-file publication before importing any."""
+    selected_engine, selected_target = _target(engine, target)
+    if path.is_symlink() or not path.is_file() or path.suffix != '.safetensors':
+        raise MusicLoraError('music_lora_format_invalid', 422)
+    _validate(path, selected_engine, selected_target)
+
+
 def get(identifier: str) -> MusicAdapter:
     manifest = _child(_directory(identifier) / 'manifest.json', _directory(identifier))
     if not manifest.is_file():
@@ -235,7 +238,10 @@ def get(identifier: str) -> MusicAdapter:
     try:
         if manifest.stat().st_size > 8192:
             raise ValueError('Manifest size')
-        adapter = MusicAdapter.model_validate_json(manifest.read_bytes())
+        payload = _object(manifest.read_bytes())
+        if payload.get('engine') == 'heartmula':
+            raise MusicLoraError('music_lora_engine_removed', 410)
+        adapter = MusicAdapter.model_validate(payload)
         if adapter.id != identifier:
             raise ValueError('Manifest identity')
         return adapter
@@ -257,7 +263,9 @@ def list_adapters() -> MusicAdapters:
             break
         try:
             adapters.append(get(directory.name))
-        except (MusicLoraError, OSError):
+        except (MusicLoraError, OSError) as error:
+            if isinstance(error, MusicLoraError) and error.status == 410:
+                continue
             incomplete = True
             logger.warning('Unavailable adapter metadata retained')
     return MusicAdapters(adapters=sorted(adapters, key=lambda item: item.created_at, reverse=True), history_incomplete=incomplete)
@@ -278,7 +286,7 @@ def export_path(identifier: str) -> Path:
     return resolve(MusicAdapterSelection(id=identifier), engine=adapter.engine, target=adapter.target)
 
 
-def find_by_job(identifier: str) -> MusicAdapter | None:
+def find_by_job(identifier: str, *, target: str | None = None) -> MusicAdapter | None:
     root = _root()
     if not root.exists():
         return None
@@ -289,17 +297,20 @@ def find_by_job(identifier: str) -> MusicAdapter | None:
             adapter = get(directory.name)
         except (MusicLoraError, OSError):
             continue
-        if adapter.source_job_id == identifier:
+        if adapter.source_job_id == identifier and (target is None or adapter.target == target):
             return adapter
     return None
 
 
 def import_stream(stream: BinaryIO, *, filename: str, name: str, engine: str, target: str, source_job_id: str | None = None) -> MusicAdapter:
+    from .music_lora_names import name_transaction, require_available
     selected_engine, selected_target = _target(engine, target)
     if Path(filename).suffix.lower() != '.safetensors':
         raise MusicLoraError('music_lora_format_invalid', 422)
     root = _root(create=True)
-    with document_lock(root / 'registry.lock'):
+    with document_lock(root / 'registry.lock'), (name_transaction() if source_job_id is None else nullcontext()):
+        if source_job_id is None:
+            require_available(selected_engine, name)
         adapter = MusicAdapter(id=uuid.uuid4().hex, engine=selected_engine, target=selected_target,
             name=name.strip(), sha256='0' * 64, created_at=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), source_job_id=source_job_id)
         directory = _directory(adapter.id)
@@ -331,7 +342,7 @@ def register_file(path: Path, *, name: str, engine: str, target: str, source_job
     if path.is_symlink() or not path.is_file():
         raise MusicLoraError('music_lora_format_invalid', 422)
     with document_lock(_root(create=True) / 'registry.lock'):
-        existing = find_by_job(source_job_id) if source_job_id is not None else None
+        existing = find_by_job(source_job_id, target=target) if source_job_id is not None else None
         if existing is not None:
             resolve(MusicAdapterSelection(id=existing.id), engine=engine, target=target)
             if existing.sha256 != _digest(path):
@@ -345,5 +356,4 @@ def capabilities() -> MusicLoraCapabilities:
     return MusicLoraCapabilities(engines=[
         MusicLoraCapability(engine='ace_step', loading=True, training=True, reason='native'),
         MusicLoraCapability(engine='yue2', loading=YUE2_LORA_AVAILABLE, training=True, reason='experimental' if YUE2_LORA_AVAILABLE else 'upgrade_required'),
-        MusicLoraCapability(engine='heartmula', loading=True, training=True, reason='experimental'),
         MusicLoraCapability(engine='stable_audio3', loading=True, training=True, reason='native')])

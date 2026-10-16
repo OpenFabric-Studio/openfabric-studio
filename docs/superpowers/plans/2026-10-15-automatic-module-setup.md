@@ -1,5 +1,7 @@
 # Automatic setup wizard
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Let setup choose relevant modules automatically so the user can review and install without knowing engine names.
 
 **Design:** Reuse the existing computer → selection → review → install wizard. Preselect the explicitly requested feature from its module card or valid `#module-…` Settings context; otherwise use a backend-owned starter suggestion. Never silently replace an unavailable requested feature. Show the actual selection and reason; put the full grouped checklist under Customize. Preserve a reset-to-automatic action and existing reviewed installation, dependencies, licensing and saved job controls.

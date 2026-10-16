@@ -1,5 +1,7 @@
 # Stable Audio 3 LoRA interface simplification
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Put Stable Audio training first, with a short path from naming an adapter to choosing captioned tracks and starting a run.
 
 **Design:** One page with three labeled groups: Name your LoRA, Add your music, Train. Keep base-model choice visible because weights and adapters must match it. Replace the Stable-only capability table with a compact readiness message and an actionable setup link when blocked. Keep job history/cancellation/export visible after the training form. Put steps/rank/learning rate/seed behind the existing `CollapsibleDetails` component, retaining all current defaults and bounds. Put existing adapter import/library tools below training in a closed disclosure; YuE retains expanded adapter tools and HeartMuLa retains its capability explanation.

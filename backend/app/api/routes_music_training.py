@@ -14,7 +14,7 @@ from .. import music_training
 from ..job_lifecycle import run_owned_thread
 from ..module_security import require_local_origin
 from ..music_lora_contracts import MusicLoraError
-from ..music_training_contracts import MusicLoraTrainingJob, MusicLoraTrainingJobs, MusicLoraTrainingRequest, MusicLoraTrainingStatuses
+from ..music_training_contracts import MusicLoraTrainingJob, MusicLoraTrainingJobs, MusicLoraTrainingRequest, MusicLoraTrainingStatuses, YueLoraPairSettings
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ router = APIRouter(prefix='/api/music-lora/training', tags=['music-lora'], route
 
 @router.get('/status', response_model=MusicLoraTrainingStatuses)
 async def status() -> MusicLoraTrainingStatuses:
-    return MusicLoraTrainingStatuses(engines=[music_training.status('heartmula'), music_training.status('yue2')])
+    return MusicLoraTrainingStatuses(engines=[music_training.status('yue2')])
 
 
 @router.get('/jobs', response_model=MusicLoraTrainingJobs)
@@ -79,6 +79,11 @@ async def job(identifier: str) -> MusicLoraTrainingJob:
 @router.post('/jobs/{identifier}/cancel', response_model=MusicLoraTrainingJob)
 async def cancel(identifier: str) -> MusicLoraTrainingJob:
     return await music_training.cancel(identifier)
+
+
+@router.post('/jobs/{identifier}/planner', response_model=MusicLoraTrainingJob)
+async def planner(identifier: str, body: YueLoraPairSettings) -> MusicLoraTrainingJob:
+    return await music_training.submit_planner(identifier, body)
 
 
 @router.get('/jobs/{identifier}/package')

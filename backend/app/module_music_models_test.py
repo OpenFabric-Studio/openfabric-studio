@@ -10,7 +10,7 @@ import struct
 import tempfile
 import threading
 import unittest
-from unittest.mock import AsyncMock, patch, sentinel
+from unittest.mock import AsyncMock, patch
 import zipfile
 
 from app import module_music_models as models
@@ -240,101 +240,6 @@ class MusicModelSetupTests(unittest.IsolatedAsyncioTestCase):
                     await task
         self.assertTrue(models._valid_file(self.environment.paths['stable_audio3'] / artifact.path))
 
-    async def test_heart_conversion_validates_complete_components_before_publication(self) -> None:
-        artifacts = [self.artifact('ckpt/HeartMuLa-oss-3B/config.json', b'{"model_type":"heartmula"}'),
-            self.artifact('ckpt/HeartCodec-oss-20260123/config.json', b'{"model_type":"heartcodec"}'),
-            self.artifact('ckpt/tokenizer.json', b'{"model":{}}')]
-        manifest = models.ModelManifest(schema_version=1, bundles={'heartmula': artifacts[:1], 'heartcodec': artifacts[1:2], 'heart-tokenizer': artifacts[2:]})
-        contents = {artifact.sha256: content for artifact, content in zip(artifacts, (b'{"model_type":"heartmula"}', b'{"model_type":"heartcodec"}', b'{"model":{}}'))}
-        async def download(artifact: DownloadArtifact, destination: Path, context: InstallContext, **_: object) -> Path:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(contents[artifact.sha256])
-            return destination
-        async def convert(argv: list[str], **_: object) -> None:
-            self.assertEqual(argv[1:3], ['-m', 'heartlib_mlx.utils.convert'])
-            self.assertEqual(argv[-2:], ['--dtype', 'bfloat16'])
-            destination = Path(argv[argv.index('--dst') + 1])
-            self.assertTrue(destination.is_relative_to(self.context.workspace))
-            destination.mkdir(parents=True)
-            (destination / 'config.json').write_text('{"model_type":"converted"}')
-            (destination / 'model.safetensors').write_bytes(tensor())
-        with patch.object(models, '_manifest', return_value=manifest), patch('app.module_install.download_artifact', side_effect=download), patch.object(self.context, 'run', side_effect=convert) as run:
-            result = await models.setup_music_models(self.context, 'heartmula', True)
-        self.assertEqual(result.state, 'verified')
-        self.assertEqual(run.await_count, 2)
-        self.assertTrue(models.music_models_present(self.environment, 'heartmula'))
-
-    async def test_failed_second_heart_component_reuses_completed_first_component_on_retry(self) -> None:
-        tokenizer = self.artifact('ckpt/tokenizer.json', b'{"model":{}}')
-        manifest = models.ModelManifest(schema_version=1, bundles={'heart-tokenizer': [tokenizer]})
-        self.put('heartmula', tokenizer.path, b'{"model":{}}')
-        converted: list[str] = []
-        fail_codec = True
-        async def convert(argv: list[str], **_: object) -> None:
-            kind = argv[argv.index('--model-type') + 1]
-            converted.append(kind)
-            destination = Path(argv[argv.index('--dst') + 1])
-            destination.mkdir(parents=True)
-            (destination / 'config.json').write_text('{"model_type":"converted"}')
-            (destination / 'model.safetensors').write_bytes(b'partial' if kind == 'heartcodec' and fail_codec else tensor())
-        with patch.object(models, '_manifest', return_value=manifest), patch.object(self.context, 'run', side_effect=convert):
-            with self.assertRaisesRegex(ModuleSetupError, 'artifact_integrity'):
-                await models.setup_music_models(self.context, 'heartmula', True)
-            engine = self.environment.paths['heartmula']
-            self.assertTrue(models._all_valid(engine, ('ckpt-mlx/heartmula/config.json', 'ckpt-mlx/heartmula/model.safetensors')))
-            self.assertFalse((engine / 'ckpt-mlx/heartcodec').exists())
-            self.assertFalse(models.music_models_present(self.environment, 'heartmula'))
-            self.assertEqual(list(self.context.workspace.glob('heart-convert-*')), [])
-            fail_codec = False
-            result = await models.setup_music_models(self.context, 'heartmula', True)
-        self.assertEqual(converted, ['heartmula', 'heartcodec', 'heartcodec'])
-        self.assertEqual(result.state, 'verified')
-        self.assertTrue(models.music_models_present(self.environment, 'heartmula'))
-
-    async def test_failed_heart_conversion_leaves_no_final_converted_files(self) -> None:
-        tokenizer = self.artifact('ckpt/tokenizer.json', b'{"model":{}}')
-        manifest = models.ModelManifest(schema_version=1, bundles={'heart-tokenizer': [tokenizer]})
-        self.put('heartmula', tokenizer.path, b'{"model":{}}')
-        async def convert(argv: list[str], **_: object) -> None:
-            destination = Path(argv[argv.index('--dst') + 1])
-            destination.mkdir(parents=True)
-            (destination / 'model.safetensors').write_bytes(b'partial')
-        with patch.object(models, '_manifest', return_value=manifest), patch.object(self.context, 'run', side_effect=convert):
-            with self.assertRaisesRegex(ModuleSetupError, 'artifact_integrity'):
-                await models.setup_music_models(self.context, 'heartmula', True)
-        self.assertFalse((self.environment.paths['heartmula'] / 'ckpt-mlx').exists())
-        self.assertEqual(list(self.context.workspace.glob('heart-convert-*')), [])
-
-    async def test_unverified_converter_drain_retains_owned_scratch(self) -> None:
-        tokenizer = self.artifact('ckpt/tokenizer.json', b'{"model":{}}')
-        manifest = models.ModelManifest(schema_version=1, bundles={'heart-tokenizer': [tokenizer]})
-        self.put('heartmula', tokenizer.path, b'{"model":{}}')
-        async def convert(argv: list[str], **_: object) -> None:
-            destination = Path(argv[argv.index('--dst') + 1])
-            destination.mkdir(parents=True)
-            (destination / 'model.safetensors').write_bytes(b'worker still owns this')
-            raise ModuleSetupError('worker_unverified')
-        with patch.object(models, '_manifest', return_value=manifest), patch.object(self.context, 'run', side_effect=convert), patch.dict(self.context.service.processes, {self.context.identifier: sentinel.worker}):
-            with self.assertRaisesRegex(ModuleSetupError, 'worker_unverified'):
-                await models.setup_music_models(self.context, 'heartmula', True)
-        self.assertEqual(len(list(self.context.workspace.glob('heart-convert-*'))), 1)
-        self.assertFalse((self.environment.paths['heartmula'] / 'ckpt-mlx').exists())
-
-    def test_existing_originals_still_reserve_conversion_space(self) -> None:
-        artifact = self.artifact('ckpt/HeartMuLa-oss-3B/model.safetensors', tensor())
-        manifest = models.ModelManifest(schema_version=1, bundles={'heartmula': [artifact]})
-        self.put('heartmula', artifact.path, tensor())
-        with patch.object(models, '_manifest', return_value=manifest):
-            self.assertEqual(models.model_download_bytes(self.environment, 'heartmula'), 0)
-            self.assertEqual(models.conversion_required_bytes(self.environment, 'heartmula'), 2 * artifact.bytes)
-
-    def test_completed_heart_component_does_not_redownload_its_originals(self) -> None:
-        self.put('heartmula', 'ckpt-mlx/heartmula/config.json', b'{"model_type":"heartmula"}')
-        self.put('heartmula', 'ckpt-mlx/heartmula/model.safetensors', tensor())
-        paths = [item.path for item in models._required_artifacts(self.environment, 'heartmula')]
-        self.assertTrue(any('/HeartCodec-oss-20260123/' in path for path in paths))
-        self.assertFalse(any('/HeartMuLa-oss-3B/' in path for path in paths))
-
     async def test_unreviewed_ace_variant_is_preserved_and_reported_manual(self) -> None:
         from app import config
         with patch.object(config, 'ACE_STEP_DIT_MODEL', '../outside'), patch('app.module_install.download_artifact', AsyncMock()) as download:
@@ -400,12 +305,10 @@ class MusicModelSetupTests(unittest.IsolatedAsyncioTestCase):
                 path.write_bytes(npz(payload))
                 self.assertTrue(models._valid_file(path))
 
-    def test_disk_directories_include_all_nested_heart_destinations_once(self) -> None:
-        root = self.environment.paths['heartmula'].resolve()
-        directories = models.model_directories(self.environment, 'heartmula')
-        self.assertEqual(len(directories), len(set(directories)))
-        self.assertEqual(set(directories), {root, root / 'ckpt', root / 'ckpt/HeartMuLa-oss-3B',
-            root / 'ckpt/HeartCodec-oss-20260123', root / 'ckpt-mlx/heartmula', root / 'ckpt-mlx/heartcodec'})
+    def test_disk_directories_include_nested_stable_destination_once(self) -> None:
+        root = self.environment.paths['stable_audio3'].resolve()
+        directories = models.model_directories(self.environment, 'stable_audio3')
+        self.assertEqual(directories, (root, root / 'optimized/mlx/models/mlx'))
         self.assertFalse(root.exists())
 
     def test_unreviewed_ace_disk_directories_fall_back_to_engine_root(self) -> None:

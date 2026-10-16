@@ -1,5 +1,7 @@
 # Music LoRA implementation plan
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 **Goal:** Support native local adapter training and loading where the selected music runtimes support them.
 
 **Architecture:** Preserve ACE's native workflow. Add a managed adapter library, supervised Stable training jobs, Stable inference selection and YuE AR/NAR session selection. HeartMuLa remains explicitly unsupported by its selected runtime.

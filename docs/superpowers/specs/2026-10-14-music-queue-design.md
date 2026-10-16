@@ -1,5 +1,7 @@
 # Music queue — proposed design
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 Status: approved by the user on 14 October 2026, including disclosed one-shot
 HeartMuLa/Stable Audio reloads. Implementation follows the companion plan.
 

@@ -5,11 +5,13 @@ import {
   parseScanLoraDatasetRequest, parseSaveLoraDatasetRequest, parseLoraDatasetOperationResponse,
   parsePreprocessLoraDatasetRequest, parseLoraDatasetTaskStarted,
   parseAutoLabelLoraDatasetRequest, parseUpdateLoraDatasetSampleRequest,
+  parseRemoveLoraDatasetRecordsRequest, parseRemoveLoraDatasetRecordsResponse,
 } from './generated'
 import type {
   LoraDatasetEntry, LoraDatasetsResponse, LoraWorkspace, ScanLoraDatasetRequest,
   SaveLoraDatasetRequest, LoraDatasetOperationResponse, PreprocessLoraDatasetRequest, LoraDatasetTaskStarted,
   AutoLabelLoraDatasetRequest, UpdateLoraDatasetSampleRequest,
+  LoraDatasetRecordRevision, RemoveLoraDatasetRecordsResponse,
 } from './generated'
 
 import { parseUploadDatasetFilesResponse } from './contracts'
@@ -47,6 +49,7 @@ export async function createLoraDataset(name: string, signal?: AbortSignal): Pro
 export async function renameLoraDataset(id: string, name: string, revision: number, signal?: AbortSignal): Promise<LoraDatasetEntry> { return write(`${datasetUrl(id)}/rename`, parseRenameLoraDatasetRequest({ name, revision }), parseLoraDatasetEntry, signal) }
 export async function trashLoraDataset(id: string, revision: number, signal?: AbortSignal): Promise<LoraDatasetEntry> { return write(`${datasetUrl(id)}/trash`, parseLoraDatasetRevision({ revision }), parseLoraDatasetEntry, signal) }
 export async function restoreLoraDataset(id: string, revision: number, signal?: AbortSignal): Promise<LoraDatasetEntry> { return write(`${datasetUrl(id)}/restore`, parseLoraDatasetRevision({ revision }), parseLoraDatasetEntry, signal) }
+export async function removeLoraDatasetRecords(records: LoraDatasetRecordRevision[], signal?: AbortSignal): Promise<RemoveLoraDatasetRecordsResponse> { return write(`${BASE}/remove-records`, parseRemoveLoraDatasetRecordsRequest({ records }), parseRemoveLoraDatasetRecordsResponse, signal) }
 export async function loadLoraDataset(id: string, revision: number, signal?: AbortSignal): Promise<LoraDatasetOperationResponse> { return write(`${datasetUrl(id)}/load`, parseLoraDatasetRevision({ revision }), parseLoraDatasetOperationResponse, signal) }
 export async function scanLoraDataset(id: string, request: ScanLoraDatasetRequest, signal?: AbortSignal): Promise<LoraDatasetOperationResponse> { return write(`${datasetUrl(id)}/scan`, parseScanLoraDatasetRequest(request), parseLoraDatasetOperationResponse, signal) }
 export async function saveLoraDataset(id: string, request: SaveLoraDatasetRequest, signal?: AbortSignal): Promise<LoraDatasetOperationResponse> { return write(`${datasetUrl(id)}/save`, parseSaveLoraDatasetRequest(request), parseLoraDatasetOperationResponse, signal) }

@@ -16,8 +16,7 @@ export const loraWorkspaceEn = {
   models: {
     ace_step: 'Dataset upload, caption review, optional auto-labeling, preprocessing, training and export use the existing ACE-Step workflow. Start its runtime explicitly when you are ready.',
     stable_audio3: 'Train a fresh native adapter from captioned library tracks on the supported Apple Silicon MLX runtime. Small Music and Medium need their matching training and encoder weights. Only the controls supported by this trainer are shown.',
-    yue2: 'Experimental acoustic/NAR adapter training learns sound, production and timbre on the supported Apple Silicon setup; the composition planner stays unchanged. Compatible native AR and NAR adapters load in the YuE generator. An optional package prepares reviewed recordings and settings for a separate NVIDIA environment; CUDA training is untested.',
-    heartmula: 'Experimental training uses short recordings, reviewed captions and matching lyrics in a separate corrected PyTorch runtime. Finished adapters load in that runtime through the HeartMuLa generator. An optional package prepares recordings and settings for a separate NVIDIA environment; CUDA training is untested.',
+    yue2: 'Experimental paired training extracts scores, then trains the AR planner and NAR acoustics in one run on the supported Apple Silicon setup. Short excerpts teach local musical patterns and sound, not entire song structure. Both adapters load into independent selectors in the YuE generator. An optional package prepares reviewed recordings and settings for a separate NVIDIA environment; CUDA training is untested.',
   },
   controlsTitle: 'What the training controls mean',
   controlsIntro: 'These are explanations, not a promise that every model exposes every control. Use the controls available in the selected model tab.',

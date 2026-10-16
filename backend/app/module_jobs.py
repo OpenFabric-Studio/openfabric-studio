@@ -4,7 +4,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
+import json
 import logging
 from pathlib import Path
 import re
@@ -15,8 +17,9 @@ import time
 from typing import IO, Literal
 import uuid
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, PrivateAttr, TypeAdapter, ValidationError
 
+from .contracts import JsonObject
 from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
 from .module_catalog import approval_scope, ModuleEnvironment, configured_environment, DEFINITIONS, now, plan
 from .module_contracts import (
@@ -28,6 +31,7 @@ from .module_diagnostics import append_event, failure_for, public_job
 from .video_process import spawn_owned, terminate_verified, WorkerIdentity
 
 logger = logging.getLogger(__name__)
+_json_object = TypeAdapter(JsonObject)
 
 
 class ModuleSetupError(Exception):
@@ -42,6 +46,62 @@ class StoredModuleJob(BaseModel):
     plan: ModulePlan
     worker: WorkerIdentity | None = None
     review_scope: str = ''
+    _retired_document: JsonObject | None = PrivateAttr(default=None)
+
+    def document(self) -> str:
+        if self._retired_document is None:
+            return self.model_dump_json()
+        document = deepcopy(self._retired_document)
+        job = document.get('job')
+        if not isinstance(job, dict):
+            raise ModuleSetupError('job_corrupt')
+        current = _json_object.validate_json(self.job.model_dump_json())
+        for field in ('state', 'updated_at', 'current_step', 'error_code'):
+            job[field] = current[field]
+        steps = job.get('steps')
+        if not isinstance(steps, list) or len(steps) != len(self.job.steps):
+            raise ModuleSetupError('job_corrupt')
+        for original, step in zip(steps, self.job.steps):
+            if not isinstance(original, dict):
+                raise ModuleSetupError('job_corrupt')
+            identifier = original.get('module_id')
+            original.update(_json_object.validate_json(step.model_dump_json()))
+            original['module_id'] = identifier
+        document['worker'] = _json_object.validate_json(self.worker.model_dump_json()) if self.worker is not None else None
+        return json.dumps(document, separators=(',', ':'))
+
+
+def _stored_job(document: str) -> StoredModuleJob:
+    try:
+        return StoredModuleJob.model_validate_json(document)
+    except ValidationError:
+        original = _json_object.validate_json(document)
+        compatible = deepcopy(original)
+        retired = False
+        for field in ('job', 'plan'):
+            section = compatible.get(field)
+            if not isinstance(section, dict):
+                raise ValueError('invalid_setup_record')
+            for name in ('features', 'reinstall'):
+                values = section.get(name)
+                if isinstance(values, list) and 'heartmula' in values:
+                    section[name] = ['media' if value == 'heartmula' else value for value in values]
+                    retired = True
+            if section.get('music_training_engine') == 'heartmula':
+                section['music_training_engine'] = None
+                retired = True
+            steps = section.get('steps')
+            if isinstance(steps, list):
+                for step in steps:
+                    if isinstance(step, dict) and step.get('module_id') == 'heartmula':
+                        step['module_id'] = 'media'
+                        retired = True
+        if not retired:
+            raise
+        # The placeholder only validates old records for worker cleanup; they cannot execute.
+        stored = StoredModuleJob.model_validate(compatible)
+        stored._retired_document = original
+        return stored
 
 
 class ModuleJobStore:
@@ -79,7 +139,7 @@ class ModuleJobStore:
     def write(self, stored: StoredModuleJob) -> None:
         with closing(self._connect()) as connection, connection:
             connection.execute('UPDATE setup_jobs SET state=?,worker=?,document=? WHERE id=?',
-                (stored.job.state, int(stored.worker is not None), stored.model_dump_json(), stored.job.id))
+                (stored.job.state, int(stored.worker is not None), stored.document(), stored.job.id))
 
     def requeue(self, stored: StoredModuleJob) -> None:
         with closing(self._connect()) as connection, connection:
@@ -105,21 +165,24 @@ class ModuleJobStore:
         try:
             if len(row[0]) > 1_000_000:
                 raise ValueError('oversized_job')
-            return StoredModuleJob.model_validate_json(row[0])
+            return _stored_job(row[0])
         except (ValidationError, ValueError) as exc:
             raise ModuleSetupError('job_corrupt') from exc
 
     def records(self, *, recovery: bool = False) -> list[StoredModuleJob]:
         if not self.path.exists():
             return []
+        records: list[StoredModuleJob] = []
         with closing(self._connect(read_only=True)) as connection:
-            query = "SELECT id FROM setup_jobs WHERE state IN ('queued','running') OR worker=1 ORDER BY rowid" if recovery else 'SELECT id FROM setup_jobs ORDER BY rowid DESC LIMIT 50'
-            rows = connection.execute(query).fetchall()
-        identifiers: list[str] = []
-        for row in rows:
-            if isinstance(row, tuple) and row and isinstance(row[0], str):
-                identifiers.append(row[0])
-        return [self.read(identifier) for identifier in identifiers]
+            query = "SELECT id FROM setup_jobs WHERE state IN ('queued','running') OR worker=1 ORDER BY rowid" if recovery else 'SELECT id FROM setup_jobs ORDER BY rowid DESC'
+            for row in connection.execute(query):
+                if isinstance(row, tuple) and row and isinstance(row[0], str):
+                    stored = self.read(row[0])
+                    if recovery or stored._retired_document is None:
+                        records.append(stored)
+                        if not recovery and len(records) == 50:
+                            break
+        return records
 
 
 @dataclass(frozen=True)
@@ -360,7 +423,10 @@ class ModuleJobService:
         self.installer: Installer = installer or _install
 
     def get(self, identifier: str) -> ModuleInstallJob:
-        return public_job(self.store.read(identifier).job)
+        stored = self.store.read(identifier)
+        if stored._retired_document is not None:
+            raise ModuleSetupError('job_missing')
+        return public_job(stored.job)
 
     def list(self) -> ModuleJobsResponse:
         return ModuleJobsResponse(jobs=[public_job(record.job) for record in self.store.records()])
@@ -370,7 +436,7 @@ class ModuleJobService:
         if allow_reuse and current.steps and all(step.operation == 'reuse' for step in current.steps):
             return current
         if not current.can_install:
-            if request.stable_training_variant is not None and any(step.operation == 'manual' for step in current.steps):
+            if (request.stable_training_variant is not None or request.stable_generation_variant is not None) and any(step.operation == 'manual' for step in current.steps):
                 raise ModuleSetupError('environment_unverified')
             if current.steps and all(step.operation in ('reuse', 'unsupported') for step in current.steps) and any(step.operation == 'reuse' for step in current.steps):
                 raise ModuleSetupError('already_installed')
@@ -388,6 +454,7 @@ class ModuleJobService:
             job = ModuleInstallJob(id=uuid.uuid4().hex, state='queued', created_at=stamp, updated_at=stamp,
                 features=request.features, download_models=request.download_models, reinstall=request.reinstall,
                 stable_training_variant=request.stable_training_variant,
+                stable_generation_variant=request.stable_generation_variant,
                 music_training_engine=request.music_training_engine,
                 steps=[ModuleJobStep(module_id=step.module_id, name=step.name, state='queued', detail=step.detail) for step in current.steps])
             stored = StoredModuleJob(job=job, plan=current, review_scope=approval_scope(request, self.environment))
@@ -431,6 +498,9 @@ class ModuleJobService:
                     result = InstallOutcome('manual', 'Unsupported on this platform. No installation was attempted.')
                 elif planned.operation == 'manual' or dependency_manual:
                     result = InstallOutcome('manual', planned.detail if not dependency_manual else 'Complete the preceding manual dependency setup, then review this feature again.')
+                elif stored.plan.stable_generation_variant is not None:
+                    from .stable_lora_setup import prepare_generation
+                    result = await prepare_generation(context, stored.plan.stable_generation_variant)
                 elif stored.plan.stable_training_variant is not None:
                     from .stable_lora_setup import prepare
                     result = await prepare(context, stored.plan.stable_training_variant)
@@ -529,15 +599,17 @@ class ModuleJobService:
     async def resume(self, identifier: str) -> ModuleInstallJob:
         async with self.lock:
             stored = self.store.read(identifier)
-            if stored.job.state not in ('cancelled', 'interrupted', 'failed', 'awaiting_manual'):
+            if stored._retired_document is not None or stored.job.state not in ('cancelled', 'interrupted', 'failed', 'awaiting_manual'):
                 raise ModuleSetupError('setup_not_resumable')
             if stored.worker is not None or self.tasks or self.stopping:
                 raise ModuleSetupError('setup_busy')
             request = ModulePlanRequest(features=stored.job.features, download_models=stored.job.download_models, reinstall=stored.job.reinstall,
-                stable_training_variant=stored.job.stable_training_variant, music_training_engine=stored.job.music_training_engine)
+                stable_training_variant=stored.job.stable_training_variant, stable_generation_variant=stored.job.stable_generation_variant,
+                music_training_engine=stored.job.music_training_engine)
             completed = {step.module_id for step in stored.job.steps if step.state == 'verified'}
             remaining = ModulePlanRequest(features=request.features, download_models=request.download_models,
                 stable_training_variant=request.stable_training_variant,
+                stable_generation_variant=request.stable_generation_variant,
                 music_training_engine=request.music_training_engine,
                 reinstall=[identifier for identifier in stored.plan.reinstall if identifier in request.reinstall and identifier not in completed])
             current = await self._review(remaining, allow_reuse=True)

@@ -75,20 +75,45 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(any(row.declared_license == 'CC-BY-NC-4.0' for row in review.steps[0].licenses))
         self.assertFalse(self.environment.root.exists())
 
+    async def test_owned_score_cli_permission_loss_offers_repair_without_reinstall_or_download(self) -> None:
+        from app import module_install
+        context = InstallContext(ModuleJobService(self.environment), '8' * 32)
+        self.external_boundaries(context)
+        await setup.prepare(context, 'yue2')
+        engine = self.environment.paths['yue2']
+        (engine / 'tools').mkdir(parents=True)
+        (engine / 'tools/model_manager_v2.py').write_text('# reviewed native installer')
+        (engine / 'model_specs').mkdir()
+        (engine / 'model_specs/sheetsage2.json').write_text('{"family":"sheetsage2"}')
+        cli = engine / 'build/macos-metal-release/bin/audiocpp_cli'
+        cli.parent.mkdir(parents=True); cli.write_bytes(b'preserved CLI'); cli.chmod(0o644)
+        module_install._record_owned(context, 'yue2', engine, module_install.load_manifest().engine.tag)
+        request = ModulePlanRequest(features=['yue2'], download_models=True, music_training_engine='yue2')
+        reviewed = setup.plan(request, self.environment)
+        self.assertEqual(reviewed.steps[0].operation, 'verify')
+        self.assertTrue(reviewed.can_install)
+        self.assertEqual(reviewed.estimated_download_bytes, 0)
+        commands, downloads = len(self.commands), len(self.downloads)
+        await setup.prepare(context, 'yue2')
+        self.assertEqual(cli.stat().st_mode & 0o111, 0o111)
+        self.assertEqual(cli.read_bytes(), b'preserved CLI')
+        self.assertEqual((len(self.commands), len(self.downloads)), (commands, downloads))
+        self.assertEqual(setup.plan(request, self.environment).steps[0].operation, 'reuse')
+
     async def test_installer_reuses_verified_assets_and_owned_environment_without_mutating_generation(self) -> None:
-        original = self.environment.paths['heartmula'] / 'private-original.txt'
+        original = self.environment.paths['yue2'] / 'private-original.txt'
         original.parent.mkdir(parents=True)
         original.write_text('keep original')
         context = InstallContext(ModuleJobService(self.environment), 'a' * 32)
         self.external_boundaries(context)
-        result = await setup.prepare(context, 'heartmula')
+        result = await setup.prepare(context, 'yue2')
         self.assertEqual(result.state, 'verified')
-        self.assertTrue(setup.prepared(self.environment, 'heartmula'))
+        self.assertTrue(setup.prepared(self.environment, 'yue2'))
         count, downloaded = len(self.commands), len(self.downloads)
-        await setup.prepare(context, 'heartmula')
+        await setup.prepare(context, 'yue2')
         self.assertEqual(len(self.commands), count)
         self.assertEqual(len(self.downloads), downloaded)
-        self.assertTrue(all(str(self.environment.paths['heartmula']) not in value for argv in self.commands for value in argv))
+        self.assertTrue(all(str(self.environment.paths['yue2']) not in value for argv in self.commands for value in argv))
         self.assertEqual(original.read_text(), 'keep original')
 
     async def test_unowned_training_directory_is_preserved_and_not_installed(self) -> None:
@@ -105,14 +130,10 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_pins_requirements_and_source_terms_are_reviewed(self) -> None:
         recipe = setup.recipes()
-        self.assertEqual([item.pin.commit for item in recipe['heartmula'].sources], ['a0e7ffadfcd0d3d0f68b400f9697c464da6f9408', '5858ca8f1ffe58d62be7c007ea55f1033c5ca456'])
+        self.assertEqual(set(recipe), {'yue2'})
         self.assertEqual([item.pin.commit for item in recipe['yue2'].sources], ['6a9355efff60589d93b41b569676f09d5db85d09', 'b058ec652802e1de24f1d429b3c7c1fb868f791c'])
-        encoder = next(item.artifact for item in setup.training_assets(self.environment, 'heartmula') if item.target.name == 'encoder.safetensors')
-        self.assertEqual((encoder.bytes, encoder.sha256), (2148691856, '19b3c0284fecac70983731433a213ad20eb08d096be3b9a287078171de0d4e79'))
         terms = next(row for row in setup._licenses('yue2') if row.component_id == 'yue-training-base')
         self.assertEqual(terms.source_url, 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE')
-        requirements = Path(setup.__file__).parent / 'assets/music-training-heart-trainer-requirements.txt'
-        self.assertNotIn('torchtune', requirements.read_text(), 'numerical-reference dependencies are not production trainer dependencies')
         for item in (Path(setup.__file__).parent / 'assets').glob('music-training-*-requirements.txt'):
             self.assertTrue(all('==' in line and not line.startswith(('-', '#')) for line in item.read_text().splitlines()))
 
@@ -138,34 +159,16 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
         source.write_text('# changed local source')
         self.assertFalse(setup.environment_ready(self.environment, 'yue2'))
 
-    async def test_generation_originals_are_reused_read_only_and_partial_components_copy_valid_files(self) -> None:
-        context = InstallContext(ModuleJobService(self.environment), 'd' * 32)
-        self.external_boundaries(context)
-        original = self.environment.paths['heartmula']
-        base_group, decoder_group, tokenizer_group = setup._heart_components()
-        for item in (*base_group[:-1], *decoder_group, *tokenizer_group):
-            target = original / item.path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(tensor() if target.suffix == '.safetensors' else b'{"fixture":1}')
-        originals = {path: path.read_bytes() for path in original.rglob('*') if path.is_file()}
-        assets = setup.training_assets(self.environment, 'heartmula')
-        self.assertTrue(any(item.reuse is not None for item in assets))
-        self.assertEqual(setup.heart_model_paths(self.environment)[1], original / 'ckpt/HeartCodec-oss-20260123')
-        await setup.prepare(context, 'heartmula')
-        self.assertEqual(set(self.downloads), {'encoder.safetensors', 'config.json', 'LICENSE', Path(base_group[-1].path).name})
-        self.assertTrue(setup.weights_ready(self.environment, 'heartmula'))
-        self.assertEqual({path: path.read_bytes() for path in originals}, originals)
-
     async def test_paths_reject_training_symlink_to_generation_tree(self) -> None:
-        original = self.environment.paths['heartmula']
+        original = self.environment.paths['yue2']
         original.mkdir(parents=True)
         parent = self.environment.root / 'training'
         parent.mkdir()
-        (parent / 'heartmula').symlink_to(original, target_is_directory=True)
+        (parent / 'yue2').symlink_to(original, target_is_directory=True)
         context = InstallContext(ModuleJobService(self.environment), 'e' * 32)
         self.external_boundaries(context)
         with self.assertRaisesRegex(ModuleSetupError, 'unsafe_install_path'):
-            await setup.prepare(context, 'heartmula')
+            await setup.prepare(context, 'yue2')
         self.assertFalse(list(original.iterdir()))
 
     async def test_job_cancel_reload_resume_retains_engine_and_reuses_prepared_dependencies(self) -> None:
@@ -316,19 +319,19 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
         from app.atomic_files import write_object
         context = InstallContext(ModuleJobService(self.environment), '4' * 32)
         self.external_boundaries(context)
-        await setup.prepare(context, 'heartmula')
-        marker = setup._receipt_path(self.environment, 'heartmula')
+        await setup.prepare(context, 'yue2')
+        marker = setup._receipt_path(self.environment, 'yue2')
         receipt = setup.TrainingOwnership.model_validate_json(marker.read_bytes())
-        legacy = 'dd282e0f77d6763bc1b2b6bbc17529d5b287ef21607168286c569f5e17ed443e'
+        legacy = '203b4f3261a6104e2d0207fc0e8a153b1c8b14f0fae983854d1eeb2d3fee7897'
         write_object(marker, {'schema_version': 1, 'root': receipt.root, 'recipe': legacy, 'fingerprint': receipt.fingerprint})
-        self.assertFalse(setup.environment_ready(self.environment, 'heartmula'))
+        self.assertFalse(setup.environment_ready(self.environment, 'yue2'))
         count = len(self.commands)
-        await setup.prepare(context, 'heartmula')
+        await setup.prepare(context, 'yue2')
         added = self.commands[count:]
         self.assertFalse(any(argv[1:3] == ['pip', 'install'] for argv in added))
-        self.assertEqual(sum(argv[1:3] == ['pip', 'check'] for argv in added), 2)
-        self.assertEqual(sum(argv[1] == '-c' for argv in added), 2)
-        self.assertTrue(setup.environment_ready(self.environment, 'heartmula'))
+        self.assertEqual(sum(argv[1:3] == ['pip', 'check'] for argv in added), 1)
+        self.assertEqual(sum(argv[1] == '-c' for argv in added), 1)
+        self.assertTrue(setup.environment_ready(self.environment, 'yue2'))
 
     async def test_failed_legacy_validation_preserves_receipt_and_unknown_recipe_is_not_adopted(self) -> None:
         from app.atomic_files import write_object

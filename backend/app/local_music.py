@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import os
 from pathlib import Path
@@ -62,6 +63,10 @@ def get(identifier: str) -> LocalMusicJob:
     if row is None:
         raise LocalMusicError('local_music_job_not_found', 404)
     try:
+        payload: object = json.loads(row['payload_json'])
+        request = payload.get('request') if isinstance(payload, dict) else None
+        if isinstance(request, dict) and request.get('engine') == 'heartmula':
+            raise LocalMusicError('local_music_engine_removed', 410)
         job = LocalMusicJob.model_validate_json(row['payload_json'])
         if job.id != identifier:
             raise ValueError('mismatched_job_identity')
@@ -77,11 +82,15 @@ def get(identifier: str) -> LocalMusicJob:
 def list_jobs() -> LocalMusicJobs:
     jobs: list[LocalMusicJob] = []
     incomplete = False
-    rows = db.get_db().execute('SELECT id FROM local_music_jobs ORDER BY created_at DESC,rowid DESC LIMIT 1000').fetchall()
+    rows = db.get_db().execute('SELECT id FROM local_music_jobs ORDER BY created_at DESC,rowid DESC')
     for row in rows:
         try:
             jobs.append(get(row['id']))
-        except LocalMusicError:
+            if len(jobs) >= 1000:
+                break
+        except LocalMusicError as error:
+            if error.status == 410:
+                continue
             incomplete = True
             logger.warning('Local music record retained but unavailable')
     return LocalMusicJobs(jobs=jobs, history_incomplete=incomplete)
@@ -190,19 +199,13 @@ def _clean_pending(identifier: str, *, keep_output: bool = False) -> None:
 
 
 def _require_ready(request: LocalMusicRequest) -> None:
-    if request.engine == 'heartmula' and request.adapter is not None:
-        from .heart_lora_runtime import status as heart_status
-        ready = heart_status()
-        if not ready.supported or not ready.installed or not ready.weights_ready:
-            raise LocalMusicError('music_training_environment_missing', 409)
-        music_lora.resolve(request.adapter, engine='heartmula', target='heartmula-3b')
-        return
     status = next((item for item in engine_status().engines if item.id == request.engine), None)
     if status is None or not status.supported:
         raise LocalMusicError('local_music_runtime_unsupported', 409)
     if not status.installed:
         raise LocalMusicError('local_music_engine_not_installed', 409)
-    if not status.weights_ready:
+    selected_ready = status.medium_weights_ready if request.variant == 'medium' else status.small_weights_ready
+    if not selected_ready:
         raise LocalMusicError('local_music_weights_missing', 409)
     if request.adapter is not None:
         music_lora.resolve(request.adapter, engine=request.engine, target=request.variant)
@@ -343,8 +346,9 @@ async def recover() -> None:
             continue
         try:
             job = get(identifier)
-        except LocalMusicError:
-            logger.warning('Local music record retained but skipped during recovery')
+        except LocalMusicError as error:
+            if error.status != 410:
+                logger.warning('Local music record retained but skipped during recovery')
             continue
         if job.status not in {'queued', 'running', 'failed'}:
             continue

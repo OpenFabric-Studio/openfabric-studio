@@ -23,6 +23,7 @@ JsonValue: TypeAlias = Annotated[PydanticJsonValue, AfterValidator(finite_json)]
 
 JsonObject = dict[str, JsonValue]
 JobStatus = Literal['queued', 'running', 'done', 'failed', 'cancelled']
+# HeartMuLa remains an origin only so previously saved audio stays accessible.
 TrackOrigin = Literal['ace_step', 'yue2', 'editor', 'upload', 'openrouter', 'heartmula', 'stable_audio3']
 
 

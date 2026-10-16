@@ -18,15 +18,15 @@ vi.mock('../../components/shared/FavoriteTrackButton.vue', () => ({ default: def
 vi.mock('../../components/shared/StemsPanel.vue', () => ({ default: defineComponent({ props: ['trackId'], setup: props => () => h('div', `Stems and editor for ${props.trackId}`) }) }))
 
 let app: App | undefined
-const engines = ['ace_step', 'yue2', 'heartmula', 'stable_audio3'] as const
-const catalog: MusicQueueCatalog = { engines: engines.map(engine => ({ engine, supported: true, installed: true, weights_ready: true, managed_status: engine === 'heartmula' || engine === 'stable_audio3' ? 'one_shot' : 'stopped', owned_instance: null, ready: true, error_code: '', setup_href: `/settings#module-${engine}` })), adapters: [] }
-const original = { title: 'Evening', description: 'Warm piano', lyrics: '', instrumental: false, duration_seconds: 120, bpm: null, key: '', language: '' }
-function preview(request: MusicQueuePreviewRequest = { brief: original, selections: [{ engine: 'heartmula', variations: 1 }] }): MusicQueuePreview {
-  const readiness = catalog.engines.find(model => model.engine === 'heartmula')
+const engines = ['ace_step', 'yue2', 'stable_audio3'] as const
+const catalog: MusicQueueCatalog = { engines: engines.map(engine => ({ engine, supported: true, installed: true, weights_ready: true, managed_status: engine === 'stable_audio3' ? 'one_shot' : 'stopped', owned_instance: null, ready: true, error_code: '', setup_href: `/settings#module-${engine}` })), adapters: [] }
+const original = { title: 'Evening', description: 'Warm piano', lyrics: '', instrumental: true, duration_seconds: 120, bpm: null, key: '', language: '' }
+function preview(request: MusicQueuePreviewRequest = { brief: original, selections: [{ engine: 'stable_audio3', variations: 1 }] }): MusicQueuePreview {
+  const readiness = catalog.engines.find(model => model.engine === 'stable_audio3')
   if (!readiness) throw new Error('Missing fixture readiness')
   const selection = request.selections[0]
   if (!selection) throw new Error('Missing fixture selection')
-  return { ...request, models: [{ selection, readiness, compatible: true, effective_duration_seconds: 120, duration_mode: 'maximum', adjustments: [], warnings: ['music_queue_one_shot_reload'], adapters: [] }], items: [{ engine: 'heartmula', variation_index: 1, payload: { engine: 'heartmula', request: { engine: 'heartmula', prompt: request.brief.description, lyrics: request.brief.lyrics ?? '', duration_seconds: 120, seed: 0 } }, adapters: [] }], total_items: 1, can_enqueue: true, fingerprint: 'f'.repeat(64) }
+  return { ...request, models: [{ selection, readiness, compatible: true, effective_duration_seconds: 120, duration_mode: 'target', adjustments: [], warnings: ['music_queue_one_shot_reload'], adapters: [] }], items: [{ engine: 'stable_audio3', variation_index: 1, payload: { engine: 'stable_audio3', request: { engine: 'stable_audio3', prompt: request.brief.description, lyrics: '', duration_seconds: 120, seed: 0, variant: 'small-music' } }, adapters: [] }], total_items: 1, can_enqueue: true, fingerprint: 'f'.repeat(64) }
 }
 function batch(id = 'a'.repeat(32), status: MusicQueueItem['status'] = 'queued'): MusicQueueBatch {
   const plan = preview(), item = plan.items[0]
@@ -67,25 +67,26 @@ beforeEach(() => {
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
 
 it('shows actual model readiness without starting or enqueuing work on entry', async () => {
-  api.musicQueueCatalog.mockResolvedValue({ ...catalog, engines: catalog.engines.map(model => model.engine === 'heartmula' ? { ...model, ready: false, weights_ready: false } : model) })
+  api.musicQueueCatalog.mockResolvedValue({ ...catalog, engines: catalog.engines.map(model => model.engine === 'stable_audio3' ? { ...model, ready: false, weights_ready: false } : model) })
   const { node } = await mount()
   expect(node.textContent).toContain('The brief')
   expect(node.textContent).toContain('Your generation plan')
   expect(node.textContent).toContain('Model weights are missing')
-  expect(node.querySelector('a[href="/settings#module-heartmula"]')).not.toBeNull()
-  expect(node.querySelector<HTMLInputElement>('input[name="model_heartmula"]')?.disabled).toBe(true)
+  expect(node.querySelector('a[href="/settings#module-stable_audio3"]')).not.toBeNull()
+  expect(node.querySelector<HTMLInputElement>('input[name="model_stable_audio3"]')?.disabled).toBe(true)
   expect(api.controlMusicQueue).not.toHaveBeenCalled(); expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
   expect(api.previewMusicQueue).not.toHaveBeenCalled()
 })
 
 it('previews selection order and a separate variation count for every model without starting work', async () => {
   const { node } = await mount()
+  button(node, 'Instrumental').click(); await settle()
   await input(node, 'description', 'Warm piano and brushed drums')
-  await select(node, 'heartmula'); await select(node, 'ace_step')
-  await input(node, 'variations_heartmula', '3'); await input(node, 'variations_ace_step', '2')
+  await select(node, 'stable_audio3'); await select(node, 'ace_step')
+  await input(node, 'variations_stable_audio3', '3'); await input(node, 'variations_ace_step', '2')
   await vi.advanceTimersByTimeAsync(350); await settle()
   expect(api.previewMusicQueue).toHaveBeenCalledTimes(1)
-  expect(api.previewMusicQueue).toHaveBeenCalledWith(expect.objectContaining({ brief: expect.objectContaining({ description: 'Warm piano and brushed drums' }), selections: [expect.objectContaining({ engine: 'heartmula', variations: 3 }), expect.objectContaining({ engine: 'ace_step', variations: 2 })] }), expect.any(AbortSignal))
+  expect(api.previewMusicQueue).toHaveBeenCalledWith(expect.objectContaining({ brief: expect.objectContaining({ description: 'Warm piano and brushed drums' }), selections: [expect.objectContaining({ engine: 'stable_audio3', variations: 3 }), expect.objectContaining({ engine: 'ace_step', variations: 2 })] }), expect.any(AbortSignal))
   expect(node.querySelector('[data-variation-total]')?.textContent).toContain('5')
   expect(api.controlMusicQueue).not.toHaveBeenCalled(); expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
 })
@@ -115,7 +116,8 @@ it('does not request a preview for invalid counts and aborts stale previews imme
 })
 
 async function compose(node: HTMLElement) {
-  await input(node, 'title', 'Evening'); await input(node, 'description', 'Warm piano'); await select(node, 'heartmula')
+  button(node, 'Instrumental').click(); await settle()
+  await input(node, 'title', 'Evening'); await input(node, 'description', 'Warm piano'); await select(node, 'stable_audio3')
   await vi.advanceTimersByTimeAsync(350); await settle()
 }
 
@@ -180,7 +182,7 @@ it('moves and cancels only unstarted briefs using the observed revision', async 
 })
 
 it('retains saved results with library playback, favourite and editor actions', async () => {
-  const track: SavedTrack = { id: 42, short_id: 42, model: 'heartmula', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
+  const track: SavedTrack = { id: 42, short_id: 42, model: 'stable_audio3', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
   const saved = batch('a'.repeat(32), 'done'), item = saved.items[0]
   if (!item) throw new Error('Missing fixture item')
   saved.items = [{ ...item, tracks: [track] }]
@@ -277,7 +279,7 @@ it.each(['ace_lora_selection_mismatch', 'ace_lora_status_unavailable'])('explain
   expect(api.controlMusicQueue).not.toHaveBeenCalled()
 })
 
-const savedTrack: SavedTrack = { id: 42, short_id: 42, model: 'heartmula', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
+const savedTrack: SavedTrack = { id: 42, short_id: 42, model: 'stable_audio3', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
 function successfulReplacement() {
   const value = batch('a'.repeat(32), 'failed'), prior = value.items[0]
   if (!prior) throw new Error('Missing fixture item')
@@ -370,6 +372,33 @@ it('uses exact musical direction fields and displays a server duration adjustmen
   expect(node.querySelector('aside')?.textContent).toContain('300 → 240 seconds')
 })
 
+it.each([
+  ['small-music', 120, '2:00 (120s)'],
+  ['medium', 380, '6:20 (380s)'],
+] as const)('displays the server duration limit for Stable %s', async (variant, stableDuration, formattedDuration) => {
+  api.previewMusicQueue.mockImplementation(async (request: MusicQueuePreviewRequest): Promise<MusicQueuePreview> => {
+    const plan = preview(request), model = plan.models[0]
+    if (!model) throw new Error('Missing Stable fixture')
+    return { ...plan, models: [{ ...model, effective_duration_seconds: stableDuration, adjustments: [{ field: 'duration_seconds', code: 'music_queue_duration_clamped', requested: '600', effective: String(stableDuration) }] }] }
+  })
+  const { node } = await mount()
+  button(node, 'Instrumental').click(); await settle()
+  await input(node, 'description', 'Warm piano')
+  await input(node, 'duration_seconds', '600')
+  const duration = node.querySelector<HTMLInputElement>('[name="duration_seconds"]')
+  expect(duration?.max).toBe('600')
+  expect(duration?.checkValidity()).toBe(true)
+  await select(node, 'stable_audio3')
+  await input(node, 'variant', variant)
+  await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(api.previewMusicQueue).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ brief: expect.objectContaining({ duration_seconds: 600 }), selections: [expect.objectContaining({ engine: 'stable_audio3', variant })] }), expect.any(AbortSignal))
+  const plan = node.querySelector('aside ol li')
+  expect(plan?.textContent).toContain(`Target duration: ${formattedDuration}`)
+  expect(plan?.textContent).toContain(`600 → ${stableDuration} seconds`)
+  expect(node.querySelector('[name="settings_mode"]')).toBeNull()
+  expect(api.controlMusicQueue).not.toHaveBeenCalled(); expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
+})
+
 it('clears a Stable adapter when its target variant changes and blocks invalid strength', async () => {
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'e'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Piano style', sha256: 'f'.repeat(64), created_at: 'now', source_job_id: null }] })
   const { node } = await mount(); button(node, 'Instrumental').click(); await settle()
@@ -388,7 +417,7 @@ it('clears a Stable adapter when its target variant changes and blocks invalid s
 })
 
 it('keeps completed briefs in paginated Results and explains retained older history', async () => {
-  const track: SavedTrack = { id: 42, short_id: 42, model: 'heartmula', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
+  const track: SavedTrack = { id: 42, short_id: 42, model: 'stable_audio3', title: 'Saved evening', created_at: '2026-10-14', lyrics: '', seed: 42, duration_ms: 120000, wall_ms: 5000, params: {}, filename: 'song.wav', audio_url: '/api/tracks/42/audio', abc_url: null, stems: null, midi: null }
   const saved = Array.from({ length: 7 }, (_, index) => {
     const value = batch((index + 1).toString(16).repeat(32), 'done'), item = value.items[0]
     if (!item) throw new Error('Missing fixture item')

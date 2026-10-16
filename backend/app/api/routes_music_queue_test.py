@@ -29,10 +29,10 @@ class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:9000')
         self.addAsyncCleanup(self.client.aclose)
         self.state = MusicQueueSnapshot(revision=7, status='paused')
-        self.ready = MusicQueueReadiness(engine='heartmula', supported=True, installed=True,
+        self.ready = MusicQueueReadiness(engine='stable_audio3', supported=True, installed=True,
             weights_ready=True, managed_status='one_shot', ready=True)
         self.request = MusicQueuePreviewRequest(brief=MusicQueueBrief(
-            description='Warm jazz', duration_seconds=30), selections=[MusicQueueEngineSelection(engine='heartmula')])
+            description='Warm jazz', duration_seconds=30), selections=[MusicQueueEngineSelection(engine='stable_audio3')])
         with patch.object(music_queue_plan, 'catalog', new=AsyncMock(return_value=MusicQueueCatalog(engines=[self.ready]))), \
                 patch.object(music_queue_plan, '_weights_ready', return_value=True):
             self.plan = await music_queue_plan.preview(self.request)
@@ -122,9 +122,9 @@ class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_inputs_return_stable_code_without_echoing_private_prompt(self) -> None:
         sentinel = 'private lyrics and prompt sentinel'
         cases: list[tuple[str, JsonObject]] = [
-            ('/preview', {'brief': {'description': sentinel}, 'selections': [{'engine': 'heartmula'}]}),
+            ('/preview', {'brief': {'description': sentinel}, 'selections': [{'engine': 'stable_audio3'}]}),
             ('/preview', {'brief': {**self.request.brief.model_dump(), 'vendor_override': sentinel},
-                'selections': [{'engine': 'heartmula'}]}),
+                'selections': [{'engine': 'stable_audio3'}]}),
             ('/control', {'revision': True, 'action': 'start'}),
             ('/control', {'revision': 7, 'action': 'restart'}),
             ('/reorder', {'revision': 7, 'batch_ids': [self.batch_id, self.batch_id]}),

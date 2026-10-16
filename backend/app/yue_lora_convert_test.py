@@ -14,6 +14,7 @@ from numpy.typing import NDArray
 from app import yue_lora_convert as convert
 
 PREFIX = 'diffusion_model.model.layers.0.'
+AR_PREFIX = 'text_encoders.model.layers.0.'
 
 
 def fixture(path: Path, tensors: dict[str, NDArray[np.float32]], *, overrides: dict[str, object] | None = None, storage_dtype: str = 'F32') -> None:
@@ -174,6 +175,36 @@ class YueLoraConvertTests(unittest.TestCase):
         fixture(self.source, source, overrides={'steps': 2, 'final_loss': 0.4})
         with self.assertRaises(ValueError):
             convert.validate_training_checkpoint(self.source, max_steps=2, rank=2)
+
+    def test_planner_fused_splits_preserve_native_ar_delta_and_provenance(self) -> None:
+        source = factors('self_attn.qkv_proj', 2048, 4096) | factors('mlp.gate_up_proj', 2048, 12288)
+        planner = {name.replace(PREFIX, AR_PREFIX): tensor for name, tensor in source.items()}
+        fixture(self.source, planner, overrides={'kind': 'planner', 'train_abc': True, 'train_semantic': False,
+            'steps': 2, 'final_loss': .4})
+        self.assertTrue(hasattr(convert, 'convert_ar'), 'Planner conversion must be available')
+        convert.convert_ar(self.source, self.output, base_sha256=convert.BASE_SHA256)
+        output = read_tensors(self.output)
+        for projection, names in (('self_attn.qkv_proj', ['self_attn.q_proj', 'self_attn.k_proj', 'self_attn.v_proj']),
+            ('mlp.gate_up_proj', ['mlp.gate_proj', 'mlp.up_proj'])):
+            expected = source[PREFIX + projection + '.lora_up.weight'] @ source[PREFIX + projection + '.lora_down.weight'][:, :13] * 3
+            actual = np.concatenate([output['layers.0.' + name + '.lora_B'] @ output['layers.0.' + name + '.lora_A'][:, :13] for name in names])
+            np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=4e-6)
+        encoded = self.output.read_bytes()
+        length = struct.unpack('<Q', encoded[:8])[0]
+        metadata = json.loads(json.loads(encoded[8:8 + length])['__metadata__']['openfabric_yue2_conversion'])
+        self.assertEqual((metadata['stage'], metadata['base_sha256']), ('ar', convert.BASE_SHA256))
+        convert.validate_training_checkpoint(self.source, max_steps=2, rank=2, target='ar')
+
+    def test_planner_requires_abc_only_metadata_and_rejects_mixed_or_overlapping_tensors(self) -> None:
+        self.assertTrue(hasattr(convert, 'convert_ar'), 'Planner conversion must be available')
+        good = {name.replace(PREFIX, AR_PREFIX): tensor for name, tensor in factors('self_attn.q_proj', 2048, 2048).items()}
+        fused = {name.replace(PREFIX, AR_PREFIX): tensor for name, tensor in factors('self_attn.qkv_proj', 2048, 4096).items()}
+        for tensors, metadata in ((good, {'train_abc': False}), (good, {'train_semantic': True}),
+            (good, {'kind': 'acoustic'}), (good | factors('self_attn.q_proj', 2048, 2048), {}), (good | fused, {})):
+            fixture(self.source, tensors, overrides={'kind': 'planner', 'train_abc': True, 'train_semantic': False, **metadata})
+            with self.assertRaises(ValueError):
+                convert.convert_ar(self.source, self.output, base_sha256=convert.BASE_SHA256)
+            self.assertFalse(self.output.exists())
 
 
 if __name__ == '__main__':

@@ -13,6 +13,7 @@ from app.module_contracts import ModuleInstallRequest, ModulePlanRequest
 from app.module_install import DownloadArtifact
 from app.module_music_models_test import npz
 from app import stable_lora_runtime as runtime
+from app import local_music_runtime as generation_runtime
 
 
 class StableTrainingSetupTests(unittest.IsolatedAsyncioTestCase):
@@ -26,6 +27,7 @@ class StableTrainingSetupTests(unittest.IsolatedAsyncioTestCase):
         for script in ('lora_train_mlx.py', 'pre_encode_mlx.py'):
             (scripts / script).write_text('# installed fixture')
         self.enterContext(patch.object(runtime, 'environment_verified', return_value=True))
+        self.enterContext(patch.object(generation_runtime, 'environment_verified', return_value=True))
         self.enterContext(patch.object(jobs, '_application_busy', return_value=False))
         self.enterContext(patch.object(catalog, 'available_bytes', return_value=100 * 1024**3))
         with patch.object(catalog, 'probe', new=AsyncMock(return_value=catalog.ProbeResult(False, ''))), patch.object(catalog, '_runtime_inventory', new=AsyncMock(return_value={})):
@@ -40,6 +42,88 @@ class StableTrainingSetupTests(unittest.IsolatedAsyncioTestCase):
 
     def request(self, variant: str = 'small-music') -> ModulePlanRequest:
         return ModulePlanRequest.model_validate({'features': ['stable_audio3'], 'download_models': True, 'stable_training_variant': variant})
+
+    def generation_request(self, variant: str = 'medium') -> ModulePlanRequest:
+        self.assertIn('stable_generation_variant', ModulePlanRequest.model_fields)
+        return ModulePlanRequest.model_validate({'features': ['stable_audio3'], 'download_models': True, 'stable_generation_variant': variant})
+
+    async def test_generation_plan_uses_selected_inference_bundle_despite_ready_small_and_training_medium(self) -> None:
+        for path in (*generation_runtime.weight_paths(self.environment, 'stable_audio3'), *runtime.training_weights(self.environment, 'medium')):
+            self.put(path)
+        request = self.generation_request()
+        review = await catalog.plan(request, self.environment)
+        self.assertEqual(review.model_dump().get('stable_generation_variant'), 'medium')
+        self.assertEqual([(step.module_id, step.operation) for step in review.steps], [('stable_audio3', 'verify')])
+        artifacts = models._manifest().bundles['stable-medium']
+        missing = [item for item in artifacts if not models._valid_file(models._path(self.environment.paths['stable_audio3'], item.path))]
+        self.assertEqual(review.estimated_download_bytes, sum(item.bytes for item in missing))
+        self.assertEqual({Path(item.path).name for item in missing}, {'dit_medium_f16.npz', 'same_l_decoder_f32.npz'})
+        self.assertTrue(review.can_install)
+        ready_small = await catalog.plan(self.generation_request('small-music'), self.environment)
+        self.assertEqual(ready_small.steps[0].operation, 'reuse')
+        self.assertFalse(ready_small.can_install)
+        self.assertNotEqual(review.plan_token, ready_small.plan_token)
+        self.assertNotEqual(catalog.approval_scope(request, self.environment), catalog.approval_scope(self.generation_request('small-music'), self.environment))
+
+    async def test_generation_download_cancel_reload_resume_preserves_shared_weights_and_variant(self) -> None:
+        for path in generation_runtime.weight_paths(self.environment, 'stable_audio3'):
+            self.put(path)
+        shared = generation_runtime.weight_paths(self.environment, 'stable_audio3')[0]
+        original = shared.read_bytes()
+        request = self.generation_request()
+        review = await catalog.plan(request, self.environment)
+        started = asyncio.Event()
+        downloaded: list[str] = []
+        block_decoder = True
+        async def download(artifact: DownloadArtifact, destination: Path, context: jobs.InstallContext, **_: object) -> Path:
+            downloaded.append(destination.name)
+            if destination.name == 'same_l_decoder_f32.npz' and block_decoder:
+                started.set()
+                await asyncio.Event().wait()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(npz())
+            return destination
+        service = jobs.ModuleJobService(self.environment)
+        reader = jobs.ModuleJobService(self.environment)
+        try:
+            with patch('app.module_install.download_artifact', side_effect=download), patch('app.module_install.install', new=AsyncMock(side_effect=AssertionError('environment install forbidden'))), patch('app.module_install.verify', new=AsyncMock(side_effect=AssertionError('aggregate verification forbidden'))):
+                with self.assertRaisesRegex(jobs.ModuleSetupError, 'already_installed'):
+                    small = await catalog.plan(self.generation_request('small-music'), self.environment)
+                    await service.create(ModuleInstallRequest(**self.generation_request('small-music').model_dump(), plan_token=small.plan_token))
+                with self.assertRaisesRegex(jobs.ModuleSetupError, 'plan_changed'):
+                    await service.create(ModuleInstallRequest(**request.model_dump(), plan_token=small.plan_token))
+                created = await service.create(ModuleInstallRequest(**request.model_dump(), plan_token=review.plan_token))
+                await asyncio.wait_for(started.wait(), 1)
+                await service.cancel(created.id)
+                retained = reader.get(created.id)
+                self.assertEqual(retained.state, 'cancelled')
+                self.assertEqual(retained.model_dump().get('stable_generation_variant'), 'medium')
+                self.assertEqual(reader.store.read(created.id).plan.model_dump().get('stable_generation_variant'), 'medium')
+                block_decoder = False
+                await reader.resume(created.id)
+                await self.wait_for_terminal(reader, created.id)
+                self.assertEqual(reader.get(created.id).state, 'completed')
+                self.assertEqual(downloaded, ['dit_medium_f16.npz', 'same_l_decoder_f32.npz', 'same_l_decoder_f32.npz'])
+                self.assertEqual(shared.read_bytes(), original)
+                stable = next(engine for engine in generation_runtime.engine_status(self.environment).engines if engine.id == 'stable_audio3')
+                self.assertTrue(stable.medium_weights_ready)
+        finally:
+            await reader.shutdown()
+            await service.shutdown()
+
+    async def test_generation_plan_does_not_require_training_scripts_and_refuses_unverified_environment(self) -> None:
+        scripts = self.environment.paths['stable_audio3'] / 'optimized/mlx/scripts'
+        for name in ('lora_train_mlx.py', 'pre_encode_mlx.py'):
+            (scripts / name).unlink()
+        review = await catalog.plan(self.generation_request(), self.environment)
+        self.assertTrue(review.can_install)
+        with patch.object(generation_runtime, 'environment_verified', return_value=False):
+            unavailable = await catalog.plan(self.generation_request(), self.environment)
+            self.assertEqual(unavailable.steps[0].operation, 'manual')
+            self.assertFalse(unavailable.can_install)
+            service = jobs.ModuleJobService(self.environment)
+            with self.assertRaisesRegex(jobs.ModuleSetupError, 'environment_unverified'):
+                await service.create(ModuleInstallRequest(**self.generation_request().model_dump(), plan_token=unavailable.plan_token))
 
     async def wait_for_terminal(self, service: jobs.ModuleJobService, identifier: str) -> None:
         task = service.tasks.get(identifier)

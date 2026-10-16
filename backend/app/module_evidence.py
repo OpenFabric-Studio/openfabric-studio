@@ -55,8 +55,19 @@ def environment_fingerprint(environment: ModuleEnvironment, identifier: ModuleId
                 if stat.st_size > 2 * 1024**2:
                     return None
                 digest.update(path.read_bytes())
-        if identifier in ('heartmula', 'stable_audio3'):
-            source = engine / ('src/heartlib_mlx' if identifier == 'heartmula' else 'optimized/mlx')
+        if identifier == 'ace_step':
+            digest.update(b'ace_training_audio_check_v2')
+            for relative in ('acestep/training/dataset_builder_modules/preprocess_audio.py',
+                             'acestep/training/data_module.py', 'acestep/core/generation/handler/io_audio.py',
+                             'acestep/training/trainer.py', 'acestep/core/generation/handler/service_generate_execute.py'):
+                path = engine / relative
+                digest.update(relative.encode())
+                if path.is_file():
+                    if path.stat().st_size > 2 * 1024**2:
+                        return None
+                    digest.update(path.read_bytes())
+        if identifier == 'stable_audio3':
+            source = engine / 'optimized/mlx'
             for count, path in enumerate(sorted(source.rglob('*.py')), start=1):
                 stat = path.stat()
                 if count > 500 or stat.st_size > 2 * 1024**2:

@@ -78,6 +78,34 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(Path(db.list_tracks('yue2')[0]['audio_path']).is_file())
         self.assertFalse(yue_jobs.work_busy())
 
+    async def test_musical_guidance_reaches_native_style_and_original_choices_are_saved(self) -> None:
+        from app.generation_contracts import YueGenerationSettings
+        from pydantic import TypeAdapter
+        try:
+            options = YueOptions.model_validate({'style': 'Folk', 'cot': 'full',
+                'bpm': 88, 'key_scale': 'Am', 'time_signature': '6/8'})
+        except ValidationError as error:
+            self.fail(f'Musical choices were rejected: {error}')
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, '_load_model', new=AsyncMock()), patch.object(yue_jobs, '_native_json', new=native):
+            job = yue_jobs.submit(YueSubmitRequest(lyrics='[Verse]\nA test', seed=12, options=options,
+                settings=YueGenerationSettings(engine='yue2', style='Folk', bpm=120, keyScale='C', timeSignature='4/4')))
+            await asyncio.wait_for(yue_jobs._tasks[job.id], 2)
+        native_options = native.await_args_list[0].args[1]['request']['options']
+        self.assertEqual(native_options['style'], 'Folk\nTempo: 88 BPM\nKey: A minor\nTime signature: 6/8')
+        self.assertNotIn('bpm', native_options)
+        self.assertNotIn('key_scale', native_options)
+        self.assertNotIn('time_signature', native_options)
+        self.assertNotIn('abc', native_options)
+        result = yue_jobs.get_job(job.id)
+        self.assertEqual(result.status, 'done')
+        self.assertEqual(result.options.style, 'Folk')
+        params = TypeAdapter(JsonObject).validate_json(db.list_tracks('yue2')[0]['params_json'])
+        self.assertEqual((params['style'], params['bpm'], params['key_scale'], params['time_signature']),
+            ('Folk', 88, 'Am', '6/8'))
+        snapshot = YueGenerationSettings.model_validate(params['_generation_settings'])
+        self.assertEqual((snapshot.bpm, snapshot.keyScale, snapshot.timeSignature), (88, 'Am', '6/8'))
+
     async def test_disabling_adapters_reloads_a_resident_adapted_session(self) -> None:
         resident = {**yue_jobs._COMPACT_ARENAS, 'yue2.model_gguf': 'yue2-3b-q8_0.gguf',
                     'yue2.ar_lora': '/private/ar.safetensors', 'yue2.ar_lora_scale': '0.5',

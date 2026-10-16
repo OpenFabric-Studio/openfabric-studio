@@ -113,6 +113,26 @@ class StableLoraJobsTests(unittest.IsolatedAsyncioTestCase):
         await stable_lora.recover()
         self.assertEqual(stable_lora.get(identifier).adapter, self.adapter)
 
+    async def test_completed_job_name_blocks_another_run_before_worker_or_directory_creation(self) -> None:
+        with patch.object(stable_lora, 'prepare_worker', side_effect=self.command):
+            await self.finish()
+            directories = set((self.root / 'stable-lora-training').iterdir())
+            duplicate = self.body().model_copy(update={'name': '  TEST   ADAPTER  ', 'rank': 16})
+            with self.assertRaises(MusicLoraError) as caught:
+                await stable_lora.submit(duplicate)
+            self.assertEqual(caught.exception.code, 'music_lora_name_exists')
+            self.assertEqual(set((self.root / 'stable-lora-training').iterdir()), directories)
+
+    async def test_existing_import_name_blocks_training(self) -> None:
+        from app.music_lora_test import adapter_bytes
+        import io
+        music_lora.import_stream(io.BytesIO(adapter_bytes()), filename='adapter.safetensors',
+            name='Test adapter', engine='stable_audio3', target='small-music')
+        with self.assertRaises(MusicLoraError) as caught:
+            await stable_lora.submit(self.body())
+        self.assertEqual(caught.exception.code, 'music_lora_name_exists')
+        self.assertFalse((self.root / 'stable-lora-training').exists())
+
     async def test_native_progress_retains_latest_valid_step_across_polling_and_reload(self) -> None:
         from app.stable_lora_contracts import StableLoraTrainingJob
         identifier = 'b' * 32

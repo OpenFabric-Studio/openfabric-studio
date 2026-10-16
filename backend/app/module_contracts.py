@@ -9,7 +9,7 @@ from .contracts import Contract
 from .music_training_contracts import MusicTrainingEngine
 from .stable_lora_contracts import StableLoraVariant
 
-ModuleId = Literal['ace_step', 'yue2', 'heartmula', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review']
+ModuleId = Literal['ace_step', 'yue2', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review']
 ModuleState = Literal['unsupported', 'missing', 'partial', 'installed', 'ready']
 ModuleActionKind = Literal['install', 'download', 'manual', 'verify', 'restart']
 ModuleJobState = Literal['queued', 'running', 'completed', 'awaiting_manual', 'failed', 'cancelled', 'interrupted']
@@ -77,15 +77,16 @@ class ModuleInventory(Contract):
     free_bytes: int | None = Field(default=None, ge=0)
     checked_at: str
     modules: list[ModuleInfo]
-    recommended_features: list[ModuleId] = Field(default_factory=list, max_length=17)
+    recommended_features: list[ModuleId] = Field(default_factory=list, max_length=16)
 
 
 class ModulePlanRequest(Contract):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    features: list[ModuleId] = Field(min_length=1, max_length=17)
+    features: list[ModuleId] = Field(min_length=1, max_length=16)
     download_models: StrictBool = False
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=17)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
     stable_training_variant: StableLoraVariant | None = None
+    stable_generation_variant: StableLoraVariant | None = None
     music_training_engine: MusicTrainingEngine | None = None
 
     @model_validator(mode='after')
@@ -96,6 +97,8 @@ class ModulePlanRequest(Contract):
             raise ValueError('invalid_reinstall_selection')
         if self.stable_training_variant is not None and (self.features != ['stable_audio3'] or not self.download_models or self.reinstall):
             raise ValueError('invalid_stable_training_selection')
+        if self.stable_generation_variant is not None and (self.features != ['stable_audio3'] or not self.download_models or self.reinstall or self.stable_training_variant is not None or self.music_training_engine is not None):
+            raise ValueError('invalid_stable_generation_selection')
         if self.music_training_engine is not None and (self.features != [self.music_training_engine] or not self.download_models or self.reinstall or self.stable_training_variant is not None):
             raise ValueError('invalid_music_training_selection')
         return self
@@ -114,8 +117,9 @@ class ModulePlanStep(Contract):
 class ModulePlan(Contract):
     features: list[ModuleId]
     download_models: bool
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=17)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
     stable_training_variant: StableLoraVariant | None = None
+    stable_generation_variant: StableLoraVariant | None = None
     music_training_engine: MusicTrainingEngine | None = None
     plan_token: str
     steps: list[ModulePlanStep]
@@ -180,8 +184,9 @@ class ModuleInstallJob(Contract):
     updated_at: str
     features: list[ModuleId]
     download_models: bool
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=17)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
     stable_training_variant: StableLoraVariant | None = None
+    stable_generation_variant: StableLoraVariant | None = None
     music_training_engine: MusicTrainingEngine | None = None
     steps: list[ModuleJobStep]
     current_step: int | None = Field(default=None, ge=0)

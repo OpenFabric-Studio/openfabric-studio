@@ -17,7 +17,7 @@ from app import artist_production, db, music_queue_store as store
 from app.local_music_contracts import LocalMusicRequest
 from app.music_queue_contracts import (
     MusicQueueBatch, MusicQueueBrief, MusicQueueEngineSelection, MusicQueueError,
-    MusicQueueHeartRequest, MusicQueueItem, MusicQueueItemStatus, MusicQueueModelPlan,
+    MusicQueueStableRequest, MusicQueueItem, MusicQueueItemStatus, MusicQueueModelPlan,
     MusicQueueReadiness, MusicQueueSnapshot,
 )
 from app.track_view import track_response
@@ -25,17 +25,17 @@ from app.track_view import track_response
 
 def batch(status: MusicQueueItemStatus = 'queued', count: int = 1) -> MusicQueueBatch:
     identifier = uuid4().hex
-    selection = MusicQueueEngineSelection(engine='heartmula')
-    readiness = MusicQueueReadiness(engine='heartmula', supported=True, installed=True,
+    selection = MusicQueueEngineSelection(engine='stable_audio3')
+    readiness = MusicQueueReadiness(engine='stable_audio3', supported=True, installed=True,
         weights_ready=True, managed_status='one_shot', ready=True)
     return MusicQueueBatch(id=identifier, created_at='2026-10-14T10:00:00Z',
         brief=MusicQueueBrief(description='Warm jazz', duration_seconds=30),
         selections=[selection], models=[MusicQueueModelPlan(selection=selection,
-            readiness=readiness, compatible=True, duration_mode='maximum', effective_duration_seconds=30)],
+            readiness=readiness, compatible=True, duration_mode='target', effective_duration_seconds=30)],
         preview_fingerprint='a' * 64, items=[MusicQueueItem(id=uuid4().hex, batch_id=identifier,
-            engine='heartmula', variation_index=1, resolved_seed=7, status=status,
-            payload=MusicQueueHeartRequest(engine='heartmula', request=LocalMusicRequest(
-                engine='heartmula', prompt='Warm jazz', duration_seconds=30, seed=7))) for _ in range(count)])
+            engine='stable_audio3', variation_index=1, resolved_seed=7, status=status,
+            payload=MusicQueueStableRequest(engine='stable_audio3', request=LocalMusicRequest(
+                engine='stable_audio3', prompt='Warm jazz', duration_seconds=30, seed=7))) for _ in range(count)])
 
 
 class MusicQueueStoreTests(unittest.TestCase):
@@ -49,7 +49,7 @@ class MusicQueueStoreTests(unittest.TestCase):
         self.connection.execute('PRAGMA foreign_keys=ON')
         self.connection.execute('''CREATE TABLE tracks (
             id INTEGER PRIMARY KEY, short_id INTEGER, is_favorite INTEGER DEFAULT 0,
-            model TEXT DEFAULT 'heartmula', created_at TEXT DEFAULT '2026-10-14',
+            model TEXT DEFAULT 'stable_audio3', created_at TEXT DEFAULT '2026-10-14',
             title TEXT DEFAULT 'Original', lyrics TEXT DEFAULT '', seed INTEGER DEFAULT 7,
             duration_ms REAL, wall_ms REAL, params_json TEXT DEFAULT '{}',
             audio_path TEXT DEFAULT '/fixture.wav', abc_path TEXT, stems_json TEXT, midi_json TEXT)''')
@@ -84,6 +84,32 @@ class MusicQueueStoreTests(unittest.TestCase):
         with patch.object(store, 'transaction', side_effect=AssertionError('GET attempted a write transaction')):
             self.assertEqual(store.snapshot(), initial)
         self.assertEqual(self.connection.execute('SELECT count(*) FROM tracks').fetchone()[0], 0)
+
+    def test_retired_batches_are_preserved_without_blocking_the_supported_queue(self) -> None:
+        retired = batch(count=2)
+        store.snapshot()
+        brief = retired.model_copy(update={'items': []}).model_dump_json().replace('stable_audio3', 'heartmula')
+        self.connection.execute('INSERT INTO music_queue_briefs(id,ordinal,submission_key,request_hash,body_json) VALUES(?,?,?,?,?)',
+            (retired.id, 1, 'retired', 'c' * 64, brief))
+        originals: list[str] = []
+        for ordinal, item in enumerate(retired.items, start=1):
+            raw = item.model_dump_json().replace('stable_audio3', 'heartmula')
+            originals.append(raw)
+            self.connection.execute('INSERT INTO music_queue_items(id,batch_id,ordinal,status,body_json) VALUES(?,?,?,?,?)',
+                (item.id, retired.id, ordinal, item.status, raw))
+        self.connection.execute("UPDATE music_queue_control SET status='running',active_item_id=? WHERE id=1", (retired.items[0].id,))
+        with patch.object(store, '_MAX_ITEMS', 1), patch.object(store, '_MAX_BATCHES', 1):
+            state = self.enqueue(key='supported')
+            self.assertEqual(len(state.batches), 1)
+            self.assertEqual(state.batches[0].items[0].engine, 'stable_audio3')
+            self.assertEqual(state.status, 'paused')
+            self.assertIsNone(state.active_item_id)
+            self.assertTrue(state.history_incomplete)
+            updated = store.mutate(lambda value: setattr(value, 'status', 'running'), revision=state.revision)
+            self.assertEqual(updated.status, 'running')
+        self.assertEqual(self.connection.execute('SELECT body_json FROM music_queue_briefs WHERE id=?', (retired.id,)).fetchone()[0], brief)
+        self.assertEqual([row[0] for row in self.connection.execute(
+            'SELECT body_json FROM music_queue_items WHERE batch_id=? ORDER BY ordinal', (retired.id,))], originals)
 
     def test_interrupted_schema_creation_rolls_back_and_can_retry(self) -> None:
         migrate = store._migrate

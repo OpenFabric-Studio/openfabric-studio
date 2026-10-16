@@ -1,5 +1,7 @@
 # Additional local music engines
 
+> Historical record — HeartMuLa retired on 16 October 2026. Its generation, training and installation instructions below no longer describe supported functionality. See [current music documentation](../../local-music.md).
+
 The maintainer selected HeartMuLa and Stable Audio 3 after reviewing
 their uses, Mac runtimes and license differences. Add those engines to Music
 without changing the ACE-Step/YuE orchestrator or introducing a service layer.
