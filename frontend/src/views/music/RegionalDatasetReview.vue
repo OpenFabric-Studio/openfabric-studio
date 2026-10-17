@@ -7,7 +7,7 @@ import { cancelLocalMusic } from '../../api/localMusic'
 import { ApiError } from '../../api/http'
 import { parseRegionalDatasetReviewRequest, parseStableLoraTrainingRequest } from '../../api/generated'
 import type { LoraDatasetOperationResponse, MusicLoraDatasetSource, RegionalComparisonState, RegionalDatasetPreview,
-  RegionalDatasetReview, RegionalExcerpt, RegionalListeningReview, RegionalPreparationJob, RegionalRecordingInspection,
+  RegionalBlindReveal, RegionalBlindSession, RegionalDatasetReview, RegionalExcerpt, RegionalListeningReview, RegionalModelCard, RegionalPreparationJob, RegionalRecordingInspection,
   RegionalAcousticReview, RegionalRecordingReview, RegionalTrainingSelection, StableLoraTrainingJob, StableLoraTrainingStatus } from '../../api/generated'
 import { createPollingLoop } from '../../composables/polling'
 import TrainingDatasetPicker from './TrainingDatasetPicker.vue'
@@ -33,7 +33,8 @@ const variant = ref<'small-music' | 'medium'>('small-music'), name = ref(''), st
 const trainingTermsBlocked = ref(true), generationTermsBlocked = ref(true)
 const comparison = ref<RegionalComparisonState | null>(null), comparisons = ref<RegionalComparisonState[]>([])
 const comparisonPrompt = ref(''), comparisonSeconds = ref(5), comparisonSeed = ref(42)
-const listener = ref(''), listenerScope = ref(''), preference = ref<RegionalListeningReview['preference']>('neither'), notes = ref(''), publicAttribution = ref(''), consent = ref(false), heardBoth = ref(false)
+const listener = ref(''), listenerScope = ref(''), preference = ref<RegionalListeningReview['preference']>('neither'), blindPreference = ref<'a' | 'b' | 'tie' | 'neither'>('tie'), notes = ref(''), publicAttribution = ref(''), consent = ref(false), heardBoth = ref(false)
+const blindSession = ref<RegionalBlindSession | null>(null), blindReveal = ref<RegionalBlindReveal | null>(null), blindContaminated = ref(false), modelCard = ref<RegionalModelCard | null>(null)
 const ratings = ref<Pick<RegionalListeningReview, 'timbre' | 'phrasing' | 'rhythm' | 'coherence' | 'artifacts' | 'cultural_appropriateness'>>({ timbre: 3, phrasing: 3, rhythm: 3, coherence: 3, artifacts: 3, cultural_appropriateness: 3 })
 const operationWorking = ref(false), acousticBusy = ref(false), error = ref(''), reconnecting = ref(false), acousticNotice = ref('')
 const working = computed(() => operationWorking.value || acousticBusy.value)
@@ -281,6 +282,45 @@ function cancelArm(identifier: string) {
   if (!comparisonId) return
   void action(async (signal, current) => { await cancelLocalMusic(identifier, signal); const state = await api.getRegionalComparison(comparisonId, signal); if (current()) comparison.value = state })
 }
+function openBlindReview() {
+  const state = comparison.value
+  if (!state || !heardBoth.value || !listener.value.trim()) return
+  blindReveal.value = null
+  void action(async (signal, current) => {
+    const session = await api.openRegionalBlindSession(state.plan.spec.id, { reviewer_reference: listener.value }, signal)
+    if (current()) { blindSession.value = session; blindContaminated.value = false }
+  })
+}
+function loadModelCard() {
+  const identifier = comparison.value?.plan.spec.id
+  if (!identifier || blindSession.value && !blindReveal.value) return
+  void action(async (signal, current) => {
+    const card = await api.getRegionalModelCard(identifier, signal)
+    if (current()) modelCard.value = card
+  })
+}
+function showLabeledArms() {
+  if (blindSession.value) blindContaminated.value = true
+  blindSession.value = null
+}
+function saveBlindListening() {
+  const state = comparison.value, session = blindSession.value
+  if (!state || !session || blindContaminated.value || !heardBoth.value) return
+  const [first, second] = session.clips
+  if (!first || !second) return
+  void action(async (signal, current) => {
+    const reveal = await api.saveRegionalBlindReview(state.plan.spec.id, { comparison_sha256: session.comparison_sha256,
+      assignment_sha256: session.assignment_sha256, label_a_sha256: first.output_sha256, label_b_sha256: second.output_sha256,
+      reviewer_reference: session.reviewer_reference, reviewed_at: new Date().toISOString().slice(0, 10),
+      tradition_scope: listenerScope.value, preference: blindPreference.value, ...ratings.value, notes: notes.value,
+      public_attribution: publicAttribution.value, attribution_consented: consent.value }, signal)
+    if (!current()) return
+    blindReveal.value = reveal
+    blindSession.value = null
+    const refreshed = await api.getRegionalComparison(state.plan.spec.id, signal)
+    if (current()) comparison.value = refreshed
+  })
+}
 function saveListening() {
   const state = comparison.value, base = state?.arms.find(arm => arm.arm === 'base')?.output_sha256, adapter = state?.arms.find(arm => arm.arm === 'adapter')?.output_sha256
   if (!state || !base || !adapter || !heardBoth.value) return
@@ -293,7 +333,7 @@ function saveListening() {
   })
 }
 watch([comparisonPrompt, comparisonSeconds, comparisonSeed, () => selected.value?.manifest_sha256, () => trainingJob.value?.adapter?.sha256], () => { comparisonKey = '' })
-watch(() => comparison.value?.plan.spec.id, () => { heardBoth.value = false })
+watch(() => comparison.value?.plan.spec.id, () => { heardBoth.value = false; blindSession.value = null; blindReveal.value = null; blindContaminated.value = false; modelCard.value = null })
 watch(() => props.disabled, disabled => {
   if (disabled) { ++generation; controller?.abort(); controller = undefined; operationWorking.value = false; poll.stop() }
   else if (!setup.value) initialize()
@@ -402,6 +442,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       <p class="text-sm text-status-queued">{{ t('regionalDatasets.unavailable') }}</p>
       <CollapsibleDetails :summary="t('regionalDatasets.runtimeEvidence')"><div class="space-y-2 text-xs text-text-dim"><p class="break-all">{{ t('regionalDatasets.manifestHash') }}: {{ comparison.plan.spec.request.manifest_sha256 }}</p><p class="break-all">{{ t('regionalDatasets.adapterHash') }}: {{ comparison.plan.spec.adapter.sha256 }}</p><p>{{ t(comparison.plan.spec.training_receipt.identity_status === 'worker_measured' ? 'regionalDatasets.measuredTraining' : 'regionalDatasets.unmeasuredTraining') }}</p><template v-if="comparison.plan.spec.training_receipt.runtime"><p class="break-all">{{ comparison.plan.spec.training_receipt.runtime.source_sha256 }} · Python {{ comparison.plan.spec.training_receipt.runtime.python_version }} · {{ comparison.plan.spec.training_receipt.runtime.platform }} / {{ comparison.plan.spec.training_receipt.runtime.machine }}</p><p v-for="model in comparison.plan.spec.training_receipt.runtime.models" :key="model.file_name" class="break-all">{{ model.file_name }} · {{ model.sha256 }} · {{ bytes(model.bytes) }}</p></template></div></CollapsibleDetails>
       <MusicTermsCard engine="stable_audio3" operation="generation" @blocked="generationTermsBlocked = $event" />
+      <template v-if="!(blindSession && !blindReveal)">
       <div v-for="arm in comparison.arms" :key="arm.arm" class="space-y-3 border-t border-border pt-3">
         <p class="text-sm text-text">{{ arm.arm === 'base' ? t('musicLora.baseOnly') : t('regionalDatasets.preferenceOptions.adapter') }} · {{ arm.job ? t(`regionalDatasets.statuses.${arm.job.status}`) : t('regionalDatasets.armPending') }}</p>
         <p v-if="arm.submission_unverified" role="alert" class="text-sm text-status-queued">{{ t('regionalDatasets.submissionUnverified') }}</p>
@@ -410,7 +451,8 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
         <button v-if="arm.job && ongoing(arm.job)" type="button" class="regional-button" :disabled="working || disabled" @click="cancelArm(arm.job.id)">{{ t('regionalDatasets.cancel') }}</button>
         <audio v-if="arm.audio_url" controls preload="none" class="max-w-full" :src="arm.audio_url" :aria-label="t(`regionalDatasets.preferenceOptions.${arm.arm}`)" />
       </div>
-      <form v-if="bothOutputs" class="space-y-3 border-t border-border pt-4" @submit.prevent="saveListening">
+      </template>
+      <form v-if="bothOutputs && !blindSession" class="space-y-3 border-t border-border pt-4" @submit.prevent="saveListening">
         <h4 class="font-medium text-text">{{ t('regionalDatasets.listeningTitle') }}</h4><p class="text-xs text-text-dim">{{ t('regionalDatasets.ratingHint') }}</p>
         <label class="regional-label">{{ t('regionalDatasets.listener') }}<input v-model="listener" required maxlength="120" pattern="[A-Za-z0-9][A-Za-z0-9_-]*" class="regional-input" :disabled="working || disabled" /></label>
         <label class="regional-label">{{ t('regionalDatasets.scope') }}<input v-model="listenerScope" required maxlength="200" class="regional-input" :disabled="working || disabled" /></label>
@@ -421,8 +463,42 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
         <label class="regional-check"><input v-model="consent" type="checkbox" :disabled="working || disabled" />{{ t('regionalDatasets.consent') }}</label>
         <label class="regional-check"><input v-model="heardBoth" type="checkbox" :disabled="working || disabled" />{{ t('regionalDatasets.heardBoth') }}</label>
         <button type="submit" class="regional-button" :disabled="working || disabled || !heardBoth || !listener.trim() || !listenerScope.trim() || !!publicAttribution && !consent">{{ t('regionalDatasets.saveListening') }}</button>
-        <p class="text-sm text-text-dim">{{ t('regionalDatasets.listenerCount', { count: comparison.listener_reviews }) }}</p>
+        <button type="button" class="regional-button" :disabled="working || disabled || !heardBoth || !listener.trim() || !listenerScope.trim()" @click="openBlindReview">{{ t('regionalDatasets.openBlind') }}</button>
       </form>
+      <p v-if="blindContaminated" role="alert" class="text-sm text-status-queued">{{ t('regionalDatasets.blindContaminated') }}</p>
+      <form v-if="blindSession && !blindReveal" class="space-y-3 border-t border-border pt-4" @submit.prevent="saveBlindListening">
+        <h4 class="font-medium text-text">{{ t('regionalDatasets.blindTitle') }}</h4>
+        <p class="text-xs text-text-dim">{{ t('regionalDatasets.blindHint') }}</p>
+        <div v-for="clip in blindSession.clips" :key="clip.label" class="space-y-2">
+          <p class="text-sm text-text">{{ t('regionalDatasets.blindClip', { label: clip.label.toUpperCase() }) }}</p>
+          <audio controls preload="none" class="max-w-full" :src="clip.audio_url" :aria-label="t('regionalDatasets.blindClip', { label: clip.label.toUpperCase() })" />
+        </div>
+        <label class="regional-label">{{ t('regionalDatasets.preference') }}<select v-model="blindPreference" class="regional-input" :disabled="working || disabled"><option v-for="value in ['a', 'b', 'tie', 'neither']" :key="value" :value="value">{{ t(`regionalDatasets.blindPreferences.${value}`) }}</option></select></label>
+        <div class="grid gap-3 sm:grid-cols-2"><label v-for="key in ratingKeys" :key="key" class="regional-label">{{ t(`regionalDatasets.ratings.${key}`) }}<input v-model.number="ratings[key]" type="number" min="1" max="5" step="1" required class="regional-input" :disabled="working || disabled" /></label></div>
+        <label class="regional-label">{{ t('regionalDatasets.notes') }}<textarea v-model="notes" maxlength="4000" class="regional-input" :disabled="working || disabled" /></label>
+        <label class="regional-label">{{ t('regionalDatasets.attribution') }}<input v-model="publicAttribution" maxlength="200" class="regional-input" :disabled="working || disabled" /></label>
+        <label class="regional-check"><input v-model="consent" type="checkbox" :disabled="working || disabled" />{{ t('regionalDatasets.consent') }}</label>
+        <div class="flex flex-wrap gap-3">
+          <button type="submit" class="regional-button" :disabled="working || disabled || blindContaminated || !heardBoth || !listenerScope.trim() || !!publicAttribution && !consent">{{ t('regionalDatasets.saveBlind') }}</button>
+          <button type="button" class="regional-button" :disabled="working || disabled" @click="showLabeledArms">{{ t('regionalDatasets.showLabels') }}</button>
+        </div>
+      </form>
+      <p v-if="blindReveal" role="status" class="text-sm text-text">{{ t('regionalDatasets.blindReveal', { a: t(`regionalDatasets.preferenceOptions.${blindReveal.label_a_arm}`), b: t(`regionalDatasets.preferenceOptions.${blindReveal.label_b_arm}`), preference: t(`regionalDatasets.preferenceOptions.${blindReveal.decoded_preference}`) }) }}</p>
+      <p v-if="bothOutputs" class="text-sm text-text-dim">{{ t('regionalDatasets.listenerCount', { count: comparison.listener_reviews, blind: comparison.blind_reviews ?? 0 }) }}</p>
+      <div v-if="!(blindSession && !blindReveal)" class="space-y-3 border-t border-border pt-4">
+        <button type="button" class="regional-button" :disabled="working || disabled" @click="loadModelCard">{{ t('regionalDatasets.modelCard') }}</button>
+        <div v-if="modelCard" class="space-y-2 text-sm text-text-dim">
+          <h4 class="font-medium text-text">{{ t('regionalDatasets.modelCardTitle') }}</h4>
+          <p v-for="notice in modelCard.notices" :key="notice.code">{{ t(`regionalDatasets.modelCardNotices.${notice.code}`) }}</p>
+          <p>{{ t('regionalDatasets.modelCardTraining', { tradition: modelCard.tradition, train: modelCard.training_recordings, holdout: modelCard.holdout_recordings, excluded: modelCard.excluded_recordings }) }}</p>
+          <p>{{ t(modelCard.declared_adapter_distribution_permitted ? 'regionalDatasets.modelCardDistributionDeclared' : 'regionalDatasets.modelCardDistributionUndeclared') }}</p>
+          <p>{{ t('regionalDatasets.modelCardReviews', { identified: modelCard.listener_reviews, unlabeled: modelCard.blind_reviews }) }}</p>
+          <p v-if="modelCard.attributions.length === 0">{{ t('regionalDatasets.modelCardNoAttribution') }}</p>
+          <ul v-else class="space-y-1"><li v-for="item in modelCard.attributions" :key="`${item.source}:${item.text}`">{{ item.text }}</li></ul>
+          <p class="break-all">{{ modelCard.adapter_name }} · {{ modelCard.adapter_sha256 }}</p>
+          <CollapsibleDetails v-if="modelCard.hashes.length" :summary="t('regionalDatasets.modelCardHashes')"><p v-for="item in modelCard.hashes" :key="`${item.role}:${item.sha256}`" class="break-all text-xs">{{ t(`regionalDatasets.hashRoles.${item.role}`) }} · {{ item.sha256 }}</p></CollapsibleDetails>
+        </div>
+      </div>
     </div>
     <CollapsibleDetails v-if="comparisons.length > 1" :summary="t('regionalDatasets.comparisonHistory')"><div class="space-y-2"><button v-for="state in comparisons" :key="state.plan.spec.id" type="button" class="regional-button block max-w-full break-words text-left" :disabled="working || disabled" @click="action(async (signal, current) => { const response = await api.getRegionalComparison(state.plan.spec.id, signal); if (current()) comparison = response })">{{ state.plan.spec.created_at }} · {{ state.plan.spec.request.request.prompt.slice(0, 100) }}</button></div></CollapsibleDetails>
   </section>

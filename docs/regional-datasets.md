@@ -158,13 +158,32 @@ runtime identity remains unverified.
 
 Listening reviews bind the specification and both exact collected output hashes.
 They record the reviewer's declared scope, separate dimensions, preference and
-rejection notes. Public reviewer attribution requires consent. The current UI is
-an identified comparison, not a blinded panel. A saved rating or completed job
-does not change `quality_status="unverified"` or approve distribution.
+rejection notes. Public reviewer attribution requires consent. The identified form
+keeps the arm names visible. A separate local action stores one random A/B
+assignment per comparison and reviewer reference before playback, reuses it on
+refresh, and refuses it if either retained output hash changes. The session and
+clip URLs use labels A and B. Saving sends the hashes of the clips that were
+presented; the response then reveals which arm was A, which was B, and the
+decoded preference. Opening the labeled view after that assignment is shown ends
+the presentation in the UI. The same reviewer reference can exist on both the
+identified review and the unlabeled review. A saved rating, a completed job, or
+an unlabeled review does not change `quality_status="unverified"` or approve
+distribution. This is a local presentation control. It does not recruit a
+listener, supervise a panel, or stop someone with database access from reading
+the stored assignment.
+
+A source-bound model card can be read for a saved comparison. It repeats the
+manifest counts, adapter identity, training settings, measured runtime when one
+was stored, collected output hashes, public attributions, and hashes of sources,
+rights evidence and prepared excerpts. It omits private reviewer references,
+rights-document references, reviewer names, captions, filenames and rating
+scores. Its distribution status stays `not_approved` even when the saved split
+marks adapter distribution as permitted. Changing a retained output makes the
+card refuse rather than repeat the old hash.
 
 No FAD/CLAP/instrument-classifier models are installed or run by these checks.
 Those metrics and cultural authenticity remain unavailable. These checks trained
 no regional adapter and recruited no musician panel; no improvement, commercial
-clearance or release readiness is claimed. Automated blinded panels, public model
-card/export packaging and release approval remain separate work. Existing local
-adapter downloads do not acquire dataset distribution permission.
+clearance or release readiness is claimed. A supervised blinded panel, copying
+the adapter into an export folder, and release approval remain separate work.
+Existing local adapter downloads do not acquire dataset distribution permission.

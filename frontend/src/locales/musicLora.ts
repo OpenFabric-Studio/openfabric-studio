@@ -8,7 +8,7 @@ export const musicLoraEn = {
   nameUnique: 'Choose a unique name for this model. Starting again creates a new run.',
   formatHint: 'Native .safetensors only, up to 512 MiB. Stable Audio requires its lora_config metadata for the matching base; YuE requires unfused AR or NAR weights. Other PEFT checkpoints with a companion JSON are not supported here.',
   history: 'Managed adapters', empty: 'No adapters have been imported or trained yet.', download: 'Export adapter', refresh: 'Refresh',
-  select: 'LoRA adapter', off: 'Off — use the base model', strength: 'Adapter strength', selectorHint: 'Only adapters matching this engine and target are listed.', manage: 'Manage or train music adapters',
+  select: 'LoRA adapter', off: 'Off — use the base model', baseOnly: 'Base', strength: 'Adapter strength', selectorHint: 'Only adapters matching this engine and target are listed.', manage: 'Manage or train music adapters',
   invalidStrength: 'Enter a strength between 0 and 2. The last valid strength remains selected.', selectionCleared: 'The previous adapter is unavailable or incompatible and was turned off. Choose a compatible adapter before generating.',
   arAdapter: 'AR autoregressive adapter', narAdapter: 'NAR acoustic adapter', yueHint: 'YuE loads independent AR autoregressive and NAR acoustic adapters. Compatible unfused SafeTensors only.', narStrengthHint: 'NAR projection replacements remain at full strength for any nonzero setting.',
   stableTraining: 'Train a Stable Audio 3 adapter', fresh: 'Each job starts fresh using the first 600 seconds of each track. Private audio copies, latents and checkpoints remain on disk and use storage. Training continues after navigation. There is no full-state resume option.',

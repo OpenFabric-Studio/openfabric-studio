@@ -4484,6 +4484,59 @@ export type RegionalAcousticScanRequest = {
   "submission_key": string
 }
 
+export type RegionalAttributionNotice = {
+  "source": "rights_record" | "listening_review" | "publisher_declaration"
+  "text": string
+}
+
+export type RegionalBlindClip = {
+  "label": "a" | "b"
+  "output_sha256": string
+  "audio_url": string
+}
+
+export type RegionalBlindReveal = {
+  "comparison_id": string
+  "reviewer_reference": string
+  "label_a_arm": "base" | "adapter"
+  "label_b_arm": "base" | "adapter"
+  "decoded_preference": "base" | "adapter" | "tie" | "neither"
+  "quality_status"?: "unverified"
+  "blind_reviews": number
+}
+
+export type RegionalBlindReview = {
+  "comparison_sha256": string
+  "assignment_sha256": string
+  "label_a_sha256": string
+  "label_b_sha256": string
+  "reviewer_reference": string
+  "reviewed_at": string
+  "tradition_scope": string
+  "preference": "a" | "b" | "tie" | "neither"
+  "timbre": number
+  "phrasing": number
+  "rhythm": number
+  "coherence": number
+  "artifacts": number
+  "cultural_appropriateness": number
+  "notes"?: string
+  "public_attribution"?: string
+  "attribution_consented"?: boolean
+}
+
+export type RegionalBlindSession = {
+  "comparison_id": string
+  "comparison_sha256": string
+  "reviewer_reference": string
+  "assignment_sha256": string
+  "clips": Array<RegionalBlindClip>
+}
+
+export type RegionalBlindSessionRequest = {
+  "reviewer_reference": string
+}
+
 export type RegionalComparisonArm = {
   "arm": "base" | "adapter"
   "job"?: (LocalMusicJob | null)
@@ -4516,6 +4569,7 @@ export type RegionalComparisonState = {
   "plan": RegionalComparisonPlan
   "arms": Array<RegionalComparisonArm>
   "listener_reviews": number
+  "blind_reviews"?: number
 }
 
 export type RegionalComparisons = {
@@ -4589,6 +4643,11 @@ export type RegionalExcerpt = {
   "end_frame": number
 }
 
+export type RegionalHashNotice = {
+  "role": "source_recording" | "rights_evidence" | "prepared_excerpt" | "comparison_output"
+  "sha256": string
+}
+
 export type RegionalListeningReview = {
   "comparison_sha256": string
   "base_output_sha256": string
@@ -4635,6 +4694,52 @@ export type RegionalMeasuredRuntime = {
   "machine": string
   "mlx_version": string
   "numpy_version": string
+}
+
+export type RegionalModelCard = {
+  "comparison_id": string
+  "comparison_sha256": string
+  "quality_status"?: "unverified"
+  "distribution_status"?: "not_approved"
+  "notices": Array<RegionalModelCardNotice>
+  "tradition": string
+  "manifest_id": string
+  "manifest_sha256": string
+  "training_recordings": number
+  "holdout_recordings": number
+  "excluded_recordings": number
+  "training_excerpts": number
+  "held_out_excerpts": number
+  "declared_adapter_distribution_permitted": boolean
+  "declared_source_redistribution_permitted": boolean
+  "adapter_id": string
+  "adapter_name": string
+  "adapter_sha256": string
+  "adapter_target": "small-music" | "medium"
+  "training_rank": 8 | 16 | 32
+  "training_max_steps": number
+  "training_learning_rate": number
+  "training_seed": number
+  "training_request_sha256": string
+  "training_dataset_sha256": string
+  "training_identity_status": "worker_measured" | "unavailable"
+  "runtime"?: (RegionalMeasuredRuntime | null)
+  "prompt": string
+  "comparison_seed": number
+  "duration_seconds": number
+  "base_output_sha256"?: (string | null)
+  "adapter_output_sha256"?: (string | null)
+  "generation_runtime_identity"?: "unverified"
+  "unavailable_metrics"?: Array<"fad" | "clap" | "instrument_classifier" | "cultural_authenticity">
+  "listener_reviews": number
+  "blind_reviews": number
+  "attributions": Array<RegionalAttributionNotice>
+  "hashes": Array<RegionalHashNotice>
+}
+
+export type RegionalModelCardNotice = {
+  "code": "quality_unverified" | "metrics_unavailable" | "listening_not_a_panel" | "generation_runtime_unverified" | "distribution_not_approved"
+  "text": string
 }
 
 export type RegionalPermissions = {
@@ -36646,6 +36751,11 @@ const schemas = {
         "maximum": 10000,
         "minimum": 0,
         "type": "integer"
+      },
+      "blind_reviews": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
       }
     },
     "required": [
@@ -36774,6 +36884,613 @@ const schemas = {
       "coherence",
       "artifacts",
       "cultural_appropriateness"
+    ],
+    "type": "object"
+  },
+  "RegionalBlindSessionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "reviewer_reference": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "reviewer_reference"
+    ],
+    "type": "object"
+  },
+  "RegionalBlindClip": {
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "enum": [
+          "a",
+          "b"
+        ],
+        "type": "string"
+      },
+      "output_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "audio_url": {
+        "maxLength": 220,
+        "pattern": "^/api/music/regional-datasets/comparisons/[0-9a-f]{32}/blind/[A-Za-z0-9][A-Za-z0-9_-]{0,119}/audio/[ab]$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "label",
+      "output_sha256",
+      "audio_url"
+    ],
+    "type": "object"
+  },
+  "RegionalBlindSession": {
+    "additionalProperties": false,
+    "properties": {
+      "comparison_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "comparison_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "reviewer_reference": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        "type": "string"
+      },
+      "assignment_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "clips": {
+        "items": {
+          "$ref": "#/$defs/RegionalBlindClip"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "comparison_id",
+      "comparison_sha256",
+      "reviewer_reference",
+      "assignment_sha256",
+      "clips"
+    ],
+    "type": "object"
+  },
+  "RegionalBlindReview": {
+    "additionalProperties": false,
+    "properties": {
+      "comparison_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "assignment_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "label_a_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "label_b_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "reviewer_reference": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "maxLength": 10,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "tradition_scope": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "preference": {
+        "enum": [
+          "a",
+          "b",
+          "tie",
+          "neither"
+        ],
+        "type": "string"
+      },
+      "timbre": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "phrasing": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "rhythm": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "coherence": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "artifacts": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "cultural_appropriateness": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "notes": {
+        "maxLength": 4000,
+        "type": "string"
+      },
+      "public_attribution": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "attribution_consented": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "comparison_sha256",
+      "assignment_sha256",
+      "label_a_sha256",
+      "label_b_sha256",
+      "reviewer_reference",
+      "reviewed_at",
+      "tradition_scope",
+      "preference",
+      "timbre",
+      "phrasing",
+      "rhythm",
+      "coherence",
+      "artifacts",
+      "cultural_appropriateness"
+    ],
+    "type": "object"
+  },
+  "RegionalBlindReveal": {
+    "additionalProperties": false,
+    "properties": {
+      "comparison_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "reviewer_reference": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        "type": "string"
+      },
+      "label_a_arm": {
+        "enum": [
+          "base",
+          "adapter"
+        ],
+        "type": "string"
+      },
+      "label_b_arm": {
+        "enum": [
+          "base",
+          "adapter"
+        ],
+        "type": "string"
+      },
+      "decoded_preference": {
+        "enum": [
+          "base",
+          "adapter",
+          "tie",
+          "neither"
+        ],
+        "type": "string"
+      },
+      "quality_status": {
+        "const": "unverified",
+        "type": "string"
+      },
+      "blind_reviews": {
+        "maximum": 10000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "comparison_id",
+      "reviewer_reference",
+      "label_a_arm",
+      "label_b_arm",
+      "decoded_preference",
+      "blind_reviews"
+    ],
+    "type": "object"
+  },
+  "RegionalAttributionNotice": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "enum": [
+          "rights_record",
+          "listening_review",
+          "publisher_declaration"
+        ],
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "text"
+    ],
+    "type": "object"
+  },
+  "RegionalHashNotice": {
+    "additionalProperties": false,
+    "properties": {
+      "role": {
+        "enum": [
+          "source_recording",
+          "rights_evidence",
+          "prepared_excerpt",
+          "comparison_output"
+        ],
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "role",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "RegionalModelCardNotice": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "enum": [
+          "quality_unverified",
+          "metrics_unavailable",
+          "listening_not_a_panel",
+          "generation_runtime_unverified",
+          "distribution_not_approved"
+        ],
+        "type": "string"
+      },
+      "text": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "code",
+      "text"
+    ],
+    "type": "object"
+  },
+  "RegionalModelCard": {
+    "additionalProperties": false,
+    "properties": {
+      "comparison_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "comparison_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "quality_status": {
+        "const": "unverified",
+        "type": "string"
+      },
+      "distribution_status": {
+        "const": "not_approved",
+        "type": "string"
+      },
+      "notices": {
+        "items": {
+          "$ref": "#/$defs/RegionalModelCardNotice"
+        },
+        "maxItems": 5,
+        "minItems": 5,
+        "type": "array"
+      },
+      "tradition": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "training_recordings": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "holdout_recordings": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "excluded_recordings": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "training_excerpts": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "held_out_excerpts": {
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "declared_adapter_distribution_permitted": {
+        "type": "boolean"
+      },
+      "declared_source_redistribution_permitted": {
+        "type": "boolean"
+      },
+      "adapter_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "adapter_name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "adapter_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "adapter_target": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "training_rank": {
+        "enum": [
+          8,
+          16,
+          32
+        ],
+        "type": "integer"
+      },
+      "training_max_steps": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "training_learning_rate": {
+        "maximum": 0.01,
+        "minimum": 1e-07,
+        "type": "number"
+      },
+      "training_seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "training_request_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "training_dataset_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "training_identity_status": {
+        "enum": [
+          "worker_measured",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "runtime": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalMeasuredRuntime"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "comparison_seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "duration_seconds": {
+        "maximum": 380,
+        "minimum": 5,
+        "type": "integer"
+      },
+      "base_output_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "adapter_output_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "generation_runtime_identity": {
+        "const": "unverified",
+        "type": "string"
+      },
+      "unavailable_metrics": {
+        "items": {
+          "enum": [
+            "fad",
+            "clap",
+            "instrument_classifier",
+            "cultural_authenticity"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 4,
+        "type": "array"
+      },
+      "listener_reviews": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "blind_reviews": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "attributions": {
+        "items": {
+          "$ref": "#/$defs/RegionalAttributionNotice"
+        },
+        "maxItems": 10000,
+        "type": "array"
+      },
+      "hashes": {
+        "items": {
+          "$ref": "#/$defs/RegionalHashNotice"
+        },
+        "maxItems": 2500,
+        "type": "array"
+      }
+    },
+    "required": [
+      "comparison_id",
+      "comparison_sha256",
+      "notices",
+      "tradition",
+      "manifest_id",
+      "manifest_sha256",
+      "training_recordings",
+      "holdout_recordings",
+      "excluded_recordings",
+      "training_excerpts",
+      "held_out_excerpts",
+      "declared_adapter_distribution_permitted",
+      "declared_source_redistribution_permitted",
+      "adapter_id",
+      "adapter_name",
+      "adapter_sha256",
+      "adapter_target",
+      "training_rank",
+      "training_max_steps",
+      "training_learning_rate",
+      "training_seed",
+      "training_request_sha256",
+      "training_dataset_sha256",
+      "training_identity_status",
+      "prompt",
+      "comparison_seed",
+      "duration_seconds",
+      "listener_reviews",
+      "blind_reviews",
+      "attributions",
+      "hashes"
     ],
     "type": "object"
   },
@@ -49357,6 +50074,46 @@ function isRegionalListeningReview(value: unknown): value is RegionalListeningRe
 }
 export function parseRegionalListeningReview(value: unknown): RegionalListeningReview {
   if (!isRegionalListeningReview(value)) throw new TypeError("Invalid RegionalListeningReview response")
+  return value
+}
+
+function isRegionalBlindSessionRequest(value: unknown): value is RegionalBlindSessionRequest {
+  return decodeSchema(schemas.RegionalBlindSessionRequest, value, schemas)
+}
+export function parseRegionalBlindSessionRequest(value: unknown): RegionalBlindSessionRequest {
+  if (!isRegionalBlindSessionRequest(value)) throw new TypeError("Invalid RegionalBlindSessionRequest response")
+  return value
+}
+
+function isRegionalBlindSession(value: unknown): value is RegionalBlindSession {
+  return decodeSchema(schemas.RegionalBlindSession, value, schemas)
+}
+export function parseRegionalBlindSession(value: unknown): RegionalBlindSession {
+  if (!isRegionalBlindSession(value)) throw new TypeError("Invalid RegionalBlindSession response")
+  return value
+}
+
+function isRegionalBlindReview(value: unknown): value is RegionalBlindReview {
+  return decodeSchema(schemas.RegionalBlindReview, value, schemas)
+}
+export function parseRegionalBlindReview(value: unknown): RegionalBlindReview {
+  if (!isRegionalBlindReview(value)) throw new TypeError("Invalid RegionalBlindReview response")
+  return value
+}
+
+function isRegionalBlindReveal(value: unknown): value is RegionalBlindReveal {
+  return decodeSchema(schemas.RegionalBlindReveal, value, schemas)
+}
+export function parseRegionalBlindReveal(value: unknown): RegionalBlindReveal {
+  if (!isRegionalBlindReveal(value)) throw new TypeError("Invalid RegionalBlindReveal response")
+  return value
+}
+
+function isRegionalModelCard(value: unknown): value is RegionalModelCard {
+  return decodeSchema(schemas.RegionalModelCard, value, schemas)
+}
+export function parseRegionalModelCard(value: unknown): RegionalModelCard {
+  if (!isRegionalModelCard(value)) throw new TypeError("Invalid RegionalModelCard response")
   return value
 }
 

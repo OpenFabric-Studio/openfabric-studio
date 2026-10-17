@@ -5,7 +5,7 @@ import { i18n } from '../../i18n'
 import * as api from '../../api/regionalDatasets'
 import * as training from '../../api/stableLora'
 import { ApiError } from '../../api/http'
-import type { RegionalDatasetReview as RegionalReview, RegionalRecordingInspection } from '../../api/generated'
+import type { RegionalComparisonState, RegionalDatasetReview as RegionalReview, RegionalModelCard, RegionalPreparationJob, RegionalRecordingInspection } from '../../api/generated'
 import RegionalDatasetReview from './RegionalDatasetReview.vue'
 import { acousticJobFixture, acousticReviewFixture } from './regionalAcousticTestFixtures'
 
@@ -22,7 +22,7 @@ vi.mock('../../api/regionalDatasets', () => ({ inspectRegionalRecording: vi.fn()
   getRegionalPreparation: vi.fn(), saveRegionalReview: vi.fn(), previewRegionalDataset: vi.fn(), prepareRegionalDataset: vi.fn(),
   regionalTrainingSelection: vi.fn(), controlRegionalPreparation: vi.fn(), submitRegionalTraining: vi.fn(),
   listRegionalComparisons: vi.fn(), getRegionalComparison: vi.fn(), createRegionalComparison: vi.fn(),
-  controlRegionalArm: vi.fn(), saveRegionalListeningReview: vi.fn(), regionalExcerptUrl: vi.fn(), listRegionalAcousticScans: vi.fn(), startRegionalAcousticScan: vi.fn(), getRegionalAcousticScan: vi.fn(), cancelRegionalAcousticScan: vi.fn(), regionalAcousticAuditionUrl: vi.fn() }))
+  controlRegionalArm: vi.fn(), saveRegionalListeningReview: vi.fn(), openRegionalBlindSession: vi.fn(), saveRegionalBlindReview: vi.fn(), getRegionalModelCard: vi.fn(), regionalExcerptUrl: vi.fn(), listRegionalAcousticScans: vi.fn(), startRegionalAcousticScan: vi.fn(), getRegionalAcousticScan: vi.fn(), cancelRegionalAcousticScan: vi.fn(), regionalAcousticAuditionUrl: vi.fn() }))
 vi.mock('../../api/stableLora', () => ({ stableLoraStatus: vi.fn(), listStableLora: vi.fn(), getStableLora: vi.fn(), cancelStableLora: vi.fn() }))
 
 let app: App | undefined
@@ -133,3 +133,87 @@ it('saves acoustic grouping through a new review revision before any preparation
   expect(node.textContent).toContain('The scan and decisions were saved')
   expect(api.prepareRegionalDataset).not.toHaveBeenCalled(); expect(api.submitRegionalTraining).not.toHaveBeenCalled()
 })
+
+it('hides arm names during an unlabeled review and reveals them only after save', async () => {
+  const preparationId = '1'.repeat(32), datasetId = 'a'.repeat(32), comparisonId = 'b'.repeat(32)
+  const manifestSha = '9'.repeat(64), planSha = 'c'.repeat(64), baseHash = '1'.repeat(64), adapterHash = '2'.repeat(64)
+  const review: RegionalReview = { revision: 1, sha256: 'e'.repeat(64), created_at: '2026-10-17T00:00:00Z', request: {
+    dataset_id: datasetId, dataset_revision: 1, expected_revision: 0, tradition: 'Fixture tradition', recordings: [], excerpts: [] } }
+  const prepared: RegionalPreparationJob = { id: preparationId, status: 'done', created_at: review.created_at, request: {
+    dataset_id: datasetId, review_revision: 1, review_sha256: review.sha256, submission_key: 'f'.repeat(32) }, result: { sha256: manifestSha, manifest: {
+      id: preparationId, dataset_id: datasetId, review_revision: 1, review_sha256: review.sha256, created_at: review.created_at, tradition: review.request.tradition,
+      split_seed: 42, recordings: [], excerpts: [], split: { recordings: [], independent_groups: 0, training_recordings: 0, holdout_recordings: 0, evaluation_sufficient: false, warnings: [] } } } }
+  const state: RegionalComparisonState = { listener_reviews: 1, blind_reviews: 0, arms: [
+    { arm: 'base', output_sha256: baseHash, audio_url: `/api/music/regional-datasets/comparisons/${comparisonId}/audio/base` },
+    { arm: 'adapter', output_sha256: adapterHash, audio_url: `/api/music/regional-datasets/comparisons/${comparisonId}/audio/adapter` } ],
+  plan: { sha256: planSha, spec: { id: comparisonId, created_at: review.created_at, held_out_excerpt_ids: [], publisher_declarations: {}, quality_status: 'unverified',
+    request: { manifest_id: preparationId, manifest_sha256: manifestSha, submission_key: 'a'.repeat(32), adapter_id: 'd'.repeat(32), adapter_sha256: '8'.repeat(64),
+      request: { engine: 'stable_audio3', prompt: 'Held-out phrase', duration_seconds: 5, seed: 7 } },
+    adapter: { id: 'd'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Fixture', sha256: '8'.repeat(64), created_at: review.created_at },
+    training_job_id: 'e'.repeat(32), training_request: { name: 'Fixture', samples: [{ caption: 'Reviewed phrase' }] },
+    training_receipt: { job_id: 'e'.repeat(32), request_sha256: '7'.repeat(64), dataset_sha256: '6'.repeat(64), identity_status: 'unavailable' } } } }
+  vi.mocked(api.getRegionalPreparation).mockResolvedValue(prepared)
+  vi.mocked(api.loadRegionalReview).mockResolvedValue(review)
+  vi.mocked(api.regionalTrainingSelection).mockResolvedValue({ manifest_id: preparationId, manifest_sha256: manifestSha, samples: [], held_out_excerpts: 0, evaluation_sufficient: false, adapter_distribution_permitted: false })
+  vi.mocked(api.listRegionalComparisons).mockResolvedValue({ comparisons: [state] })
+  vi.mocked(api.openRegionalBlindSession).mockResolvedValue({ comparison_id: comparisonId, comparison_sha256: planSha, reviewer_reference: 'listener-one', assignment_sha256: 'd'.repeat(64), clips: [
+    { label: 'a', output_sha256: adapterHash, audio_url: `/api/music/regional-datasets/comparisons/${comparisonId}/blind/listener-one/audio/a` },
+    { label: 'b', output_sha256: baseHash, audio_url: `/api/music/regional-datasets/comparisons/${comparisonId}/blind/listener-one/audio/b` } ] })
+  vi.mocked(api.saveRegionalBlindReview).mockResolvedValue({ comparison_id: comparisonId, reviewer_reference: 'listener-one', label_a_arm: 'adapter', label_b_arm: 'base', decoded_preference: 'adapter', quality_status: 'unverified', blind_reviews: 1 })
+  vi.mocked(api.getRegionalComparison).mockResolvedValue({ ...state, blind_reviews: 1 })
+  localStorage.setItem('openfabric-regional-preparation-v1', preparationId)
+  const node = await mount()
+  expect(node.querySelector('audio[aria-label="Base"]')).toBeTruthy()
+  expect(node.textContent).toContain('1 saved identified listener reviews and 0 saved unlabeled reviews')
+  const listener = labeled(node, 'Private reviewer reference'), scope = labeled(node, 'Musician/reviewer tradition'), heard = labeled(node, 'I listened to both exact retained')
+  listener.value = 'listener-one'; listener.dispatchEvent(new Event('input', { bubbles: true }))
+  scope.value = 'Fixture scope'; scope.dispatchEvent(new Event('input', { bubbles: true }))
+  heard.checked = true; heard.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  expect(button(node, 'Hide arm labels and review A/B').disabled).toBe(false)
+  button(node, 'Hide arm labels and review A/B').click(); await settle()
+  const clips = [...node.querySelectorAll('audio')]
+  expect(clips.map(item => item.getAttribute('aria-label'))).toEqual(['Clip A', 'Clip B'])
+  expect(clips.every(item => !item.getAttribute('src')?.includes('/audio/base') && !item.getAttribute('src')?.includes('/audio/adapter'))).toBe(true)
+  expect(node.textContent).not.toContain('Show source-bound model card')
+  expect(node.textContent).not.toContain('Save listening review against these exact outputs')
+  button(node, 'Show arm labels and end this blind presentation').click(); await settle()
+  expect(node.textContent).toContain('Arm labels were opened after this assignment')
+  expect(node.querySelector('audio[aria-label="Base"]')).toBeTruthy()
+  button(node, 'Hide arm labels and review A/B').click(); await settle()
+  expect(node.textContent).not.toContain('Arm labels were opened after this assignment')
+  button(node, 'Save unlabeled review and reveal the assignment').click(); await settle()
+  const saved = vi.mocked(api.saveRegionalBlindReview).mock.calls[0]?.[1]
+  expect(saved?.preference).toBe('tie')
+  expect(saved?.label_a_sha256).toBe(adapterHash)
+  expect(saved && 'base_output_sha256' in saved).toBe(false)
+  expect(node.textContent).toContain('Clip A was Adapter. Clip B was Base. The saved preference decodes to Adapter. Quality remains unverified.')
+  expect(node.textContent).toContain('1 saved identified listener reviews and 1 saved unlabeled reviews')
+  vi.mocked(api.getRegionalModelCard).mockResolvedValue(modelCard(comparisonId))
+  button(node, 'Show source-bound model card').click(); await settle()
+  expect(node.textContent).toContain('Quality is unverified.')
+  expect(node.textContent).toContain('The saved split does not mark adapter distribution as permitted.')
+  expect(node.textContent).toContain('Example performer, used with scoped permission.')
+  expect(node.textContent).not.toContain('fixture-contract')
+})
+
+function modelCard(comparisonId: string): RegionalModelCard {
+  return { comparison_id: comparisonId, comparison_sha256: 'c'.repeat(64), quality_status: 'unverified', distribution_status: 'not_approved',
+    notices: [
+      { code: 'quality_unverified', text: 'Quality is unverified.' },
+      { code: 'metrics_unavailable', text: 'FAD, CLAP, instrument classification and cultural authenticity were not measured.' },
+      { code: 'listening_not_a_panel', text: 'Saved listening reviews are local records. They are not a recruited panel or a recommendation.' },
+      { code: 'generation_runtime_unverified', text: 'The generation runtime identity was not measured.' },
+      { code: 'distribution_not_approved', text: 'This card does not approve distribution, commercial use, or release.' } ],
+    tradition: 'Fixture tradition', manifest_id: '1'.repeat(32), manifest_sha256: '9'.repeat(64), training_recordings: 1, holdout_recordings: 1,
+    excluded_recordings: 1, training_excerpts: 1, held_out_excerpts: 1, declared_adapter_distribution_permitted: false, declared_source_redistribution_permitted: false,
+    adapter_id: 'd'.repeat(32), adapter_name: 'Fixture', adapter_sha256: '8'.repeat(64), adapter_target: 'small-music', training_rank: 8, training_max_steps: 1,
+    training_learning_rate: 0.0001, training_seed: 1, training_request_sha256: '7'.repeat(64), training_dataset_sha256: '6'.repeat(64), training_identity_status: 'unavailable',
+    prompt: 'Held-out phrase', comparison_seed: 7, duration_seconds: 5, listener_reviews: 1, blind_reviews: 1,
+    attributions: [{ source: 'rights_record', text: 'Example performer, used with scoped permission.' }], hashes: [] }
+}
+
+function labeled(node: ParentNode, caption: string): HTMLInputElement {
+  const input = [...node.querySelectorAll('label')].find(item => item.textContent?.includes(caption))?.querySelector('input')
+  if (!(input instanceof HTMLInputElement)) throw new Error(`Missing ${caption}`)
+  return input
+}

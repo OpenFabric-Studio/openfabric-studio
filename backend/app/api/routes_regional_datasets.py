@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 import logging
+import re
 import sqlite3
 from typing import Literal
 
@@ -23,8 +24,10 @@ from ..regional_dataset_contracts import (RegionalDatasetError, RegionalDatasetI
 from ..stable_lora_contracts import StableLoraTrainingJob
 from ..music_lora_contracts import MusicLoraError
 from ..local_music_contracts import LocalMusicError
-from ..regional_evaluation_contracts import (RegionalComparisonArmId, RegionalComparisonPlan,
-    RegionalComparisonState, RegionalComparisons, RegionalEvaluationRequest, RegionalListeningReview)
+from ..regional_evaluation_contracts import (RegionalBlindLabel, RegionalBlindReveal, RegionalBlindReview,
+    RegionalBlindSession, RegionalBlindSessionRequest, RegionalComparisonArmId, RegionalComparisonPlan,
+    RegionalComparisonState, RegionalComparisons, RegionalEvaluationRequest, RegionalListeningReview,
+    RegionalModelCard)
 from ..regional_acoustic_contracts import RegionalAcousticScanRequest, RegionalAcousticJob, RegionalAcousticJobs
 from ..video_projects import VideoProjectError
 from .routes_music_terms import require_usage
@@ -198,3 +201,26 @@ async def comparison_audio(identifier: MusicAnalysisId, arm: RegionalComparisonA
 @router.post('/comparisons/{identifier}/reviews', response_model=RegionalComparisonState)
 async def listening_review(identifier: MusicAnalysisId, body: RegionalListeningReview) -> RegionalComparisonState:
     return await evaluation.review(identifier, body)
+
+
+@router.post('/comparisons/{identifier}/blind-sessions', response_model=RegionalBlindSession)
+async def blind_session(identifier: MusicAnalysisId, body: RegionalBlindSessionRequest) -> RegionalBlindSession:
+    return await evaluation.open_blind_session(identifier, body.reviewer_reference)
+
+
+@router.get('/comparisons/{identifier}/blind/{reviewer}/audio/{label}')
+async def blind_comparison_audio(identifier: MusicAnalysisId, reviewer: str, label: RegionalBlindLabel) -> FileResponse:
+    if re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,119}', reviewer) is None:
+        raise HTTPException(422, 'regional_dataset_invalid')
+    return FileResponse(await evaluation.blind_audio(identifier, reviewer, label), media_type='audio/wav',
+        filename=evaluation.blind_download_name(label), content_disposition_type='inline', headers={'Cache-Control': 'no-store'})
+
+
+@router.post('/comparisons/{identifier}/blind-reviews', response_model=RegionalBlindReveal)
+async def blind_review(identifier: MusicAnalysisId, body: RegionalBlindReview) -> RegionalBlindReveal:
+    return await evaluation.submit_blind_review(identifier, body)
+
+
+@router.get('/comparisons/{identifier}/model-card', response_model=RegionalModelCard)
+async def comparison_model_card(identifier: MusicAnalysisId) -> RegionalModelCard:
+    return await evaluation.model_card(identifier)

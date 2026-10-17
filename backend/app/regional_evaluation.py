@@ -7,10 +7,11 @@ from contextlib import asynccontextmanager
 import hashlib
 import os
 from pathlib import Path
-from typing import Annotated
+import secrets
+from typing import Annotated, Literal
 import uuid
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from . import db, local_music, music_lora, regional_datasets as datasets, regional_dataset_store as store, stable_lora
 from .contracts import JsonObject
@@ -18,10 +19,12 @@ from .job_lifecycle import await_cleanup, run_owned_thread
 from .local_music_contracts import LocalMusicRequest
 from .module_catalog import available_bytes
 from .music_evidence import capture_music_evidence
-from .regional_dataset_contracts import RegionalContract, RegionalDatasetError, RegionalPreparedSelection
-from .regional_evaluation_contracts import (RegionalComparisonArm, RegionalComparisonArmId, RegionalComparisonPlan,
-    RegionalComparisonSpec, RegionalComparisonState, RegionalComparisons, RegionalEvaluationRequest,
-    RegionalListeningReview, RegionalMeasuredModel, RegionalMeasuredRuntime, RegionalTrainingReceipt)
+from .regional_dataset_contracts import RegionalContract, RegionalDatasetError, RegionalDatasetManifest, RegionalPreparedSelection
+from .regional_evaluation_contracts import (RegionalAttributionNotice, RegionalBlindClip, RegionalBlindLabel,
+    RegionalBlindReveal, RegionalBlindReview, RegionalBlindSession, RegionalComparisonArm, RegionalComparisonArmId,
+    RegionalComparisonPlan, RegionalComparisonSpec, RegionalComparisonState, RegionalComparisons, RegionalEvaluationRequest,
+    RegionalHashNotice, RegionalListeningReview, RegionalMeasuredModel, RegionalMeasuredRuntime, RegionalModelCard,
+    RegionalTrainingReceipt, regional_model_card_notices)
 from .stable_lora_contracts import StableLoraCompletion
 from .stable_lora_runtime import fingerprint
 from .video_io import copy_verified, hash_file
@@ -31,6 +34,19 @@ _reading = 0
 _closing = False
 _idle = asyncio.Event()
 _idle.set()
+
+
+class _BlindAssignment(RegionalContract):
+    comparison_sha256: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
+    label_a_arm: RegionalComparisonArmId
+    label_a_sha256: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
+    label_b_sha256: str = Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')
+
+
+class _BlindReviewRecord(RegionalContract):
+    review: RegionalBlindReview
+    label_a_arm: RegionalComparisonArmId
+    decoded_preference: Literal['base', 'adapter', 'tie', 'neither']
 
 
 class _RuntimeModel(RegionalContract):
@@ -159,7 +175,8 @@ def get(identifier: str) -> RegionalComparisonState:
             audio_url=f'/api/music/regional-datasets/comparisons/{identifier}/audio/{arm}' if checksum is not None else None,
             submission_unverified=bool(row['submitting'])))
     count = db.get_db().execute('SELECT COUNT(*) FROM regional_listening_reviews WHERE comparison_id=?', (identifier,)).fetchone()[0]
-    return RegionalComparisonState(plan=plan, arms=arms, listener_reviews=count)
+    blind = db.get_db().execute('SELECT COUNT(*) FROM regional_blind_reviews WHERE comparison_id=?', (identifier,)).fetchone()[0]
+    return RegionalComparisonState(plan=plan, arms=arms, listener_reviews=count, blind_reviews=blind)
 
 
 def list_comparisons(manifest_id: str) -> RegionalComparisons:
@@ -303,6 +320,214 @@ async def review(identifier: str, body: RegionalListeningReview) -> RegionalComp
             raise RegionalDatasetError('regional_dataset_limit', 422)
         connection.execute('INSERT INTO regional_listening_reviews(comparison_id,reviewer_reference,body_json) VALUES(?,?,?)', (identifier, body.reviewer_reference, body.model_dump_json())); connection.commit()
         return get(identifier)
+
+
+def blind_download_name(label: RegionalBlindLabel) -> str:
+    return f'comparison-{label}.wav'
+
+
+def _other_arm(arm: RegionalComparisonArmId) -> RegionalComparisonArmId:
+    return 'adapter' if arm == 'base' else 'base'
+
+
+def _decoded_preference(preference: Literal['a', 'b', 'tie', 'neither'], label_a_arm: RegionalComparisonArmId) -> Literal['base', 'adapter', 'tie', 'neither']:
+    if preference == 'a':
+        return label_a_arm
+    if preference == 'b':
+        return _other_arm(label_a_arm)
+    return preference
+
+
+def _blind_session(identifier: str, reviewer: str, plan_sha: str, assignment: _BlindAssignment, digest: str) -> RegionalBlindSession:
+    def clip(label: RegionalBlindLabel, checksum: str) -> RegionalBlindClip:
+        return RegionalBlindClip(label=label, output_sha256=checksum,
+            audio_url=f'/api/music/regional-datasets/comparisons/{identifier}/blind/{reviewer}/audio/{label}')
+    clips = [clip('a', assignment.label_a_sha256), clip('b', assignment.label_b_sha256)]
+    return RegionalBlindSession(comparison_id=identifier, comparison_sha256=plan_sha, reviewer_reference=reviewer,
+        assignment_sha256=digest, clips=clips)
+
+
+def _load_assignment(identifier: str, reviewer: str, plan_sha: str, checksums: dict[RegionalComparisonArmId, str]) -> tuple[_BlindAssignment, str]:
+    row = db.get_db().execute('SELECT assignment_sha256,body_json FROM regional_blind_assignments WHERE comparison_id=? AND reviewer_reference=?', (identifier, reviewer)).fetchone()
+    if row is None:
+        raise RegionalDatasetError('regional_dataset_not_found', 404)
+    assignment = _BlindAssignment.model_validate_json(row['body_json'])
+    other = _other_arm(assignment.label_a_arm)
+    if (store.canonical_sha256(assignment) != row['assignment_sha256'] or assignment.comparison_sha256 != plan_sha
+            or assignment.label_a_sha256 != checksums[assignment.label_a_arm] or assignment.label_b_sha256 != checksums[other]):
+        raise RegionalDatasetError('regional_dataset_source_changed')
+    return assignment, row['assignment_sha256']
+
+
+async def open_blind_session(identifier: str, reviewer_reference: str) -> RegionalBlindSession:
+    async with _reading_files(), _lock:
+        state = get(identifier)
+        stored = {item.arm: item.output_sha256 for item in state.arms}
+        if stored['base'] is None or stored['adapter'] is None:
+            raise RegionalDatasetError('regional_dataset_busy')
+        checksums: dict[RegionalComparisonArmId, str] = {'base': stored['base'], 'adapter': stored['adapter']}
+        await audio(identifier, 'base')
+        await audio(identifier, 'adapter')
+        connection = db.get_db()
+        existing = connection.execute('SELECT 1 FROM regional_blind_assignments WHERE comparison_id=? AND reviewer_reference=?', (identifier, reviewer_reference)).fetchone()
+        if existing is None:
+            label_a: RegionalComparisonArmId = 'base' if secrets.choice(('base', 'adapter')) == 'base' else 'adapter'
+            assignment = _BlindAssignment(comparison_sha256=state.plan.sha256, label_a_arm=label_a,
+                label_a_sha256=checksums[label_a], label_b_sha256=checksums[_other_arm(label_a)])
+            digest = store.canonical_sha256(assignment)
+            connection.execute('INSERT INTO regional_blind_assignments(comparison_id,reviewer_reference,assignment_sha256,body_json) VALUES(?,?,?,?)',
+                (identifier, reviewer_reference, digest, assignment.model_dump_json()))
+            connection.commit()
+        else:
+            assignment, digest = _load_assignment(identifier, reviewer_reference, state.plan.sha256, checksums)
+        return _blind_session(identifier, reviewer_reference, state.plan.sha256, assignment, digest)
+
+
+async def blind_audio(identifier: str, reviewer_reference: str, label: RegionalBlindLabel) -> Path:
+    state = get(identifier)
+    stored = {item.arm: item.output_sha256 for item in state.arms}
+    if stored['base'] is None or stored['adapter'] is None:
+        raise RegionalDatasetError('regional_dataset_source_changed')
+    checksums: dict[RegionalComparisonArmId, str] = {'base': stored['base'], 'adapter': stored['adapter']}
+    assignment, _digest = _load_assignment(identifier, reviewer_reference, state.plan.sha256, checksums)
+    arm = assignment.label_a_arm if label == 'a' else _other_arm(assignment.label_a_arm)
+    return await audio(identifier, arm)
+
+
+def _reveal(identifier: str, reviewer: str, record: _BlindReviewRecord, count: int) -> RegionalBlindReveal:
+    return RegionalBlindReveal(comparison_id=identifier, reviewer_reference=reviewer, label_a_arm=record.label_a_arm,
+        label_b_arm=_other_arm(record.label_a_arm), decoded_preference=record.decoded_preference,
+        blind_reviews=count)
+
+
+async def submit_blind_review(identifier: str, body: RegionalBlindReview) -> RegionalBlindReveal:
+    async with _reading_files(), _lock:
+        state = get(identifier)
+        stored = {item.arm: item.output_sha256 for item in state.arms}
+        if stored['base'] is None or stored['adapter'] is None:
+            raise RegionalDatasetError('regional_dataset_source_changed')
+        checksums: dict[RegionalComparisonArmId, str] = {'base': stored['base'], 'adapter': stored['adapter']}
+        assignment, digest = _load_assignment(identifier, body.reviewer_reference, state.plan.sha256, checksums)
+        if (body.comparison_sha256 != state.plan.sha256 or body.assignment_sha256 != digest
+                or body.label_a_sha256 != assignment.label_a_sha256 or body.label_b_sha256 != assignment.label_b_sha256):
+            raise RegionalDatasetError('regional_dataset_source_changed')
+        await blind_audio(identifier, body.reviewer_reference, 'a')
+        await blind_audio(identifier, body.reviewer_reference, 'b')
+        decoded = _decoded_preference(body.preference, assignment.label_a_arm)
+        record = _BlindReviewRecord(review=body, label_a_arm=assignment.label_a_arm, decoded_preference=decoded)
+        connection = db.get_db()
+        old = connection.execute('SELECT body_json FROM regional_blind_reviews WHERE comparison_id=? AND reviewer_reference=?', (identifier, body.reviewer_reference)).fetchone()
+        if old is not None:
+            if _BlindReviewRecord.model_validate_json(old['body_json']) != record:
+                raise RegionalDatasetError('regional_dataset_revision_conflict')
+            count = connection.execute('SELECT COUNT(*) FROM regional_blind_reviews WHERE comparison_id=?', (identifier,)).fetchone()[0]
+            return _reveal(identifier, body.reviewer_reference, record, count)
+        count = connection.execute('SELECT COUNT(*) FROM regional_blind_reviews WHERE comparison_id=?', (identifier,)).fetchone()[0]
+        if count >= 10000:
+            raise RegionalDatasetError('regional_dataset_limit', 422)
+        connection.execute('INSERT INTO regional_blind_reviews(comparison_id,reviewer_reference,body_json) VALUES(?,?,?)',
+            (identifier, body.reviewer_reference, record.model_dump_json()))
+        connection.commit()
+        return _reveal(identifier, body.reviewer_reference, record, count + 1)
+
+
+def _card_attribution(notices: list[RegionalAttributionNotice], seen: set[tuple[str, str]], source: Literal['rights_record', 'listening_review', 'publisher_declaration'], text: str) -> None:
+    cleaned = text.strip()
+    if not cleaned or (source, cleaned) in seen:
+        return
+    seen.add((source, cleaned))
+    notices.append(RegionalAttributionNotice(source=source, text=cleaned))
+
+
+def _card_attributions(identifier: str, manifest: RegionalDatasetManifest, declarations: list[str]) -> list[RegionalAttributionNotice]:
+    notices: list[RegionalAttributionNotice] = []
+    seen: set[tuple[str, str]] = set()
+    try:
+        for recording in sorted(manifest.recordings, key=lambda item: item.review.id):
+            for rights in sorted(recording.review.rights, key=lambda item: item.id):
+                _card_attribution(notices, seen, 'rights_record', rights.public_attribution)
+        connection = db.get_db()
+        for row in connection.execute('SELECT body_json FROM regional_listening_reviews WHERE comparison_id=? ORDER BY reviewer_reference', (identifier,)):
+            review = RegionalListeningReview.model_validate_json(row['body_json'])
+            if review.attribution_consented:
+                _card_attribution(notices, seen, 'listening_review', review.public_attribution)
+        for row in connection.execute('SELECT body_json FROM regional_blind_reviews WHERE comparison_id=? ORDER BY reviewer_reference', (identifier,)):
+            record = _BlindReviewRecord.model_validate_json(row['body_json'])
+            if record.review.attribution_consented:
+                _card_attribution(notices, seen, 'listening_review', record.review.public_attribution)
+        for text in declarations:
+            _card_attribution(notices, seen, 'publisher_declaration', text)
+    except ValidationError:
+        raise RegionalDatasetError('regional_dataset_storage_unavailable', 503) from None
+    return notices
+
+
+def _card_hashes(manifest: RegionalDatasetManifest, outputs: dict[RegionalComparisonArmId, str | None]) -> list[RegionalHashNotice]:
+    notices: list[RegionalHashNotice] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(role: Literal['source_recording', 'rights_evidence', 'prepared_excerpt', 'comparison_output'], checksum: str) -> None:
+        if (role, checksum) in seen:
+            return
+        seen.add((role, checksum))
+        notices.append(RegionalHashNotice(role=role, sha256=checksum))
+
+    for recording in sorted(manifest.recordings, key=lambda item: item.review.id):
+        add('source_recording', recording.review.source_sha256)
+        for rights in sorted(recording.review.rights, key=lambda item: item.id):
+            add('rights_evidence', rights.evidence_sha256)
+    for excerpt in sorted(manifest.excerpts, key=lambda item: item.id):
+        add('prepared_excerpt', excerpt.sha256)
+    for arm in ('base', 'adapter'):
+        checksum = outputs[arm]
+        if checksum is not None:
+            add('comparison_output', checksum)
+    return notices
+
+
+async def model_card(identifier: str) -> RegionalModelCard:
+    async with _reading_files(), _lock:
+        state = get(identifier)
+        spec = state.plan.spec
+        prepared = store.get_manifest(db.get_db(), spec.request.manifest_id)
+        if prepared.sha256 != spec.request.manifest_sha256:
+            raise RegionalDatasetError('regional_dataset_source_changed')
+        manifest = prepared.manifest
+        if {item.id for item in manifest.excerpts if item.split == 'holdout'} != set(spec.held_out_excerpt_ids):
+            raise RegionalDatasetError('regional_dataset_source_changed')
+        outputs: dict[RegionalComparisonArmId, str | None] = {}
+        for arm in state.arms:
+            if arm.output_sha256 is None:
+                outputs[arm.arm] = None
+                continue
+            await audio(identifier, arm.arm)
+            outputs[arm.arm] = arm.output_sha256
+        if set(outputs) != {'base', 'adapter'}:
+            raise RegionalDatasetError('regional_dataset_storage_unavailable', 503)
+        training = [item for item in manifest.split.recordings if item.split == 'train']
+        if spec.adapter.target == 'small-music':
+            adapter_target: Literal['small-music', 'medium'] = 'small-music'
+        elif spec.adapter.target == 'medium':
+            adapter_target = 'medium'
+        else:
+            raise RegionalDatasetError('regional_dataset_source_changed')
+        return RegionalModelCard(comparison_id=identifier, comparison_sha256=state.plan.sha256, notices=regional_model_card_notices(),
+            tradition=manifest.tradition, manifest_id=manifest.id, manifest_sha256=prepared.sha256,
+            training_recordings=manifest.split.training_recordings, holdout_recordings=manifest.split.holdout_recordings,
+            excluded_recordings=sum(item.split == 'excluded' for item in manifest.split.recordings),
+            training_excerpts=sum(item.split == 'train' for item in manifest.excerpts), held_out_excerpts=len(spec.held_out_excerpt_ids),
+            declared_adapter_distribution_permitted=bool(training) and all(item.adapter_distribution_permitted for item in training),
+            declared_source_redistribution_permitted=bool(training) and all(item.source_redistribution_permitted for item in training),
+            adapter_id=spec.adapter.id, adapter_name=spec.adapter.name, adapter_sha256=spec.adapter.sha256, adapter_target=adapter_target,
+            training_rank=spec.training_request.rank, training_max_steps=spec.training_request.max_steps,
+            training_learning_rate=spec.training_request.learning_rate, training_seed=spec.training_request.seed,
+            training_request_sha256=spec.training_receipt.request_sha256, training_dataset_sha256=spec.training_receipt.dataset_sha256,
+            training_identity_status=spec.training_receipt.identity_status, runtime=spec.training_receipt.runtime, prompt=spec.request.request.prompt,
+            comparison_seed=spec.request.request.seed, duration_seconds=spec.request.request.duration_seconds,
+            base_output_sha256=outputs['base'], adapter_output_sha256=outputs['adapter'],
+            listener_reviews=state.listener_reviews, blind_reviews=state.blind_reviews,
+            attributions=_card_attributions(identifier, manifest, list(spec.publisher_declarations.public_attributions)),
+            hashes=_card_hashes(manifest, outputs))
 
 
 async def recover() -> None:

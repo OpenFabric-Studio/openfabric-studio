@@ -6,10 +6,11 @@ import { parseRegionalDatasetInspectionRequest, parseRegionalRecordingInspection
   parseRegionalPreparationRequest, parseRegionalPreparationJob, parseRegionalPreparationJobs,
   parseRegionalPreparedSelection, parseRegionalTrainingSelection, parseRegionalTrainingSubmission,
   parseStableLoraTrainingJob, parseRegionalEvaluationRequest, parseRegionalComparisonPlan,
-  parseRegionalComparisonState, parseRegionalComparisons, parseRegionalListeningReview } from './generated'
+  parseRegionalComparisonState, parseRegionalComparisons, parseRegionalListeningReview, parseRegionalBlindSessionRequest,
+  parseRegionalBlindSession, parseRegionalBlindReview, parseRegionalBlindReveal, parseRegionalModelCard } from './generated'
 import type { RegionalDatasetInspectionRequest, RegionalDatasetReviewRequest, RegionalManifestSelection,
   RegionalPreparationRequest, RegionalPreparedSelection, RegionalTrainingSubmission, RegionalComparisonState,
-  RegionalEvaluationRequest, RegionalListeningReview } from './generated'
+  RegionalEvaluationRequest, RegionalListeningReview, RegionalBlindSessionRequest, RegionalBlindReview } from './generated'
 
 const base = '/api/music/regional-datasets'
 function id(value: string): string {
@@ -181,4 +182,41 @@ export async function controlRegionalArm(identifier: string, arm: 'base' | 'adap
 export async function saveRegionalListeningReview(identifier: string, body: RegionalListeningReview, signal?: AbortSignal) {
   const checked = id(identifier)
   return write(`/comparisons/${checked}/reviews`, parseRegionalListeningReview(body), value => boundState(value, checked), signal)
+}
+function reviewer(value: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,119}$/.test(value)) throw new TypeError('Invalid reviewer reference')
+  return value
+}
+export async function openRegionalBlindSession(identifier: string, body: RegionalBlindSessionRequest, signal?: AbortSignal) {
+  const checked = id(identifier)
+  const request = parseRegionalBlindSessionRequest(body)
+  reviewer(request.reviewer_reference)
+  return write(`/comparisons/${checked}/blind-sessions`, request, value => {
+    const session = parseRegionalBlindSession(value)
+    if (session.comparison_id !== checked || session.reviewer_reference !== request.reviewer_reference
+      || session.clips.map(clip => clip.label).join() !== 'a,b'
+      || session.clips.some(clip => !clip.audio_url.endsWith(`/blind/${request.reviewer_reference}/audio/${clip.label}`))) throw new TypeError('Mismatched blind session')
+    return session
+  }, signal)
+}
+const modelCardNotices = ['quality_unverified', 'metrics_unavailable', 'listening_not_a_panel', 'generation_runtime_unverified', 'distribution_not_approved']
+export async function getRegionalModelCard(identifier: string, signal?: AbortSignal) {
+  const checked = id(identifier)
+  return apiFetch(`${base}/comparisons/${checked}/model-card`, { signal }, value => {
+    const card = parseRegionalModelCard(value)
+    if (card.comparison_id !== checked || card.quality_status !== 'unverified' || card.distribution_status !== 'not_approved'
+      || card.notices.map(item => item.code).join() !== modelCardNotices.join()) throw new TypeError('Mismatched regional model card')
+    return card
+  })
+}
+export async function saveRegionalBlindReview(identifier: string, body: RegionalBlindReview, signal?: AbortSignal) {
+  const checked = id(identifier)
+  const request = parseRegionalBlindReview(body)
+  reviewer(request.reviewer_reference)
+  return write(`/comparisons/${checked}/blind-reviews`, request, value => {
+    const reveal = parseRegionalBlindReveal(value)
+    if (reveal.comparison_id !== checked || reveal.reviewer_reference !== request.reviewer_reference
+      || reveal.quality_status !== 'unverified' || new Set([reveal.label_a_arm, reveal.label_b_arm]).size !== 2) throw new TypeError('Mismatched blind review')
+    return reveal
+  }, signal)
 }

@@ -24,7 +24,7 @@ from app.stable_lora_contracts import StableLoraTrainingRequest
 from app.stable_lora_contracts import StableLoraTrainingJob
 from app.music_lora_contracts import MusicAdapter
 from app.local_music_contracts import LocalMusicJob, LocalMusicRequest
-from app.regional_evaluation_contracts import RegionalEvaluationRequest, RegionalTrainingReceipt, RegionalListeningReview
+from app.regional_evaluation_contracts import RegionalBlindReview, RegionalEvaluationRequest, RegionalTrainingReceipt, RegionalListeningReview
 from app.stable_lora_runtime import fingerprint
 from app.regional_dataset_contracts_test import recording
 from app.regional_acoustic_contracts import RegionalAcousticScanRequest, RegionalAcousticReview, RegionalAcousticDecision
@@ -564,6 +564,54 @@ class RegionalPreparationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(state.listener_reviews, 1)
             self.assertEqual((await evaluation.review(plan.spec.id, review)).listener_reviews, 1)
             self.assertEqual(state.plan.spec.quality_status, 'unverified')
+            with patch('app.regional_evaluation.secrets.choice', return_value='adapter'):
+                session = await evaluation.open_blind_session(plan.spec.id, 'blind-listener')
+            self.assertEqual([clip.label for clip in session.clips], ['a', 'b'])
+            self.assertTrue(all('/blind/blind-listener/audio/' in clip.audio_url for clip in session.clips))
+            dumped = session.model_dump_json()
+            self.assertNotIn('/audio/base', dumped)
+            self.assertNotIn('/audio/adapter', dumped)
+            self.assertNotIn('"arm"', dumped)
+            self.assertEqual((await evaluation.open_blind_session(plan.spec.id, 'blind-listener')).assignment_sha256, session.assignment_sha256)
+            self.assertEqual(await evaluation.blind_audio(plan.spec.id, 'blind-listener', 'a'), await evaluation.audio(plan.spec.id, 'adapter'))
+            self.assertEqual(evaluation.blind_download_name('a'), 'comparison-a.wav')
+            blind = RegionalBlindReview(comparison_sha256=plan.sha256, assignment_sha256=session.assignment_sha256,
+                label_a_sha256=session.clips[0].output_sha256, label_b_sha256=session.clips[1].output_sha256,
+                reviewer_reference='blind-listener', reviewed_at='2026-10-17', tradition_scope='Fixture scope only',
+                preference='a', timbre=4, phrasing=4, rhythm=4, coherence=4, artifacts=4, cultural_appropriateness=4)
+            reveal = await evaluation.submit_blind_review(plan.spec.id, blind)
+            self.assertEqual(reveal.label_a_arm, 'adapter')
+            self.assertEqual(reveal.label_b_arm, 'base')
+            self.assertEqual(reveal.decoded_preference, 'adapter')
+            self.assertEqual(reveal.quality_status, 'unverified')
+            self.assertEqual(reveal.blind_reviews, 1)
+            self.assertEqual((await evaluation.submit_blind_review(plan.spec.id, blind)).blind_reviews, 1)
+            self.assertEqual(evaluation.get(plan.spec.id).blind_reviews, 1)
+            self.assertEqual(evaluation.get(plan.spec.id).listener_reviews, 1)
+            card = await evaluation.model_card(plan.spec.id)
+            dumped = card.model_dump_json()
+            for private in ('fixture-contract', 'fixture-listener', 'blind-listener', 'Fixture reviewer',
+                    'Fixture scope only', 'Declared plucked-string phrase'):
+                self.assertNotIn(private, dumped)
+            self.assertIn('Example performer, used with scoped permission.', dumped)
+            self.assertEqual(card.quality_status, 'unverified')
+            self.assertEqual(card.distribution_status, 'not_approved')
+            self.assertEqual((card.listener_reviews, card.blind_reviews), (1, 1))
+            self.assertFalse(card.declared_adapter_distribution_permitted)
+            self.assertEqual(card.training_identity_status, 'unavailable')
+            self.assertIsNone(card.runtime)
+            self.assertEqual(card.base_output_sha256, hashes['base'])
+            self.assertEqual(card.adapter_output_sha256, hashes['adapter'])
+            self.assertEqual([item.code for item in card.notices], ['quality_unverified', 'metrics_unavailable',
+                'listening_not_a_panel', 'generation_runtime_unverified', 'distribution_not_approved'])
+            with self.assertRaises(RegionalDatasetError) as conflict:
+                await evaluation.submit_blind_review(plan.spec.id, blind.model_copy(update={'preference': 'b'}))
+            self.assertEqual(conflict.exception.code, 'regional_dataset_revision_conflict')
+            with self.assertRaises(RegionalDatasetError) as changed:
+                await evaluation.submit_blind_review(plan.spec.id, blind.model_copy(update={'label_a_sha256': '0' * 64}))
+            self.assertEqual(changed.exception.code, 'regional_dataset_source_changed')
             target.write_bytes(b'changed retained comparison')
+            with self.assertRaises(RegionalDatasetError):
+                await evaluation.model_card(plan.spec.id)
             with self.assertRaises(RegionalDatasetError):
                 await evaluation.review(plan.spec.id, review.model_copy(update={'reviewer_reference': 'another-listener'}))
