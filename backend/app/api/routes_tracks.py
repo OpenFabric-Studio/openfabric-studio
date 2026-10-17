@@ -85,6 +85,7 @@ async def save_track(
         params_dict = TypeAdapter(JsonObject).validate_json(params or "{}")
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail="invalid_track_params") from exc
+    params_dict = {key: value for key, value in params_dict.items() if key not in {'_music_evidence', '_music_adapters'}}
 
     ext = (audio.filename or "").rsplit(".", 1)[-1].lower()
     if ext not in ALLOWED_AUDIO_EXT:
@@ -252,14 +253,18 @@ async def delete_track(track_id: int):
     from ..voice_build import protect_track_removal
     from ..audio_versions import protect_track_versions_removal
     from ..audio_exports import protect_track_exports_removal, delete_track_exports
+    from ..music_analysis import MusicAnalysisError, protect_track_removal as protect_track_analysis
+    from ..music_conditioning import protect_source_removal as protect_conditioning_source
+    from ..local_music_contracts import LocalMusicError
+    from ..replacement_jobs import ReplacementError, protect_track_removal as protect_replacement_source
     try:
-        async with protect_track_references(track_id), protect_track_versions_removal(track_id), protect_track_removal(track_id), protect_track_exports_removal(track_id):
+        async with protect_track_analysis(track_id), protect_conditioning_source(track_id), protect_replacement_source(track_id), protect_track_references(track_id), protect_track_versions_removal(track_id), protect_track_removal(track_id), protect_track_exports_removal(track_id):
             ensure_track_removable(track_id)
             if stems.is_active(track_id) or midi.any_active(track_id):
                 raise HTTPException(status_code=409, detail='job_busy')
             delete_track_exports(track_id)
             if not db.delete_track(track_id):
                 return JSONResponse({"error": "not found"}, status_code=404)
-    except ReferenceImportError as exc:
+    except (ReferenceImportError, MusicAnalysisError, LocalMusicError, ReplacementError) as exc:
         raise HTTPException(status_code=409, detail=exc.code) from exc
     return {"deleted": True}

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import logging
 import uuid
 
-from ..config import ALLOW_CONCURRENT_MODELS, MODELS
+from ..config import ALLOW_CONCURRENT_MODELS, MODELS, ProcessSpec
 from ..contracts import JsonObject
 from ..job_lifecycle import await_cleanup
 from .process import ManagedProcess, StartCancelled
@@ -34,6 +35,7 @@ class OrchestratorManager:
         self.state = OrchestratorState(models={mid: ModelRuntimeState(mid) for mid in MODELS})
         self._processes: dict[str, list[ManagedProcess]] = {}
         self._instances: dict[str, str] = {}
+        self._launch_specs: dict[str, tuple[ProcessSpec, ...]] = {}
         self._lock = asyncio.Lock()
         self._cancel_start: dict[str, asyncio.Event] = {}
         self._stop_requests = 0
@@ -87,16 +89,19 @@ class OrchestratorManager:
             },
         }
 
-    async def switch_to(self, model_id: str) -> None:
+    async def switch_to(self, model_id: str, *, process_specs: tuple[ProcessSpec, ...] | None = None) -> None:
         if model_id not in MODELS:
             raise ValueError(f"unknown model '{model_id}'")
+        specs = self._copy_specs(tuple(MODELS[model_id].processes) if process_specs is None else process_specs)
+        if not specs:
+            raise ValueError('Engine launch requires process specs')
         stop_requests = self._stop_requests
         async with self._lock:
             if self._stop_requests != stop_requests:
                 raise StartCancelled(f"start of '{model_id}' was cancelled")
             if self._mark_if_exited(model_id):
                 await self._stop_processes(model_id)
-            if self.state.models[model_id].status == ModelStatus.RUNNING:
+            if self.state.models[model_id].status == ModelStatus.RUNNING and self._launch_specs.get(model_id) == specs:
                 self.state.active_model = model_id
                 return
             # A failed drain retains the old tree. Never replace its registry
@@ -107,7 +112,10 @@ class OrchestratorManager:
                 for current in tuple(self._processes):
                     if current != model_id:
                         await self._stop_model(current)
-            await self._start_model(model_id)
+            if process_specs is None:
+                await self._start_model(model_id)
+            else:
+                await self._start_model(model_id, process_specs=specs)
 
     async def stop_active(self) -> None:
         self._cancel_pending_starts()
@@ -121,11 +129,11 @@ class OrchestratorManager:
             return None
         instance = self._instances.get(model_id)
         processes = self._processes.get(model_id, [])
-        definition = MODELS[model_id]
-        if instance is None or len(processes) != len(definition.processes):
+        specs = self._launch_specs.get(model_id, tuple(MODELS[model_id].processes))
+        if instance is None or len(processes) != len(specs):
             return None
         try:
-            for process, spec in zip(processes, definition.processes):
+            for process, spec in zip(processes, specs):
                 if process.spec != spec:
                     return None
                 process.require_owned()
@@ -161,9 +169,13 @@ class OrchestratorManager:
                 return
             if status not in (ModelStatus.RUNNING, ModelStatus.ERROR, ModelStatus.STOPPING):
                 raise StartCancelled('Engine restart interrupted')
+            specs = self._launch_specs.get(model_id, tuple(MODELS[model_id].processes))
             await self._stop_model(model_id)
             if self._stop_requests == stop_requests:
-                await self._start_model(model_id)
+                if specs == tuple(MODELS[model_id].processes):
+                    await self._start_model(model_id)
+                else:
+                    await self._start_model(model_id, process_specs=specs)
 
     async def stop_all(self) -> None:
         self._cancel_pending_starts()
@@ -176,10 +188,16 @@ class OrchestratorManager:
             for model_id in list(self._processes):
                 await self._stop_model(model_id)
 
-    async def _start_model(self, model_id: str) -> None:
+    @staticmethod
+    def _copy_specs(specs: tuple[ProcessSpec, ...]) -> tuple[ProcessSpec, ...]:
+        return tuple(replace(spec, cmd=list(spec.cmd), env=dict(spec.env), extra_path_dirs=list(spec.extra_path_dirs))
+                     for spec in specs)
+
+    async def _start_model(self, model_id: str, *, process_specs: tuple[ProcessSpec, ...] | None = None) -> None:
         if model_id in self._processes:
             raise RuntimeError('Engine shutdown is incomplete')
-        definition = MODELS[model_id]
+        specs = self._copy_specs(tuple(MODELS[model_id].processes) if process_specs is None else process_specs)
+        self._launch_specs[model_id] = self._copy_specs(specs)
         rs = self.state.models[model_id]
         rs.status = ModelStatus.STARTING
         rs.error_message = None
@@ -188,7 +206,7 @@ class OrchestratorManager:
         self._processes[model_id] = started
         cancel = self._cancel_start[model_id] = asyncio.Event()
         try:
-            for spec in definition.processes:
+            for spec in specs:
                 if cancel.is_set():
                     raise StartCancelled(f"start of '{model_id}' was cancelled")
                 proc = ManagedProcess(spec)
@@ -229,6 +247,7 @@ class OrchestratorManager:
         if self._processes.get(model_id) is procs:
             del self._processes[model_id]
             self._instances.pop(model_id, None)
+            self._launch_specs.pop(model_id, None)
 
     async def _stop_model(self, model_id: str) -> None:
         rs = self.state.models[model_id]

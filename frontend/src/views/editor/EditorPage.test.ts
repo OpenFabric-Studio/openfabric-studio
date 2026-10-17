@@ -18,6 +18,11 @@ import { audioSettingsResponse } from '../settings/settingsTestFixtures'
 import * as projectsApi from '../../api/projects'
 import { timeStretchBuffer } from '../../audio/timeStretchEngine'
 import type { TimelineProject } from '../../audio/timelineTypes'
+import * as beatsApi from '../../api/beats'
+import * as mashupsApi from '../../api/mashups'
+import { beatDocument, beatJob, beatRequest } from '../music/beatTestFixtures'
+import { mashupJob } from '../../stores/mashupTestFixtures'
+import type { BeatJob } from '../../api/generated'
 
 const audioClock = vi.hoisted(() => ({ currentTime: 0 }))
 const engine = vi.hoisted(() => ({
@@ -39,6 +44,8 @@ vi.mock('../../api/audioExports', () => ({ createAudioExport: vi.fn(), getAudioE
 vi.mock('../../api/audioVersions', () => ({ listAudioVersions: vi.fn() }))
 vi.mock('../../api/audioSettings', () => ({ getAudioSettings: vi.fn() }))
 vi.mock('../../audio/timeStretchEngine', () => ({ timeStretchBuffer: vi.fn() }))
+vi.mock('../../api/beats', async original => ({ ...await original<typeof import('../../api/beats')>(), getBeat: vi.fn(), listBeatJobs: vi.fn(), getBeatJob: vi.fn() }))
+vi.mock('../../api/mashups', async original => ({ ...await original<typeof import('../../api/mashups')>(), getMashupJob: vi.fn() }))
 
 let app: App | undefined
 const frames = new Map<number, FrameRequestCallback>()
@@ -87,6 +94,96 @@ function transportButton(container: HTMLElement): HTMLButtonElement {
   if (!(button instanceof HTMLButtonElement)) throw new Error('Missing transport button')
   return button
 }
+
+function linkedBeatJob(): BeatJob {
+  const job = beatJob({ status: 'done', phase: 'done', beat_revision: 1, request: { ...beatRequest(), expected_revision: 1 } })
+  job.manifest = { beat_id: job.beat_id, beat_revision: 1, document_sha256: '1'.repeat(64), render_id: job.id,
+    seed: 4471, renderer_version: 'beat-render-v1', algorithm_version: 'beat-events-v1', frames: 144000,
+    musical_frames: 144000, peak: .5, kit_manifest_sha256: '2'.repeat(64), events_sha256: '3'.repeat(64),
+    artifacts: [{ id: 'f'.repeat(32), kind: 'stem', lane_id: 'lane-0', sha256: '4'.repeat(64), byte_size: 1024, media_type: 'audio/wav', filename: 'stem.wav' }] }
+  return job
+}
+
+function beatAction(container: HTMLElement, text: string): HTMLButtonElement {
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === text)
+  if (!(button instanceof HTMLButtonElement)) throw new Error('Missing beat action: ' + text)
+  return button
+}
+
+async function flushPromises(): Promise<void> {
+  for (let index = 0; index < 12; index++) await Promise.resolve()
+  await nextTick()
+}
+
+it('explicitly updates a pinned beat clip while preserving arrangement, mixer and undo', async () => {
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing lane')
+  lane.settings.volume = .6
+  lane.clips.push({ id: 'linked', type: 'audio', sourceLabel: 'My beat', sourceUrl: '/old.wav',
+    timelineStart: 8, trimStart: .2, trimEnd: 2, fadeInDuration: .1, fadeOutDuration: .2, originalBpm: 120,
+    beatLink: { beat_id: 'a'.repeat(32), beat_revision: 0, render_id: 'b'.repeat(32), lane_id: 'lane-0', occurrence_index: null } })
+  store.selectedClipId = 'linked'
+  store.snapshot()
+  vi.mocked(beatsApi.getBeat).mockResolvedValue({ ...beatDocument(), revision: 1 })
+  const job = linkedBeatJob()
+  vi.mocked(beatsApi.listBeatJobs).mockResolvedValue({ jobs: [job] })
+  vi.mocked(beatsApi.getBeatJob).mockResolvedValue(job)
+  await nextTick()
+  expect(container.textContent).toContain('Pinned beat revision 0')
+  beatAction(container, 'Check beat updates').click()
+  await flushPromises()
+  expect(container.textContent).toContain('Current saved revision 1')
+  expect(lane.clips[0]?.sourceUrl).toBe('/old.wav')
+  beatAction(container, 'Update selected beat clip').click()
+  await flushPromises()
+  const clip = lane.clips[0]
+  expect(clip?.sourceUrl).toContain('/artifacts/' + 'f'.repeat(32))
+  expect(clip?.beatLink?.beat_revision).toBe(1)
+  expect([clip?.timelineStart, clip?.trimStart, clip?.trimEnd, clip?.fadeInDuration, clip?.fadeOutDuration]).toEqual([8, .2, 2, .1, .2])
+  expect(lane.settings.volume).toBe(.6)
+  store.undo()
+  expect(store.project.lanes[0]?.clips[0]?.sourceUrl).toBe('/old.wav')
+  expect(store.project.lanes[0]?.clips[0]?.beatLink?.beat_revision).toBe(0)
+})
+
+it('ignores a late beat update check after the editor session changes', async () => {
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing lane')
+  lane.clips.push({ id: 'linked', sourceLabel: 'Beat', sourceUrl: '/old.wav', timelineStart: 0, trimStart: 0, trimEnd: 2,
+    beatLink: { beat_id: 'a'.repeat(32), beat_revision: 0, render_id: 'b'.repeat(32), lane_id: 'lane-0', occurrence_index: null } })
+  store.selectedClipId = 'linked'
+  const pending = deferred<ReturnType<typeof beatDocument>>()
+  vi.mocked(beatsApi.getBeat).mockReturnValue(pending.promise)
+  await nextTick()
+  beatAction(container, 'Check beat updates').click()
+  await nextTick()
+  store.newProject()
+  pending.resolve({ ...beatDocument(), revision: 1 })
+  await flushPromises()
+  expect(store.project.lanes.every(item => item.clips.length === 0)).toBe(true)
+  expect(container.textContent).not.toContain('Current saved revision 1')
+})
+
+it.each(['trim', 'warp'] as const)('retains existing linked audio when the new render conflicts with its %s', async reason => {
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing lane')
+  lane.clips.push({ id: 'linked', sourceLabel: 'Beat', sourceUrl: '/old.wav', timelineStart: 8, trimStart: 0,
+    trimEnd: reason === 'trim' ? 4 : 2, originalBpm: 120, warpEnabled: reason === 'warp',
+    beatLink: { beat_id: 'a'.repeat(32), beat_revision: 0, render_id: 'b'.repeat(32), lane_id: 'lane-0', occurrence_index: null } })
+  store.selectedClipId = 'linked'
+  vi.mocked(beatsApi.getBeat).mockResolvedValue({ ...beatDocument(), revision: 1, bpm: reason === 'warp' ? 180 : 120 })
+  vi.mocked(beatsApi.listBeatJobs).mockResolvedValue({ jobs: [linkedBeatJob()] })
+  vi.mocked(beatsApi.getBeatJob).mockResolvedValue(linkedBeatJob())
+  await nextTick()
+  beatAction(container, 'Check beat updates').click(); await flushPromises()
+  beatAction(container, 'Update selected beat clip').click(); await flushPromises()
+  expect(lane.clips[0]?.sourceUrl).toBe('/old.wav')
+  expect(lane.clips[0]?.beatLink?.beat_revision).toBe(0)
+  expect(container.textContent).toContain(reason === 'trim' ? 'new render is shorter' : 'Turn off clip tempo warp')
+})
 
 async function settlePlayback(): Promise<void> { await nextTick(); await nextTick() }
 
@@ -616,6 +713,83 @@ it('keeps a canonical WAV and delegates selected MP3 processing to the durable b
   expect(tracksApi.saveTrack).toHaveBeenCalledWith(expect.any(Object), expect.any(Blob), 'wav')
   expect(exportsApi.createAudioExport).toHaveBeenCalledWith(42, 'a'.repeat(32), 'mp3', undefined, { settings: audioSettingsResponse().settings })
 })
+
+it.each([
+  { label: 'known track', extraSource: null, complete: true },
+  { label: 'untracked source', extraSource: '/external.wav', complete: false },
+  { label: 'unsafe track identifier', extraSource: '/api/tracks/9007199254740992/audio', complete: false },
+])('records an explicit ancestry-complete marker for an editor export with $label', async ({ extraSource, complete }) => {
+  engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing export lane')
+  lane.clips.push({ id: 'tracked', sourceUrl: '/api/tracks/7/audio', sourceLabel: 'Saved source', timelineStart: 0, trimStart: 0, trimEnd: 1 })
+  if (extraSource) lane.clips.push({ id: 'external', sourceUrl: extraSource, sourceLabel: 'Untracked source', timelineStart: 0, trimStart: 0, trimEnd: 1 })
+  await nextTick()
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(button instanceof HTMLButtonElement)) throw new Error('Missing export action')
+  button.click(); for (let index = 0; index < 20; index++) await nextTick()
+  expect(vi.mocked(tracksApi.saveTrack).mock.lastCall?.[0].params).toMatchObject({ source_track_ids: [7], source_ancestry_complete: complete })
+})
+
+it.each(['matched', 'hash-mismatch', 'revision-mismatch', 'offline'] as const)('preserves verified beat parent lineage on editor export with %s', async state => {
+  engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+  vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  const { store, container } = await mountEditor()
+  const lane = store.project.lanes[0]
+  if (!lane) throw new Error('Missing export lane')
+  const job = linkedBeatJob()
+  if (!job.manifest) throw new Error('Missing render manifest')
+  job.manifest.track_id = 42
+  if (state === 'offline') vi.mocked(beatsApi.getBeatJob).mockRejectedValue(new Error('offline'))
+  else vi.mocked(beatsApi.getBeatJob).mockResolvedValue(job)
+  lane.clips.push({ id: 'tracked', sourceUrl: '/api/tracks/7/audio', sourceLabel: 'Saved source', timelineStart: 0, trimStart: 0, trimEnd: 1 },
+    { id: 'beat', sourceLabel: 'Beat', sourceUrl: beatsApi.beatArtifactUrl(job.id, 'f'.repeat(32)),
+      timelineStart: 0, trimStart: 0, trimEnd: 1,
+      beatLink: { beat_id: job.beat_id, beat_revision: state === 'revision-mismatch' ? 0 : 1, render_id: job.id, lane_id: 'lane-0', occurrence_index: null },
+      sourceArtifact: { artifact_id: 'f'.repeat(32), sha256: (state === 'hash-mismatch' ? '5' : '4').repeat(64) } })
+  await nextTick()
+  const button = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === i18n.global.t('editor.export'))
+  if (!(button instanceof HTMLButtonElement)) throw new Error('Missing export action')
+  button.click(); for (let index = 0; index < 24; index++) await nextTick()
+  expect(vi.mocked(tracksApi.saveTrack).mock.lastCall?.[0].params).toMatchObject({
+    source_track_ids: state === 'matched' ? [7, 42] : [7], source_ancestry_complete: state === 'matched',
+  })
+})
+
+it.each(['matched', 'hash-mismatch', 'url-mismatch', 'job-mismatch', 'revision-mismatch', 'preview', 'offline'] as const)(
+  'preserves the retained mashup parent on editor export with %s', async state => {
+    engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+    const { store, container } = await mountEditor()
+    const lane = store.project.lanes[0]
+    if (!lane) throw new Error('Missing export lane')
+    const job = mashupJob()
+    const manifest = job.manifest
+    const artifact = manifest?.artifacts.find(item => item.kind === 'placement')
+    if (!manifest || !artifact || !job.request) throw new Error('Missing mashup fixture')
+    manifest.track_id = 42
+    const requestedId = job.id
+    const sourceUrl = mashupsApi.mashupArtifactUrl(requestedId, artifact.id)
+    if (state === 'job-mismatch') job.id = 'e'.repeat(32)
+    if (state === 'revision-mismatch') manifest.mashup_revision++
+    if (state === 'preview') { job.kind = 'preview'; job.request.mode = 'preview'; manifest.mode = 'preview' }
+    if (state === 'offline') vi.mocked(mashupsApi.getMashupJob).mockRejectedValue(new Error('original sources detached'))
+    else vi.mocked(mashupsApi.getMashupJob).mockResolvedValue(job)
+    lane.clips.push({ id: 'tracked', sourceUrl: '/api/tracks/7/audio', sourceLabel: 'Existing track', timelineStart: 0, trimStart: 0, trimEnd: 1 },
+      { id: 'mashup', sourceLabel: 'Retained mashup placement', sourceUrl: state === 'url-mismatch' ? sourceUrl + '/extra' : sourceUrl,
+        timelineStart: 0, trimStart: 0, trimEnd: 1,
+        sourceArtifact: { artifact_id: artifact.id, sha256: state === 'hash-mismatch' ? '0'.repeat(64) : artifact.sha256 } })
+    await nextTick()
+    const button = [...container.querySelectorAll('button')].find(item => item.textContent?.trim() === i18n.global.t('editor.export'))
+    if (!(button instanceof HTMLButtonElement)) throw new Error('Missing export action')
+    button.click(); for (let index = 0; index < 28; index++) await nextTick()
+    expect(vi.mocked(tracksApi.saveTrack).mock.lastCall?.[0].params).toMatchObject({
+      source_track_ids: state === 'matched' ? [7, 42] : [7], source_ancestry_complete: state === 'matched',
+    })
+    expect(versionsApi.listAudioVersions).toHaveBeenCalledWith(42)
+  })
 
 it('does not download a completed durable export when its owned polling response arrives after navigation', async () => {
   engine.render.mockResolvedValue(new AudioBuffer({ numberOfChannels: 1, length: 8000, sampleRate: 8000 }))

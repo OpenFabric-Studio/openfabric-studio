@@ -1,0 +1,294 @@
+{
+  "id": "dddddddddddddddddddddddddddddddd",
+  "mashup_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "mashup_revision": 1,
+  "kind": "full",
+  "status": "done",
+  "request": {
+    "expected_revision": 1,
+    "submission_key": "fixture",
+    "mode": "full",
+    "preview_start_tick": null,
+    "preview_end_tick": null
+  },
+  "progress": {
+    "phase": "publishing",
+    "completed": 1,
+    "total": 1
+  },
+  "manifest": {
+    "schema_version": 1,
+    "mashup_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "mashup_revision": 1,
+    "job_id": "dddddddddddddddddddddddddddddddd",
+    "plan_sha256": "fa4a1f0d875cce2a20ecba44f36ddc7328127c0f4791725b2dc44976620fec8b",
+    "source_a_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+    "source_b_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "mode": "full",
+    "frames": 384000,
+    "sample_rate_hz": 48000,
+    "channels": 2,
+    "start_tick": 0,
+    "artifacts": [
+      {
+        "id": "00000000000000000000000000000064",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000064.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "a",
+        "stem": "vocals",
+        "placement_id": "80e056cde7cd06d641b80f53fa8101b1",
+        "frames": 192000
+      },
+      {
+        "id": "00000000000000000000000000000065",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000065.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "drums",
+        "placement_id": "bffe1e2ea9904eae5459019f8245a6fb",
+        "frames": 192000
+      },
+      {
+        "id": "00000000000000000000000000000066",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000066.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "bass",
+        "placement_id": "f05ad24cdd92fd86530b1aa7bc99063c",
+        "frames": 192000
+      },
+      {
+        "id": "00000000000000000000000000000067",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000067.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "other",
+        "placement_id": "11832a210363f79a1508af067dc91215",
+        "frames": 192000
+      },
+      {
+        "id": "00000000000000000000000000000068",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000068.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "a",
+        "stem": "vocals",
+        "placement_id": "a4f2ba0c584c52fed04f6ddbc2c8b99f",
+        "frames": 192000
+      },
+      {
+        "id": "00000000000000000000000000000069",
+        "kind": "placement",
+        "filename": "placement-00000000000000000000000000000069.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "drums",
+        "placement_id": "897fa026857627f06971d74319773ae5",
+        "frames": 192000
+      },
+      {
+        "id": "0000000000000000000000000000006a",
+        "kind": "placement",
+        "filename": "placement-0000000000000000000000000000006a.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "bass",
+        "placement_id": "a7d7b34d19664bc607966d797957007f",
+        "frames": 192000
+      },
+      {
+        "id": "0000000000000000000000000000006b",
+        "kind": "placement",
+        "filename": "placement-0000000000000000000000000000006b.wav",
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "byte_count": 1536088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "other",
+        "placement_id": "18216982f9ed0face6913d00d74246df",
+        "frames": 192000
+      },
+      {
+        "id": "000000000000000000000000000001f4",
+        "kind": "stem",
+        "filename": "a-vocals.wav",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_count": 3072088,
+        "media_type": "audio/wav",
+        "source": "a",
+        "stem": "vocals",
+        "placement_id": null,
+        "frames": 384000
+      },
+      {
+        "id": "000000000000000000000000000001f5",
+        "kind": "stem",
+        "filename": "b-drums.wav",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_count": 3072088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "drums",
+        "placement_id": null,
+        "frames": 384000
+      },
+      {
+        "id": "000000000000000000000000000001f6",
+        "kind": "stem",
+        "filename": "b-bass.wav",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_count": 3072088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "bass",
+        "placement_id": null,
+        "frames": 384000
+      },
+      {
+        "id": "000000000000000000000000000001f7",
+        "kind": "stem",
+        "filename": "b-other.wav",
+        "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "byte_count": 3072088,
+        "media_type": "audio/wav",
+        "source": "b",
+        "stem": "other",
+        "placement_id": null,
+        "frames": 384000
+      },
+      {
+        "id": "cccccccccccccccccccccccccccccccc",
+        "kind": "mix",
+        "filename": "mix.wav",
+        "sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "byte_count": 3072088,
+        "media_type": "audio/wav",
+        "source": null,
+        "stem": null,
+        "placement_id": null,
+        "frames": 384000
+      }
+    ],
+    "placements": [
+      {
+        "placement_id": "80e056cde7cd06d641b80f53fa8101b1",
+        "artifact_id": "00000000000000000000000000000064",
+        "source_start_frame": 0,
+        "source_end_frame": 192000,
+        "target_start_frame": 0,
+        "target_end_frame": 192000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "bffe1e2ea9904eae5459019f8245a6fb",
+        "artifact_id": "00000000000000000000000000000065",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 0,
+        "target_end_frame": 192000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "f05ad24cdd92fd86530b1aa7bc99063c",
+        "artifact_id": "00000000000000000000000000000066",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 0,
+        "target_end_frame": 192000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "11832a210363f79a1508af067dc91215",
+        "artifact_id": "00000000000000000000000000000067",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 0,
+        "target_end_frame": 192000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "a4f2ba0c584c52fed04f6ddbc2c8b99f",
+        "artifact_id": "00000000000000000000000000000068",
+        "source_start_frame": 192000,
+        "source_end_frame": 384000,
+        "target_start_frame": 192000,
+        "target_end_frame": 384000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "897fa026857627f06971d74319773ae5",
+        "artifact_id": "00000000000000000000000000000069",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 192000,
+        "target_end_frame": 384000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "a7d7b34d19664bc607966d797957007f",
+        "artifact_id": "0000000000000000000000000000006a",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 192000,
+        "target_end_frame": 384000,
+        "artifact_start_frame": 0
+      },
+      {
+        "placement_id": "18216982f9ed0face6913d00d74246df",
+        "artifact_id": "0000000000000000000000000000006b",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_frame": 192000,
+        "target_end_frame": 384000,
+        "artifact_start_frame": 0
+      }
+    ],
+    "metrics": {
+      "duration_sec": 8.0,
+      "integrated_lufs": null,
+      "loudness_range_lu": null,
+      "true_peak_dbtp": null,
+      "sample_peak_dbfs": null,
+      "full_scale_fraction": 0.0,
+      "near_full_scale_fraction": 0.0,
+      "measurement_method": "ffmpeg-loudnorm-oversampled-v1",
+      "ffmpeg_version": "unavailable",
+      "source_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "samples_analyzed": 0,
+      "warnings": []
+    },
+    "warnings": [],
+    "music_evidence": {
+      "restriction": "unknown",
+      "identity_basis": "publisher_declared",
+      "components": [],
+      "adapters": [],
+      "lineage_complete": false,
+      "public_attributions": []
+    },
+    "track_id": 3,
+    "project_id": 1
+  },
+  "error": null,
+  "created_at": "2026-10-17T00:00:00+00:00",
+  "started_at": "2026-10-17T00:00:00+00:00",
+  "finished_at": "2026-10-17T00:00:00+00:00"
+}

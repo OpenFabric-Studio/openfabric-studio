@@ -9,6 +9,16 @@ from .music_training_source_contracts import MusicLoraSource
 
 
 def source_path(sample: MusicLoraSource, *, prefix: Literal['stable_lora', 'music_training']) -> Path:
+    if sample.regional_manifest is not None:
+        if prefix != 'stable_lora':
+            raise MusicLoraError(prefix + '_dataset_invalid', 422)
+        from .regional_datasets import training_excerpt_source
+        from .regional_dataset_contracts import RegionalDatasetError
+        reference = sample.regional_manifest
+        try:
+            return training_excerpt_source(reference.manifest_id, reference.manifest_sha256, reference.excerpt_id).path
+        except (RegionalDatasetError, OSError, RuntimeError, ValueError) as error:
+            raise MusicLoraError(prefix + '_dataset_changed', 409) from error
     if sample.track_id is not None:
         row = db.get_track(sample.track_id)
         value: object = row['audio_path'] if row is not None else None

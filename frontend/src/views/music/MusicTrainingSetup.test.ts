@@ -6,6 +6,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n } from '../../i18n'
 import * as api from '../../api/modules'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 import { parseModuleInstallJob, parseModulePlan, type ModuleInstallJob, type ModulePlan } from '../../api/generated'
 import MusicTrainingSetup from './MusicTrainingSetup.vue'
 vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(), planModules: vi.fn(), installModules: vi.fn(), controlModuleJob: vi.fn() }))
@@ -15,7 +17,7 @@ const job = (state = 'running') => parseModuleInstallJob({ id: 'b'.repeat(32), s
 const generationPlan = () => parseModulePlan({ ...plan(), stable_training_variant: null, stable_generation_variant: 'medium' })
 const generationJob = (state = 'running') => parseModuleInstallJob({ ...job(state), id: 'c'.repeat(32), stable_training_variant: null, stable_generation_variant: 'medium', steps: [{ module_id: 'stable_audio3', name: 'Generation files', state: state === 'completed' ? 'verified' : 'running', detail: 'Checking generation files.', error_code: null }] })
 async function settle() { for (let i = 0; i < 15; i++) await nextTick() }
-async function mount(mode: 'training' | 'generation' | 'scores' = 'training', variant: 'small-music' | 'medium' = 'small-music', refresh = vi.fn(), engine: 'stable_audio3' | 'yue2' = 'stable_audio3') {
+async function mount(mode: 'training' | 'generation' | 'conditioning' | 'scores' | 'song' = 'training', variant: 'small-music' | 'medium' = 'small-music', refresh = vi.fn(), engine: 'stable_audio3' | 'yue2' | 'ace_step' = 'stable_audio3') {
   const selection = ref({ mode, variant, engine })
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: MusicTrainingSetup }, { path: '/settings', component: { render: () => null } }] })
   await router.push('/')
@@ -25,7 +27,19 @@ async function mount(mode: 'training' | 'generation' | 'scores' = 'training', va
 }
 function button(node: ParentNode, label: string) { const found = [...node.querySelectorAll('button')].find(item => item.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
 beforeEach(() => { vi.resetAllMocks(); vi.mocked(api.listModuleJobs).mockResolvedValue([]); vi.mocked(api.planModules).mockResolvedValue(plan()); vi.mocked(api.installModules).mockResolvedValue(job()); vi.mocked(api.controlModuleJob).mockResolvedValue(job('cancelled')) })
+beforeEach(() => { vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true })) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
+it('reviews only the selected conditioning bundle and preserves its explicit install token', async () => {
+  vi.mocked(api.planModules).mockResolvedValue({ ...plan(), stable_training_variant: null, stable_conditioning_variant: 'small-music' })
+  const { node } = await mount('conditioning')
+  button(node, 'Prepare audio reference files').click(); await settle()
+  expect(api.planModules).toHaveBeenCalledExactlyOnceWith({ features: ['stable_audio3'], download_models: true,
+    stable_conditioning_variant: 'small-music' }, expect.any(AbortSignal))
+  button(node, 'Download and prepare').click(); await settle()
+  expect(api.installModules).toHaveBeenCalledExactlyOnceWith({ features: ['stable_audio3'], download_models: true,
+    reinstall: [], stable_conditioning_variant: 'small-music', plan_token: 'a'.repeat(64) }, expect.any(AbortSignal))
+  expect(node.textContent).not.toContain('Prepare training')
+})
 it('reviews a variant-specific download before preparing and never requests a reinstall', async () => {
   const { node } = await mount()
   expect(api.installModules).not.toHaveBeenCalled()
@@ -34,6 +48,28 @@ it('reviews a variant-specific download before preparing and never requests a re
   expect(node.textContent).toContain('1.13 GB')
   button(node, 'Download and prepare').click(); await settle()
   expect(api.installModules).toHaveBeenCalledExactlyOnceWith({ features: ['stable_audio3'], download_models: true, reinstall: [], stable_training_variant: 'small-music', plan_token: 'a'.repeat(64) }, expect.any(AbortSignal))
+})
+
+it('requires setup terms before downloading Stable training files', async () => {
+  const before = { engine: 'stable_audio3', operation: 'setup', revision: 0, noncommercial_enabled: false, allowed: false,
+    requirements: [{ component_id: 'weights', name: 'Weights', scope: 'model', restriction: 'conditional', source_url: 'https://example.org/terms', terms_digest: 'a'.repeat(64), acknowledged: false }] } satisfies Awaited<ReturnType<typeof terms.getMusicTerms>>
+  vi.mocked(terms.getMusicTerms).mockResolvedValue(before)
+  vi.mocked(terms.acceptMusicTerms).mockResolvedValue({ ...before, allowed: true, revision: 1, requirements: before.requirements.map(row => ({ ...row, acknowledged: true })) })
+  const { node } = await mount(); button(node, 'Prepare training').click(); await settle()
+  expect(terms.getMusicTerms).toHaveBeenCalledWith('stable_audio3', 'setup', expect.any(AbortSignal))
+  expect(button(node, 'Download and prepare').disabled).toBe(true)
+  const review = node.querySelector('section[aria-label="Publisher terms"] input')
+  if (!(review instanceof HTMLInputElement)) throw new Error('Missing terms review')
+  review.click(); await settle(); button(node, 'Accept reviewed terms').click(); await settle()
+  expect(button(node, 'Download and prepare').disabled).toBe(false)
+  expect(api.installModules).not.toHaveBeenCalled()
+})
+
+it('reviews actual YuE training terms rather than generation weights during trainer setup', async () => {
+  vi.mocked(api.planModules).mockResolvedValue(parseModulePlan({ ...plan(), features: ['yue2'], stable_training_variant: null, music_training_engine: 'yue2' }))
+  const { node } = await mount('training', 'small-music', vi.fn(), 'yue2')
+  button(node, 'Prepare training').click(); await settle()
+  expect(terms.getMusicTerms).toHaveBeenCalledWith('yue2', 'training', expect.any(AbortSignal))
 })
 it('reattaches to preparation after reload and cancels the owned backend job only on request', async () => {
   vi.mocked(api.listModuleJobs).mockResolvedValue([job()])
@@ -204,4 +240,14 @@ it('rejects a training plan returned to the score preparation action', async () 
   button(node, 'Prepare automatic score extraction').click(); await settle()
   button(node, 'Download and prepare').click(); await settle()
   expect(api.installModules).not.toHaveBeenCalled()
+})
+
+it('prepares the ACE base bundle explicitly without selecting a trainer or changing the normal model', async () => {
+  vi.mocked(api.planModules).mockResolvedValue(parseModulePlan({ ...plan(), features: ['ace_step'], stable_training_variant: null, ace_generation_model: 'acestep-v15-base' }))
+  const { node } = await mount('song', 'small-music', vi.fn(), 'ace_step')
+  button(node, 'Prepare ACE-Step Base').click(); await settle()
+  expect(api.planModules).toHaveBeenCalledExactlyOnceWith({ features: ['ace_step'], download_models: true, ace_generation_model: 'acestep-v15-base' }, expect.any(AbortSignal))
+  button(node, 'Download and prepare').click(); await settle()
+  expect(api.installModules).toHaveBeenCalledExactlyOnceWith({ features: ['ace_step'], download_models: true, reinstall: [], ace_generation_model: 'acestep-v15-base', plan_token: 'a'.repeat(64) }, expect.any(AbortSignal))
+  expect(terms.getMusicTerms).toHaveBeenCalledWith('ace_step', 'setup', expect.any(AbortSignal))
 })

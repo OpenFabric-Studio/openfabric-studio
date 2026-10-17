@@ -328,6 +328,12 @@ def _owned_receipt(marker: Path, identifier: ModuleId, target: Path, version: st
 
 
 def _installation_version(identifier: ModuleId, assets: AssetManifest) -> str:
+    if identifier == 'music_beats':
+        from .music_beats_runtime import REVISION as BEATS_REVISION
+        return BEATS_REVISION
+    if identifier == 'music_dsp':
+        from .music_stretch import REVISION
+        return REVISION
     return 'speechbrain-1.0.3-torch-2.6.0-cpu-v1' if identifier == 'speaker_review' else assets.aceStep.commit if identifier == 'ace_step' else assets.engine.tag if identifier == 'yue2' else SOURCE_PINS[identifier].commit if identifier in SOURCE_PINS else hashlib.sha256(manifest_path().read_bytes()).hexdigest()
 
 
@@ -443,6 +449,14 @@ async def verify(context: InstallContext, identifier: ModuleId, *, download_mode
         return await _native_weights(context, context.environment.paths['yue2'], load_manifest(), download_models)
     if module.state == 'ready':
         return InstallOutcome('verified', 'Current bounded tool or runtime/model checks passed. No engine files were changed.')
+    if identifier == 'music_beats':
+        from .music_beats_runtime import setup as setup_beats
+        target = context.confined(context.environment.paths[identifier])
+        if not _owned(context, identifier, target, _installation_version(identifier, load_manifest())):
+            return InstallOutcome('manual', 'Existing beat-analysis files are preserved. Use the managed installation or review its exact identity.')
+        result = await setup_beats(context, target, download_models=download_models)
+        _record_owned(context, identifier, target, _installation_version(identifier, load_manifest()))
+        return result
     if identifier == 'speaker_review':
         return _speaker_outcome(context)
     definition = DEFINITIONS[identifier]
@@ -681,6 +695,21 @@ async def install(context: InstallContext, identifier: ModuleId, download_models
         return InstallOutcome('manual', 'An existing or modified installation was preserved. Use a separate managed root or review the existing setup manually.')
     from .module_catalog import DEFINITIONS
     context.update_detail(f'Preparing the managed {DEFINITIONS[identifier].name} installation.')
+    if identifier == 'music_beats':
+        from .music_beats_runtime import initialize_marker, setup as setup_beats
+        initialize_marker(context, target)
+        _record_owned(context, identifier, target, version)
+        result = await setup_beats(context, target, download_models=download_models)
+        _record_owned(context, identifier, target, version)
+        return result
+    if identifier == 'music_dsp':
+        from .music_dsp_runtime import setup as setup_dsp, status as dsp_status
+        if owned:
+            verified = await await_cleanup(asyncio.to_thread(dsp_status, env))
+            return InstallOutcome('verified' if verified.ready else 'manual', 'Existing music processing files were checked. Changed files remain protected.')
+        outcome = await setup_dsp(context, target)
+        _record_owned(context, identifier, target, version)
+        return outcome
     if identifier == 'speaker_review':
         target.mkdir(parents=True, exist_ok=True)
         marker = context.confined(target / '.openfabric-speaker-runtime.json')

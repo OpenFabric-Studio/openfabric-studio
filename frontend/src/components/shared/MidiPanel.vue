@@ -6,6 +6,8 @@ import type { MidiSource, MidiStatus } from '../../api/midi'
 import { drawPianoRoll, parseMidiBytes, playMidiNotes } from '../../audio/miniMidiPlayer'
 import type { MidiParsed, MidiSynthHandle } from '../../audio/miniMidiPlayer'
 import { createPollingLoop } from '../../composables/polling'
+import { ApiError } from '../../api/http'
+import MusicTermsCard from './MusicTermsCard.vue'
 
 const props = defineProps<{ trackId: number }>()
 const { t } = useI18n()
@@ -21,6 +23,7 @@ const SOURCE_LABELS = computed<Record<MidiSource, string>>(() => ({
 const status = ref<MidiStatus | null>(null)
 const expanded = ref(false)
 const actionError = ref<string | null>(null)
+const termsBlocked = ref(false)
 
 const midiCache = ref<Record<string, MidiParsed>>({})
 const playingSource = ref<string | null>(null)
@@ -65,6 +68,7 @@ function beginAction(source: MidiSource) {
 }
 
 async function start(source: MidiSource, force = false) {
+  if (termsBlocked.value) return
   if (force && !window.confirm(t('midiPanel.confirmRecreate', { source: SOURCE_LABELS.value[source] }))) return
   const context = beginAction(source)
   actionError.value = null
@@ -75,7 +79,7 @@ async function start(source: MidiSource, force = false) {
     status.value = response
   } catch (e) {
     if (!context.isCurrent()) return
-    actionError.value = e instanceof Error ? e.message : String(e)
+    actionError.value = e instanceof ApiError && (e.message === 'music_terms_required' || e.message === 'music_noncommercial_disabled') ? t('musicTerms.required') : e instanceof Error ? e.message : String(e)
     if (anyBusy()) poll.start(false)
     return
   }
@@ -232,6 +236,8 @@ onBeforeUnmount(() => {
         {{ t('midiPanel.intro') }}
       </p>
 
+      <MusicTermsCard engine="yue2" operation="transcription" @blocked="termsBlocked = $event" />
+
       <div v-if="actionError" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ actionError }}</div>
 
       <div
@@ -265,7 +271,7 @@ onBeforeUnmount(() => {
             {{ t('midiPanel.notes') }}
           </button>
           <button type="button" class="text-xs text-accent1 hover:underline" @click="download(source)">{{ t('midiPanel.download') }}</button>
-          <button type="button" class="text-xs text-text-dim hover:underline" @click="start(source, true)">{{ t('midiPanel.recreate') }}</button>
+          <button type="button" :disabled="termsBlocked" class="text-xs text-text-dim hover:underline disabled:opacity-50" @click="start(source, true)">{{ t('midiPanel.recreate') }}</button>
 
           <div v-if="openRollSource === source" class="mt-2 w-full space-y-1">
             <div class="flex items-center justify-between text-[10px] text-text-dim">
@@ -282,7 +288,8 @@ onBeforeUnmount(() => {
         <template v-else>
           <button
             type="button"
-            class="accent-gradient rounded-lg px-2.5 py-1 text-xs font-medium text-white"
+            :disabled="termsBlocked"
+            class="accent-gradient rounded-lg px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
             @click="start(source)"
           >
             {{ t('midiPanel.recognize') }}

@@ -1,8 +1,7 @@
-"""Generic reverse proxy: /api/{ace,yue2}/* -> the active model's own REST API.
+"""Proxy native models with reviewed YuE tasks and loader identities.
 
-Mirrors the proxy pattern YuE2's own web-ui/server.py already uses for its
-/v1/* passthrough (strip hop-by-hop headers, forward method/body/query as-is)
-so both frontends can be written against a single same-origin API surface.
+The separate upload route owns input conversion. Other YuE mutations cannot
+bypass terms admission through this proxy's generic forwarding path.
 """
 from __future__ import annotations
 
@@ -13,12 +12,13 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import unquote
 import httpx
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
+from starlette.types import Message
 
 from pydantic import TypeAdapter, ValidationError
-from ..config import MODELS, ACE_STEP_DIR
+from ..config import MODELS, ACE_STEP_DIR, yue2_specs
 from ..contracts import JsonObject, JsonValue
 from ..orchestrator.manager import manager
 from ..orchestrator.state import ModelStatus
@@ -27,6 +27,7 @@ from ..ace_lora_contracts import AceLoraLoadRequest, AceLoraScaleRequest, AceLor
 from .. import lora_datasets
 from ..job_lifecycle import await_cleanup
 from ..resource_admission import NativeLease, ResourceBusyError, reserve_native, reserve_native_control
+from .routes_music_terms import require_usage
 
 router = APIRouter(prefix="/api")
 
@@ -153,6 +154,55 @@ _ACE_LORA_OPERATIONS: dict[str, Literal['load', 'unload', 'toggle', 'scale']] = 
 _ACE_LORA_ENDPOINTS = {'v1/lora/status', *_ACE_LORA_OPERATIONS}
 
 
+async def _bounded_native_request(request: Request) -> tuple[Request, JsonObject]:
+    raw = bytearray()
+    async for chunk in request.stream():
+        if len(raw) + len(chunk) > 1024 * 1024:
+            raise HTTPException(413, 'music_terms_request_too_large')
+        raw.extend(chunk)
+    try:
+        body = TypeAdapter(JsonObject).validate_json(raw)
+    except ValueError as error:
+        raise HTTPException(422, 'music_terms_request_invalid') from error
+
+    async def receive() -> Message:
+        return {'type': 'http.request', 'body': bytes(raw), 'more_body': False}
+    return Request(request.scope, receive), body
+
+
+async def _native_music_request(request: Request) -> tuple[Request, Literal['generation', 'transcription']]:
+    replay, body = await _bounded_native_request(request)
+    model = body.get('model')
+    specs = yue2_specs()
+    operation: Literal['generation', 'transcription']
+    if model == specs['yue2']['id']:
+        operation = 'generation'
+    elif model in (specs['sheetsage2']['id'], specs['muscriptor']['id']):
+        operation = 'transcription'
+    else:
+        raise HTTPException(503, 'music_terms_unavailable')
+    if not isinstance(body.get('request'), dict):
+        raise HTTPException(422, 'music_terms_request_invalid')
+
+    return replay, operation
+
+
+async def _native_model_load(request: Request) -> Request:
+    replay, body = await _bounded_native_request(request)
+    specs = yue2_specs()
+    spec = next((spec for spec in specs.values() if spec['id'] == body.get('id')), None)
+    if (spec is None or body.keys() - {*spec, 'load_options', 'session_options'}
+            or any(body.get(key) != value for key, value in spec.items())
+            or body.get('load_options', {}) != {}):
+        raise HTTPException(422, 'music_terms_request_invalid')
+    options = body.get('session_options', {})
+    if not isinstance(options, dict) or options and (
+            spec['id'] != specs['yue2']['id'] or options.keys() != {'yue2.model_gguf'}
+            or options.get('yue2.model_gguf') not in ('yue2-3b-q8_0.gguf', 'yue2-3b-q4_0.gguf')):
+        raise HTTPException(422, 'music_terms_request_invalid')
+    return replay
+
+
 async def _ace_lora_proxy(request: Request, endpoint: str) -> Response:
     if endpoint == 'v1/lora/status':
         if request.method != 'GET':
@@ -207,6 +257,9 @@ async def _ace_lora_proxy(request: Request, endpoint: str) -> Response:
 def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
     async def _route(request: Request, path: str = "") -> Response:
         endpoint = posixpath.normpath('/' + unquote(path).replace('\\', '/').split('?', 1)[0].split('#', 1)[0]).strip('/')
+        if model_id == 'yue2' and request.method.upper() not in {'GET', 'HEAD', 'OPTIONS'} and (
+                request.method.upper() != 'POST' or endpoint not in {'v1/tasks/run', 'v1/models/load', 'v1/models/unload'}):
+            raise HTTPException(405, 'native_operation_unsupported')
         if model_id == 'ace_step' and endpoint == 'v1/training/export':
             return JSONResponse({'error': 'lora_export_safe_endpoint_required'}, status_code=410)
         is_ace_lora = model_id == 'ace_step' and endpoint in _ACE_LORA_ENDPOINTS
@@ -216,14 +269,22 @@ def _make_proxy_route(model_id: str) -> Callable[..., Awaitable[Response]]:
             return JSONResponse({'error': 'ace_lora_model_inactive'}, status_code=503)
         if rs.status != ModelStatus.RUNNING:
             return JSONResponse({"error": f"model '{model_id}' is not active"}, status_code=503)
+        if request.method.upper() in {'POST', 'PUT', 'PATCH'}:
+            if model_id == 'yue2' and endpoint == 'v1/tasks/run':
+                request, operation = await _native_music_request(request)
+                require_usage('yue2', operation)
+            elif model_id == 'ace_step' and endpoint in {'release_task', 'v1/training/start'}:
+                require_usage('ace_step', 'generation' if endpoint == 'release_task' else 'training')
         owner: _ProxyOwnership | None = None
         try:
-            accelerator = _accelerator_mutation(model_id, endpoint if is_ace_lora or is_ace_init else path, request.method)
+            accelerator = _accelerator_mutation(model_id, endpoint if is_ace_lora or is_ace_init or model_id == 'yue2' else path, request.method)
             mutation = request.method.upper() not in {'GET', 'HEAD', 'OPTIONS'} and not (
                 model_id == 'ace_step' and request.method.upper() == 'POST' and path.strip('/') == 'query_result')
             if mutation:
                 from ..music_queue_ownership import require_access
                 require_access()
+                if model_id == 'yue2' and endpoint == 'v1/models/load':
+                    request = await _native_model_load(request)
                 if model_id == 'yue2' and accelerator:
                     await native_yue.recover_quarantined()
                 lease = await reserve_native(video_jobs.work_busy, model_id=model_id,

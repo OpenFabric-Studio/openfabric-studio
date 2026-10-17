@@ -32,6 +32,9 @@ from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .job_lifecycle import await_cleanup
 from .voice_build import start_apply, public_voice, record_apply_failure
+from .queued_music_source_contracts import QueuedMusicSource
+from .song_capabilities import AceRuntimeProof, BASE_MODEL, SOURCE_COMMIT
+from .song_from_beat_contracts import AceMusicConditioning, AceCompleteConditioning, RetainedAceConditioning
 
 logger = logging.getLogger(__name__)
 _json: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
@@ -127,7 +130,8 @@ def adopt(task_id: str, params: JsonObject, title: str, voice_id: str | None, tr
         linked = db.get_db().execute('SELECT 1 FROM ace_candidates WHERE track_id=?', (track_id,)).fetchone()
         if not track or track['model'] != 'ace_step' or linked:
             raise HTTPException(status_code=422, detail='invalid_candidate_tracks')
-    record_job(task_id, params, title, voice_id, tuple(track_ids))
+    legacy_params = {key: value for key, value in params.items() if key not in {'_music_evidence', '_music_adapters', '_song_conditioning'}}
+    record_job(task_id, legacy_params, title, voice_id, tuple(track_ids))
     launch(task_id)
     return get_job(task_id)
 
@@ -162,7 +166,9 @@ def _audio_part(audio: UploadFile) -> tuple[str, BinaryIO, str | None]:
 
 
 async def submit(params: JsonObject, title: str, voice_id: str | None, audio: UploadFile | None,
-                 style_audio: UploadFile | None = None) -> AceJobReleaseResponse:
+                 style_audio: UploadFile | None = None, *, retained_input: QueuedMusicSource | None = None,
+                 conditioning: AceMusicConditioning | None = None,
+                 conditioning_proof: AceRuntimeProof | None = None) -> AceJobReleaseResponse:
     if not _engine_running():
         raise HTTPException(status_code=503, detail='model_inactive')
     validated = AceSubmitParams.model_validate(params)
@@ -170,17 +176,46 @@ async def submit(params: JsonObject, title: str, voice_id: str | None, audio: Up
     # Internal metadata is server-owned and must never reach the native engine.
     snapshot = params.get('_generation_settings')
     settings = AceGenerationSettings.model_validate(snapshot) if snapshot is not None else None
-    clean = {key: value for key, value in params.items() if key not in {'_source_audio_format', '_encoding_settings', '_generation_settings'}}
+    retained_path: Path | None = None
+    receipt: RetainedAceConditioning | None = None
+    if retained_input is not None or conditioning is not None or conditioning_proof is not None:
+        if (retained_input is None or conditioning is None or conditioning_proof is None or settings is None
+                or audio is not None or style_audio is not None or voice_id is not None
+                or settings.selectedModel != BASE_MODEL or params.get('model') != BASE_MODEL
+                or params.get('task_type') != ('complete' if isinstance(conditioning, AceCompleteConditioning) else 'lego')):
+            raise HTTPException(422, 'conditioning_snapshot_invalid')
+        from .queued_music_sources import resolve
+        retained_path = await resolve(retained_input, conditioning)
+        captured = retained_input.snapshot
+        receipt = RetainedAceConditioning(conditioning=conditioning, source_frames=captured.frames,
+            source_rate_hz=captured.sample_rate_hz, source_channels=1 if captured.channels == 1 else 2, source_bytes=captured.source_bytes,
+            source_commit=SOURCE_COMMIT, source_proof_sha256=conditioning_proof.source_proof_sha256,
+            model_sha256=conditioning_proof.model_sha256, artifacts_sha256=conditioning_proof.artifacts_sha256)
+    clean = {key: value for key, value in params.items() if key not in {'_source_audio_format', '_encoding_settings', '_generation_settings', '_music_evidence', '_music_adapters', '_song_conditioning'}}
     engine_params: JsonObject = {**clean, 'audio_format': 'wav', 'batch_size': validated.batch_size}
     params = {**clean, 'audio_format': validated.audio_format, 'batch_size': validated.batch_size,
               '_source_audio_format': 'wav', '_encoding_settings': _object.validate_json(load_settings().model_dump_json())}
+    from .music_evidence import capture_music_evidence, serialize_music_evidence, merge_music_evidence
+    evidence = capture_music_evidence('ace_step')
+    if retained_input is not None:
+        evidence = merge_music_evidence([evidence, retained_input.snapshot.music_evidence])
+    # Adapters, uploads and opaque dependency selectors lack retained identities/source links.
+    native_dependency = any(clean.get(key) not in (None, '') for key in
+                            ('lora_path', 'ctx_audio', 'src_audio', 'src_audio_path', 'ref_audio', 'reference_audio'))
+    if settings is None or settings.loraName is not None or audio is not None or style_audio is not None or native_dependency:
+        evidence.lineage_complete = False
+    params['_music_evidence'] = serialize_music_evidence(evidence)
+    if receipt is not None:
+        params['_song_conditioning'] = _object.validate_json(receipt.model_dump_json())
     if isinstance(snapshot, dict):
         params['_generation_settings'] = snapshot
     if voice_id:
         voice = public_voice(voice_id)
         if not voice.get('usable'):
             raise HTTPException(status_code=409, detail='voice_not_ready')
-    async with ace_lora.control_lock, httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+    async with ace_lora.control_lock, AsyncExitStack() as handles, httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
+        if retained_path is not None:
+            audio = UploadFile(filename=retained_path.name, file=handles.enter_context(retained_path.open('rb')))
         if not _engine_running():
             raise HTTPException(status_code=503, detail='model_inactive')
         if settings is not None:
@@ -209,7 +244,15 @@ async def submit(params: JsonObject, title: str, voice_id: str | None, audio: Up
         if audio is None and style_audio is None:
             result = await _engine_json(client, '/release_task', engine_params)
         else:
-            fields = {key: json.dumps(value) if isinstance(value, (dict, list, bool)) else str(value) for key, value in engine_params.items() if value is not None}
+            fields: dict[str, str | list[str]] = {}
+            for key, value in engine_params.items():
+                if value is None:
+                    continue
+                if key == 'track_classes' and isinstance(value, list) and all(isinstance(role, str) for role in value):
+                    # The pinned parser preserves repeated fields; a JSON string becomes one invalid role.
+                    fields[key] = [role for role in value if isinstance(role, str)]
+                else:
+                    fields[key] = json.dumps(value) if isinstance(value, (dict, list, bool)) else str(value)
             files: dict[str, tuple[str, BinaryIO, str | None]] = {}
             if audio is not None:
                 files['ctx_audio'] = _audio_part(audio)

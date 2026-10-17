@@ -9,19 +9,25 @@ import type { ModuleInfo, ModulePlan, ModuleInstallJob } from '../../api/generat
 import ModuleLicenseCards from './ModuleLicenseCards.vue'
 import ModuleSetupJob from './ModuleSetupJob.vue'
 import CollapsibleDetails from '../../components/shared/CollapsibleDetails.vue'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
 import { formatCreated } from '../../composables/formatCreated'
 
 const { t } = useI18n(), store = useModulesStore()
 const wizard = ref(false), step = ref(0), selected = ref<ModuleId[]>([]), downloadModels = ref(true)
 const reinstall = ref<ModuleId[]>([])
 const plan = ref<ModulePlan | null>(null), working = ref(false), error = ref('')
+const termsBlocked = ref<Partial<Record<ModuleId, boolean>>>({})
+const termsModules = computed(() => (plan.value?.download_models ? plan.value.features : []).filter(
+  (id): id is 'ace_step' | 'yue2' | 'stable_audio3' => id === 'ace_step' || id === 'yue2' || id === 'stable_audio3',
+))
+const termsRequired = computed(() => termsModules.value.some(id => termsBlocked.value[id]))
 const wizardHeading = ref<HTMLElement | null>(null), activityHeading = ref<HTMLElement | null>(null), setupButton = ref<HTMLButtonElement | null>(null)
 let alive = true, generation = 0, controller: AbortController | null = null
 const steps = ['computer', 'features', 'review', 'install']
 const groups: { label: string; ids: ModuleId[] }[] = [
   { label: 'music', ids: ['ace_step', 'yue2', 'stable_audio3'] },
   { label: 'voices', ids: ['speech', 'singing', 'separation', 'kokoro', 'chatterbox', 'rvc', 'speaker_review'] },
-  { label: 'videoTools', ids: ['video', 'wan22', 'media', 'transcription', 'source_import', 'ebooks'] },
+  { label: 'videoTools', ids: ['video', 'wan22', 'media', 'music_dsp', 'music_beats', 'transcription', 'source_import', 'ebooks'] },
 ]
 const modules = computed(() => store.inventory?.modules ?? [])
 const currentJob = computed(() => {
@@ -118,13 +124,14 @@ async function review() {
   finally { if (alive && token === generation) { working.value = false; controller = null } }
 }
 function errorText(err: unknown, fallback: string): string {
+  if (err instanceof ApiError && ['music_terms_required', 'music_noncommercial_disabled'].includes(err.message)) return t('musicTerms.required')
   const messages: Record<string, string> = { setup_busy: 'busy', plan_changed: 'changed', insufficient_disk: 'disk', worker_unverified: 'ownership', setup_not_resumable: 'notResumable', already_installed: 'alreadyInstalled', reinstall_unavailable: 'reinstallUnavailable' }
   const key = err instanceof ApiError ? messages[err.message] : undefined
   return t(key ? `moduleWorkspace.errors.${key}` : fallback)
 }
 function retainJob(job: ModuleInstallJob) { store.acceptJob(job) }
 async function install() {
-  if (working.value || !plan.value?.can_install || !reviewedSupported.value || store.offline) return
+  if (termsRequired.value || working.value || !plan.value?.can_install || !reviewedSupported.value || store.offline) return
   const reviewed = plan.value, token = ++generation
   controller?.abort(); const request = new AbortController(); controller = request; working.value = true; error.value = ''
   try {
@@ -236,7 +243,8 @@ onBeforeUnmount(() => { alive = false; generation++; controller?.abort() })
         <p v-if="plan.download_size_unknown" class="text-sm text-status-queued">{{ t('moduleWorkspace.unknownDownload') }}</p>
         <ul v-if="plan.warnings.length" class="list-disc space-y-1 pl-5 text-sm text-status-queued"><li v-for="warning in plan.warnings" :key="warning">{{ warning }}</li></ul>
         <ol class="space-y-3"><li v-for="item in plan.steps" :key="item.module_id" class="rounded-lg border border-border bg-panel-2/40 p-3"><h4 class="text-sm font-medium text-text">{{ item.name }}</h4><p v-if="item.operation === 'reuse'" data-reused-module class="mt-1 text-xs text-status-done">{{ t('moduleWorkspace.reuse') }}</p><p class="mt-1 text-sm text-text-dim">{{ item.detail }}</p><template v-for="action in item.actions" :key="action.label"><p class="mt-2 text-xs text-text-dim">{{ action.detail }}</p><a v-if="safeUrl(action.url)" :href="safeUrl(action.url)" target="_blank" rel="noopener noreferrer" class="inline-block min-h-11 py-3 text-sm text-text underline decoration-accent2">{{ action.label }}</a></template><ModuleLicenseCards data-license-review :licenses="item.licenses" /></li></ol>
-        <div class="flex gap-2"><button type="button" class="setup-button" :disabled="working" @click="changeStep(1)">{{ t('moduleWorkspace.back') }}</button><button type="button" class="setup-button bg-accent1 text-white" :disabled="working || !plan.can_install || !reviewedSupported || store.offline || store.busy" @click="install">{{ t('moduleWorkspace.installAction') }}</button></div>
+        <MusicTermsCard v-for="engine in termsModules" :key="engine" :engine="engine" operation="setup" @blocked="termsBlocked[engine] = $event" />
+        <div class="flex gap-2"><button type="button" class="setup-button" :disabled="working" @click="changeStep(1)">{{ t('moduleWorkspace.back') }}</button><button type="button" class="setup-button bg-accent1 text-white" :disabled="termsRequired || working || !plan.can_install || !reviewedSupported || store.offline || store.busy" @click="install">{{ t('moduleWorkspace.installAction') }}</button></div>
       </template>
       <p v-if="step === 3" class="text-sm text-text-dim">{{ t('moduleWorkspace.noPercentage') }}</p>
     </div>

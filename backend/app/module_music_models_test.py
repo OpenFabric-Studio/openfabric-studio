@@ -41,6 +41,36 @@ def npz(content: bytes | None = None) -> bytes:
 
 
 class MusicModelSetupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_base_asset_plan_is_explicit_bound_and_never_changes_default_model(self) -> None:
+        from app import config, module_catalog
+        from app.module_contracts import ModulePlanRequest
+        from app import song_capabilities
+        request = ModulePlanRequest(features=['ace_step'], download_models=True,
+            ace_generation_model='acestep-v15-base')
+        original = config.ACE_STEP_DIT_MODEL
+        with patch.object(song_capabilities, 'source_ready', return_value=True), \
+             patch.object(module_catalog, 'engine_python', return_value=self.root / 'python'), \
+             patch.object(module_catalog, 'available_bytes', return_value=100_000_000_000):
+            (self.root / 'python').write_bytes(b'fixture')
+            selected = await module_catalog.plan(request, self.environment)
+            self.assertEqual(selected.ace_generation_model, 'acestep-v15-base')
+            self.assertTrue(selected.can_install)
+            self.assertEqual(len(selected.steps), 1)
+            self.assertNotEqual(module_catalog.approval_scope(request, self.environment),
+                module_catalog.approval_scope(ModulePlanRequest(features=['ace_step'], download_models=True), self.environment))
+        self.assertEqual(config.ACE_STEP_DIT_MODEL, original)
+
+    def test_ace_conditioning_manifest_selects_base_without_turbo_sft_or_language_model(self) -> None:
+        artifacts = models.ace_conditioning_artifacts()
+        components = {Path(item.path).parts[1] for item in artifacts}
+        self.assertEqual(components, {'acestep-v15-base', 'vae', 'Qwen3-Embedding-0.6B'})
+        base = {Path(item.path).name: item for item in artifacts if '/acestep-v15-base/' in item.path}
+        self.assertEqual(base['model.safetensors'].bytes, 4787825604)
+        self.assertEqual(base['model.safetensors'].sha256,
+            '4177f600501a6d4bd81cadaa0abac557ffd15c54e5c8cb52053cdb24a0844d6b')
+        self.assertTrue(all('/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/' in item.url
+            for item in base.values()))
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

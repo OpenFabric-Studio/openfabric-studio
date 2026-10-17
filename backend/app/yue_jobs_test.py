@@ -16,6 +16,8 @@ from pydantic import ValidationError
 
 from app import db, music_lora, yue_jobs
 from app.contracts import JsonObject
+from app.export_provenance_contracts import MusicEvidence
+from app.music_evidence import capture_music_evidence, track_music_evidence
 from app.music_lora_contracts import MusicAdapter, MusicAdapterSelection
 from app.music_lora_test import adapter_bytes
 from app.yue_contracts import YueOptions, YueSubmitRequest
@@ -77,6 +79,27 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(db.list_tracks('yue2')), 1)
         self.assertTrue(Path(db.list_tracks('yue2')[0]['audio_path']).is_file())
         self.assertFalse(yue_jobs.work_busy())
+        assert result.track is not None
+        self.assertTrue(MusicEvidence.model_validate(result.track.params['_music_evidence']).lineage_complete)
+        self.assertTrue(track_music_evidence(result.track.id).lineage_complete)
+
+    async def test_external_score_retains_known_restrictions_without_claiming_complete_lineage(self) -> None:
+        request = self.request()
+        request.options = YueOptions(style='jazz', cot='melody', abc='X:1\nK:C\nC D E F|')
+        native = AsyncMock(return_value={'audio': audio_fixture()})
+        with patch.object(yue_jobs, '_load_model', new=AsyncMock()), patch.object(yue_jobs, '_native_json', new=native):
+            job = yue_jobs.submit(request)
+            await asyncio.wait_for(yue_jobs._tasks[job.id], 2)
+        track = yue_jobs.get_job(job.id).track
+        assert track is not None
+        evidence = MusicEvidence.model_validate(track.params['_music_evidence'])
+        self.assertFalse(evidence.lineage_complete)
+        self.assertEqual(evidence.components, capture_music_evidence('yue2').components)
+        self.assertEqual(evidence.restriction, 'noncommercial')
+        inherited = track_music_evidence(track.id)
+        self.assertFalse(inherited.lineage_complete)
+        self.assertEqual(inherited.restriction, 'noncommercial')
+        self.assertEqual(native.await_args_list[0].args[1]['request']['options']['abc'], request.options.abc)
 
     async def test_musical_guidance_reaches_native_style_and_original_choices_are_saved(self) -> None:
         from app.generation_contracts import YueGenerationSettings
@@ -105,6 +128,8 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
             ('Folk', 88, 'Am', '6/8'))
         snapshot = YueGenerationSettings.model_validate(params['_generation_settings'])
         self.assertEqual((snapshot.bpm, snapshot.keyScale, snapshot.timeSignature), (88, 'Am', '6/8'))
+        self.assertIn('_music_evidence', params)
+        self.assertIn('noncommercial', str(params['_music_evidence']))
 
     async def test_disabling_adapters_reloads_a_resident_adapted_session(self) -> None:
         resident = {**yue_jobs._COMPACT_ARENAS, 'yue2.model_gguf': 'yue2-3b-q8_0.gguf',
@@ -180,6 +205,9 @@ class YueJobsTests(unittest.IsolatedAsyncioTestCase):
             {**ar.model_dump(mode='json'), 'strength': 0.5}, {**nar.model_dump(mode='json'), 'strength': 0.0}])
         self.assertIn('arAdapter', str(track.params['_generation_settings']))
         self.assertNotIn(str(db.DATA_DIR), str(track.params))
+        evidence = track_music_evidence(track.id)
+        self.assertTrue(evidence.lineage_complete)
+        self.assertEqual([adapter.sha256 for adapter in evidence.adapters], [ar.sha256, nar.sha256])
 
     def test_incompatible_adapter_is_rejected_before_a_job_is_created(self) -> None:
         adapter = self.register_adapter('nar')

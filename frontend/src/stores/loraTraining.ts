@@ -9,6 +9,7 @@ const t = i18n.global.t
 export function loraExportErrorText(cause: unknown): string {
   if (cause instanceof ApiError) {
     switch (cause.message) {
+      case 'insufficient_disk': return t('localMusic.insufficientDisk')
       case 'lora_export_destination_exists': return t('loraExport.errors.exists')
       case 'lora_export_destination_unsafe': return t('loraExport.errors.destination')
       case 'lora_export_source_unsafe':

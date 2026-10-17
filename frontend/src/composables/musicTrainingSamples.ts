@@ -1,6 +1,8 @@
 import type { LoraDatasetOperationResponse, MusicLoraSource, MusicLoraTrainingSample } from '../api/generated'
 
 export function trainingSampleKey(sample: MusicLoraSource): string {
+  const regional = sample.regional_manifest
+  if (regional) return `regional-${regional.manifest_id}-${regional.manifest_sha256}-${regional.excerpt_id}`
   return sample.dataset ? `${sample.dataset.dataset_id}-${sample.dataset.sample_id}` : String(sample.track_id)
 }
 export function savedTrainingSamples(snapshot: LoraDatasetOperationResponse, engine: 'stable_audio3' | 'yue2', limit: number): Array<MusicLoraTrainingSample & { title: string }> {

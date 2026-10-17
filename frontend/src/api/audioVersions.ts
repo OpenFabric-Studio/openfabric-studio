@@ -1,5 +1,6 @@
 import { apiFetch } from './http'
 import { parseAudioVersion, parseCreateAudioVersionRequest, parseTrackAudioVersionsResponse } from './contracts'
+import type { CreateAudioVersionRequest } from './generated'
 export type { AudioVersion, TrackAudioVersionsResponse } from './contracts'
 
 function base(trackId: number) {
@@ -13,8 +14,8 @@ function item(trackId: number, versionId: string) {
 export async function listAudioVersions(trackId: number, signal?: AbortSignal) {
   return parseTrackAudioVersionsResponse(await apiFetch(base(trackId), { signal }))
 }
-export async function createAudioVersion(trackId: number, voiceId: string, signal?: AbortSignal) {
-  const body = parseCreateAudioVersionRequest({ voice_id: voiceId })
+export async function createAudioVersion(trackId: number, voiceId: string, signal?: AbortSignal, options?: Pick<CreateAudioVersionRequest, 'mix'>) {
+  const body = parseCreateAudioVersionRequest({ voice_id: voiceId, ...options })
   return parseAudioVersion(await apiFetch(base(trackId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), signal }))
 }
 async function action(trackId: number, versionId: string, action: 'cancel' | 'retry', signal?: AbortSignal) {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import hashlib
 import json
 import os
@@ -14,7 +15,7 @@ from unittest.mock import AsyncMock, patch
 
 from pydantic import ValidationError
 
-from app import db, music_training, music_lora
+from app import db, music_training, music_lora, module_catalog
 from app.music_lora_contracts import MusicAdapter, MusicLoraError
 from app.music_training_contracts import MusicLoraTrainingSample, MusicLoraTrainingRequest, MusicLoraTrainingStatus, MusicLoraTrainingJob, YueLoraPairSettings
 from app.video_process import WorkerIdentity
@@ -378,6 +379,96 @@ class MusicTrainingJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.source.read_bytes(), b'preserve original')
         await music_training.recover()
         self.assertEqual(music_training.get(identifier).adapter, self.adapter)
+
+    async def test_admission_includes_pcm_latents_and_retained_optimizer_checkpoints(self) -> None:
+        parameters = 28 * 8 * 32768
+        native_bytes = 28 * 8 * 38912 * 4
+        pcm = 13 * 48000 * 2 * 2
+        latents = (12 * 25 + 1) * 64 * 2
+        required = 2 * pcm + 2 * latents + parameters * 10 + 2 * 1024**2 + 2 * native_bytes + 64 * 1024**2
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=required - 1)), \
+                patch.object(music_training, '_run', new=AsyncMock()), self.assertRaises(MusicLoraError) as caught:
+            await music_training.submit(self.body())
+        self.assertEqual(caught.exception.code, 'insufficient_disk')
+        self.assertEqual(music_training.list_jobs().jobs, [])
+        self.assertFalse((self.root / 'music-lora-training').exists())
+        self.assertEqual(self.source.read_bytes(), b'preserve original')
+
+    async def test_multiple_sources_need_additional_decoded_and_cached_space(self) -> None:
+        second = db.insert_track(model='upload', title='Second', lyrics='', seed=None, duration_ms=1000,
+            wall_ms=None, params={}, audio_path=self.source, abc_path=None)
+        parameters = 28 * 8 * 32768
+        single = 2 * 13 * 48000 * 4 + 2 * 301 * 64 * 2 + parameters * 10 + 2 * 1024**2 + 2 * 28 * 8 * 38912 * 4 + 64 * 1024**2
+        usage = module_catalog.shutil.disk_usage(self.root)
+        request = self.body().model_copy(update={'samples': [*self.body().samples, MusicLoraTrainingSample(track_id=second, caption='Piano')]})
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=single)), \
+                patch.object(music_training, '_run', new=AsyncMock()), self.assertRaises(MusicLoraError) as caught:
+            await music_training.submit(request)
+        self.assertEqual(caught.exception.code, 'insufficient_disk')
+
+    async def test_long_runs_reserve_every_retained_checkpoint_and_optimizer_state(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=220 * 1024**2)), \
+                patch.object(music_training, '_run', new=AsyncMock()), self.assertRaises(MusicLoraError) as caught:
+            await music_training.submit(self.body().model_copy(update={'max_steps': 50}))
+        self.assertEqual(caught.exception.code, 'insufficient_disk')
+
+    async def test_paired_runs_reserve_both_adapter_phases(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=220 * 1024**2)), \
+                patch.object(music_training, '_run', new=AsyncMock()), self.assertRaises(MusicLoraError) as caught:
+            await music_training.submit(self.pair_body())
+        self.assertEqual(caught.exception.code, 'insufficient_disk')
+
+    async def test_portable_package_does_not_reserve_local_training_checkpoints(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        required = self.source.stat().st_size * 2 + 64 * 1024**2
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=required)), \
+                patch.object(music_training, '_run', new=AsyncMock()):
+            job = await music_training.submit(self.body(), kind='nvidia-package')
+            await music_training._tasks[job.id]
+        self.assertEqual(job.kind, 'nvidia-package')
+
+    async def test_space_is_rechecked_before_training_worker_preparation(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(music_training, 'prepare_worker', side_effect=self.command) as prepare:
+            job = await music_training.submit(self.body())
+            with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=1)):
+                await music_training._tasks[job.id]
+        self.assertEqual(music_training.get(job.id).error_code, 'insufficient_disk')
+        prepare.assert_not_called()
+        self.assertEqual(self.source.read_bytes(), b'preserve original')
+
+    async def test_publication_reserves_the_actual_adapter_copy_and_recovers_without_training(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        def command(request: MusicLoraTrainingRequest, run: Path, sources: list[Path]) -> tuple[list[str], Path, dict[str, str]]:
+            result = self.command(request, run, sources)
+            disk.return_value = usage._replace(free=64 * 1024**2 + 1)
+            return result
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage) as disk, \
+                patch.object(music_training, 'prepare_worker', side_effect=command):
+            identifier = await self.finish()
+        job = music_training.get(identifier)
+        self.assertEqual(job.error_code, 'insufficient_disk')
+        self.assertIsNone(job.adapter)
+        self.assertTrue((music_training._directory(identifier) / 'final.safetensors').is_file())
+        with patch.object(music_training, 'prepare_worker') as prepare:
+            await music_training.recover()
+        prepare.assert_not_called()
+        self.assertEqual(music_training.get(identifier).status, 'done')
+        self.assertEqual(self.source.read_bytes(), b'preserve original')
+
+    async def test_disk_full_adapter_publication_has_a_stable_recoverable_error(self) -> None:
+        with patch.object(music_training, 'prepare_worker', side_effect=self.command), \
+                patch.object(music_training, 'register_file', side_effect=OSError(errno.ENOSPC, 'disk full')):
+            identifier = await self.finish()
+        job = music_training.get(identifier)
+        self.assertEqual(job.error_code, 'insufficient_disk')
+        self.assertTrue((music_training._directory(identifier) / 'completion.json').is_file())
+        self.assertEqual(self.source.read_bytes(), b'preserve original')
+        await music_training.recover()
+        self.assertEqual(music_training.get(identifier).status, 'done')
 
     async def test_final_checkpoint_registers_in_real_managed_adapter_library(self) -> None:
         with patch.object(music_training, 'prepare_worker', side_effect=self.command), \

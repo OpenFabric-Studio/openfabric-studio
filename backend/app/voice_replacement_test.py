@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import os
 import signal
 import subprocess
@@ -70,6 +71,138 @@ class VoiceReplacementTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         if db._db is not None:
             db._db.close()
+
+    async def test_upload_measured_mix_settings_are_explicit_and_validated_before_library_writes(self) -> None:
+        engine = self.root / 'engine'
+        engine.mkdir()
+        (engine / 'inference.py').write_text('# fixture engine', encoding='utf-8')
+        bad = await self.client.post('/api/voices/replace', files={'audio': ('song.wav', wav_bytes(), 'audio/wav')},
+            data={'voice_id': self.voice_id, 'mix': json.dumps({'manual_gain_db': 5.0})})
+        self.assertEqual(bad.status_code, 422, bad.text)
+        self.assertEqual(db.list_tracks(), [])
+        good = await self.client.post('/api/voices/replace', files={'audio': ('song.wav', wav_bytes(), 'audio/wav')},
+            data={'voice_id': self.voice_id, 'mix': json.dumps({'vocal_level': 'manual', 'manual_gain_db': -3.0})})
+        self.assertEqual(good.status_code, 200, good.text)
+        self.assertEqual(good.json()['application']['mix_settings']['manual_gain_db'], -3.0)
+        self.assertIsNone(good.json()['application']['mix'])
+
+    async def test_measured_apply_uses_shared_cpu_renderer_and_serves_retained_artifacts_after_reload(self) -> None:
+        import shutil
+        import numpy as np
+        import soundfile as sf
+        from app import audio_versions
+        from app.api import routes_audio_versions
+        from app.voice_contracts import VoiceTrialMetrics
+        engine = self.root / 'engine'
+        engine.mkdir()
+        (engine / 'inference.py').write_text('# fixture engine', encoding='utf-8')
+        time = np.arange(3 * 48000) / 48000
+        tone = np.asarray(.1 * np.sin(2 * np.pi * 440 * time), dtype=np.float32)
+        data = io.BytesIO()
+        sf.write(data, np.column_stack((tone, -tone)), 48000, format='WAV', subtype='FLOAT')
+        async def separation(audio: Path, out_dir: Path, **kwargs: object) -> dict[str, Path]:
+            out_dir.mkdir(parents=True)
+            samples, rate = sf.read(audio, dtype='float32', always_2d=True)
+            paths = {}
+            for stem in ('vocals', 'drums', 'bass', 'other'):
+                path = out_dir / (stem + '.wav')
+                sf.write(path, samples if stem == 'vocals' else np.zeros_like(samples), rate, subtype='FLOAT')
+                paths[stem] = path
+            return paths
+        async def mono(source: Path, destination: Path, slot: object) -> None:
+            shutil.copyfile(source, destination)
+        async def inference(command: list[str], **kwargs: object) -> int:
+            samples, rate = sf.read(command[command.index('--source') + 1], dtype='float32', always_2d=True)
+            sf.write(Path(command[command.index('--output') + 1]) / 'vc_fixture.wav', samples / 2, rate, subtype='FLOAT')
+            return 0
+        async def measure(audio: Path, expected: float, job: voice_build.ApplyJob, label: str) -> VoiceTrialMetrics:
+            return VoiceTrialMetrics(duration_sec=expected, duration_delta_sec=0.0, level_db=-20.0, peak=.2, clipped_fraction=0.0)
+        with patch.object(voice_build, '_apply_inner', side_effect=self.real_apply), \
+                patch.object(voice_build, '_engine_python', return_value=Path(sys.executable)), \
+                patch.object(voice_build, 'LOG_DIR', self.root / 'logs'), \
+                patch('app.seed_vc_compat.ensure_compatibility'), patch.object(voice_build, 'ensure_whisper_float32_off_cuda'), \
+                patch.object(voice_build, 'separate_file', side_effect=separation), \
+                patch.object(voice_build, 'phase_safe_mono', side_effect=mono), \
+                patch.object(voice_build, 'ensure_target_reference', new=AsyncMock(side_effect=lambda _voice, reference, *_args: reference)), \
+                patch.object(voice_build, '_spawn', side_effect=inference) as converter, \
+                patch.object(voice_build, '_measure_conversion', side_effect=measure), \
+                patch.object(voice_build, '_ffmpeg', new=AsyncMock(side_effect=AssertionError('legacy RMS/limiter path'))):
+            accepted = await self.client.post('/api/voices/replace', files={'audio': ('song.wav', data.getvalue(), 'audio/wav')},
+                data={'voice_id': self.voice_id, 'mix': '{}'})
+            self.assertEqual(accepted.status_code, 200, accepted.text)
+            track = accepted.json()['track']['id']
+            job = voice_build._applies[track]
+            await asyncio.wait_for(asyncio.shield(job.task), 30)
+            self.assertEqual(job.status, 'done', job.error_code)
+            self.assertEqual(converter.await_count, 1)
+        status = voice_build.apply_status(track)
+        self.assertAlmostEqual(status['mix']['applied_gain_db'], 6.0206, delta=.1)
+        self.assertFalse(job.work_dir.exists())
+        versions = audio_versions.list_versions(track).versions
+        completed = next(item for item in versions if item.id == job.audio_version_id)
+        self.assertIsNotNone(completed.mix)
+        report = completed.mix
+        app = FastAPI()
+        app.include_router(routes_audio_versions.router)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://test') as client:
+            for artifact in report.artifacts:
+                response = await client.get(artifact.audio_url)
+                self.assertEqual(response.status_code, 200, response.text[:200])
+            wrong = await client.get(f'/api/tracks/{track + 100}/versions/{completed.id}/mix/artifacts/{report.artifacts[0].id}')
+            self.assertEqual(wrong.status_code, 404)
+        # A completed retained render can outlive a failed catalog attachment.
+        audio_versions.sync_application(completed.id, track, 'failed', 'interrupted')
+        with patch.object(voice_build, '_apply_inner', side_effect=self.real_apply), \
+                patch.object(voice_build, '_engine_python', return_value=Path(sys.executable)), \
+                patch('app.seed_vc_compat.ensure_compatibility'), patch.object(voice_build, 'ensure_whisper_float32_off_cuda'), \
+                patch.object(voice_build, 'separate_file', new=AsyncMock(side_effect=AssertionError('repeated separation'))), \
+                patch.object(voice_build, '_spawn', new=AsyncMock(side_effect=AssertionError('repeated conversion'))):
+            voice_build.start_apply(self.voice_id, track, audio_version_id=completed.id)
+            retried = voice_build._applies[track]
+            await asyncio.wait_for(asyncio.shield(retried.task), 30)
+        self.assertEqual(retried.status, 'done', retried.error_code)
+        self.assertEqual(retried.mix_report.id, report.id)
+        existing_master = Path(db.get_track(track)['audio_path']).read_bytes()
+        audio_versions.sync_application(completed.id, track, 'failed', 'interrupted')
+        (self.voice / 'model.pth').write_bytes(b'replaced model bytes')
+        with patch.object(voice_build, '_apply_inner', side_effect=self.real_apply), \
+                patch.object(voice_build, '_engine_python', return_value=Path(sys.executable)), \
+                patch('app.seed_vc_compat.ensure_compatibility'), patch.object(voice_build, 'ensure_whisper_float32_off_cuda'), \
+                patch.object(voice_build, 'separate_file', new=AsyncMock(side_effect=AssertionError('changed model separated'))), \
+                self.assertLogs('app.voice_build', level='WARNING'):
+            voice_build.start_apply(self.voice_id, track, audio_version_id=completed.id)
+            changed = voice_build._applies[track]
+            await asyncio.wait_for(asyncio.shield(changed.task), 30)
+        self.assertEqual(changed.status, 'failed')
+        self.assertEqual(changed.error_code, 'dsp_source_changed')
+        self.assertEqual(Path(db.get_track(track)['audio_path']).read_bytes(), existing_master)
+
+    async def test_shared_dsp_command_cancel_drains_the_apply_process_slot(self) -> None:
+        entered = asyncio.Event()
+        children: list[asyncio.subprocess.Process] = []
+        spawn = voice_build.spawn_apply_worker
+        async def record(argv: list[str], cwd: Path, env: object, stdout: int) -> asyncio.subprocess.Process:
+            proc = await spawn(argv, cwd, env, stdout)
+            children.append(proc)
+            entered.set()
+            return proc
+        job = voice_build.ApplyJob(voice_id=self.voice_id, track_id=1)
+        with patch.object(voice_build, 'spawn_apply_worker', side_effect=record):
+            task = asyncio.create_task(voice_build._mix_command(job,
+                [sys.executable, '-c', 'import time;time.sleep(60)'], 60.0))
+            await entered.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        self.assertIsNotNone(children[0].returncode)
+        self.assertIsNone(job.slot.proc)
+
+    async def test_strict_production_cannot_accept_general_measured_mix_settings(self) -> None:
+        from app.voice_mix_contracts import VoiceMixSettings
+        with self.assertRaises(HTTPException) as error:
+            voice_build.start_apply(self.voice_id, 1, production_run_id='b' * 32, mix=VoiceMixSettings())
+        self.assertEqual(error.exception.detail, 'voice_mix_strict_production_unsupported')
+        self.assertEqual(db.list_tracks(), [])
 
     async def replace(self, *, voice_id: str | None = None, filename: str = 'song.wav', data: bytes | None = None) -> httpx.Response:
         return await self.client.post('/api/voices/replace', data={'voice_id': voice_id or self.voice_id},

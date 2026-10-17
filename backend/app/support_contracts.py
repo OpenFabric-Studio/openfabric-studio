@@ -1,7 +1,7 @@
 """Allowlisted engine controls and locally reviewed support reports."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import ConfigDict, Field, StrictBool
 
@@ -69,7 +69,7 @@ class SupportReport(SupportContract):
     acceleration: Literal['apple_silicon', 'nvidia_unverified', 'cpu', 'unknown']
     physical_memory_bytes: int | None = Field(default=None, ge=1, le=17_592_186_044_416)
     backend_connection: Literal['reachable', 'unreachable', 'unverified']
-    modules: list[SupportModuleState] = Field(default_factory=list, max_length=17)
+    modules: list[SupportModuleState] = Field(default_factory=list, max_length=len(get_args(ModuleId)))
     engines: list[SupportEngineState] = Field(default_factory=list, max_length=2)
     recent_actions: list[SupportAction] = Field(default_factory=list, max_length=20)
 

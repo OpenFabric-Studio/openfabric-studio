@@ -10,6 +10,7 @@ from .module_catalog import ModuleEnvironment, configured_environment, engine_py
 from .module_evidence import environment_verified
 from .module_jobs import ModuleSetupError
 from .module_music_models import _path, _valid_file
+from .module_music_models import stable_training_artifacts
 from .music_lora_contracts import MusicLoraError
 from .stable_lora_contracts import StableLoraTrainingRequest, StableLoraTrainingStatus
 from .video_media import tool
@@ -55,6 +56,21 @@ def prepare_worker(request: StableLoraTrainingRequest, run_dir: Path, sources: l
         raise MusicLoraError('stable_lora_training_weights_missing')
     if len(sources) != len(request.samples):
         raise MusicLoraError('stable_lora_dataset_invalid', 422)
+    source_sha256s: list[str | None] = []
+    for sample, source in zip(request.samples, sources, strict=True):
+        reference = sample.regional_manifest
+        if reference is None:
+            source_sha256s.append(None)
+            continue
+        from .regional_datasets import training_excerpt_source
+        from .regional_dataset_contracts import RegionalDatasetError
+        try:
+            selected = training_excerpt_source(reference.manifest_id, reference.manifest_sha256, reference.excerpt_id)
+            if selected.path != source or selected.caption != sample.caption:
+                raise MusicLoraError('stable_lora_dataset_changed')
+            source_sha256s.append(selected.sha256)
+        except (RegionalDatasetError, OSError, ValueError, RuntimeError) as error:
+            raise MusicLoraError('stable_lora_dataset_changed') from error
     root = env.paths['stable_audio3'].resolve()
     native = root / 'optimized/mlx'
     python = engine_python(root, env.platform)
@@ -66,7 +82,12 @@ def prepare_worker(request: StableLoraTrainingRequest, run_dir: Path, sources: l
         '--seed', str(request.seed), '--max-steps', str(request.max_steps), '--checkpoint-every', str(min(1000, request.max_steps)),
         '--adapter-type', 'lora', '--rank', str(request.rank), '--grad-checkpoint', '--no-conditioner-lora']
     payload = {'request': request.model_dump(mode='json'), 'request_sha256': fingerprint(request), 'sources': [str(path) for path in sources],
+        'source_sha256s': source_sha256s,
         'preencode_argv': preencode, 'train_argv': train, 'ffmpeg': tool('ffmpeg')}
+    if any(sample.regional_manifest is not None for sample in request.samples):
+        payload['runtime_proof'] = {'root': str(native), 'models': [
+            {'path': str(Path(item.path).relative_to('optimized/mlx')), 'sha256': item.sha256, 'bytes': item.bytes}
+            for item in stable_training_artifacts(request.variant)]}
     atomic_text(run_dir / 'request.json', json.dumps(payload, ensure_ascii=False))
     child_env = os.environ.copy()
     child_env.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1', 'PYTHONUTF8': '1'})

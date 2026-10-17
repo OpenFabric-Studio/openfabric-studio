@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MusicStorageReview from './MusicStorageReview.vue'
 import { computed, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { routeLocationKey } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -203,7 +204,7 @@ onBeforeUnmount(() => { active = false; operation++; controller?.abort(); contro
       </form>
       <p v-if="notice" role="status" class="text-sm text-status-done">{{ notice }}</p>
     </section>
-    <div v-show="tab === 'library'" id="settings-panel-library" role="tabpanel" aria-labelledby="settings-tab-library"><LibraryFolder /></div>
+    <div v-show="tab === 'library'" id="settings-panel-library" role="tabpanel" aria-labelledby="settings-tab-library" class="space-y-5"><LibraryFolder /><MusicStorageReview v-if="tab === 'library'" /></div>
     <div v-show="tab === 'preferences'" id="settings-panel-preferences" role="tabpanel" aria-labelledby="settings-tab-preferences" class="space-y-8"><GenerationSettings /><ArtistSettings /></div>
   </div>
 </template>

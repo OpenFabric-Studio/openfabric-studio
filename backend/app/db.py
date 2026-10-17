@@ -218,6 +218,20 @@ def _open_db() -> sqlite3.Connection:
             migrate_stable_lora(_db)
             from .music_training import migrate as migrate_music_training
             migrate_music_training(_db)
+            from .music_analysis import migrate as migrate_music_analysis
+            migrate_music_analysis(_db)
+            from .beat_store import migrate as migrate_beats
+            migrate_beats(_db)
+            from .beat_projects import migrate as migrate_music_projects
+            migrate_music_projects(_db)
+            from .replacement_store import migrate as migrate_replacement
+            migrate_replacement(_db)
+            from .mashup_store import migrate as migrate_mashups
+            migrate_mashups(_db)
+            from .regional_dataset_store import migrate as migrate_regional_datasets
+            migrate_regional_datasets(_db)
+            from .beat_song_mix_store import migrate as migrate_beat_song_mixes
+            migrate_beat_song_mixes(_db)
         except BaseException:
             # Do not retain a partly initialized connection after a migration
             # interruption. Additive migrations are safe to retry on next open.
@@ -262,6 +276,10 @@ def insert_track(
     yue_job_id: str | None = None,
     cloud_music_job_id: str | None = None,
     local_music_job_id: str | None = None,
+    beat_job_id: str | None = None,
+    replacement_render_id: str | None = None,
+    mashup_job_id: str | None = None,
+    beat_song_mix_job_id: str | None = None,
 ) -> int:
     db = get_db()
     db.execute("BEGIN IMMEDIATE")
@@ -304,6 +322,21 @@ def insert_track(
             attached_local = db.execute('UPDATE local_music_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, local_music_job_id))
             if attached_local.rowcount != 1:
                 raise ValueError('invalid_local_music_attachment')
+        if beat_job_id is not None:
+            attached_beat = db.execute('UPDATE beat_render_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, beat_job_id))
+            if attached_beat.rowcount != 1:
+                raise ValueError('invalid_beat_job_attachment')
+        if replacement_render_id is not None:
+            from .replacement_store import attach_render
+            attach_render(db, replacement_render_id, cur.lastrowid)
+        if mashup_job_id is not None:
+            attached_mashup = db.execute('UPDATE mashup_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, mashup_job_id))
+            if attached_mashup.rowcount != 1:
+                raise ValueError('invalid_mashup_job_attachment')
+        if beat_song_mix_job_id is not None:
+            attached_mix = db.execute('UPDATE beat_song_mix_jobs SET track_id=? WHERE id=? AND track_id IS NULL', (cur.lastrowid, beat_song_mix_job_id))
+            if attached_mix.rowcount != 1:
+                raise ValueError('invalid_beat_song_mix_attachment')
         if audio_version_id is not None:
             attached = db.execute("UPDATE audio_versions SET worker_track_id=? WHERE id=? AND kind='voice' AND worker_track_id IS NULL",
                                   (cur.lastrowid, audio_version_id))

@@ -15,6 +15,7 @@ from .. import local_music
 from ..local_music_contracts import LocalMusicEngines, LocalMusicError, LocalMusicJob, LocalMusicJobs, LocalMusicRequest
 from ..music_lora_contracts import MusicLoraError
 from ..module_security import require_local_origin
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ async def jobs() -> LocalMusicJobs:
 
 @router.post('/jobs', response_model=LocalMusicJob)
 async def submit(body: LocalMusicRequest) -> LocalMusicJob:
+    require_usage(body.engine, 'generation')
     return await local_music.submit(body)
 
 

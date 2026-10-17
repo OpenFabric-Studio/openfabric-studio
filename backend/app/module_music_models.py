@@ -23,6 +23,7 @@ from .stable_lora_contracts import StableLoraVariant
 
 if TYPE_CHECKING:
     from .module_catalog import ModuleEnvironment
+    from .module_contracts import ModulePlan, ModulePlanRequest
     from .module_jobs import InstallContext, InstallOutcome
 
 
@@ -42,7 +43,7 @@ class ModelArtifact(BaseModel):
         return value
 
 
-BundleId = Literal['ace-main', 'ace-xl', 'ace-lm4b', 'stable-small', 'stable-medium', 'stable-small-training', 'stable-medium-training']
+BundleId = Literal['ace-main', 'ace-xl', 'ace-base', 'ace-lm4b', 'stable-small', 'stable-medium', 'stable-small-training', 'stable-medium-training']
 
 
 class ModelManifest(BaseModel):
@@ -196,6 +197,62 @@ def stable_training_artifacts(variant: StableLoraVariant) -> list[ModelArtifact]
     return artifacts
 
 
+def ace_conditioning_artifacts() -> list[ModelArtifact]:
+    """Base DiT and its actual shared dependencies; the language model is unused."""
+    from .module_jobs import ModuleSetupError
+    manifest = _manifest()
+    base = manifest.bundles.get('ace-base', [])
+    shared = [item for item in manifest.bundles.get('ace-main', [])
+              if PurePosixPath(item.path).parts[1] in ('vae', 'Qwen3-Embedding-0.6B')]
+    if len(base) != 6 or not shared:
+        raise ModuleSetupError('artifact_integrity')
+    return [*base, *shared]
+
+
+def plan_ace_conditioning(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePlan:
+    from .module_catalog import approval_scope, available_bytes, engine_python, supported
+    from .module_contracts import ModulePlan, ModulePlanStep
+    from .module_licenses import declarations
+    from .song_capabilities import source_ready
+    import hashlib
+    import json
+    root = environment.paths['ace_step']
+    artifacts = ace_conditioning_artifacts()
+    _preflight(root, [item.path for item in artifacts])
+    missing = [item for item in artifacts if not _valid_file(_path(root, item.path))]
+    size = sum(item.bytes for item in missing if _installed_model_code(environment, 'ace_step', item) is None)
+    required = size * 2
+    spaces = [available_bytes(path) for path in {environment.root, *(_path(root, item.path).parent for item in missing)}]
+    free = min(space for space in spaces if space is not None) if all(space is not None for space in spaces) else None
+    installed = engine_python(root, environment.platform).is_file() and source_ready(environment)
+    operation: Literal['unsupported', 'manual', 'verify', 'reuse'] = ('unsupported' if not supported('ace_step', environment)
+        else 'manual' if not installed else 'verify' if missing else 'reuse')
+    detail = ('Prepare the pinned ACE-Step runtime first; no model download was started.' if not installed else
+        'Prepare only the reviewed base DiT, VAE and Qwen text encoder. Existing Turbo/SFT weights and default model settings are preserved.')
+    step = ModulePlanStep(module_id='ace_step', name='ACE-Step base conditioning assets', operation=operation,
+        estimated_download_bytes=size, detail=detail, actions=[], licenses=declarations('ace_step'))
+    token = hashlib.sha256(json.dumps({'scope': approval_scope(request, environment),
+        'steps': [step.model_dump(mode='json')]}, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return ModulePlan(features=['ace_step'], download_models=True, ace_generation_model='acestep-v15-base',
+        plan_token=token, steps=[step], estimated_download_bytes=size, download_size_unknown=False,
+        required_free_bytes=required, free_bytes=free, can_install=operation == 'verify' and free is not None and free >= required,
+        warnings=['This explicitly selected base model is separate from Turbo/SFT. No default configuration changes.',
+            'Source/asset checks do not establish model execution, audio quality, or rights to source recordings.'])
+
+
+async def setup_ace_conditioning_models(context: InstallContext) -> InstallOutcome:
+    from .module_jobs import InstallOutcome, ModuleSetupError
+    from .song_capabilities import source_ready
+    if not source_ready(context.environment):
+        raise ModuleSetupError('environment_unverified')
+    artifacts = ace_conditioning_artifacts()
+    _preflight(context.environment.paths['ace_step'], [item.path for item in artifacts])
+    await _install_artifacts(context, 'ace_step', artifacts)
+    if not _all_valid(context.environment.paths['ace_step'], [item.path for item in artifacts]):
+        raise ModuleSetupError('artifact_integrity')
+    return InstallOutcome('verified', 'Selected ACE base assets passed structural checks. Exact hashes are checked before native initialization; model execution and audio quality remain unverified. Default model settings were preserved.')
+
+
 def stable_generation_artifacts(variant: StableLoraVariant) -> list[ModelArtifact]:
     from .module_jobs import ModuleSetupError
     bundle: BundleId = 'stable-medium' if variant == 'medium' else 'stable-small'
@@ -203,6 +260,27 @@ def stable_generation_artifacts(variant: StableLoraVariant) -> list[ModelArtifac
     if len(artifacts) != 3:
         raise ModuleSetupError('artifact_integrity')
     return artifacts
+
+
+def stable_conditioning_artifacts(variant: StableLoraVariant) -> list[ModelArtifact]:
+    """The selected inference bundle and its encoder; no unused training base."""
+    from .module_jobs import ModuleSetupError
+    suffix = 'same_l_encoder_f32.npz' if variant == 'medium' else 'same_s_encoder_f32.npz'
+    encoders = [item for item in stable_training_artifacts(variant) if item.path.endswith('/' + suffix)]
+    if len(encoders) != 1:
+        raise ModuleSetupError('artifact_integrity')
+    return [*stable_generation_artifacts(variant), encoders[0]]
+
+
+async def setup_stable_conditioning_models(context: InstallContext, variant: StableLoraVariant) -> InstallOutcome:
+    from .module_jobs import InstallOutcome, ModuleSetupError
+    artifacts = stable_conditioning_artifacts(variant)
+    root = context.environment.paths['stable_audio3']
+    _preflight(root, [item.path for item in artifacts])
+    await _install_artifacts(context, 'stable_audio3', artifacts)
+    if not _all_valid(root, [item.path for item in artifacts]):
+        raise ModuleSetupError('artifact_integrity')
+    return InstallOutcome('verified', 'Selected generation bundle and matching reference encoder passed structural checks. No training base was selected. Exact hashes are checked before conditioned inference; audio quality remains unverified.')
 
 
 async def setup_stable_generation_models(context: InstallContext, variant: StableLoraVariant) -> InstallOutcome:
@@ -285,7 +363,7 @@ def _installed_model_code(environment: ModuleEnvironment, identifier: ModuleId, 
     if identifier != 'ace_step' or not artifact.path.endswith('.py'):
         return None
     parts = PurePosixPath(artifact.path).parts
-    variants = {'acestep-v15-turbo': 'turbo', 'acestep-v15-xl-sft': 'xl_sft'}
+    variants = {'acestep-v15-turbo': 'turbo', 'acestep-v15-xl-sft': 'xl_sft', 'acestep-v15-base': 'base'}
     variant = variants.get(parts[1]) if len(parts) == 3 else None
     if variant is None:
         return None

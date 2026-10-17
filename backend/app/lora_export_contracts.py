@@ -19,6 +19,8 @@ class LoraExportResponse(Contract):
     adapter_path: str = Field(min_length=1, max_length=4096)
     source: str = Field(min_length=1, max_length=4096)
     message: str = Field(min_length=1, max_length=200)
+    required_free_bytes: int | None = Field(default=None, ge=0, le=9_007_199_254_740_991)
+    free_bytes: int | None = Field(default=None, ge=0, le=9_007_199_254_740_991)
 
 
 class LoraExportOptionsResponse(Contract):

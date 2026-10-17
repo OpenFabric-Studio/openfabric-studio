@@ -5,6 +5,8 @@ import TrackAudioVersions from './TrackAudioVersions.vue'
 import { i18n, setLocale } from '../../i18n'
 import type { AudioVersion, AudioExportResponse, VoiceJobProgress } from '../../api/contracts'
 import * as downloadApi from '../../api/trackDownload'
+import { parseVoiceMixReport } from '../../api/generated'
+import { measuredVoiceMixFixture } from './voiceMixTestFixture'
 vi.mock('../../api/trackDownload', () => ({ downloadTrackAudio: vi.fn() }))
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), cancel: vi.fn(), retry: vi.fn(), exports: vi.fn(), export: vi.fn(), cancelExport: vi.fn(), retryExport: vi.fn(), voices: vi.fn() }))
 vi.mock('../../api/audioVersions', () => ({ listAudioVersions: api.list, createAudioVersion: api.create, cancelAudioVersion: api.cancel, retryAudioVersion: api.retry }))
@@ -96,6 +98,28 @@ it('tags the exact selected export without changing playback or raw download sel
   app?.unmount(); app = undefined; expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:download')
 })
 it('creates another voice without altering the existing versions', async () => { const node = mount(); await settle(); button(node, 'Add voice version').click(); await settle(); expect(api.create).toHaveBeenCalledWith(42, 'c'.repeat(32), expect.any(AbortSignal)); expect(node.textContent).toContain('Other singer'); button(node, 'Original').click(); await settle(); expect(node.querySelector('audio')?.src).toContain('/original.wav') })
+it('captures explicitly enabled measured mixing and clears it when changing tracks', async () => {
+  const node = mount(); await settle()
+  const checkbox = [...node.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(item => item.parentElement?.textContent?.trim() === 'Use measured vocal mixing')
+  if (!checkbox) throw new Error('Missing measured mixing control')
+  checkbox.click(); await settle(); button(node, 'Add voice version').click(); await settle()
+  expect(api.create).toHaveBeenCalledWith(42, 'c'.repeat(32), expect.any(AbortSignal), { mix: expect.objectContaining({ vocal_level: 'match_original' }) })
+  currentTrack.value = 43; await settle()
+  const next = [...node.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find(item => item.parentElement?.textContent?.trim() === 'Use measured vocal mixing')
+  expect(next?.checked).toBe(false)
+})
+it('shows only the measured report bound to the selected version and its source', async () => {
+  const fixture = parseVoiceMixReport(measuredVoiceMixFixture)
+  const report = { ...fixture, audio_version_id: voice.id, source: { ...fixture.source, track_id: 42, version_id: original.id } }
+  api.list.mockResolvedValue({ track_id: 42, original_available: true, versions: [original, { ...voice, mix: report, mix_settings: report.settings }] })
+  const node = mount(); await settle()
+  expect(node.textContent).toContain('Applied vocal gain: 6.00 dB')
+  api.list.mockResolvedValue({ track_id: 42, original_available: true, versions: [original, { ...voice, mix: { ...report, source: { ...report.source, track_id: 99 } }, mix_settings: report.settings }] })
+  button(node, 'Refresh').click(); await settle()
+  expect(node.textContent).not.toContain('Applied vocal gain:')
+  expect(node.textContent).toContain('report is unavailable')
+  expect(node.querySelectorAll('audio')).toHaveLength(1)
+})
 it('exports the selected version and shows the captured quality', async () => { const node = mount(); await settle(); button(node, 'Original').click(); await settle(); button(node, 'Create export').click(); await settle(); expect(api.export).toHaveBeenCalledWith(42, original.id, 'mp3', expect.any(AbortSignal)); expect(node.textContent).toContain('320 kbps'); expect(node.querySelector('a[href="/original.mp3"]')?.hasAttribute('download')).toBe(true) })
 it('does not offer another conversion when the original is unavailable', async () => { api.list.mockResolvedValue({ track_id:42, original_available:false, versions:[voice] }); const node=mount(); await settle(); expect(button(node, 'Add voice version').disabled).toBe(true); expect(node.textContent).toContain('original audio is unavailable') })
 it('discards an action that completes after unmount and never restarts polling', async () => { vi.useFakeTimers(); let finish: ((value: AudioVersion) => void) | undefined; api.create.mockReturnValue(new Promise<AudioVersion>(resolve => { finish=resolve })); const node=mount(); await settle(); button(node,'Add voice version').click(); await settle(); app?.unmount(); app=undefined; const before=api.list.mock.calls.length; finish?.(queued); await settle(); await vi.advanceTimersByTimeAsync(9000); expect(api.list).toHaveBeenCalledTimes(before); expect(vi.getTimerCount()).toBe(0) })

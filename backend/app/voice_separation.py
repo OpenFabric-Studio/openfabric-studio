@@ -5,8 +5,10 @@ import asyncio
 import os
 import shutil
 import sys
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal
 
 from .config import DEMUCS_DIR, LOG_DIR
 from .managed_layout import engine_default
@@ -26,6 +28,96 @@ class VoiceSeparationError(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+# Declared model/checksum prefixes from upstream demucs/remote/files.txt and
+# htdemucs[_ft].yaml. These are integrity prefixes, not full published digests.
+_DEMUCS_MODELS = {
+    'fast': ('htdemucs', (('955717e8', '8726e21a'),)),
+    'high': ('htdemucs_ft', (('f7e0c4bc', 'ba3fe64a'), ('d12395a8', 'e57c48e6'),
+        ('92cfc3b6', 'ef3bcb9c'), ('04573f0d', 'f3cf25b2'))),
+}
+
+
+def _file_signature(path: Path) -> tuple[int, int, int, int, int]:
+    info = path.stat()
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+@dataclass(frozen=True)
+class OfflineDemucs:
+    python: Path
+    engine: Path
+    model: str
+    files: tuple[tuple[Path, str, tuple[int, int, int, int, int]], ...]
+    bag: bytes
+
+    @property
+    def model_bytes(self) -> int:
+        return sum(signature[2] for _, _, signature in self.files)
+
+    def command(self, audio: Path, output: Path) -> list[str]:
+        """Copy a bounded local-only repository. Call in an owned thread."""
+        repo = output / 'models'
+        repo.mkdir(parents=True, exist_ok=False)
+        for path, prefix, signature in self.files:
+            if path.is_symlink() or _file_signature(path) != signature:
+                raise VoiceSeparationError('separation_model_changed')
+            target = repo / path.name
+            digest = hashlib.sha256()
+            total = 0
+            with path.open('rb') as source, target.open('xb') as destination:
+                while block := source.read(65536):
+                    total += len(block)
+                    if total > signature[2]:
+                        raise VoiceSeparationError('separation_model_changed')
+                    digest.update(block)
+                    destination.write(block)
+            if (total != signature[2] or not digest.hexdigest().startswith(prefix)
+                    or _file_signature(path) != signature):
+                raise VoiceSeparationError('separation_model_changed')
+        (repo / (self.model + '.yaml')).write_bytes(self.bag)
+        return [str(self.python), '-m', 'demucs', '--repo', str(repo), '-n', self.model,
+            '--float32', '-o', str(output / 'separated'), str(audio)]
+
+
+def offline_demucs(quality: Literal['fast', 'high'], *, engine: Path | None = None,
+                   checkpoints: Path | None = None) -> OfflineDemucs:
+    """Read-only local readiness; never starts Python, uv, or a model download.
+
+    Managed setup stores torch checkpoints under the managed cache. Explicit
+    internal paths support isolated fixtures; public requests cannot set them.
+    Actual checkpoint integrity is checked while making the private repo.
+    """
+    if engine is None:
+        engine = DEMUCS_DIR
+    if checkpoints is None:
+        from .module_catalog import configured_environment
+        checkpoints = configured_environment().root / 'cache/torch/hub/checkpoints'
+    python = engine / '.venv' / ('Scripts/python.exe' if sys.platform == 'win32' else 'bin/python')
+    model, declared = _DEMUCS_MODELS[quality]
+    try:
+        # The interpreter may be a normal venv symlink. Source/cache paths may
+        # not escape their configured roots through symbolic components.
+        if (engine.is_symlink() or engine.resolve() != engine or not python.is_file()
+                or checkpoints.is_symlink() or checkpoints.resolve() != checkpoints):
+            raise VoiceSeparationError('separation_unavailable')
+        for name in ('pretrained.py', 'repo.py', 'separate.py'):
+            source = engine / 'demucs' / name
+            if source.is_symlink() or not source.is_file() or source.stat().st_size > 1024**2:
+                raise VoiceSeparationError('separation_unavailable')
+        bag_path = engine / 'demucs/remote' / (model + '.yaml')
+        if bag_path.is_symlink() or bag_path.resolve() != bag_path or bag_path.stat().st_size > 4096:
+            raise VoiceSeparationError('separation_unavailable')
+        files: list[tuple[Path, str, tuple[int, int, int, int, int]]] = []
+        for signature, prefix in declared:
+            path = checkpoints / f'{signature}-{prefix[:8]}.th'
+            if path.is_symlink() or path.resolve() != path or not path.is_file() or not 0 < path.stat().st_size <= 2 * 1024**3:
+                raise VoiceSeparationError('separation_unavailable')
+            files.append((path, prefix, _file_signature(path)))
+        return OfflineDemucs(python, engine, model, tuple(files), bag_path.read_bytes())
+    except OSError as error:
+        raise VoiceSeparationError('separation_unavailable') from error
 
 
 def roformer_python() -> Path:

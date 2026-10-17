@@ -1,10 +1,12 @@
 """Native proxy and durable submissions share video resource admission."""
 from __future__ import annotations
 import asyncio
+import json
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from fastapi import HTTPException, Request, Response
+from starlette.types import Message
 import httpx
 from app import resource_admission
 from app.api import routes_ace_jobs, routes_proxy
@@ -12,6 +14,8 @@ from app.orchestrator.state import ModelStatus
 
 class NativeRouteAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self.enterContext(patch.object(routes_proxy, 'require_usage'))
+        self.enterContext(patch.object(routes_ace_jobs, 'require_usage'))
         self.lock = patch.object(resource_admission, 'admission_lock', asyncio.Lock())
         self.lock.start()
         self.counter = patch.object(resource_admission, '_native_inflight', 0)
@@ -19,7 +23,11 @@ class NativeRouteAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self) -> None:
         self.counter.stop(); self.lock.stop()
     def request(self, method: str = 'POST') -> Request:
-        return Request({'type': 'http', 'method': method, 'path': '/', 'headers': [], 'query_string': b''})
+        body = json.dumps({'model': routes_proxy.yue2_specs()['yue2']['id'],
+            'request': {'lyrics': 'Fixture verse', 'seed': 7, 'options': {'style': 'Jazz'}}}).encode()
+        async def receive() -> Message:
+            return {'type': 'http.request', 'body': body, 'more_body': False}
+        return Request({'type': 'http', 'method': method, 'path': '/', 'headers': [], 'query_string': b''}, receive)
     async def test_busy_video_rejects_native_generation_without_forwarding(self) -> None:
         with patch.object(routes_proxy.manager.state, 'models', {'yue2': SimpleNamespace(status=ModelStatus.RUNNING)}), patch('app.video_jobs.work_busy', return_value=True, create=True), patch.object(routes_proxy, '_proxy_to', AsyncMock()) as forward:
             response = await routes_proxy._make_proxy_route('yue2')(self.request(), 'v1/tasks/run')
@@ -102,7 +110,6 @@ class NativeRouteAdmissionTests(unittest.IsolatedAsyncioTestCase):
             resetting.set()
             await released.wait()
         request = self.request()
-        request._receive = AsyncMock(return_value={'type': 'http.request', 'body': b'{}', 'more_body': False})
         with patch.object(routes_proxy.manager.state, 'models', {'yue2': SimpleNamespace(status=ModelStatus.RUNNING)}), patch('app.video_jobs.work_busy', return_value=False), patch.object(routes_proxy._client, 'send', side_effect=send), patch.object(routes_proxy.manager, 'restart_model', side_effect=reset):
             task = asyncio.create_task(routes_proxy._make_proxy_route('yue2')(request, 'v1/tasks/run'))
             await entered.wait()

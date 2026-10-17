@@ -45,12 +45,16 @@ Daily work also watches related open-source projects (e.g. VoiceStudio, LocalAI)
 | **ACE-Step 1.5** | Text/style music generation, covers, section edits |
 | **YuE2-3B** | Longer tracks with CoT / ABC planning |
 | **Stable Audio 3 (experimental)** | Local Small Music / Medium instrumental generation through the official Apple Silicon MLX runtime |
+| **Music workspaces (experimental)** | Editable beats with audio/MIDI/stems, retained-source song mixing and mashups, prepared/converted voice replacement and reviewed adapter comparisons |
+| **Audio analysis** | Explicit CPU features and optional pinned beat timing; saved results, manual corrections and storage forecasts |
 | **Voice Clone** | Seed-VC singing voices, prep, compare |
 | **Artist production (experimental)** | Local consent/QC, pinned guide conversion, source lineage, release review and configurable accounting |
 | **Speech profiles** | Reference clips for speech and audiobooks, with four licensed English starter voices |
 | **Video Studio** | Local LTX pictures and optional quoted OpenRouter shots with approvals/export |
 | **OpenRouter media** | Bring your own key for cloud speech, video and experimental Lyria music |
 | **Demucs / DAW** | Stems and multitrack timeline |
+
+See [music workflow usage and limits](docs/music-workflows.md) before using the experimental workspaces. Native model support, source-code verification and measured listening quality are separate claims. Regional presets remain unreviewed and need compatible licensed sample assets.
 
 UI language: English. Brand palette: near-black + indigo (`#4F46E5` / `#6366F1`).
 

@@ -25,6 +25,7 @@ from .contracts import Contract, JobStatus, JsonObject
 from .job_lifecycle import await_cleanup
 from .voice_contracts import VoiceJobProgress
 from .voice_progress import read_progress
+from .voice_mix_contracts import VoiceMixSettings
 
 logger = logging.getLogger(__name__)
 _ACTIVE = {'queued', 'running'}
@@ -204,6 +205,15 @@ def _stored(track_id: int, version_id: str) -> store.StoredAudioVersion:
 
 def _public(record: store.StoredAudioVersion) -> AudioVersion:
     public = record.public.model_copy(deep=True)
+    if public.kind == 'voice' and record.path is not None:
+        from . import voice_mix
+        from .music_dsp import MusicDspError
+        try:
+            public.mix_settings = voice_mix.read_settings(record.path, public.id)
+            public.mix = voice_mix.read_report(record.path, public.id)
+        except MusicDspError:
+            logger.exception('Voice mix metadata unavailable for version %s', public.id)
+            public.error_code = 'voice_mix_report_unavailable'
     if record.worker_track_id is not None:
         from . import voice_build
         active = voice_build._applies.get(record.worker_track_id)
@@ -324,7 +334,7 @@ def _rollback(record: store.StoredAudioVersion) -> None:
         _contained(record.path, exists=False).unlink(missing_ok=True)
 
 
-def start_version(track_id: int, voice_id: str) -> AudioVersion:
+def start_version(track_id: int, voice_id: str, *, mix: VoiceMixSettings | None = None) -> AudioVersion:
     from . import voice_build
     if track_id in _deleting:
         raise HTTPException(status_code=409, detail='audio_version_busy')
@@ -344,7 +354,10 @@ def start_version(track_id: int, voice_id: str) -> AudioVersion:
                     'audio_version_id':record.public.id,'voice_id':voice_id}, audio_path=record.path, abc_path=None,
                     audio_version_id=record.public.id)
         record = _stored(track_id, record.public.id)
-        voice_build.start_apply(voice_id, child)
+        if mix is not None:
+            voice_build.start_apply(voice_id, child, mix=mix)
+        else:
+            voice_build.start_apply(voice_id, child)
     except BaseException:
         _rollback(_stored(track_id, record.public.id))
         raise

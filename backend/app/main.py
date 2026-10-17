@@ -53,6 +53,16 @@ from .api.routes_stable_lora import router as stable_lora_router
 from .api.routes_music_training import router as music_training_router
 from .api.routes_training_captions import router as training_captions_router
 from .api.routes_music_queue import router as music_queue_router
+from .api.routes_music_terms import router as music_terms_router
+from .api.routes_music_analysis import router as music_analysis_router
+from .api.routes_music_artifacts import router as music_artifacts_router
+from .api.routes_beats import router as beats_router
+from .api.routes_music_conditioning import router as music_conditioning_router
+from .api.routes_song_from_beat import router as song_from_beat_router
+from .api.routes_replacement import router as replacement_router
+from .api.routes_mashups import router as mashups_router
+from .api.routes_beat_song_mixes import router as beat_song_mixes_router
+from .api.routes_regional_datasets import router as regional_datasets_router
 from .api.routes_artist_production import router as artist_production_router
 from .desktop_runtime import router as desktop_runtime_router
 from .module_security import LocalAccessMiddleware
@@ -62,6 +72,7 @@ from .orchestrator.manager import manager
 from . import ace_jobs, audio_exports, audio_versions, audiobooks, audiobook_publish, audiobook_workflows, audiobook_review, ebook_import, midi, module_jobs, native_yue, optional_engines, speech_clone, reference_imports, stems, tagging, video_character_training, video_character_comparison, video_jobs, voice_build, voice_comparisons, yue_jobs, yue_upload
 from .job_lifecycle import await_cleanup
 from . import cloud_music, local_music, stable_lora, music_training, training_captions, music_queue, openrouter_client, speaker_review, reading_media, character_swaps, video_scenes, clip_hosting
+from . import music_analysis, music_artifacts, beat_jobs, replacement_jobs, mashups, regional_datasets, beat_song_mix, song_sources
 
 
 @asynccontextmanager
@@ -73,11 +84,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         ensure_layout(DATA_DIR, legacy_logs)
         place_seed_models(DATA_DIR, SEED_VC_DIR)
         openrouter_client.start()
+        await song_sources.recover()
         await cloud_music.recover()
         await local_music.recover()
         await stable_lora.recover()
         await music_training.recover()
         await training_captions.recover()
+        await music_analysis.recover()
+        await music_artifacts.recover()
+        await beat_jobs.recover()
+        await replacement_jobs.recover()
+        await mashups.recover()
+        await beat_song_mix.recover()
+        await regional_datasets.recover()
         yue_upload.start()
         await audio_versions.recover()
         await audio_exports.recover_exports()
@@ -122,6 +141,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 try:
                     outcomes = await asyncio.gather(
                         shutdown_lora_export(),
+                        music_analysis.shutdown(),
+                        music_artifacts.shutdown(),
+                        beat_jobs.shutdown(),
+                        replacement_jobs.shutdown(),
+                        mashups.shutdown(),
+                        beat_song_mix.shutdown(),
+                        regional_datasets.shutdown(),
                         cloud_music.shutdown(), local_music.shutdown(), stable_lora.shutdown(), music_training.shutdown(), training_captions.shutdown(), openrouter_client.shutdown(), voice_build.shutdown(), audio_exports.shutdown_exports(), voice_comparisons.shutdown(), video_jobs.shutdown(), character_swaps.shutdown(), video_scenes.shutdown(),
                         stems.shutdown(), midi.shutdown(), tagging.shutdown(), reference_imports.shutdown(),
                         audiobooks.shutdown(), audiobook_workflows.shutdown(), audiobook_review.shutdown(), speaker_review.shutdown(), reading_media.shutdown(), ebook_import.shutdown(), module_jobs.shutdown(), speech_clone.shutdown(),
@@ -129,11 +155,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                     )
                 finally:
                     try:
-                        await await_cleanup(clip_hosting.shutdown())
+                        await await_cleanup(song_sources.shutdown())
                     finally:
-                        # A narration worker can quarantine an encoder while its
-                        # sibling repair registry is already shutting down.
-                        await await_cleanup(audiobook_publish.shutdown())
+                        try:
+                            await await_cleanup(clip_hosting.shutdown())
+                        finally:
+                            # A narration worker can quarantine an encoder while its
+                            # sibling repair registry is already shutting down.
+                            await await_cleanup(audiobook_publish.shutdown())
                 for outcome in outcomes:
                     if isinstance(outcome, BaseException):
                         logging.getLogger(__name__).error("Job cleanup failed", exc_info=outcome)
@@ -166,6 +195,16 @@ app.include_router(stable_lora_router)
 app.include_router(music_training_router)
 app.include_router(training_captions_router)
 app.include_router(music_queue_router)
+app.include_router(music_terms_router)
+app.include_router(music_analysis_router)
+app.include_router(music_artifacts_router)
+app.include_router(beats_router)
+app.include_router(music_conditioning_router)
+app.include_router(song_from_beat_router)
+app.include_router(replacement_router)
+app.include_router(mashups_router)
+app.include_router(beat_song_mixes_router)
+app.include_router(regional_datasets_router)
 app.include_router(artist_production_router)
 app.include_router(ace_jobs_router)
 app.include_router(yue_jobs_router)

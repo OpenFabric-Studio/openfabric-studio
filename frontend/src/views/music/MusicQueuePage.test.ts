@@ -7,15 +7,29 @@ import { i18n, setLocale } from '../../i18n'
 import MusicQueuePage from './MusicQueuePage.vue'
 import * as adapters from '../../api/musicLora'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
+import { pendingAceSongSource, pendingMusicConditioning } from '../../composables/generationDrafts'
 import { emptyAceSettings } from '../../composables/generationSnapshots'
 import type { MusicQueueBatch, MusicQueueCatalog, MusicQueueItem, MusicQueuePreview, MusicQueuePreviewRequest, MusicQueueSnapshot, SavedTrack } from '../../api/generated'
 
 const api = vi.hoisted(() => ({ musicQueueCatalog: vi.fn(), getMusicQueue: vi.fn(), previewMusicQueue: vi.fn(), enqueueMusicQueue: vi.fn(), controlMusicQueue: vi.fn(), reorderMusicQueue: vi.fn(), retryMusicQueue: vi.fn(), cancelMusicQueueBatch: vi.fn() }))
 vi.mock('../../api/musicQueue', () => ({ ...api }))
+vi.mock('../../api/songFromBeat', () => ({ songFromBeatCapabilities: vi.fn().mockResolvedValue({ modes: [] }) }))
+vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn().mockResolvedValue([]) }))
 vi.mock('../../api/musicLora', () => ({ listMusicAdapters: vi.fn() }))
 vi.mock('../../components/shared/TrackAudioVersions.vue', () => ({ default: defineComponent({ props: ['trackId', 'fallbackAudioUrl'], emits: ['playing', 'processing'], setup: (props, { emit }) => () => h('audio', { src: props.fallbackAudioUrl, 'data-track': props.trackId, onPlay: () => emit('playing', true), onPause: () => emit('playing', false) }) }) }))
 vi.mock('../../components/shared/FavoriteTrackButton.vue', () => ({ default: defineComponent({ props: ['trackId'], setup: props => () => h('button', `Favourite ${props.trackId}`) }) }))
 vi.mock('../../components/shared/StemsPanel.vue', () => ({ default: defineComponent({ props: ['trackId'], setup: props => () => h('div', `Stems and editor for ${props.trackId}`) }) }))
+
+const conditioning = { mode: 'audio_to_audio', source: { kind: 'version', track_id: 7, version_id: 'e'.repeat(32) }, source_sha256: 'd'.repeat(64), noise_level: .6 } as const
+vi.mock('./MusicConditioningControls.vue', () => ({ default: defineComponent({
+  props: ['request', 'disabled', 'sourceDraft'], emits: ['change', 'validity', 'draftApplied'],
+  setup: (props, { emit }) => () => h('section', { 'data-reference': true }, [
+    h('button', { type: 'button', disabled: props.disabled, onClick: () => { emit('change', conditioning); emit('validity', true); emit('draftApplied') } }, 'Review fixture reference'),
+    h('button', { type: 'button', onClick: () => emit('validity', false) }, 'Invalidate reference'),
+  ]),
+}) }))
 
 let app: App | undefined
 const engines = ['ace_step', 'yue2', 'stable_audio3'] as const
@@ -58,12 +72,13 @@ async function select(node: HTMLElement, engine: typeof engines[number]) {
   element.click(); await settle()
 }
 beforeEach(() => {
-  vi.resetAllMocks(); vi.useFakeTimers(); setLocale('en')
+  vi.resetAllMocks(); vi.useFakeTimers(); setLocale('en'); pendingMusicConditioning.value = null; pendingAceSongSource.value = null
   api.musicQueueCatalog.mockResolvedValue(catalog)
   api.getMusicQueue.mockResolvedValue(snapshot())
   api.previewMusicQueue.mockReturnValue(new Promise(() => {}))
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [], history_incomplete: false })
 })
+beforeEach(() => { vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true })) })
 afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren(); vi.useRealTimers() })
 
 it('shows actual model readiness without starting or enqueuing work on entry', async () => {
@@ -121,6 +136,21 @@ async function compose(node: HTMLElement) {
   await vi.advanceTimersByTimeAsync(350); await settle()
 }
 
+it('requires explicit terms acceptance before adding a restricted model to the queue', async () => {
+  const before = { engine: 'stable_audio3', operation: 'generation', revision: 0, noncommercial_enabled: false, allowed: false,
+    requirements: [{ component_id: 'weights', name: 'Weights', scope: 'model', restriction: 'conditional', source_url: 'https://example.org/terms', terms_digest: 'a'.repeat(64), acknowledged: false }] } satisfies Awaited<ReturnType<typeof terms.getMusicTerms>>
+  vi.mocked(terms.getMusicTerms).mockResolvedValue(before)
+  vi.mocked(terms.acceptMusicTerms).mockResolvedValue({ ...before, allowed: true, revision: 1, requirements: before.requirements.map(row => ({ ...row, acknowledged: true })) })
+  api.previewMusicQueue.mockImplementation(async (request: MusicQueuePreviewRequest) => preview(request))
+  const { node } = await mount(); await compose(node)
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(true)
+  const review = node.querySelector('section[aria-label="Publisher terms"] input')
+  if (!(review instanceof HTMLInputElement)) throw new Error('Missing terms review')
+  review.click(); await settle(); button(node, 'Accept reviewed terms').click(); await settle()
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(false)
+  expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
+})
+
 it('enqueues a verified immutable plan with one client key and leaves starting to the user', async () => {
   api.previewMusicQueue.mockImplementation(async (request: MusicQueuePreviewRequest) => preview(request))
   api.enqueueMusicQueue.mockResolvedValue(snapshot([batch()], 2))
@@ -142,6 +172,8 @@ it('keeps the same submission key after an ambiguous network failure and shows a
   button(node, 'Add 1 variation to queue').click(); await settle()
   expect(node.textContent).not.toContain('token-secret')
   expect(node.querySelector('[role="alert"]')?.textContent).toContain('Could not update the queue')
+  api.musicQueueCatalog.mockResolvedValueOnce({ ...catalog, engines: catalog.engines.map(value => ({ ...value })) })
+  button(node, 'Refresh setup').click(); await settle(); await vi.advanceTimersByTimeAsync(350); await settle()
   button(node, 'Add 1 variation to queue').click(); await settle()
   expect(api.enqueueMusicQueue.mock.calls[0]?.[0].submission_key).toBe(api.enqueueMusicQueue.mock.calls[1]?.[0].submission_key)
 })
@@ -451,4 +483,48 @@ it('retains a running queue through a transient observation failure and reconnec
   expect(api.getMusicQueue).toHaveBeenCalledTimes(3)
   expect(node.textContent).not.toContain(i18n.global.t('musicQueue.errors.observe'))
   expect(api.controlMusicQueue).not.toHaveBeenCalled(); expect(api.enqueueMusicQueue).not.toHaveBeenCalled(); expect(api.retryMusicQueue).not.toHaveBeenCalled()
+})
+
+it('queues a reviewed retained reference and blocks an invalidated review without falling back to text only', async () => {
+  api.previewMusicQueue.mockImplementation(async (request: MusicQueuePreviewRequest) => preview(request))
+  const { node } = await mount(); await compose(node)
+  button(node, 'Review fixture reference').click(); await settle()
+  await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(api.previewMusicQueue).toHaveBeenLastCalledWith(expect.objectContaining({ selections: [expect.objectContaining({ conditioning })] }), expect.any(AbortSignal))
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(false)
+  button(node, 'Invalidate reference').click(); await settle()
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(true)
+  expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
+  await input(node, 'description', '')
+  expect(node.querySelector('[data-reference]')).not.toBeNull()
+  expect(button(node, 'Review fixture reference').disabled).toBe(true)
+  await input(node, 'description', 'A changed brief')
+  await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(api.previewMusicQueue).toHaveBeenLastCalledWith(expect.objectContaining({ selections: [expect.objectContaining({ conditioning })] }), expect.any(AbortSignal))
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(true)
+})
+
+it('opens a beat handoff for review without automatically accepting storage or enqueuing', async () => {
+  pendingMusicConditioning.value = { source: { kind: 'beat_render', beat_id: 'a'.repeat(32), beat_revision: 1, render_id: 'b'.repeat(32), sha256: 'c'.repeat(64) }, label: 'My authored beat' }
+  api.previewMusicQueue.mockImplementation(async (request: MusicQueuePreviewRequest) => preview(request))
+  const { node } = await mount()
+  expect(node.querySelector<HTMLInputElement>('[name="model_stable_audio3"]')?.checked).toBe(true)
+  expect(node.textContent).toContain('My authored beat')
+  await input(node, 'description', 'Warm piano')
+  await vi.advanceTimersByTimeAsync(350); await settle()
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(true)
+  expect(api.enqueueMusicQueue).not.toHaveBeenCalled(); expect(api.controlMusicQueue).not.toHaveBeenCalled()
+})
+
+it('opens the source task setup even when ordinary ACE weights are missing without enqueuing a text fallback', async () => {
+  api.musicQueueCatalog.mockResolvedValue({ ...catalog, engines: catalog.engines.map(row => row.engine === 'ace_step' ? { ...row, ready: false, weights_ready: false } : row) })
+  const { node } = await mount()
+  await input(node, 'description', 'Add warm strings')
+  button(node, 'Use audio with ACE-Step').click(); await settle()
+  expect(node.querySelector<HTMLSelectElement>('[name="ace-song-mode"]')?.value).toBe('ace_complete')
+  expect(node.textContent).toContain('Prepare ACE-Step Base')
+  expect(node.querySelector('a[href="/settings#module-ace_step"]')?.textContent).toBeTruthy()
+  expect(node.textContent).toContain('Open automatic ACE-Step runtime setup or repair')
+  expect(button(node, 'Add 1 variation to queue').disabled).toBe(true)
+  expect(api.enqueueMusicQueue).not.toHaveBeenCalled()
 })

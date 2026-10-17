@@ -18,6 +18,7 @@ import TrainingAudioImport from './TrainingAudioImport.vue'
 import TrainingCaptionAnalyzer from './TrainingCaptionAnalyzer.vue'
 import TrainingOptionsHelp from './TrainingOptionsHelp.vue'
 import TrainingJobProgress from './TrainingJobProgress.vue'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
 import { savedTrainingSamples, trainingSampleKey } from '../../composables/musicTrainingSamples'
 import type { LoraDatasetOperationResponse, MusicLoraSource } from '../../api/generated'
 
@@ -28,6 +29,7 @@ const status = ref<MusicLoraTrainingStatus | null>(null), jobs = ref<MusicLoraTr
 const historyKnown = ref(false), reconnecting = ref(false), incomplete = ref(false), busy = ref(false), error = ref('')
 const name = ref(''), samples = ref<Array<MusicLoraTrainingSample & { title: string }>>([]), pickerOpen = ref(false)
 const importing = ref(false), captioning = ref(false)
+const termsBlocked = ref(false)
 const maxSteps = ref(1000), rank = ref<NonNullable<MusicLoraTrainingRequest['rank']>>(16), learningRate = ref(0.0001), seed = ref(42), seconds = ref(12)
 const plannerSteps = ref(100), plannerLearningRate = ref(0.00005)
 const plannerSource = ref<MusicLoraTrainingJob | null>(null), missingPlannerSteps = ref(100), missingPlannerRate = ref(0.00005)
@@ -39,13 +41,13 @@ const active = computed(() => jobs.value.some(job => job.status === 'running' ||
 const trainingReady = computed(() => !!status.value?.supported && status.value.installed && status.value.weights_ready)
 const ready = computed(() => trainingReady.value && status.value?.paired_ready === true)
 const setupMode = computed(() => trainingReady.value && !ready.value ? 'scores' : 'training')
-const canSubmit = computed(() => historyKnown.value && !active.value && !busy.value && !importing.value && !captioning.value && !nameTaken.value && !!name.value.trim() && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
+const canSubmit = computed(() => !termsBlocked.value && historyKnown.value && !active.value && !busy.value && !importing.value && !captioning.value && !nameTaken.value && !!name.value.trim() && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
   && samples.value.every(sample => !!sample.caption.trim() && sample.caption.length <= 4000 && (sample.lyrics?.length ?? 0) <= 20000)
   && Number.isInteger(plannerSteps.value) && plannerSteps.value >= 1 && plannerSteps.value <= 100000 && Number.isFinite(plannerLearningRate.value) && plannerLearningRate.value >= 1e-7 && plannerLearningRate.value <= 0.01
   && Number.isInteger(maxSteps.value) && maxSteps.value >= 1 && maxSteps.value <= 100000 && Number.isInteger(seed.value) && seed.value >= 0 && seed.value <= 2147483647
   && Number.isInteger(seconds.value) && seconds.value >= 6 && seconds.value <= 30 && Number.isFinite(learningRate.value) && learningRate.value >= 1e-7 && learningRate.value <= 0.01)
 const canTrain = computed(() => ready.value && canSubmit.value)
-const canStartPlanner = computed(() => plannerSource.value?.can_train_missing_ar === true && historyKnown.value && !reconnecting.value && !incomplete.value && !active.value && !busy.value && !importing.value && !captioning.value && ready.value
+const canStartPlanner = computed(() => !termsBlocked.value && plannerSource.value?.can_train_missing_ar === true && historyKnown.value && !reconnecting.value && !incomplete.value && !active.value && !busy.value && !importing.value && !captioning.value && ready.value
   && modelJobs.value.some(job => job.id === plannerSource.value?.id && job.can_train_missing_ar === true)
   && Number.isInteger(missingPlannerSteps.value) && missingPlannerSteps.value >= 1 && missingPlannerSteps.value <= 100000 && Number.isFinite(missingPlannerRate.value) && missingPlannerRate.value >= 1e-7 && missingPlannerRate.value <= 0.01)
 let alive = true, generation = 0, controller: AbortController | undefined
@@ -57,6 +59,7 @@ function accept(response: { jobs: MusicLoraTrainingJob[]; history_incomplete?: b
 }
 function safeError(cause: unknown): string {
   const code = cause instanceof ApiError ? cause.message : ''
+  if (code === 'music_terms_required' || code === 'music_noncommercial_disabled') return t('musicTerms.required')
   if (code === 'music_lora_name_exists') return t('musicLora.errors.nameExists')
   if (code === 'music_lora_name_unavailable') return t('musicLora.errors.nameUnavailable')
   if (code === 'music_training_planner_exists') return t('musicLora.missingAr.exists')
@@ -164,6 +167,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
     <p v-if="reconnecting" role="status" class="text-sm text-status-queued">{{ t('loraWorkspace.reconnecting') }}</p>
     <p v-if="incomplete" role="alert" class="text-sm text-status-queued">{{ t('musicLora.historyIncomplete') }}</p>
     <form class="space-y-5 rounded-xl border border-border bg-panel p-5" @submit.prevent="start('training')">
+      <MusicTermsCard :engine="engine" operation="training" @blocked="termsBlocked = $event" />
       <fieldset class="space-y-3"><legend class="mb-3 font-semibold text-text">{{ t('musicLora.simple.nameStep') }}</legend><label class="training-label">{{ t('musicLora.name') }}<input v-model="name" name="model-training-name" maxlength="120" required class="training-input" :disabled="busy" :aria-invalid="nameError ? true : undefined" :aria-describedby="nameError ? 'model-training-name-error' : undefined" @input="nameError && (error = '')" /></label><p v-if="nameError" id="model-training-name-error" data-name-error role="alert" class="text-sm text-status-failed">{{ nameError }}</p><p class="text-xs text-text-dim">{{ t('musicLora.nameUnique') }}</p></fieldset>
       <fieldset class="space-y-3 border-t border-border pt-4">
         <legend class="pr-3 font-semibold text-text">{{ t('musicLora.simple.tracksStep') }}</legend>

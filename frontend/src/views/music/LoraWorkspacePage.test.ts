@@ -6,6 +6,8 @@ import { appRoutes } from '../../router'
 import { i18n } from '../../i18n'
 import * as adapters from '../../api/musicLora'
 import * as training from '../../api/stableLora'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 import type { StableLoraTrainingJob } from '../../api/generated'
 
 const aceUnmounted = vi.hoisted(() => vi.fn())
@@ -26,6 +28,7 @@ async function mount(path = '/music/lora') {
 }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true }))
   vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }] })
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [], history_incomplete: false })
 })

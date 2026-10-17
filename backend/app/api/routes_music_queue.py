@@ -21,6 +21,7 @@ from ..music_queue_contracts import (
     MusicQueueSnapshot,
 )
 from ..resource_admission import ResourceBusyError
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,10 @@ async def preview(body: MusicQueuePreviewRequest) -> MusicQueuePreview:
 
 @router.post('/batches', response_model=MusicQueueSnapshot)
 async def enqueue(body: MusicQueueEnqueueRequest) -> MusicQueueSnapshot:
-    return await music_queue.enqueue(body)
+    def admit() -> None:
+        for selection in body.selections:
+            require_usage(selection.engine, 'generation')
+    return await music_queue.enqueue(body, admit=admit)
 
 
 @router.post('/control', response_model=MusicQueueSnapshot)
@@ -94,6 +98,14 @@ async def reorder(body: MusicQueueReorderRequest) -> MusicQueueSnapshot:
 
 @router.post('/retry', response_model=MusicQueueSnapshot)
 async def retry(body: MusicQueueRetryRequest) -> MusicQueueSnapshot:
+    if body.mode == 'inference':
+        current = music_queue.snapshot()
+        if current.revision != body.revision:
+            raise MusicQueueError('music_queue_revision_conflict')
+        item = next((item for batch in current.batches for item in batch.items if item.id == body.item_id), None)
+        if item is None:
+            raise MusicQueueError('music_queue_item_missing', 404)
+        require_usage(item.engine, 'generation')
     return await music_queue.retry(body)
 
 

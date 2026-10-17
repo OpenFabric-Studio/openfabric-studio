@@ -19,7 +19,7 @@ from app.music_queue_contracts import (
     MusicQueueSnapshot,
 )
 from app.music_queue_engines import EngineResult
-from app import music_queue_plan
+from app import music_queue_plan, song_sources
 from app.track_view import track_response
 
 
@@ -113,6 +113,7 @@ class MusicQueueTests(unittest.IsolatedAsyncioTestCase):
 
         self.enterContext(patch.object(music_queue_plan, 'catalog', new=AsyncMock(return_value=MusicQueueCatalog(engines=self.ready))))
         self.enterContext(patch.object(music_queue_plan, '_weights_ready', return_value=True))
+        await song_sources.recover()
         await queue.recover()
 
     async def asyncTearDown(self) -> None:
@@ -120,6 +121,7 @@ class MusicQueueTests(unittest.IsolatedAsyncioTestCase):
         if self.session.gate is not None:
             self.session.gate.set()
         await queue.shutdown()
+        await song_sources.shutdown()
         self.connection.close()
 
     async def request(self, key: str = 'first', variations: int = 2) -> MusicQueueEnqueueRequest:
@@ -152,6 +154,91 @@ class MusicQueueTests(unittest.IsolatedAsyncioTestCase):
             await queue.enqueue(changed)
         self.assertEqual(failure.exception.code, 'music_queue_submission_conflict')
         self.assertEqual(len(queue.snapshot().batches), 1)
+
+    async def test_conditioned_admission_retains_one_source_for_all_variations_before_start(self) -> None:
+        import hashlib
+        import numpy as np
+        import soundfile as sf
+        from app import audio_versions, song_sources
+        source_path = db.FILES_DIR / 'source.wav'; source_path.parent.mkdir(exist_ok=True)
+        sf.write(source_path, np.zeros((4800, 2), dtype=np.float32), 48000, subtype='FLOAT')
+        track = db.insert_track(model='upload', title='Source', lyrics='', seed=None, duration_ms=100,
+            wall_ms=None, params={}, audio_path=source_path, abc_path=None)
+        original = audio_versions.retain_original(track, source_path)
+        source = {'kind': 'version', 'track_id': track, 'version_id': original.id}
+        path = audio_versions.resolve_source(track, original.id)
+        checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+        body = MusicQueuePreviewRequest.model_validate({'brief': {'description': 'Instrumental', 'instrumental': True, 'duration_seconds': 10},
+            'selections': [{'engine': 'stable_audio3', 'variations': 2, 'conditioning': {'mode': 'audio_to_audio', 'source': source, 'source_sha256': checksum, 'noise_level': .6}}]})
+        with patch('app.music_conditioning.verify_runtime', new=AsyncMock()), \
+                patch('app.music_conditioning.available_bytes', return_value=100 * 1024**3):
+            preview = await music_queue_plan.preview(body)
+            request = MusicQueueEnqueueRequest(**body.model_dump(), revision=queue.snapshot().revision,
+                submission_key='retained-source', preview_fingerprint=preview.fingerprint)
+            with patch.object(queue.store, 'enqueue', side_effect=OSError('injected publication failure')):
+                with self.assertRaises(OSError):
+                    await queue.enqueue(request)
+            self.assertEqual(queue.snapshot().batches, [])
+            # Intake is complete, but the queue transaction never committed.
+            path.unlink(); db.delete_track(track)
+            accepted = await queue.enqueue(request)
+            items = accepted.batches[0].items
+            self.assertEqual(len(items), 2)
+            self.assertEqual(items[0].retained_input, items[1].retained_input)
+            retained = items[0].retained_input
+            self.assertIsNotNone(retained)
+            private = song_sources.snapshot_path(song_sources.owned_root(retained.owner_id), retained.snapshot)
+            self.assertEqual(hashlib.sha256(private.read_bytes()).hexdigest(), checksum)
+            self.assertEqual(self.session.events, [])
+            repeated = await queue.enqueue(request)
+            self.assertEqual(repeated.batches[0].id, accepted.batches[0].id)
+            await queue._validate(items[0])
+            await queue.control(MusicQueueControlRequest(revision=queue.snapshot().revision, action='start'))
+            await self.finish()
+            self.assertEqual([item.status for item in queue.snapshot().batches[0].items], ['done', 'done'])
+            self.assertTrue(private.is_file())
+
+    async def test_ace_conditioning_recovers_intake_after_source_deletion_without_starting_a_model(self) -> None:
+        import hashlib
+        import numpy as np
+        import soundfile as sf
+        from app import audio_versions, song_capabilities, song_from_beat
+        source_path = db.FILES_DIR / 'ace-source.wav'; source_path.parent.mkdir(exist_ok=True)
+        sf.write(source_path, np.full((480000, 2), .01, dtype=np.float32), 48000, subtype='FLOAT')
+        track = db.insert_track(model='upload', title='Source', lyrics='', seed=None, duration_ms=10000,
+            wall_ms=None, params={}, audio_path=source_path, abc_path=None)
+        original = audio_versions.retain_original(track, source_path)
+        path = audio_versions.resolve_source(track, original.id)
+        checksum = hashlib.sha256(path.read_bytes()).hexdigest()
+        body = MusicQueuePreviewRequest.model_validate({'brief': {'description': 'Add bass', 'instrumental': True, 'duration_seconds': 10},
+            'selections': [{'engine': 'ace_step', 'variations': 2, 'conditioning': {'mode': 'ace_lego',
+                'source': {'kind': 'version', 'track_id': track, 'version_id': original.id},
+                'source_sha256': checksum, 'track_name': 'bass'}}]})
+        state = song_capabilities.capabilities().model_copy(deep=True)
+        state = state.model_copy(update={'modes': [row.model_copy(update={'installed': True,
+            'weights_ready': True, 'ready': True, 'reason': None}) for row in state.modes]})
+        with patch.object(song_capabilities, 'capabilities', return_value=state), \
+             patch.object(song_from_beat, 'available_bytes', return_value=100 * 1024**3), \
+             patch.object(song_capabilities, 'verify_runtime', new=AsyncMock()) as native:
+            forecast = await music_queue_plan.preview(body)
+            self.assertTrue(forecast.can_enqueue)
+            request = MusicQueueEnqueueRequest(**body.model_dump(), revision=queue.snapshot().revision,
+                submission_key='ace-intake', preview_fingerprint=forecast.fingerprint)
+            with patch.object(queue.store, 'enqueue', side_effect=OSError('injected publication failure')):
+                with self.assertRaises(OSError):
+                    await queue.enqueue(request)
+            path.unlink(); db.delete_track(track)
+            accepted = await queue.enqueue(request)
+            items = accepted.batches[0].items
+            self.assertEqual(items[0].retained_input, items[1].retained_input)
+            self.assertIsNotNone(items[0].retained_input)
+            self.assertEqual(self.session.events, [])
+            native.assert_not_awaited()
+            await queue._validate(items[0])
+            self.assertEqual((await queue.enqueue(request)).batches[0].id, accepted.batches[0].id)
+            await queue.control(MusicQueueControlRequest(revision=queue.snapshot().revision, action='start'))
+            await self.finish()
+            self.assertEqual([item.status for item in queue.snapshot().batches[0].items], ['done', 'done'])
 
     async def test_queue_saves_all_variations_then_unloads_before_next_model(self) -> None:
         await queue.enqueue(await self.request())

@@ -60,12 +60,12 @@ PACKAGES: dict[ModuleId, tuple[str, ...]] = {
     'kokoro': ('kokoro', 'soundfile'),
     'chatterbox': ('chatterbox-tts',),
     'wan22': ('mlx-video',),
-    'rvc': ('torch', 'soundfile', 'librosa', 'faiss-cpu'),
+    'rvc': ('torch', 'soundfile', 'librosa', 'faiss-cpu', 'transformers'),
 }
 
 _RVC_PACKAGES = (
     'torch', 'torchaudio', 'soundfile', 'librosa', 'numpy', 'faiss-cpu',
-    'pyyaml', 'scipy', 'av', 'einops', 'tqdm',
+    'pyyaml', 'scipy', 'av', 'einops', 'tqdm', 'transformers',
 )
 
 KOKORO_VOICES: dict[str, tuple[str, ...]] = {
@@ -560,9 +560,19 @@ async def render_wan(
 
 
 async def convert_rvc(model_path: str, input_path: str) -> LocalRun:
+    output = _output('rvc', '.wav')
+    argv, root = prepare_rvc_command(Path(model_path), Path(input_path), output)
+    return await _run('rvc', argv, cwd=root, output=output, timeout=600, runtime=RVC_RUNTIME)
+
+
+def prepare_rvc_command(voice: Path, source: Path, output: Path, *, index: Path | None = None,
+                        speaker_id: int | None = None, index_rate: float | None = None) -> tuple[list[str], Path]:
+    """Shared command boundary. An admitted caller owns launch/lease/receipts.
+
+    None preserves the standalone CLI's existing defaults. Registered models
+    always provide explicit speaker/index settings, preventing index discovery.
+    """
     require_installed('rvc')
-    voice = Path(model_path)
-    source = Path(input_path)
     if voice.suffix.lower() != '.pth' or not voice.is_file():
         raise OptionalEngineError('weights_missing', 'RVC needs a trained .pth voice you already have. OpenFabric does not train or download one. ' + setup_hint('rvc'))
     if not source.is_file() or source.suffix.lower() not in ('.wav', '.flac', '.mp3'):
@@ -574,13 +584,25 @@ async def convert_rvc(model_path: str, input_path: str) -> LocalRun:
     if not (root / 'assets' / 'rmvpe' / 'rmvpe.pt').is_file():
         needed.append('assets/rmvpe/rmvpe.pt')
     _missing('rvc', needed)
-    output = _output('rvc', '.wav')
     argv = [
         str(_engine_python('rvc')), str(root / 'infer' / 'cli.py'),
         '--model', str(voice), '--input', str(source), '--output', str(output),
         '--f0-method', 'rmvpe', '--overwrite', '--format', 'wav',
     ]
-    return await _run('rvc', argv, cwd=root, output=output, timeout=600, runtime=RVC_RUNTIME)
+    if speaker_id is not None:
+        if type(speaker_id) is not int or not 0 <= speaker_id <= 1023:
+            raise OptionalEngineError('input_refused', 'The registered speaker is invalid.')
+        argv.extend(['--speaker-id', str(speaker_id)])
+    if index_rate is not None:
+        import math
+        if not math.isfinite(index_rate) or not 0 <= index_rate <= 1 or index_rate > 0 and index is None:
+            raise OptionalEngineError('input_refused', 'The registered index setting is invalid.')
+        argv.extend(['--index-rate', str(index_rate)])
+    if index is not None:
+        if index.suffix != '.index' or not index.is_file():
+            raise OptionalEngineError('input_refused', 'The registered index is unavailable.')
+        argv.extend(['--index', str(index)])
+    return argv, root
 
 
 def prepare_chatterbox(model: str) -> None:

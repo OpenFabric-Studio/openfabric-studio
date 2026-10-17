@@ -36,6 +36,10 @@ async function select(id: ModelId) {
     <header class="space-y-3 border-b border-border pb-5">
       <div class="flex flex-wrap items-start justify-between gap-4">
         <div><h1 class="text-2xl font-semibold text-text">{{ t('musicWorkspace.title') }}</h1><p class="mt-2 text-sm text-text-dim">{{ t('musicQueue.intro') }}</p></div>
+        <RouterLink to="/music/beats" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('beats.title') }}</RouterLink>
+        <RouterLink to="/music/voice-replacement" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('replacement.title') }}</RouterLink>
+        <RouterLink to="/music/beat-song-mix" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('beatSongMixes.title') }}</RouterLink>
+        <RouterLink to="/music/mashups" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('mashups.title') }}</RouterLink>
         <RouterLink v-if="!route.path.startsWith('/music/lora')" to="/music/lora" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicLora.manage') }}</RouterLink>
         <RouterLink v-if="route.name !== 'music'" to="/music" class="inline-flex min-h-11 items-center rounded-lg border border-border px-4 text-sm text-accent2 focus-visible:outline-2 focus-visible:outline-accent2">{{ t('musicQueue.backToQueue') }}</RouterLink>
       </div>

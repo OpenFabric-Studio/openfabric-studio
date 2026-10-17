@@ -16,6 +16,54 @@ from app.orchestrator.state import ModelStatus
 
 
 class NativeLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_launch_context_is_owned_restarted_and_never_mutates_default_specs(self) -> None:
+        manager = OrchestratorManager()
+        original = MODELS['ace_step'].processes[0]
+        selected = replace(original, env={**original.env, 'ACESTEP_CONFIG_PATH': 'acestep-v15-base',
+            'ACESTEP_NO_INIT': 'true', 'HF_HUB_OFFLINE': '1'})
+        created: list[ManagedProcess] = []
+        def create(spec: ProcessSpec) -> ManagedProcess:
+            process = Mock(spec=ManagedProcess)
+            process.spec = spec
+            process.wait_healthy = AsyncMock()
+            process.stop = AsyncMock()
+            created.append(process)
+            return process
+        with patch('app.orchestrator.manager.ManagedProcess', side_effect=create):
+            await manager.switch_to('ace_step', process_specs=(selected,))
+            identity = manager.owned_instance('ace_step')
+            self.assertIsNotNone(identity)
+            selected.env['ACESTEP_CONFIG_PATH'] = 'changed-after-launch'
+            self.assertEqual(created[0].spec.env['ACESTEP_CONFIG_PATH'], 'acestep-v15-base')
+            self.assertEqual(manager.owned_instance('ace_step'), identity)
+            await manager.restart_model('ace_step')
+            self.assertEqual(created[1].spec.env['ACESTEP_CONFIG_PATH'], 'acestep-v15-base')
+            self.assertIsNotNone(manager.owned_instance('ace_step'))
+            self.assertNotEqual(manager.owned_instance('ace_step'), identity)
+            created[1].spec.env['ACESTEP_CONFIG_PATH'] = 'mutated-process-record'
+            self.assertIsNone(manager.owned_instance('ace_step'))
+            await manager.switch_to('ace_step')
+            self.assertEqual(created[2].spec, original)
+            self.assertEqual(MODELS['ace_step'].processes[0], original)
+            await manager.stop_all()
+
+    async def test_context_replacement_cannot_discard_an_undrained_tree(self) -> None:
+        manager = OrchestratorManager()
+        original = MODELS['ace_step'].processes[0]
+        selected = replace(original, env={**original.env, 'ACESTEP_CONFIG_PATH': 'acestep-v15-base'})
+        process = Mock(spec=ManagedProcess)
+        process.spec = selected
+        process.wait_healthy = AsyncMock()
+        process.stop = AsyncMock(side_effect=RuntimeError('Drain failed'))
+        with patch('app.orchestrator.manager.ManagedProcess', return_value=process) as create:
+            await manager.switch_to('ace_step', process_specs=(selected,))
+            with self.assertRaisesRegex(RuntimeError, 'Drain failed'):
+                await manager.switch_to('ace_step')
+            self.assertEqual(create.call_count, 1)
+            self.assertEqual(manager._processes['ace_step'], [process])
+            process.stop = AsyncMock()
+            await manager.stop_all()
+
     async def test_pending_start_is_registered_before_health_finishes(self) -> None:
         manager = OrchestratorManager()
         process = Mock(spec=ManagedProcess)

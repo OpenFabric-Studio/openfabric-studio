@@ -11,6 +11,21 @@ from app.contracts import JsonObject
 from app.orchestrator.state import ModelStatus
 
 
+class MusicAnalysisWorkAccountingTests(unittest.TestCase):
+    def test_music_cleanup_and_beats_block_library_setup_until_drained(self) -> None:
+        for name in ('app.music_artifacts.work_busy', 'app.beat_jobs.work_busy', 'app.replacement_jobs.work_busy', 'app.beat_song_mix.work_busy', 'app.mashups.work_busy', 'app.regional_datasets.work_busy', 'app.queued_music_sources.work_busy', 'app.song_sources.work_busy'):
+            with self.subTest(owner=name), patch(name, return_value=True):
+                self.assertTrue(work_busy.local_work_busy())
+
+    def test_analysis_blocks_idle_accounting_until_its_owner_is_drained(self) -> None:
+        with patch('app.music_analysis.work_busy', return_value=False) as analysis_busy:
+            self.assertFalse(work_busy.local_work_busy())
+            analysis_busy.return_value = True
+            self.assertTrue(work_busy.local_work_busy())
+            analysis_busy.return_value = False
+            self.assertFalse(work_busy.local_work_busy())
+
+
 class NativeWorkAccountingTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.payloads: dict[str, JsonObject] = {

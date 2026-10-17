@@ -6,17 +6,21 @@ import { i18n, setLocale } from '../../i18n'
 import * as music from '../../api/localMusic'
 import * as adapters from '../../api/musicLora'
 import * as modules from '../../api/modules'
+import * as terms from '../../api/musicTerms'
+import * as conditioning from '../../api/musicConditioning'
 import { createPinia } from 'pinia'
 import { ApiError } from '../../api/http'
 import type { LocalMusicEngineId } from '../../api/localMusic'
 import { parseModuleInstallJob } from '../../api/generated'
 import type { LocalMusicJob, LocalMusicJobs, LocalMusicRequest, SavedTrack } from '../../api/generated'
 import LocalMusicPanel from './LocalMusicPanel.vue'
-import { pendingMusicAdapter } from '../../composables/generationDrafts'
+import { pendingMusicAdapter, pendingMusicConditioning } from '../../composables/generationDrafts'
 
 vi.mock('../../api/localMusic', () => ({ localMusicEngines: vi.fn(), listLocalMusic: vi.fn(), submitLocalMusic: vi.fn(), cancelLocalMusic: vi.fn() }))
 vi.mock('../../api/musicLora', () => ({ listMusicAdapters: vi.fn() }))
 vi.mock('../../api/modules', () => ({ listModuleJobs: vi.fn(), planModules: vi.fn(), installModules: vi.fn(), controlModuleJob: vi.fn() }))
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
+vi.mock('../../api/musicConditioning', () => ({ conditioningCapabilities: vi.fn(), previewConditioning: vi.fn(), inspectConditioningSource: vi.fn() }))
 vi.mock('../../components/shared/StemsPanel.vue', () => ({ default: defineComponent({ props: { trackId: { type: Number, required: true } }, setup: props => () => h('div', `Stems and editor for ${props.trackId}`) }) }))
 let app: App | undefined
 const engines = ['stable_audio3'] as const
@@ -48,13 +52,62 @@ async function input(node: HTMLElement, name: string, value: string) {
 }
 beforeEach(() => {
   pendingMusicAdapter.value = null
+  pendingMusicConditioning.value = null
   vi.resetAllMocks(); setLocale('en')
+  vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation,
+    revision: 0, noncommercial_enabled: false, requirements: [], allowed: true }))
   vi.mocked(music.localMusicEngines).mockResolvedValue({ engines: engines.map(id => ({ id, installed: true, weights_ready: true, small_weights_ready: true, medium_weights_ready: true, supported: true, runtime: 'mlx', detail: '' })) })
   vi.mocked(modules.listModuleJobs).mockResolvedValue([])
   vi.mocked(music.listLocalMusic).mockResolvedValue({ jobs: [], history_incomplete: false })
   vi.mocked(music.submitLocalMusic).mockResolvedValue(job('queued'))
   vi.mocked(music.cancelLocalMusic).mockResolvedValue(job('cancelled'))
+  vi.mocked(conditioning.conditioningCapabilities).mockResolvedValue({ modes: [{ engine: 'stable_audio3', mode: 'audio_to_audio', proof_status: 'source_verified', enabled_small: true, enabled_medium: true, output_semantics: 'generated_full_mix', notes: 'Runtime unverified.' }] })
   vi.mocked(adapters.listMusicAdapters).mockResolvedValue({ adapters: [{ id: 'b'.repeat(32), engine: 'stable_audio3', target: 'small-music', name: 'Piano style', sha256: 'c'.repeat(64), created_at: 'now', source_job_id: null }], history_incomplete: false })
+})
+
+it('accepts a retained beat handoff but gates generation on fresh reference review', async () => {
+  const source = { kind: 'beat_render', beat_id: 'c'.repeat(32), beat_revision: 2,
+    render_id: 'd'.repeat(32), sha256: 'e'.repeat(64) } as const
+  const info = { source, source_sha256: source.sha256, source_bytes: 1000, source_rate_hz: 44100,
+    source_channels: 2, source_frames: 220500, duration_sec: 5 } as const
+  vi.mocked(conditioning.inspectConditioningSource).mockResolvedValue(info)
+  vi.mocked(conditioning.previewConditioning).mockResolvedValue({ ...info, required_free_bytes: 5000, free_bytes: 10000, can_start: true })
+  pendingMusicConditioning.value = { source, label: 'Saved beat reference' }
+  const { node } = await mount()
+  await input(node, 'prompt', 'Piano variation'); await input(node, 'duration_seconds', '5')
+  expect(pendingMusicConditioning.value).toBeNull()
+  expect(button(node, 'Generate music').disabled).toBe(true)
+  expect(music.submitLocalMusic).not.toHaveBeenCalled()
+  button(node, 'Review reference and storage').click(); await settle()
+  const checkbox = node.querySelector('[name="conditioning-reviewed"]')
+  if (!(checkbox instanceof HTMLInputElement)) throw new Error('Missing reference review')
+  checkbox.click(); await settle()
+  expect(button(node, 'Generate music').disabled).toBe(false)
+  expect([...node.querySelectorAll('input')].filter(element => !element.checkValidity()).map(element => ({ name: element.name, value: element.value, message: element.validationMessage }))).toEqual([])
+  button(node, 'Generate music').click(); await settle()
+  expect(music.submitLocalMusic).toHaveBeenCalledWith(expect.objectContaining({ conditioning: {
+    mode: 'audio_to_audio', source, source_sha256: source.sha256, noise_level: .6 } }), expect.any(AbortSignal))
+})
+
+it('requires the displayed publisher terms before starting a new generation', async () => {
+  const before = { engine: 'stable_audio3', operation: 'generation', revision: 0,
+    noncommercial_enabled: false, allowed: false,
+    requirements: [{ component_id: 'stable-weights', name: 'Stable weights', scope: 'model',
+      restriction: 'conditional', source_url: 'https://example.org/terms', terms_digest: 'a'.repeat(64),
+      acknowledged: false }] } satisfies Awaited<ReturnType<typeof terms.getMusicTerms>>
+  vi.mocked(terms.getMusicTerms).mockResolvedValue(before)
+  vi.mocked(terms.acceptMusicTerms).mockResolvedValue({ ...before, revision: 1, allowed: true,
+    requirements: before.requirements.map(item => ({ ...item, acknowledged: true })) })
+  const { node } = await mount()
+  await input(node, 'prompt', 'Piano music')
+  expect(button(node, 'Generate music').disabled).toBe(true)
+  expect(music.submitLocalMusic).not.toHaveBeenCalled()
+  const review = node.querySelector('section[aria-label="Publisher terms"] input[type="checkbox"]')
+  if (!(review instanceof HTMLInputElement)) throw new Error('Missing explicit review checkbox')
+  review.checked = true; review.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+  button(node, 'Accept reviewed terms').click(); await settle()
+  expect(button(node, 'Generate music').disabled).toBe(false)
+  expect(music.submitLocalMusic).not.toHaveBeenCalled()
 })
 
 it('blocks missing Medium generation when Small is ready and offers explicit generation setup', async () => {

@@ -3,7 +3,7 @@ import { onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { claimPlayback, releasePlaybackIfCurrent } from '../../composables/audioPlayback'
 
-const props = withDefaults(defineProps<{ src: string; label: string; active?: boolean }>(), { active: true })
+const props = withDefaults(defineProps<{ src: string; label: string; active?: boolean; preload?: 'none' | 'metadata' }>(), { active: true, preload: 'metadata' })
 const { t } = useI18n()
 const audio = ref<HTMLAudioElement | null>(null)
 const failed = ref(false)
@@ -29,7 +29,7 @@ onBeforeUnmount(() => { alive = false; stop() })
 </script>
 <template>
   <div class="space-y-2">
-    <audio ref="audio" controls preload="metadata" class="h-10 w-full" :src="src" :aria-label="label" @play="onPlay" @pause="release" @ended="release" @error="onError" @loadedmetadata="onMetadata" />
+    <audio ref="audio" controls :preload="preload" class="h-11 w-full" :src="src" :aria-label="label" @play="onPlay" @pause="release" @ended="release" @error="onError" @loadedmetadata="onMetadata" />
     <p v-if="duration != null" class="text-xs text-text-dim">{{ t('speechWorkspace.audioDuration', { seconds: duration.toFixed(2) }) }}</p>
     <p v-if="failed" role="alert" class="text-xs text-status-failed">{{ t('speechWorkspace.audioError') }}</p>
   </div>

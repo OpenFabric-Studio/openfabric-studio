@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import tempfile
 import unittest
 from collections.abc import AsyncIterator
@@ -43,6 +44,40 @@ class TrackStorageTests(unittest.IsolatedAsyncioTestCase):
         path = db.model_dir("upload") / name
         path.write_bytes(b"owned audio fixture")
         return path
+
+    async def test_generic_save_cannot_forge_server_recorded_music_evidence(self) -> None:
+        application = FastAPI()
+        application.include_router(routes_tracks.router)
+        params = {'bpm': 99, '_music_evidence': {'lineage_complete': True, 'public_attributions': ['forged proof']},
+            '_music_adapters': [{'id': 'a' * 32, 'sha256': 'b' * 64}]}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(application), base_url='http://127.0.0.1:9000') as client:
+            response = await client.post('/api/tracks', data={'model': 'editor', 'params': json.dumps(params)},
+                files={'audio': ('fixture.wav', b'owned fixture', 'audio/wav')})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['params'], {'bpm': 99})
+        row = db.get_track(response.json()['id'])
+        self.assertIsNotNone(row)
+        self.assertNotIn('forged proof', row['params_json'] if row is not None else '')
+
+    async def test_failed_conditioning_drain_preserves_track_and_audio(self) -> None:
+        from app import music_conditioning
+        from app.local_music_contracts import LocalMusicError
+        audio = self.audio()
+        identifier = self.track(audio)
+
+        @asynccontextmanager
+        async def blocked(track_id: int) -> AsyncIterator[None]:
+            self.assertEqual(track_id, identifier)
+            raise LocalMusicError('conditioning_source_busy', 409)
+            yield
+
+        with patch.object(music_conditioning, 'protect_source_removal', blocked):
+            with self.assertRaises(HTTPException) as caught:
+                await routes_tracks.delete_track(identifier)
+        self.assertEqual(caught.exception.status_code, 409)
+        self.assertEqual(caught.exception.detail, 'conditioning_source_busy')
+        self.assertIsNotNone(db.get_track(identifier))
+        self.assertTrue(audio.is_file())
 
     async def test_delete_keeps_audio_used_by_another_historical_track(self) -> None:
         audio = self.audio()
@@ -110,7 +145,7 @@ class TrackStorageTests(unittest.IsolatedAsyncioTestCase):
                             else:
                                 await midi.cancel(identifier, "full")
 
-    async def test_delete_rechecks_derivatives_started_while_exports_drain(self) -> None:
+    async def test_delete_rechecks_midi_started_while_exports_drain(self) -> None:
         audio = self.audio()
         identifier = self.track(audio)
         entered, release = asyncio.Event(), asyncio.Event()
@@ -121,14 +156,14 @@ class TrackStorageTests(unittest.IsolatedAsyncioTestCase):
             await release.wait()
             async with original(track_id):
                 yield
-        async def worker(track_id: int) -> None:
+        async def worker(track_id: int, source: str) -> None:
             await asyncio.Event().wait()
-        with patch.dict(stems._jobs, {}, clear=True), patch.object(stems, "_run", side_effect=worker), \
+        with patch.dict(midi._jobs, {}, clear=True), patch.object(midi, "_run", side_effect=worker), \
              patch.object(audio_exports, "protect_track_exports_removal", side_effect=held_guard):
             deletion = asyncio.create_task(routes_tracks.delete_track(identifier))
             await entered.wait()
             try:
-                await stems.start(identifier)
+                await midi.start(identifier, 'full')
                 release.set()
                 with self.assertRaises(HTTPException) as caught:
                     await deletion
@@ -138,7 +173,7 @@ class TrackStorageTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 release.set()
                 await asyncio.gather(deletion, return_exceptions=True)
-                await stems.cancel(identifier)
+                await midi.cancel(identifier, 'full')
 
     async def test_delete_preserves_shared_stem_and_midi_artifacts(self) -> None:
         for kind in ("stems", "midi"):

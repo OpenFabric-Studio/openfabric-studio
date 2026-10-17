@@ -47,7 +47,7 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.manager._processes = self.processes
         self.manager.owned_instance.side_effect = lambda engine: self.instances.get(engine)
 
-        async def start(engine: str) -> None:
+        async def start(engine: str, **_: object) -> None:
             self.events.append('load:' + engine)
             self.instances[engine] = engine + '-instance'
             self.states[engine].status = ModelStatus.RUNNING
@@ -77,6 +77,66 @@ class MusicQueueEngineTests(unittest.IsolatedAsyncioTestCase):
         self.real_prepare = engines._prepare_ace
         self.prepare = self.enterContext(patch.object(engines, '_prepare_ace', new=AsyncMock()))
         self.session = engines.EngineSession()
+
+    async def test_base_conditioning_uses_verified_owned_launch_and_exact_native_task_fields(self) -> None:
+        from app import config, song_capabilities, song_from_beat
+        from app.song_from_beat_contracts import AceCompleteConditioning
+        ordinary = self.item()
+        options = AceCompleteConditioning(mode='ace_complete', source={'kind': 'version',
+            'track_id': 1, 'version_id': 'a' * 32}, source_sha256='b' * 64, track_classes=['bass', 'guitar'])
+        payload = MusicQueueAceRequest(engine='ace_step', request=ordinary.payload.request.model_copy(update={
+            'taskType': 'complete', 'useRefAudio': True, 'selectedModel': 'acestep-v15-base',
+            'trackClasses': ['bass', 'guitar']}), conditioning=options)
+        proof = song_capabilities.AceRuntimeProof('c' * 64, 'd' * 64, 'e' * 64)
+        await self.session.ensure(ordinary.payload)
+        with patch.object(song_capabilities, 'verify_runtime', new=AsyncMock(return_value=proof)) as verify, \
+             patch.object(song_from_beat, 'launch_specs', return_value=tuple(config.MODELS['ace_step'].processes)):
+            await self.session.ensure(payload)
+        verify.assert_awaited_once()
+        self.assertEqual(self.events, ['load:ace_step', 'unload:ace_step', 'load:ace_step'])
+        self.assertEqual(self.manager.switch_to.call_args.kwargs['process_specs'], tuple(config.MODELS['ace_step'].processes))
+        params = engines._ace_params(payload.request, ordinary.resolved_seed, conditioning=options)
+        self.assertEqual(params['task_type'], 'complete')
+        self.assertEqual(params['track_classes'], ['bass', 'guitar'])
+        self.assertEqual(params['model'], 'acestep-v15-base')
+        self.assertIs(params['thinking'], False)
+
+    async def test_base_init_rejects_wrong_loaded_model_before_submitting_another_init(self) -> None:
+        self.instances['ace_step'] = 'owned'
+        requests: list[str] = []
+        async def respond(request: httpx.Request) -> httpx.Response:
+            requests.append(request.url.path)
+            return httpx.Response(200, json={'models_initialized': True, 'loaded_model': 'acestep-v15-turbo'})
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch.object(engines.httpx, 'AsyncClient', return_value=client):
+            with self.assertRaises(MusicQueueError) as error:
+                await self.real_prepare(expected_model='acestep-v15-base', instance_id='owned')
+        self.assertEqual(error.exception.code, 'conditioning_model_changed')
+        self.assertEqual(requests, ['/health'])
+
+    async def test_lazy_base_init_names_the_exact_model_and_requires_owned_identity(self) -> None:
+        import json
+        requests: list[tuple[str, object]] = []
+        initialized = False
+        async def respond(request: httpx.Request) -> httpx.Response:
+            nonlocal initialized
+            if request.url.path == '/health':
+                return httpx.Response(200, json={'models_initialized': initialized,
+                    'loaded_model': 'acestep-v15-base' if initialized else None})
+            body: object = json.loads(await request.aread())
+            requests.append((request.url.path, body))
+            initialized = True
+            return httpx.Response(200, json={'message': 'Ready'})
+        with patch.object(engines.httpx, 'AsyncClient') as create:
+            with self.assertRaises(MusicQueueError):
+                await self.real_prepare(expected_model='acestep-v15-base', instance_id='not-owned')
+            create.assert_not_called()
+        self.instances['ace_step'] = 'owned'
+        client = httpx.AsyncClient(transport=httpx.MockTransport(respond))
+        with patch.object(engines.httpx, 'AsyncClient', return_value=client):
+            await self.real_prepare(expected_model='acestep-v15-base', instance_id='owned')
+        self.assertEqual(requests, [('/v1/init', {'init_llm': False, 'model': 'acestep-v15-base'}),
+            ('/v1/lora/unload', {})])
 
     def item(self, engine: str = 'ace_step', *, child: str | None = 'a' * 32) -> MusicQueueItem:
         if engine == 'ace_step':

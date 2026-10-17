@@ -22,6 +22,9 @@ import { timeStretchBuffer } from '../../audio/timeStretchEngine'
 import { TRACK_COLORS } from '../../utils/trackColors'
 import { detectBpm } from '../../audio/bpmDetector'
 import * as tracksApi from '../../api/tracks'
+import * as beatsApi from '../../api/beats'
+import * as mashupsApi from '../../api/mashups'
+import type { BeatJob, BeatRenderManifest, MashupJob } from '../../api/generated'
 import { parseTimelineProject } from '../../api/editorValidation'
 import ChannelStrip from '../../components/shared/ChannelStrip.vue'
 import TimelineLane from '../../components/editor/TimelineLane.vue'
@@ -46,6 +49,119 @@ const exportError = ref<string | null>(null)
 const exportedOk = ref(false)
 const processedExport = ref<AudioExportResponse | null>(null)
 const showHelpModal = ref(false)
+
+const selectedBeatClip = computed(() => store.project.lanes.flatMap(lane => lane.clips)
+  .find(clip => clip.id === store.selectedClipId && clip.type !== 'midi' && clip.beatLink))
+const beatChecking = ref(false)
+const beatCurrentRevision = ref<number | null>(null)
+const beatTarget = ref<BeatJob | null>(null)
+const beatNotice = ref<string | null>(null)
+let beatActionGeneration = 0
+let beatActionController: AbortController | null = null
+
+function resetBeatAction(): void {
+  beatActionGeneration++
+  beatActionController?.abort()
+  beatActionController = null
+  beatChecking.value = false
+  beatCurrentRevision.value = null
+  beatTarget.value = null
+  beatNotice.value = null
+}
+watch([() => store.session, () => store.projectId, () => store.project, () => selectedBeatClip.value?.id,
+  () => selectedBeatClip.value?.beatLink?.render_id], resetBeatAction, { flush: 'sync' })
+
+function beatManifest(job: BeatJob, beatId: string, revision: number): BeatRenderManifest | null {
+  const manifest = job.manifest
+  return job.status === 'done' && job.request.mode === 'full' && job.beat_id === beatId
+    && job.beat_revision === revision && job.request.beat_id === beatId && job.request.expected_revision === revision
+    && manifest?.render_id === job.id && manifest.beat_id === beatId && manifest.beat_revision === revision
+    ? manifest : null
+}
+
+function beginBeatAction() {
+  const clip = selectedBeatClip.value
+  if (!clip?.beatLink) return null
+  beatActionController?.abort()
+  const controller = new AbortController()
+  beatActionController = controller
+  const token = ++beatActionGeneration, session = store.session, project = store.project, projectId = store.projectId
+  const pinnedRender = clip.beatLink.render_id
+  beatChecking.value = true
+  beatNotice.value = null
+  return { clip, link: clip.beatLink, signal: controller.signal,
+    isCurrent: () => !unmounted && token === beatActionGeneration && store.session === session
+      && store.project === project && store.projectId === projectId && selectedBeatClip.value === clip
+      && clip.beatLink?.render_id === pinnedRender }
+}
+
+async function checkBeatUpdates(): Promise<void> {
+  const action = beginBeatAction()
+  if (!action) return
+  beatTarget.value = null
+  try {
+    const current = await beatsApi.getBeat(action.link.beat_id, action.signal)
+    if (!action.isCurrent()) return
+    beatCurrentRevision.value = current.revision
+    if (current.revision === action.link.beat_revision) {
+      beatNotice.value = t('beats.beatUpToDate')
+      return
+    }
+    const history = await beatsApi.listBeatJobs(current.id, action.signal)
+    if (!action.isCurrent()) return
+    const job = history.jobs.find(item => beatManifest(item, current.id, current.revision)
+      ?.artifacts.some(artifact => artifact.kind === 'stem' && artifact.lane_id === action.link.lane_id))
+    if (!job || action.link.occurrence_index != null) {
+      beatNotice.value = t('beats.beatNeedsRender')
+      return
+    }
+    beatTarget.value = job
+    beatNotice.value = t('beats.beatUpdateReady', { revision: current.revision })
+  } catch {
+    if (action.isCurrent()) beatNotice.value = t('beats.beatUpdateFailed')
+  } finally {
+    if (action.isCurrent()) beatChecking.value = false
+  }
+}
+
+async function updateBeatClip(): Promise<void> {
+  const target = beatTarget.value
+  if (!target) return
+  const action = beginBeatAction()
+  if (!action) return
+  try {
+    const [current, job] = await Promise.all([beatsApi.getBeat(action.link.beat_id, action.signal),
+      beatsApi.getBeatJob(target.id, action.signal)])
+    if (!action.isCurrent()) return
+    const manifest = beatManifest(job, action.link.beat_id, current.revision)
+    const matches = manifest?.artifacts.filter(item => item.kind === 'stem' && item.lane_id === action.link.lane_id)
+    const artifact = matches?.length === 1 ? matches[0] : undefined
+    if (current.revision !== target.beat_revision || !manifest || !artifact) throw new Error('stale beat render')
+    if (action.clip.trimEnd > manifest.frames / (manifest.sample_rate_hz ?? 48000)) {
+      beatNotice.value = t('beats.beatTrimConflict')
+      return
+    }
+    if (action.clip.warpEnabled && action.clip.originalBpm !== current.bpm) {
+      beatNotice.value = t('beats.beatWarpConflict')
+      return
+    }
+    action.clip.sourceUrl = beatsApi.beatArtifactUrl(job.id, artifact.id)
+    action.clip.sourceArtifact = { artifact_id: artifact.id, sha256: artifact.sha256 }
+    action.clip.originalBpm = current.bpm
+    action.clip.beatLink = { ...action.link, beat_revision: current.revision, render_id: job.id }
+    store.snapshot()
+    beatNotice.value = t('beats.beatUpdated', { revision: current.revision })
+  } catch {
+    if (action.isCurrent()) beatNotice.value = t('beats.beatUpdateFailed')
+  } finally {
+    if (action.isCurrent()) beatChecking.value = false
+  }
+}
+
+function editLinkedBeat(): void {
+  const link = selectedBeatClip.value?.beatLink
+  if (link) void router.push({ path: '/music/beats', query: { beat_id: link.beat_id, revision: link.beat_revision } })
+}
 
 const laneLevels = ref<{ peak: number; clipping: boolean; peakL: number; peakR: number }[]>([])
 const masterLevel = ref<{ peak: number; clipping: boolean; peakL: number; peakR: number }>({ peak: 0, clipping: false, peakL: 0, peakR: 0 })
@@ -488,16 +604,13 @@ async function doExport(): Promise<void> {
     // Keep rendered PCM independent from the codec/house target. Only app-owned
     // library URLs supply ancestry; arbitrary imports remain unknown.
     const sourceClips = snapshot.lanes.flatMap(lane => lane.clips)
-    const sourceIds = [...new Set(sourceClips.flatMap(clip => {
-      const match = /^\/api\/tracks\/([1-9][0-9]*)\//.exec(clip.sourceUrl ?? '')
-      const id = match ? Number(match[1]) : NaN
-      return Number.isSafeInteger(id) ? [id] : []
-    }))]
-    const ancestryComplete = sourceClips.every(clip => /^\/api\/tracks\/[1-9][0-9]*\//.test(clip.sourceUrl ?? ''))
+    const clipSourceIds = await sourceTrackIds(sourceClips)
+    const sourceIds = [...new Set(clipSourceIds.filter(id => id !== null))]
+    const ancestryComplete = clipSourceIds.every(id => id !== null)
     const params: JsonObject = { project_export: true, project_id: projectId }
     if (sourceIds.length && sourceIds.length <= 100) {
       params.source_track_ids = sourceIds
-      if (!ancestryComplete) params.source_ancestry_complete = false
+      params.source_ancestry_complete = ancestryComplete
     }
     const saved = await tracksApi.saveTrack({ model: 'editor', title: name, lyrics: '', params }, encodeWav(rendered), 'wav')
     const versions = await listAudioVersions(saved.id)
@@ -515,6 +628,59 @@ async function doExport(): Promise<void> {
   } finally {
     if (isCurrent() && !tracking) exporting.value = false
   }
+}
+
+async function sourceTrackIds(clips: Clip[]): Promise<(number | null)[]> {
+  const ids = [...new Set(clips.flatMap(clip => clip.beatLink ? [clip.beatLink.render_id] : []))]
+  const renders = new Map<string, BeatJob>()
+  const mashupPath = /^\/api\/mashups\/jobs\/([a-f0-9]{32})\/artifacts\/([a-f0-9]{32})$/
+  const mashupIds = [...new Set(clips.flatMap(clip => {
+    const id = mashupPath.exec(clip.sourceUrl ?? '')?.[1]
+    return id ? [id] : []
+  }))]
+  const mashupRenders = new Map<string, MashupJob>()
+  if (ids.length <= 100) {
+    await Promise.all(ids.map(async id => {
+      try { renders.set(id, await beatsApi.getBeatJob(id)) } catch { /* Unknown lineage stays unknown. */ }
+    }))
+  }
+  if (mashupIds.length <= 100) {
+    await Promise.all(mashupIds.map(async id => {
+      try { mashupRenders.set(id, await mashupsApi.getMashupJob(id)) } catch { /* Unknown lineage stays unknown. */ }
+    }))
+  }
+  return clips.map(clip => {
+    if (clip.beatLink) {
+      const link = clip.beatLink, job = renders.get(link.render_id)
+      const manifest = job ? beatManifest(job, link.beat_id, link.beat_revision) : null
+      const source = clip.sourceArtifact
+      if (!source) return null
+      const artifact = manifest?.artifacts.find(item => item.kind === 'stem' && item.lane_id === link.lane_id
+        && item.id === source.artifact_id && item.sha256 === source.sha256)
+      const trackId = manifest?.track_id
+      return artifact && job && clip.sourceUrl === beatsApi.beatArtifactUrl(job.id, artifact.id)
+        && typeof trackId === 'number' && Number.isSafeInteger(trackId) && trackId > 0 ? trackId : null
+    }
+    const mashup = mashupPath.exec(clip.sourceUrl ?? '')
+    if (mashup) {
+      const jobId = mashup[1], artifactId = mashup[2], source = clip.sourceArtifact
+      const job = jobId ? mashupRenders.get(jobId) : undefined
+      const manifest = job?.manifest
+      if (!job || !source || job.id !== jobId || job.status !== 'done' || job.kind !== 'full'
+        || job.request?.mode !== 'full' || job.request.expected_revision !== job.mashup_revision
+        || manifest?.mode !== 'full' || manifest.job_id !== job.id || manifest.mashup_id !== job.mashup_id
+        || manifest.mashup_revision !== job.mashup_revision) return null
+      const artifact = manifest.artifacts.find(item => item.id === artifactId && item.id === source.artifact_id
+        && item.sha256 === source.sha256 && item.media_type === 'audio/wav'
+        && ['placement', 'stem', 'dry', 'mix'].includes(item.kind))
+      const trackId = manifest.track_id
+      return artifact && clip.sourceUrl === mashupsApi.mashupArtifactUrl(job.id, artifact.id)
+        && typeof trackId === 'number' && Number.isSafeInteger(trackId) && trackId > 0 ? trackId : null
+    }
+    const match = /^\/api\/tracks\/([1-9][0-9]*)\//.exec(clip.sourceUrl ?? '')
+    const id = match ? Number(match[1]) : NaN
+    return Number.isSafeInteger(id) ? id : null
+  })
 }
 
 // Only the most recent load() may write buffers or clear the loading state
@@ -971,6 +1137,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   unmounted = true
+  resetBeatAction()
   exportPoll.stop()
   pendingExport = null
   loadToken++
@@ -1271,6 +1438,15 @@ onBeforeRouteLeave(() => {
       </div>
 
       <!-- Channel Strip Panel -->
+      <section v-if="selectedBeatClip?.beatLink" class="rounded-lg border border-border/60 bg-panel/70 p-3 space-y-2" :aria-label="t('beats.editBeat')">
+        <p class="text-xs text-text-dim">{{ t('beats.pinnedBeat', { revision: selectedBeatClip.beatLink.beat_revision }) }}<span v-if="beatCurrentRevision !== null"> · {{ t('beats.currentBeat', { revision: beatCurrentRevision }) }}</span></p>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" class="min-h-11 rounded border border-border px-3 text-sm" @click="editLinkedBeat">{{ t('beats.editBeat') }}</button>
+          <button type="button" class="min-h-11 rounded border border-border px-3 text-sm" :disabled="beatChecking" @click="checkBeatUpdates">{{ t('beats.checkBeatUpdates') }}</button>
+          <button v-if="beatTarget" type="button" class="min-h-11 rounded border border-border px-3 text-sm" :disabled="beatChecking" @click="updateBeatClip">{{ t('beats.updateBeatClip') }}</button>
+        </div>
+        <p v-if="beatNotice" role="status" class="text-xs text-text-dim">{{ beatNotice }}</p>
+      </section>
       <div class="flex items-start justify-between gap-4 rounded-lg border border-border/60 bg-panel/70 backdrop-blur-md p-3 shadow-sm w-full overflow-hidden shrink-0 z-20">
         <div class="flex flex-1 items-start gap-4 min-w-0">
           <!-- Left sidebar (Channel Strip) -->

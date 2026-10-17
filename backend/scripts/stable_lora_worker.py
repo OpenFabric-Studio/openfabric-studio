@@ -5,11 +5,14 @@ import argparse
 from dataclasses import dataclass
 import hashlib
 import json
+import importlib.metadata
 import os
 from pathlib import Path
+import platform
 import re
 import struct
 import subprocess
+import sys
 import uuid
 import wave
 
@@ -78,6 +81,13 @@ def atomic_json(path: Path, value: object) -> None:
 
 
 @dataclass(frozen=True)
+class RuntimeModel:
+    path: str
+    sha256: str
+    bytes: int
+
+
+@dataclass(frozen=True)
 class TrainingPlan:
     directory: Path
     sources: list[Path]
@@ -89,6 +99,9 @@ class TrainingPlan:
     variant: str
     max_steps: int
     rank: int
+    source_sha256s: tuple[str | None, ...] = ()
+    runtime_root: Path | None = None
+    runtime_models: tuple[RuntimeModel, ...] = ()
 
 
 def argv(value: object) -> list[str]:
@@ -122,15 +135,82 @@ def read_plan(path: Path) -> TrainingPlan:
     fingerprint = text(payload.get('request_sha256'))
     if re.fullmatch(r'[0-9a-f]{64}', fingerprint) is None:
         raise ValueError('invalid_training_request')
+    expected = payload.get('source_sha256s', [None] * len(samples))
+    if not isinstance(expected, list) or len(expected) != len(samples):
+        raise ValueError('invalid_training_dataset')
+    checksums: list[str | None] = []
+    for sample, checksum in zip(samples, expected, strict=True):
+        if checksum is not None and (not isinstance(checksum, str) or re.fullmatch(r'[0-9a-f]{64}', checksum) is None):
+            raise ValueError('invalid_training_dataset')
+        if object_value(sample).get('regional_manifest') is not None and checksum is None:
+            raise ValueError('invalid_training_dataset')
+        checksums.append(checksum)
+    proof = payload.get('runtime_proof')
+    runtime_root: Path | None = None
+    runtime_models: list[RuntimeModel] = []
+    if proof is not None:
+        identity = object_value(proof)
+        runtime_root = Path(text(identity.get('root'), 10000))
+        if not runtime_root.is_absolute() or runtime_root.is_symlink() or runtime_root.resolve() != runtime_root or not runtime_root.is_dir():
+            raise ValueError('invalid_training_runtime')
+        models = identity.get('models')
+        if not isinstance(models, list) or not 1 <= len(models) <= 6:
+            raise ValueError('invalid_training_runtime')
+        for entry in models:
+            item = object_value(entry)
+            relative = Path(text(item.get('path'), 300))
+            checksum = text(item.get('sha256'), 64)
+            if relative.is_absolute() or any(part in ('.', '..') for part in relative.parts) or '\\' in str(relative) or re.fullmatch(r'[0-9a-f]{64}', checksum) is None:
+                raise ValueError('invalid_training_runtime')
+            runtime_models.append(RuntimeModel(relative.as_posix(), checksum, integer(item.get('bytes'), 1, 100_000_000_000)))
     return TrainingPlan(directory, paths, captions, argv(payload.get('preencode_argv')), argv(payload.get('train_argv')),
-        text(payload.get('ffmpeg'), 10000), fingerprint, variant, integer(request.get('max_steps'), 1, 100000), rank)
+        text(payload.get('ffmpeg'), 10000), fingerprint, variant, integer(request.get('max_steps'), 1, 100000), rank, tuple(checksums), runtime_root, tuple(runtime_models))
+
+
+def runtime_identity(plan: TrainingPlan) -> dict[str, object] | None:
+    """Measure the selected files before/after work; no GPU imports or package install."""
+    root = plan.runtime_root
+    if root is None:
+        return None
+    models: list[dict[str, object]] = []
+    for model in plan.runtime_models:
+        path = root / model.path
+        if (any(item.is_symlink() for item in (path, *path.parents)) or path.resolve() != path
+                or path.stat().st_size != model.bytes or digest(path, model.bytes) != model.sha256):
+            raise ValueError('training_model_changed')
+        models.append({'path': model.path, 'sha256': model.sha256, 'bytes': model.bytes})
+    checksum = hashlib.sha256()
+    count, source_bytes = 0, 0
+    source_paths: list[Path] = []
+    for path in root.rglob('*.py'):
+        if len(source_paths) >= 500:
+            raise ValueError('invalid_training_runtime')
+        source_paths.append(path)
+    for path in sorted(source_paths):
+        count += 1
+        source_bytes += path.stat().st_size
+        if count > 500 or source_bytes > 64 * 1024**2 or path.is_symlink() or path.resolve() != path:
+            raise ValueError('invalid_training_runtime')
+        checksum.update(path.relative_to(root).as_posix().encode('utf-8')); checksum.update(b'\0')
+        checksum.update(digest(path, 2 * 1024**2).encode('ascii')); checksum.update(b'\0')
+    if count == 0:
+        raise ValueError('invalid_training_runtime')
+    packages: dict[str, str] = {}
+    for name in ('mlx', 'numpy'):
+        try:
+            packages[name] = importlib.metadata.version(name)
+        except importlib.metadata.PackageNotFoundError:
+            packages[name] = 'unavailable'
+    return {'models': models, 'source_sha256': checksum.hexdigest(), 'source_file_count': count,
+        'python_executable_sha256': digest(Path(sys.executable).resolve(), 64 * 1024**2),
+        'python_version': platform.python_version(), 'platform': sys.platform, 'machine': platform.machine(), 'packages': packages}
 
 
 def progress(directory: Path, stage: str) -> None:
     atomic_json(directory / 'stage.json', {'stage': stage})
 
 
-def prepare_dataset(plan: TrainingPlan) -> None:
+def prepare_dataset(plan: TrainingPlan, *, measured_runtime: dict[str, object] | None = None) -> None:
     directory = plan.directory / 'audio'
     directory.mkdir()
     manifest: list[dict[str, object]] = []
@@ -139,6 +219,8 @@ def prepare_dataset(plan: TrainingPlan) -> None:
         if source.suffix.lower() not in formats or source.is_symlink():
             raise ValueError('invalid_training_dataset')
         source_sha256 = digest(source)
+        if plan.source_sha256s and plan.source_sha256s[index] is not None and source_sha256 != plan.source_sha256s[index]:
+            raise ValueError('training_source_changed')
         pending = directory / f'{index:03d}.partial.wav'
         output = directory / f'{index:03d}.wav'
         subprocess.run([plan.ffmpeg, '-nostdin', '-v', 'error', '-xerror', '-protocol_whitelist', 'file,pipe',
@@ -152,7 +234,10 @@ def prepare_dataset(plan: TrainingPlan) -> None:
         pending.replace(output)
         atomic_json(output.with_suffix('.json'), {'text': caption})
         manifest.append({'sample': output.name, 'source_sha256': source_sha256, 'audio_sha256': digest(output), 'caption': caption})
-    atomic_json(plan.directory / 'dataset.json', {'request_sha256': plan.fingerprint, 'samples': manifest})
+    result: dict[str, object] = {'request_sha256': plan.fingerprint, 'samples': manifest}
+    if measured_runtime is not None:
+        result['runtime_identity'] = measured_runtime
+    atomic_json(plan.directory / 'dataset.json', result)
 
 
 def validate_latents(plan: TrainingPlan) -> None:
@@ -170,13 +255,16 @@ def run(plan: TrainingPlan) -> None:
     os.environ.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1'})
     os.chdir(plan.directory)
     progress(plan.directory, 'preparing')
-    prepare_dataset(plan)
+    measured = runtime_identity(plan)
+    prepare_dataset(plan, measured_runtime=measured)
     progress(plan.directory, 'encoding')
     subprocess.run(plan.preencode_argv, check=True)
     # The native encoder reports per-file errors without a failing exit code.
     validate_latents(plan)
     progress(plan.directory, 'loading')
     subprocess.run(plan.train_argv, check=True)
+    if runtime_identity(plan) != measured:
+        raise ValueError('training_runtime_changed')
     checkpoints = list((plan.directory / 'checkpoints').glob(f'training/*/checkpoints/training-step={plan.max_steps}-epoch=*.safetensors'))
     if len(checkpoints) != 1:
         raise ValueError('training_final_checkpoint_missing')

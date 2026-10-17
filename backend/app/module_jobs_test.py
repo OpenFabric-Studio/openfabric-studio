@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 from dataclasses import replace
 from pathlib import Path
 import sys
@@ -44,6 +45,27 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         other = jobs.ModuleJobService(self.environment)
         self.assertEqual(other.get(created.id).steps[0].state, 'manual')
         await service.shutdown()
+
+    async def test_explicit_ace_base_selection_is_persisted_and_uses_only_its_asset_installer(self) -> None:
+        from app import song_capabilities, module_music_models
+        python = self.root / 'fixture-python'; python.write_bytes(b'fixture')
+        request = ModulePlanRequest(features=['ace_step'], download_models=True, ace_generation_model='acestep-v15-base')
+        with patch.object(song_capabilities, 'source_ready', return_value=True), \
+             patch.object(catalog, 'engine_python', return_value=python), \
+             patch.object(catalog, 'available_bytes', return_value=100 * 1024**3), \
+             patch.object(module_music_models, 'setup_ace_conditioning_models', new=AsyncMock(
+                 return_value=jobs.InstallOutcome('verified', 'Fixture assets only'))) as prepare:
+            reviewed = await catalog.plan(request, self.environment)
+            service = jobs.ModuleJobService(self.environment)
+            try:
+                job = await service.create(ModuleInstallRequest(**request.model_dump(), plan_token=reviewed.plan_token))
+                await self.wait_for_terminal(service, job.id)
+                self.assertEqual(service.get(job.id).state, 'completed')
+                self.assertEqual(service.get(job.id).ace_generation_model, 'acestep-v15-base')
+                self.assertEqual(service.store.read(job.id).plan.ace_generation_model, 'acestep-v15-base')
+                prepare.assert_awaited_once()
+            finally:
+                await service.shutdown()
 
     async def test_retired_setup_history_is_preserved_without_hiding_other_jobs(self) -> None:
         service = jobs.ModuleJobService(self.environment)
@@ -188,6 +210,82 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(jobs.ModuleSetupError, 'plan_changed'):
             await service.create(request)
         self.assertEqual(list(self.root.iterdir()), [])
+
+    async def test_space_is_rechecked_before_the_first_expensive_install_step(self) -> None:
+        installer = AsyncMock(return_value=jobs.InstallOutcome('verified', 'Fixture installed.'))
+        service = jobs.ModuleJobService(self.environment, installer=installer)
+        try:
+            created = await service.create(await self.request(['media']))
+            with patch.object(catalog, 'available_bytes', return_value=1):
+                await self.wait_for_terminal(service, created.id)
+            self.assertEqual(service.get(created.id).error_code, 'insufficient_disk')
+            installer.assert_not_awaited()
+        finally:
+            await service.shutdown()
+
+    async def test_later_install_steps_recheck_space_after_a_dependency_finishes(self) -> None:
+        installed: list[catalog.ModuleId] = []
+        async def install(context: jobs.InstallContext, identifier: catalog.ModuleId, download: bool) -> jobs.InstallOutcome:
+            installed.append(identifier)
+            disk.return_value = 1
+            return jobs.InstallOutcome('verified', 'Fixture installed.')
+        service = jobs.ModuleJobService(self.environment, installer=install)
+        try:
+            with patch.object(catalog, 'available_bytes', return_value=100 * 1024**3) as disk:
+                created = await service.create(await self.request(['speech']))
+                await self.wait_for_terminal(service, created.id)
+            self.assertEqual(installed, ['media'])
+            self.assertEqual(service.get(created.id).steps[0].state, 'verified')
+            self.assertEqual(service.get(created.id).error_code, 'insufficient_disk')
+        finally:
+            await service.shutdown()
+
+    async def test_zero_download_verification_is_not_blocked_by_unknown_free_space(self) -> None:
+        from app import module_install
+        reviewed = await catalog.plan(ModulePlanRequest(features=['media']), self.environment)
+        reviewed.steps[0].operation = 'verify'
+        reviewed.steps[0].estimated_download_bytes = 0
+        reviewed.required_free_bytes = 0
+        reviewed.estimated_download_bytes = 0
+        current = reviewed.model_copy(update={'free_bytes': None, 'can_install': False}, deep=True)
+        service = jobs.ModuleJobService(self.environment)
+        try:
+            with patch.object(service, '_review', AsyncMock(return_value=reviewed)), patch.object(jobs, 'plan', AsyncMock(return_value=current)), \
+                    patch.object(module_install, 'verify', AsyncMock(return_value=jobs.InstallOutcome('verified', 'Read-only verification.'))) as verify:
+                created = await service.create(ModuleInstallRequest(features=['media'], plan_token=reviewed.plan_token))
+                await self.wait_for_terminal(service, created.id)
+            verify.assert_awaited_once()
+            self.assertEqual(service.get(created.id).state, 'completed')
+        finally:
+            await service.shutdown()
+
+    async def test_per_step_review_cannot_download_more_than_the_accepted_plan(self) -> None:
+        reviewed = await catalog.plan(ModulePlanRequest(features=['media']), self.environment)
+        reviewed.steps[0].estimated_download_bytes = 100
+        current = reviewed.model_copy(deep=True)
+        current.steps[0].estimated_download_bytes = 101
+        installer = AsyncMock(return_value=jobs.InstallOutcome('verified', 'Fixture installed.'))
+        service = jobs.ModuleJobService(self.environment, installer=installer)
+        try:
+            with patch.object(service, '_review', AsyncMock(return_value=reviewed)), patch.object(jobs, 'plan', AsyncMock(return_value=current)):
+                created = await service.create(ModuleInstallRequest(features=['media'], plan_token=reviewed.plan_token))
+                await self.wait_for_terminal(service, created.id)
+            self.assertEqual(service.get(created.id).error_code, 'plan_changed')
+            installer.assert_not_awaited()
+        finally:
+            await service.shutdown()
+
+    async def test_disk_full_installer_error_has_a_stable_failure_code(self) -> None:
+        sentinel = self.root / 'preserved-original'
+        sentinel.write_bytes(b'keep this')
+        service = jobs.ModuleJobService(self.environment, installer=AsyncMock(side_effect=OSError(errno.ENOSPC, 'disk full')))
+        try:
+            created = await service.create(await self.request(['media']))
+            await self.wait_for_terminal(service, created.id)
+            self.assertEqual(service.get(created.id).error_code, 'insufficient_disk')
+            self.assertEqual(sentinel.read_bytes(), b'keep this')
+        finally:
+            await service.shutdown()
 
     async def test_installed_only_request_cannot_create_a_job_or_run_an_installer(self) -> None:
         status = await catalog.inventory(self.environment)

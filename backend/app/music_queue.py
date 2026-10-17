@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime, timezone
-import hashlib
 import logging
 import secrets
 from typing import Literal
@@ -15,10 +15,11 @@ from .music_queue_contracts import (
     MusicQueueBatch, MusicQueueCancelRequest, MusicQueueControlRequest,
     MusicQueueEnqueueRequest, MusicQueueError, MusicQueueItem, MusicQueueItemStatus,
     MusicQueuePayload, MusicQueuePreviewRequest, MusicQueueReorderRequest,
-    MusicQueueRetryRequest, MusicQueueSnapshot,
+    MusicQueueRetryRequest, MusicQueueSnapshot, payload_conditioning,
 )
 from .music_queue_engines import EngineResult, EngineSession, inspect_child, recover_child
-from .music_queue_plan import preview
+from .music_queue_plan import preview, request_hash as hash_request
+from . import queued_music_sources
 from .resource_admission import ResourceBusyError
 
 logger = logging.getLogger(__name__)
@@ -63,17 +64,26 @@ def _seed(payload: MusicQueuePayload, seed: int) -> MusicQueuePayload:
     return payload.model_copy(update={'request': payload.request.model_copy(update={'seed': seed})})
 
 
-async def enqueue(request: MusicQueueEnqueueRequest) -> MusicQueueSnapshot:
+async def enqueue(request: MusicQueueEnqueueRequest, *, admit: Callable[[], None] | None = None) -> MusicQueueSnapshot:
     body = MusicQueuePreviewRequest(brief=request.brief, selections=request.selections)
-    request_hash = hashlib.sha256(body.model_dump_json().encode()).hexdigest()
+    request_hash = hash_request(body)
     prior = store.lookup_submission(request.submission_key, request_hash)
     if prior is not None:
         return prior
-    plan = await preview(body)
+    if _closing:
+        raise MusicQueueError('music_queue_busy')
+    if admit is not None:
+        admit()
+    options = [selection.conditioning for selection in request.selections if selection.conditioning is not None]
+    inputs = await queued_music_sources.load_existing(request.submission_key, request_hash, options)
+    plan = await preview(body, retained_inputs=inputs) if inputs else await preview(body)
     if plan.fingerprint != request.preview_fingerprint:
         raise MusicQueueError('music_queue_preview_changed')
     if not plan.can_enqueue:
         raise MusicQueueError('music_queue_plan_unavailable')
+    inputs = await queued_music_sources.retain(request.submission_key, request_hash, options)
+    if _closing:
+        raise MusicQueueError('music_queue_busy')
     identifier = uuid.uuid4().hex
     seeds: set[int] = set()
     items: list[MusicQueueItem] = []
@@ -84,7 +94,11 @@ async def enqueue(request: MusicQueueEnqueueRequest) -> MusicQueueSnapshot:
         seeds.add(seed)
         items.append(MusicQueueItem(**normalized.model_dump(exclude={'payload'}),
             payload=_seed(normalized.payload, seed), id=uuid.uuid4().hex,
-            batch_id=identifier, resolved_seed=seed))
+            batch_id=identifier, resolved_seed=seed,
+            retained_input=next((retained for retained in inputs
+                if (option := payload_conditioning(normalized.payload)) is not None
+                and retained.snapshot.source == option.source
+                and retained.snapshot.sha256 == option.source_sha256), None)))
     batch = MusicQueueBatch(id=identifier, created_at=datetime.now(timezone.utc).isoformat(),
         brief=plan.brief, selections=plan.selections, models=plan.models,
         preview_fingerprint=plan.fingerprint, items=items)
@@ -143,7 +157,8 @@ async def _release() -> bool:
 
 async def _validate(item: MusicQueueItem) -> None:
     batch = _batch(snapshot(), item.batch_id)
-    plan = await preview(MusicQueuePreviewRequest(brief=batch.brief, selections=batch.selections))
+    inputs = [candidate.retained_input for candidate in batch.items if candidate.retained_input is not None]
+    plan = await preview(MusicQueuePreviewRequest(brief=batch.brief, selections=batch.selections), retained_inputs=inputs)
     model = next(model for model in plan.models if model.selection.engine == item.engine)
     if not model.compatible or not model.readiness.ready:
         raise MusicQueueError(model.error_code or model.readiness.error_code or 'music_queue_plan_unavailable')
@@ -366,6 +381,7 @@ async def retry(request: MusicQueueRetryRequest) -> MusicQueueSnapshot:
 async def recover() -> None:
     global _closing, _pause
     _closing, _pause = False, True
+    await queued_music_sources.recover()
     ownership.register_stop_handler(stop_active)
     results: dict[str, EngineResult] = {}
     for batch in snapshot().batches:
@@ -395,5 +411,6 @@ async def stop_active() -> None:
 async def shutdown() -> None:
     global _closing
     _closing = True
+    await queued_music_sources.shutdown()
     async with _controls:
         await _stop('interrupted')

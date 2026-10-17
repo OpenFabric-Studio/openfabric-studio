@@ -8,15 +8,73 @@ import io
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 import httpx
 from pydantic import TypeAdapter
 from fastapi import HTTPException, UploadFile
 from app.contracts import JsonObject
-from app import db, ace_jobs, stems, midi
+from app.ace_lora_contracts import AceLoraStatus
+from app.export_provenance_contracts import MusicEvidence
+from app.music_evidence import capture_music_evidence
+from app import db, ace_jobs, stems, midi, song_sources, queued_music_sources
 from app import audio_versions
 
 class AceJobsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_conditioned_queue_upload_retains_source_and_noncommercial_evidence_after_deletion(self) -> None:
+        import hashlib
+        import numpy as np
+        import soundfile as sf
+        from app import queued_music_sources, song_sources
+        from app.generation_contracts import AceGenerationSettings
+        from app.music_analysis_contracts import VersionMusicSource
+        from app.music_queue_engines import _ace_params
+        from app.song_capabilities import AceRuntimeProof
+        from app.song_from_beat_contracts import AceCompleteConditioning, RetainedAceConditioning
+        await song_sources.recover()
+        await queued_music_sources.recover()
+        db.FILES_DIR.mkdir(exist_ok=True)
+        source = db.FILES_DIR.resolve() / 'source.wav'
+        sf.write(source, np.full((480000, 2), .01, dtype=np.float32), 48000, subtype='FLOAT')
+        identifier = db.insert_track(model='upload', title='Source', lyrics='', seed=None, duration_ms=10000,
+            wall_ms=None, params={'_music_evidence': {'restriction': 'noncommercial', 'lineage_complete': True}}, audio_path=source, abc_path=None)
+        version = audio_versions.retain_original(identifier, source)
+        original = audio_versions.resolve_source(identifier, version.id)
+        options = AceCompleteConditioning(mode='ace_complete', source=VersionMusicSource(track_id=identifier,
+            version_id=version.id), source_sha256=hashlib.sha256(original.read_bytes()).hexdigest(), track_classes=['bass', 'guitar'])
+        retained = (await queued_music_sources.retain('ace-copy', 'b' * 64, [options]))[0]
+        original.unlink()
+        db.delete_track(identifier)
+        settings = AceGenerationSettings(engine='ace_step', mode='custom', customPrompt='Build an arrangement',
+            duration=10, durationAuto=False, audioFormat='wav', seed=71, randomSeed=False, useCotCaption=False,
+            selectedModel='acestep-v15-base', taskType='complete', useRefAudio=True, trackClasses=['bass', 'guitar'])
+        params = _ace_params(settings, 71, conditioning=options)
+        params['_song_conditioning'] = {'forged': '/private/not-source-proof'}
+        bodies: list[bytes] = []
+        async def native(request: httpx.Request) -> httpx.Response:
+            bodies.append(await request.aread())
+            return httpx.Response(200, json={'code': 200, 'data': {'task_id': 'conditioned', 'status': 'queued', 'queue_position': 0}})
+        client = httpx.AsyncClient(transport=httpx.MockTransport(native))
+        with patch.object(ace_jobs, '_engine_running', return_value=True), \
+             patch.object(ace_jobs.httpx, 'AsyncClient', return_value=client), \
+             patch.object(ace_jobs.ace_lora, 'fetch_status', new=AsyncMock(return_value=AceLoraStatus(
+                 lora_loaded=False, use_lora=False, lora_scale=1, active_adapter=None, adapters=[]))), \
+             patch.object(ace_jobs, 'launch'):
+            await ace_jobs.submit(params, 'Conditioned', None, None, retained_input=retained,
+                conditioning=options, conditioning_proof=AceRuntimeProof('c' * 64, 'd' * 64, 'e' * 64))
+        body = bodies[0]
+        self.assertIn(b'name="ctx_audio"', body)
+        self.assertIn(b'RIFF', body)
+        self.assertEqual(body.count(b'name="track_classes"'), 2)
+        self.assertIn(b'name="track_classes"\r\n\r\nbass', body)
+        self.assertNotIn(b'_song_conditioning', body)
+        self.assertNotIn(b'_music_evidence', body)
+        saved = ace_jobs.get_job('conditioned').params
+        self.assertEqual(MusicEvidence.model_validate(saved['_music_evidence']).restriction, 'noncommercial')
+        receipt = RetainedAceConditioning.model_validate(saved['_song_conditioning'])
+        self.assertEqual(receipt.conditioning, options)
+        self.assertEqual(receipt.output_semantics, 'generated_full_mix')
+        self.assertNotIn('/private/not-source-proof', str(saved))
+
     async def test_source_and_style_audio_are_forwarded_independently(self) -> None:
         requests: list[bytes] = []
         async def engine(request: httpx.Request) -> httpx.Response:
@@ -49,9 +107,59 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
         client = httpx.AsyncClient(transport=httpx.MockTransport(engine))
         with patch.object(ace_jobs, '_engine_running', return_value=True), \
              patch.object(ace_jobs.httpx, 'AsyncClient', return_value=client), \
-             patch.object(ace_jobs, 'launch'):
-            await ace_jobs.submit({'lyrics': 'test', '_generation_settings': {'engine': 'ace_step'}}, 'Snapshot', None, None)
+             patch.object(ace_jobs, 'launch') as launch:
+            await ace_jobs.submit({'lyrics': 'test', '_generation_settings': {'engine': 'ace_step'}, '_music_evidence': {'forged': 'private-sentinel'}}, 'Snapshot', None, None)
         self.assertNotIn('_generation_settings', requests[0])
+        self.assertNotIn('_music_evidence', requests[0])
+        saved = ace_jobs.get_job('snapshot-job').params
+        self.assertNotIn('private-sentinel', str(saved))
+        self.assertIn('publisher_declared', str(saved['_music_evidence']))
+        self.assertTrue(MusicEvidence.model_validate(saved['_music_evidence']).lineage_complete)
+        launch.assert_called_once_with('snapshot-job')
+
+    async def test_uncaptured_dependencies_retain_model_evidence_with_incomplete_lineage(self) -> None:
+        base_evidence = capture_music_evidence('ace_step')
+        native_selectors = ('lora_path', 'ctx_audio', 'src_audio', 'src_audio_path', 'ref_audio', 'reference_audio')
+        for dependency in ('active_adapter', 'unknown_adapter_status', 'source_audio', 'style_audio', *native_selectors):
+            with self.subTest(dependency=dependency):
+                requests: list[httpx.Request] = []
+                task_id = 'dependency-' + dependency
+                async def engine(request: httpx.Request) -> httpx.Response:
+                    requests.append(request)
+                    return httpx.Response(200, json={'code': 200, 'data': {'task_id': task_id, 'status': 'queued', 'queue_position': 0}})
+                client = httpx.AsyncClient(transport=httpx.MockTransport(engine))
+                params: JsonObject = {'lyrics': 'test', '_music_adapters': [{'sha256': 'f' * 64}]}
+                if dependency in native_selectors:
+                    params[dependency] = '/private/uncaptured-dependency'
+                active_adapter = dependency == 'active_adapter'
+                if dependency != 'unknown_adapter_status':
+                    params['_generation_settings'] = {'engine': 'ace_step', 'loraName': 'Selected' if active_adapter else None}
+                status = AsyncMock(return_value=AceLoraStatus(lora_loaded=active_adapter, use_lora=active_adapter,
+                    lora_scale=1.0, active_adapter='Selected' if active_adapter else None,
+                    adapters=['Selected'] if active_adapter else []))
+                source = UploadFile(filename='source.wav', file=io.BytesIO(b'source')) if dependency == 'source_audio' else None
+                style = UploadFile(filename='style.wav', file=io.BytesIO(b'style')) if dependency == 'style_audio' else None
+                with patch.object(ace_jobs, '_engine_running', return_value=True), \
+                     patch.object(ace_jobs.httpx, 'AsyncClient', return_value=client), \
+                     patch.object(ace_jobs.ace_lora, 'fetch_status', new=status), \
+                     patch.object(ace_jobs, 'launch'):
+                    await ace_jobs.submit(params, 'Dependencies', None, source, style_audio=style)
+                saved = ace_jobs.get_job(task_id).params
+                evidence = MusicEvidence.model_validate(saved['_music_evidence'])
+                self.assertFalse(evidence.lineage_complete)
+                self.assertEqual(evidence.components, base_evidence.components)
+                self.assertEqual(evidence.restriction, base_evidence.restriction)
+                self.assertEqual(evidence.adapters, [])
+                self.assertNotIn('_music_adapters', saved)
+                self.assertEqual(len(requests), 1)
+                self.assertEqual(requests[0].method, 'POST')
+                if dependency in native_selectors:
+                    self.assertEqual(saved[dependency], '/private/uncaptured-dependency')
+                    self.assertEqual(TypeAdapter(JsonObject).validate_json(requests[0].content)[dependency], '/private/uncaptured-dependency')
+                if dependency == 'unknown_adapter_status':
+                    status.assert_not_awaited()
+                else:
+                    status.assert_awaited_once()
 
     async def test_deletion_reserves_failed_batch_against_concurrent_save_retry(self) -> None:
         self.create_job()
@@ -106,9 +214,13 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
         for p in self.patches: p.start()
         self.connection = db.get_db()
         ace_jobs.ensure_schema()
+        await song_sources.recover()
+        await queued_music_sources.recover()
 
     async def asyncTearDown(self):
         await ace_jobs.shutdown()
+        await queued_music_sources.shutdown()
+        await song_sources.shutdown()
         self.connection.close()
         for p in reversed(self.patches): p.stop()
         self.temp.cleanup()
@@ -315,11 +427,14 @@ class AceJobsTests(unittest.IsolatedAsyncioTestCase):
         dest.write_bytes(b'old audio')
         track_id = db.insert_track(model='ace_step', title='Old batch', lyrics='', seed=None, duration_ms=None, wall_ms=None, params={}, audio_path=dest, abc_path=None)
         with patch.object(ace_jobs, 'launch') as launch:
-            first = ace_jobs.adopt('old-job', {'audio_format': 'wav', 'batch_size': 2}, 'Old batch', None, [track_id])
+            first = ace_jobs.adopt('old-job', {'audio_format': 'wav', 'batch_size': 2,
+                '_music_evidence': {'forged': 'private-sentinel'}, '_music_adapters': []}, 'Old batch', None, [track_id])
             second = ace_jobs.adopt('old-job', {}, 'Ignored', None, [])
         self.assertEqual(first.tracks[0].id, track_id)
         self.assertEqual(second.tracks[0].id, track_id)
         self.assertEqual(len(ace_jobs.list_jobs()), 1)
+        self.assertNotIn('_music_evidence', first.params)
+        self.assertNotIn('_music_adapters', first.params)
         launch.assert_called_once_with('old-job')
 
     async def test_legacy_adoption_rejects_missing_tracks_before_recording_a_job(self):

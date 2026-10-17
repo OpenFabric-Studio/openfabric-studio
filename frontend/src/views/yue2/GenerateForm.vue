@@ -9,6 +9,7 @@ import HelpModal from '../../components/shared/HelpModal.vue'
 import TagInput from '../../components/shared/TagInput.vue'
 import VoiceSelect from '../../components/shared/VoiceSelect.vue'
 import MusicAdapterSelect from '../../components/shared/MusicAdapterSelect.vue'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
 import GenerationLibraryButton from '../../components/shared/GenerationLibraryButton.vue'
 import ReferencePreparationButton from '../../components/shared/ReferencePreparationButton.vue'
 import { setActiveVoiceId } from '../../api/voices'
@@ -22,6 +23,7 @@ import { samplingSettings, finiteNumber, SAMPLING_KEYS, type SamplingKey, type S
 const props = withDefaults(defineProps<{ generationAvailable?: boolean }>(), { generationAvailable: true })
 const store = useYue2Store()
 const selectedVoiceId = ref<string | null>(null)
+const termsBlocked = ref(false)
 const arAdapter = ref<MusicAdapterSelection | null>(null)
 const narAdapter = ref<MusicAdapterSelection | null>(null)
 const arAdapterValid = ref(true), narAdapterValid = ref(true)
@@ -248,7 +250,7 @@ async function applyScoreChoices() {
 }
 
 async function submit() {
-  if (!props.generationAvailable || submitting.value || !arAdapterValid.value || !narAdapterValid.value || invalidBpm.value || applyingScore.value || externalAbc.value && musicalChoicesPending.value) return
+  if (termsBlocked.value || !props.generationAvailable || submitting.value || !arAdapterValid.value || !narAdapterValid.value || invalidBpm.value || applyingScore.value || externalAbc.value && musicalChoicesPending.value) return
   formError.value = ''
   if (!lyrics.value.trim()) {
     formError.value = t('yueGen.enterLyrics')
@@ -276,7 +278,8 @@ async function submit() {
       narAdapter: narAdapter.value,
     })
   } catch (cause) {
-    if (formAlive) formError.value = t(cause instanceof ApiError && cause.message === 'music_lora_runtime_unsupported'
+    if (formAlive) formError.value = t(cause instanceof ApiError && ['music_terms_required', 'music_noncommercial_disabled'].includes(cause.message)
+      ? 'musicTerms.required' : cause instanceof ApiError && cause.message === 'music_lora_runtime_unsupported'
       ? 'musicLora.errors.runtime' : cause instanceof TypeError ? 'generationWorkspace.invalid' : 'generationWorkspace.submitFailed')
   } finally {
     if (formAlive) submitting.value = false
@@ -288,7 +291,8 @@ async function submit() {
   <div class="lg:sticky lg:top-20 lg:self-start">
     <div class="space-y-4 rounded-xl border border-border bg-panel p-4">
       <VoiceSelect link @select="selectedVoiceId = $event" />
-      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="submitting || !generationAvailable || !arAdapterValid || !narAdapterValid || invalidBpm || applyingScore || externalAbc && musicalChoicesPending" @click="submit">
+      <MusicTermsCard engine="yue2" operation="generation" @blocked="termsBlocked = $event" />
+      <button type="button" class="accent-gradient w-full rounded-lg py-2.5 text-sm font-semibold text-white disabled:opacity-50" :disabled="termsBlocked || submitting || !generationAvailable || !arAdapterValid || !narAdapterValid || invalidBpm || applyingScore || externalAbc && musicalChoicesPending" @click="submit">
         {{ submitting ? t('yueGen.submitting') : t('yueGen.submit') }}
       </button>
       <p v-if="formError" class="rounded-lg bg-status-failed/10 p-2 text-xs text-status-failed">{{ formError }}</p>

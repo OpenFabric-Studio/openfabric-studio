@@ -4,29 +4,37 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import * as music from '../../api/localMusic'
 import type { LocalMusicEngineId } from '../../api/localMusic'
+import type { ConditioningSelection, MusicConditioningDraft } from '../../api/musicConditioning'
 import type { LocalMusicEngines, LocalMusicJob, LocalMusicRequest, MusicAdapterSelection } from '../../api/generated'
 import { ApiError } from '../../api/http'
-import { pendingMusicAdapter } from '../../composables/generationDrafts'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
+import { pendingMusicAdapter, pendingMusicConditioning } from '../../composables/generationDrafts'
 import { createPollingLoop } from '../../composables/polling'
 import StemsPanel from '../../components/shared/StemsPanel.vue'
 import MusicAdapterSelect from '../../components/shared/MusicAdapterSelect.vue'
 import MusicTrainingSetup from './MusicTrainingSetup.vue'
+import MusicConditioningControls from './MusicConditioningControls.vue'
 
 const props = defineProps<{ engine: LocalMusicEngineId }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const engineStatus = ref<LocalMusicEngines['engines'][number] | null>(null)
 const jobs = ref<LocalMusicJob[]>([]), historyIncomplete = ref(false), busy = ref(false), error = ref('')
 const title = ref(''), prompt = ref(''), duration = ref(30), seed = ref(0)
 const variant = ref<NonNullable<LocalMusicRequest['variant']>>('small-music')
 const adapter = ref<MusicAdapterSelection | null>(null)
 const adapterValid = ref(true)
+const conditioning = ref<ConditioningSelection | null>(null), conditioningValid = ref(true)
+const conditioningDraft = ref<MusicConditioningDraft | null>(null)
+const baseRequest = computed<LocalMusicRequest>(() => ({ engine: props.engine, title: title.value.trim(), prompt: prompt.value.trim(),
+  lyrics: '', duration_seconds: duration.value, seed: seed.value, variant: variant.value, adapter: adapter.value }))
 const selectedJobs = computed(() => jobs.value.filter(job => job.request.engine === props.engine))
 const active = computed(() => selectedJobs.value.some(job => ongoing(job)))
 const weightsReady = computed(() => (variant.value === 'medium' ? engineStatus.value?.medium_weights_ready : engineStatus.value?.small_weights_ready) === true)
 const ready = computed(() => !!engineStatus.value?.supported && engineStatus.value.installed && weightsReady.value)
 const minDuration = 5
 const maxDuration = computed(() => variant.value === 'medium' ? 380 : 120)
-const valid = computed(() => ready.value && !active.value && adapterValid.value && prompt.value.trim().length > 0 && prompt.value.length <= 4000
+const termsBlocked = ref(false)
+const valid = computed(() => !termsBlocked.value && ready.value && !active.value && adapterValid.value && conditioningValid.value && prompt.value.trim().length > 0 && prompt.value.length <= 4000
   && title.value.length <= 500
   && Number.isInteger(duration.value) && duration.value >= minDuration && duration.value <= maxDuration.value
   && Number.isInteger(seed.value) && seed.value >= 0 && seed.value <= 2147483647)
@@ -34,7 +42,12 @@ const readinessKey = computed(() => !engineStatus.value?.supported ? 'unsupporte
 let alive = true, generation = 0, controller: AbortController | undefined
 function ongoing(job: LocalMusicJob): boolean { return job.status === 'queued' || job.status === 'running' }
 function errorText(code: string | null | undefined, fallback: string): string {
+  if (code && te(`musicConditioning.errors.${code}`)) return t(`musicConditioning.errors.${code}`)
   switch (code) {
+    case 'music_terms_required':
+    case 'music_noncommercial_disabled': return t('musicTerms.required')
+    case 'insufficient_disk': return t('localMusic.insufficientDisk')
+    case 'local_music_output_exists': return t('localMusic.outputExists')
     case 'music_lora_adapter_not_found': return t('musicLora.errors.missing')
     case 'music_lora_adapter_changed': return t('musicLora.errors.changed')
     case 'music_lora_target_mismatch':
@@ -89,8 +102,7 @@ function history() {
 }
 function generate() {
   if (!valid.value) return
-  const request: LocalMusicRequest = { engine: props.engine, title: title.value.trim(), prompt: prompt.value.trim(),
-    lyrics: '', duration_seconds: duration.value, seed: seed.value, variant: variant.value, adapter: adapter.value }
+  const request: LocalMusicRequest = conditioning.value ? { ...baseRequest.value, conditioning: conditioning.value } : baseRequest.value
   return action(async (signal, isCurrent) => {
     const response = await music.submitLocalMusic(request, signal)
     if (isCurrent()) jobs.value = [response, ...jobs.value.filter(job => job.id !== response.id)]
@@ -103,6 +115,12 @@ function cancel(job: LocalMusicJob) {
   })
 }
 watch(variant, () => { adapter.value = null; adapterValid.value = true }, { flush: 'sync' })
+watch(pendingMusicConditioning, value => { if (value && alive) conditioningDraft.value = value }, { immediate: true })
+function conditioningDraftApplied() {
+  if (!alive) return
+  if (pendingMusicConditioning.value === conditioningDraft.value) pendingMusicConditioning.value = null
+  conditioningDraft.value = null
+}
 watch(() => [pendingMusicAdapter.value, props.engine], async (_value, _previous, onCleanup) => {
   const selection = pendingMusicAdapter.value
   if (!selection || selection.engine !== props.engine) return
@@ -143,6 +161,8 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       <label class="music-label">{{ t('localMusic.variant') }}<select v-model="variant" name="variant" class="music-input" :disabled="busy" aria-describedby="local-music-variant-hint"><option value="small-music">{{ t('localMusic.small') }} · {{ t(engineStatus?.small_weights_ready ? 'localMusic.weightsAvailable' : 'localMusic.weightsMissing') }}</option><option value="medium">{{ t('localMusic.medium') }} · {{ t(engineStatus?.medium_weights_ready ? 'localMusic.weightsAvailable' : 'localMusic.weightsMissing') }}</option></select></label><p id="local-music-variant-hint" class="text-xs text-text-dim">{{ t('localMusic.variantHint') }}</p>
       <div class="space-y-2"><MusicAdapterSelect v-model="adapter" :engine="engine" :target="variant" :disabled="busy" @validity="adapterValid = $event" /><RouterLink to="/music/lora" class="inline-flex min-h-11 items-center text-xs text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('musicLora.manage') }}</RouterLink></div>
       <p id="local-music-duration-hint" class="text-xs text-text-dim">{{ t('localMusic.durationHint', { min: minDuration, max: maxDuration }) }}</p>
+      <MusicConditioningControls :request="baseRequest" :supported="engineStatus?.supported ?? false" :installed="engineStatus?.installed ?? false" :disabled="busy" :source-draft="conditioningDraft" @change="conditioning = $event" @validity="conditioningValid = $event" @refresh="load" @draft-applied="conditioningDraftApplied" />
+      <MusicTermsCard :engine="engine" operation="generation" @blocked="termsBlocked = $event" />
       <button type="submit" class="music-button accent-gradient text-white" :disabled="busy || !valid">{{ t('localMusic.generate') }}</button>
       <p v-if="active" class="text-xs text-text-dim">{{ t('localMusic.ongoing') }}</p>
     </form>
@@ -153,6 +173,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
         <div class="flex flex-wrap items-start justify-between gap-3"><div><h4 class="break-words font-medium text-text">{{ job.track?.title || job.request.title || t(`localMusic.engines.${engine}`) }}</h4><p class="mt-1 text-xs text-text-dim" role="status">{{ t(`localMusic.states.${job.status}`) }}</p></div><button v-if="ongoing(job)" type="button" class="music-button" :disabled="busy" @click="cancel(job)">{{ t('localMusic.cancel') }}</button></div>
         <p v-if="job.status === 'failed'" role="alert" class="text-sm text-status-failed">{{ errorText(job.error_code, 'localMusic.failed') }}</p>
         <p v-if="job.status === 'interrupted'" class="text-sm text-status-queued">{{ t('localMusic.interrupted') }}</p>
+        <p v-if="job.conditioning_recipe" class="break-all text-xs text-text-dim">{{ t(`musicConditioning.${job.conditioning_recipe.mode}`) }} · {{ t('musicConditioning.hash') }}: {{ job.conditioning_recipe.source_sha256 }}</p>
         <template v-if="job.track"><audio :src="job.track.audio_url" controls preload="none" class="w-full" :aria-label="job.track.title" /><a :href="job.track.audio_url" :download="job.track.filename" class="inline-flex min-h-11 items-center text-sm text-accent1 underline focus-visible:outline-2 focus-visible:outline-accent1">{{ t('localMusic.download') }}</a><StemsPanel :track-id="job.track.id" :title="job.track.title" :lyrics="job.track.lyrics" :model="job.track.model" /></template>
       </article>
     </div>

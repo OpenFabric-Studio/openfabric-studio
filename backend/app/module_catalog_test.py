@@ -12,11 +12,22 @@ from unittest.mock import AsyncMock, patch
 from pydantic import ValidationError
 
 from app import module_catalog as catalog
-from app.module_contracts import ModuleId, ModuleInventory, ModulePlanRequest
+from app.module_contracts import ModuleId, ModuleInventory, ModuleLicenseDeclaration, ModulePlanRequest
 from app.module_runtime import RuntimeEvidence
 
 
 class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
+    async def test_approval_scope_changes_when_selected_component_terms_change(self) -> None:
+        request = ModulePlanRequest(features=['yue2'], download_models=True)
+        previous = catalog.approval_scope(request, self.environment)
+        original = catalog.declarations
+        changed = original('yue2')
+        changed[1].notes = 'Updated publisher model terms require renewed review.'
+        def declarations(identifier: ModuleId) -> list[ModuleLicenseDeclaration]:
+            return changed if identifier == 'yue2' else original(identifier)
+        with patch.object(catalog, 'declarations', side_effect=declarations):
+            self.assertNotEqual(catalog.approval_scope(request, self.environment), previous)
+
     async def test_catalog_only_exposes_remaining_music_engines(self) -> None:
         with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
             inventory = await catalog.inventory(self.environment)
@@ -79,6 +90,62 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('No weights are downloaded', reviewed.steps[0].detail)
         self.assertEqual(reviewed.required_free_bytes, dependencies_only.required_free_bytes, 'ignored weight flag must not add an invented model disk requirement')
         self.assertEqual(capability.call_args.kwargs['python_path'], catalog.engine_python(self.environment.paths['speaker_review'], self.environment.platform))
+
+    async def test_beats_dependencies_are_reused_but_explicit_missing_weights_are_verified(self) -> None:
+        from app import music_beats_runtime
+        with patch.object(catalog, 'probe', new=AsyncMock(return_value=catalog.ProbeResult(False, ''))), \
+                patch.object(music_beats_runtime, 'status', return_value=RuntimeEvidence(installed=True, ready=False)):
+            dependencies = await catalog.plan(ModulePlanRequest(features=['music_beats']), self.environment)
+            weights = await catalog.plan(ModulePlanRequest(features=['music_beats'], download_models=True), self.environment)
+        dependency_step = next(step for step in dependencies.steps if step.module_id == 'music_beats')
+        model_step = next(step for step in weights.steps if step.module_id == 'music_beats')
+        self.assertEqual(dependency_step.operation, 'verify')
+        self.assertEqual(model_step.operation, 'verify')
+        self.assertIn('media', [step.module_id for step in weights.steps])
+        self.assertTrue(model_step.licenses)
+
+    async def test_partial_beats_dependency_recovery_keeps_unknown_sizing_and_rejects_low_disk(self) -> None:
+        with patch.object(catalog, 'probe', new=AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+            inventory = await catalog.inventory(self.environment)
+        inventory = inventory.model_copy(update={'modules': [module.model_copy(update={'state': 'ready'}) if module.id == 'media'
+            else module.model_copy(update={'state': 'partial'}) if module.id == 'music_beats' else module for module in inventory.modules]})
+        with patch.object(catalog, 'inventory', new=AsyncMock(return_value=inventory)), \
+                patch.object(catalog, 'available_bytes', return_value=1024**3):
+            for selected in (False, True):
+                reviewed = await catalog.plan(ModulePlanRequest(features=['music_beats'], download_models=selected), self.environment)
+                step = next(step for step in reviewed.steps if step.module_id == 'music_beats')
+                self.assertEqual(step.operation, 'verify')
+                self.assertIsNone(step.estimated_download_bytes)
+                self.assertTrue(reviewed.download_size_unknown)
+                self.assertGreaterEqual(reviewed.required_free_bytes, 8 * 1024**3)
+                self.assertFalse(reviewed.can_install)
+
+    async def test_verified_beats_dependencies_forecast_only_explicit_missing_checkpoint(self) -> None:
+        from app import music_beats_runtime
+        from app.music_beats import BeatRuntimeIdentity
+        identity = BeatRuntimeIdentity(source_sha256='a' * 64, weights_sha256='b' * 64, python_sha256='c' * 64,
+            python_version='3.12.13', packages=music_beats_runtime.PACKAGES)
+        with patch.object(catalog, 'probe', new=AsyncMock(return_value=catalog.ProbeResult(False, ''))):
+            inventory = await catalog.inventory(self.environment)
+        inventory = inventory.model_copy(update={'modules': [module.model_copy(update={'state': 'ready'}) if module.id == 'media'
+            else module.model_copy(update={'state': 'partial'}) if module.id == 'music_beats' else module for module in inventory.modules]})
+
+        def observed(root: Path, *, require_weights: bool = True) -> BeatRuntimeIdentity:
+            if require_weights:
+                raise music_beats_runtime.BeatRuntimeError('analysis_weights_missing')
+            return identity
+
+        with patch.object(catalog, 'inventory', new=AsyncMock(return_value=inventory)), \
+                patch.object(music_beats_runtime, 'identity', side_effect=observed), \
+                patch.object(catalog, 'available_bytes', return_value=1024**2):
+            dependencies = await catalog.plan(ModulePlanRequest(features=['music_beats']), self.environment)
+            weights = await catalog.plan(ModulePlanRequest(features=['music_beats'], download_models=True), self.environment)
+        self.assertEqual(next(step for step in dependencies.steps if step.module_id == 'music_beats').estimated_download_bytes, 0)
+        step = next(step for step in weights.steps if step.module_id == 'music_beats')
+        self.assertEqual(step.estimated_download_bytes, music_beats_runtime.WEIGHTS_BYTES)
+        self.assertFalse(weights.download_size_unknown)
+        self.assertGreaterEqual(weights.required_free_bytes, music_beats_runtime.WEIGHTS_BYTES)
+        self.assertFalse(weights.can_install)
 
     async def test_existing_engine_folders_and_http_do_not_mean_ready(self) -> None:
         engine = self.environment.paths['speech']
@@ -252,7 +319,7 @@ class ModuleCatalogTests(unittest.IsolatedAsyncioTestCase):
         inventory = ModuleInventory.model_validate(payload)
         self.assertEqual(inventory.model_dump().get('recommended_features'), [])
         self.assertIsNot(inventory.recommended_features, ModuleInventory.model_validate(payload).recommended_features)
-        for features in (['ace_step'] * 17, ['unknown']):
+        for features in (['ace_step'] * (len(catalog.MODULE_IDS) + 1), ['unknown']):
             with self.subTest(features=features), self.assertRaises(ValidationError):
                 ModuleInventory.model_validate({**payload, 'recommended_features': features})
         maximum = ModuleInventory.model_validate({**payload, 'recommended_features': list(catalog.MODULE_IDS)})
@@ -464,6 +531,7 @@ class OptionalEngineCatalogTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Turbo', catalog.DEFINITIONS['chatterbox'].description)
         self.assertIn('TI2V-5B', catalog.DEFINITIONS['wan22'].description)
         self.assertIn('CPU', catalog.DEFINITIONS['rvc'].description)
+        self.assertIn('transformers', catalog.DEFINITIONS['rvc'].packages)
         self.assertLessEqual(len(catalog.DEFINITIONS['kokoro'].description), 300)
         self.assertLessEqual(len(catalog.DEFINITIONS['chatterbox'].guidance), 1000)
         from app.optional_engines import PACKAGES

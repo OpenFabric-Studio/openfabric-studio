@@ -18,6 +18,7 @@ from ..reference_contracts import (
     ReferenceLyricsRequest, ReferenceProbeRequest, ReferenceSource, ReferenceTrackPreparationRequest,
 )
 from ..reference_tools import ReferenceToolError, transform_abc, transform_lyrics
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -74,12 +75,16 @@ async def list_imports() -> ReferenceImportsResponse:
 @router.post('/imports', response_model=ReferenceImport)
 async def create(request: ReferenceImportRequest) -> ReferenceImport:
     with _errors():
+        if request.melody:
+            require_usage('yue2', 'transcription')
         return await service.create(request)
 
 
 @router.post('/prepare', response_model=ReferenceImport)
 async def prepare(request: ReferenceTrackPreparationRequest) -> ReferenceImport:
     with _errors():
+        if request.melody:
+            require_usage('yue2', 'transcription')
         return await service.prepare(request)
 
 
@@ -98,6 +103,9 @@ async def cancel(identifier: ImportId) -> ReferenceImport:
 @router.post('/imports/{identifier}/retry', response_model=ReferenceImport)
 async def retry(identifier: ImportId) -> ReferenceImport:
     with _errors():
+        current = service.get(identifier)
+        if current.request.melody and any(stage.name == 'melody' and stage.status in ('failed', 'missing_tool', 'cancelled') for stage in current.stages):
+            require_usage('yue2', 'transcription')
         return await service.retry(identifier)
 
 

@@ -21,6 +21,7 @@ from app.generation_contracts import GENERATION_CLIENT_MODELS
 from app.yue_contracts import YUE_CLIENT_MODELS
 from app.reference_contracts import REFERENCE_CLIENT_MODELS
 from app.module_contracts import MODULE_CLIENT_MODELS
+from app.music_terms_contracts import MUSIC_TERMS_CLIENT_MODELS
 from app.optional_engine_contracts import OPTIONAL_ENGINE_CLIENT_MODELS
 from app.audiobook_review_contracts import AUDIOBOOK_REVIEW_CLIENT_MODELS
 from app.openrouter_contracts import OPENROUTER_CLIENT_MODELS
@@ -32,6 +33,21 @@ from app.music_training_contracts import MUSIC_TRAINING_CLIENT_MODELS
 from app.training_caption_contracts import TRAINING_CAPTION_CLIENT_MODELS
 from app.music_training_source_contracts import MusicLoraSource, MusicLoraDatasetSource
 from app.music_queue_contracts import MUSIC_QUEUE_CLIENT_MODELS
+from app.music_analysis_contracts import MUSIC_ANALYSIS_CLIENT_MODELS
+from app.music_dsp_contracts import MUSIC_DSP_CLIENT_MODELS
+from app.music_artifact_contracts import MUSIC_ARTIFACT_CLIENT_MODELS
+from app.beat_contracts import BEAT_CLIENT_MODELS
+from app.beat_preset_contracts import BEAT_PRESET_CLIENT_MODELS
+from app.beat_project_contracts import MUSIC_PROJECT_CLIENT_MODELS
+from app.replacement_contracts import REPLACEMENT_CLIENT_MODELS
+from app.mashup_contracts import MASHUP_CLIENT_MODELS
+from app.regional_dataset_contracts import REGIONAL_DATASET_CLIENT_MODELS
+from app.regional_acoustic_contracts import REGIONAL_ACOUSTIC_CLIENT_MODELS
+from app.regional_evaluation_contracts import REGIONAL_EVALUATION_CLIENT_MODELS
+from app.beat_song_mix_contracts import BEAT_SONG_MIX_CLIENT_MODELS
+from app.voice_mix_contracts import VOICE_MIX_CLIENT_MODELS
+from app.music_conditioning_contracts import MUSIC_CONDITIONING_CLIENT_MODELS
+from app.song_from_beat_contracts import SONG_FROM_BEAT_CLIENT_MODELS
 from app.lora_dataset_contracts import LORA_DATASET_CLIENT_MODELS
 from app.lora_export_contracts import LORA_EXPORT_CLIENT_MODELS
 from app.speaker_review_contracts import SPEAKER_REVIEW_CLIENT_MODELS
@@ -50,6 +66,21 @@ from app.singer_range_contracts import SingerRangeRequest, SingerRangeProfile, P
 
 ALL_MODELS: list[type[BaseModel]] = [*CLIENT_MODELS, *EXTRA_CLIENT_MODELS, ArtistSettings, TaggedDownloadOptions, TrackActivityResponse, *GENERATION_CLIENT_MODELS, *YUE_CLIENT_MODELS, *REFERENCE_CLIENT_MODELS, *MODULE_CLIENT_MODELS, *OPTIONAL_ENGINE_CLIENT_MODELS, *AUDIOBOOK_REVIEW_CLIENT_MODELS, *OPENROUTER_CLIENT_MODELS, *CLOUD_MUSIC_CLIENT_MODELS, *SPEAKER_REVIEW_CLIENT_MODELS, *EXPORT_PROVENANCE_CLIENT_MODELS]
 ALL_MODELS.extend(ACE_LORA_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_ANALYSIS_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_DSP_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_ARTIFACT_CLIENT_MODELS)
+ALL_MODELS.extend(BEAT_CLIENT_MODELS)
+ALL_MODELS.extend(BEAT_PRESET_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_PROJECT_CLIENT_MODELS)
+ALL_MODELS.extend(REPLACEMENT_CLIENT_MODELS)
+ALL_MODELS.extend(MASHUP_CLIENT_MODELS)
+ALL_MODELS.extend(REGIONAL_DATASET_CLIENT_MODELS)
+ALL_MODELS.extend(REGIONAL_ACOUSTIC_CLIENT_MODELS)
+ALL_MODELS.extend(REGIONAL_EVALUATION_CLIENT_MODELS)
+ALL_MODELS.extend(BEAT_SONG_MIX_CLIENT_MODELS)
+ALL_MODELS.extend(VOICE_MIX_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_CONDITIONING_CLIENT_MODELS)
+ALL_MODELS.extend(SONG_FROM_BEAT_CLIENT_MODELS)
 ALL_MODELS.extend(READING_MEDIA_CLIENT_MODELS)
 ALL_MODELS.extend(LOCAL_MUSIC_CLIENT_MODELS)
 ALL_MODELS.extend(MUSIC_LORA_CLIENT_MODELS)
@@ -58,6 +89,7 @@ ALL_MODELS.extend(MUSIC_TRAINING_CLIENT_MODELS)
 ALL_MODELS.extend(TRAINING_CAPTION_CLIENT_MODELS)
 ALL_MODELS.extend([MusicLoraSource, MusicLoraDatasetSource])
 ALL_MODELS.extend(MUSIC_QUEUE_CLIENT_MODELS)
+ALL_MODELS.extend(MUSIC_TERMS_CLIENT_MODELS)
 ALL_MODELS.extend(LORA_DATASET_CLIENT_MODELS)
 ALL_MODELS.extend(LORA_EXPORT_CLIENT_MODELS)
 ALL_MODELS.extend(SUPPORT_CLIENT_MODELS)

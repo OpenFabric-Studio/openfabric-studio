@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import logging
 import os
 from pathlib import Path, PureWindowsPath
@@ -13,7 +14,7 @@ import sys
 from . import config
 from .lora_export_contracts import LoraExportRequest, LoraExportResponse, LoraTrainedCheckpoint, LoraTrainedFilesRequest, LoraTrainedFilesResponse
 from .job_lifecycle import await_cleanup, kill_process_tree, spawn_process
-from .module_catalog import configured_environment
+from .module_catalog import available_bytes, configured_environment
 from .video_process import WorkerOutputError, read_owned_output
 
 logger = logging.getLogger(__name__)
@@ -96,9 +97,15 @@ def _complete_adapter(source: Path) -> bool:
     )
 
 
-def _plan(body: LoraExportRequest) -> tuple[Path, Path]:
+def _plan(body: LoraExportRequest) -> tuple[Path, Path, int, int]:
     try:
-        return _source(body.lora_output_dir), _destination(body.export_path)
+        source, destination = _source(body.lora_output_dir), _destination(body.export_path)
+        # Preserve every checkpoint file and reserve 64 MiB for filesystem and metadata writes.
+        required = sum(path.stat().st_size for path in source.rglob('*') if path.is_file()) + 64 * 1024**2
+        free = available_bytes(destination.parent)
+        if free is None or free < required:
+            raise LoraExportError('insufficient_disk', 409)
+        return source, destination, required, free
     except FileNotFoundError as exc:
         raise LoraExportError('lora_export_destination_unsafe') from exc
     except (OSError, ValueError) as exc:
@@ -106,13 +113,14 @@ def _plan(body: LoraExportRequest) -> tuple[Path, Path]:
         raise LoraExportError('lora_export_storage_unavailable', 503) from exc
 
 
-def _response(source: Path, destination: Path, message: str) -> LoraExportResponse:
-    return LoraExportResponse(export_path=str(destination), adapter_path=str(destination / 'adapter'), source=str(source), message=message)
+def _response(source: Path, destination: Path, message: str, required: int, free: int) -> LoraExportResponse:
+    return LoraExportResponse(export_path=str(destination), adapter_path=str(destination / 'adapter'), source=str(source), message=message,
+        required_free_bytes=required, free_bytes=free)
 
 
 def preview_export(body: LoraExportRequest) -> LoraExportResponse:
-    source, destination = _plan(body)
-    return _response(source, destination, 'Ready to export into a new folder')
+    source, destination, required, free = _plan(body)
+    return _response(source, destination, 'Ready to export into a new folder', required, free)
 
 
 def check_trained_files(body: LoraTrainedFilesRequest) -> LoraTrainedFilesResponse:
@@ -166,8 +174,8 @@ def _copy_tree(source: Path, destination: Path) -> None:
 
 
 def export_lora(body: LoraExportRequest) -> LoraExportResponse:
-    source, destination = _plan(body)
-    response = _response(source, destination, 'LoRA exported successfully')
+    source, destination, required, free = _plan(body)
+    response = _response(source, destination, 'LoRA exported successfully', required, free)
     try:
         _copy_tree(source, destination)
     except FileExistsError as exc:
@@ -175,7 +183,7 @@ def export_lora(body: LoraExportRequest) -> LoraExportResponse:
     except OSError as exc:
         # Leave only the newly created partial copy; cleanup must never delete a racing user file.
         logger.exception('LoRA export copy failed')
-        raise LoraExportError('lora_export_copy_failed', 503) from exc
+        raise LoraExportError('insufficient_disk' if exc.errno == errno.ENOSPC else 'lora_export_copy_failed', 503) from exc
     return response
 
 

@@ -4,14 +4,20 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import * as music from '../../api/musicQueue'
 import { ApiError } from '../../api/http'
-import { parseMusicQueuePreviewRequest } from '../../api/generated'
-import type { MusicQueueBatch, MusicQueueCatalog, MusicQueueControlRequest, MusicQueueEngineSelection, MusicQueueItem, MusicQueueModelPlan, MusicQueuePreview, MusicQueuePreviewRequest, MusicQueueReadiness, MusicQueueSnapshot } from '../../api/generated'
+import { parseLocalMusicRequest, parseMusicQueuePreviewRequest } from '../../api/generated'
+import type { LocalMusicRequest, MusicQueueBatch, MusicQueueCatalog, MusicQueueControlRequest, MusicQueueEngineSelection, MusicQueueItem, MusicQueueModelPlan, MusicQueuePreview, MusicQueuePreviewRequest, MusicQueueReadiness, MusicQueueSnapshot } from '../../api/generated'
+import type { ConditioningSelection, MusicConditioningDraft } from '../../api/musicConditioning'
+import { pendingAceSongSource, pendingMusicConditioning } from '../../composables/generationDrafts'
+import MusicConditioningControls from './MusicConditioningControls.vue'
+import AceSongFromBeatControls from './AceSongFromBeatControls.vue'
+import type { AceSongConditioning, AceSongDraft } from '../../api/songFromBeat'
 import { createPollingLoop } from '../../composables/polling'
 import { formatDuration } from '../../composables/formatDuration'
 import { useDialogA11y } from '../../composables/useDialogA11y'
 import { usePagination } from '../../composables/usePagination'
 import AppIcon from '../../components/shared/AppIcon.vue'
 import MusicAdapterSelect from '../../components/shared/MusicAdapterSelect.vue'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
 import TrackAudioVersions from '../../components/shared/TrackAudioVersions.vue'
 import FavoriteTrackButton from '../../components/shared/FavoriteTrackButton.vue'
 import StemsPanel from '../../components/shared/StemsPanel.vue'
@@ -24,16 +30,19 @@ const catalog = ref<MusicQueueCatalog | null>(null), snapshot = ref<MusicQueueSn
 const title = ref(''), description = ref(''), lyrics = ref(''), instrumental = ref(false)
 const duration = ref<number | string>(120), bpm = ref<number | string>(''), musicalKey = ref(''), language = ref('')
 const selections = ref<MusicQueueEngineSelection[]>([])
+const termsBlocked = ref<Partial<Record<Engine, boolean>>>({})
 const preview = ref<MusicQueuePreview | null>(null), previewLoading = ref(false), busy = ref(false)
 const catalogError = ref(''), catalogLoading = ref(false), observationError = ref(''), previewError = ref(''), actionError = ref('')
 const arValid = ref(true), narValid = ref(true), stableValid = ref(true)
+const aceSourceMode = ref<AceSongConditioning['mode'] | 'off'>('off'), aceSourceValid = ref(true), aceSourceDraft = ref<AceSongDraft | null>(null)
+const conditioningValid = ref(true), conditioningDraft = ref<MusicConditioningDraft | null>(null)
 const activeTab = ref<'create' | 'results'>('create'), showInputs = ref(false)
 const dialog = ref<HTMLElement | null>(null), queueHeading = ref<HTMLElement | null>(null)
 const descriptionInput = ref<HTMLTextAreaElement | null>(null)
 let alive = true, previewGeneration = 0, actionGeneration = 0
 let previewController: AbortController | undefined, actionController: AbortController | undefined
 let previewTimer: ReturnType<typeof setTimeout> | undefined
-let submissionKey: string | null = null
+let submissionKey: string | null = null, submissionBody = ''
 const catalogController = new AbortController()
 useDialogA11y(dialog, () => showInputs.value, () => { showInputs.value = false })
 
@@ -69,14 +78,56 @@ const request = computed<MusicQueuePreviewRequest | null>(() => {
     return parseMusicQueuePreviewRequest({ brief: { title: title.value, description: description.value, lyrics: instrumental.value ? '' : lyrics.value, instrumental: instrumental.value, duration_seconds: duration.value, bpm: bpm.value === '' ? null : bpm.value, key: musicalKey.value, language: language.value }, selections: selections.value.map(selection => ({ ...selection })) })
   } catch { return null }
 })
-const canEnqueue = computed(() => !!request.value && !!preview.value?.can_enqueue && !previewLoading.value && !busy.value && snapshot.value !== null)
+const stableRequest = computed<LocalMusicRequest | null>(() => {
+  const selection = selectionFor('stable_audio3')
+  if (!selection || !instrumental.value || !description.value.trim()) return null
+  const directions = [description.value]
+  if (bpm.value !== '') directions.push(`Tempo: ${bpm.value} BPM`)
+  if (musicalKey.value.trim()) directions.push(`Key: ${musicalKey.value}`)
+  if (language.value.trim()) directions.push(`Language: ${language.value}`)
+  try { return parseLocalMusicRequest({ engine: 'stable_audio3', title: title.value, prompt: directions.join('\n'), lyrics: '',
+    duration_seconds: Math.min(Number(duration.value), selection.variant === 'medium' ? 380 : 120),
+    seed: 0, variant: selection.variant ?? 'small-music', adapter: selection.adapter ?? null }) }
+  catch { return null }
+})
+const lastStableRequest = ref<LocalMusicRequest | null>(null)
+watch(stableRequest, value => { if (value) lastStableRequest.value = value }, { immediate: true })
+function setConditioning(value: ConditioningSelection | null) {
+  const selection = selectionFor('stable_audio3')
+  if (selection) selection.conditioning = value
+}
+watch(pendingMusicConditioning, value => {
+  if (!value || !alive || value.source.kind !== 'version' && value.source.kind !== 'beat_render') return
+  conditioningDraft.value = value
+  conditioningValid.value = false
+  setInstrumental(true)
+  if (!selectionFor('stable_audio3')) selections.value.push({ engine: 'stable_audio3', variations: 1, variant: 'small-music' })
+}, { immediate: true })
+function conditioningDraftApplied() {
+  if (pendingMusicConditioning.value === conditioningDraft.value) pendingMusicConditioning.value = null
+  conditioningDraft.value = null
+}
+function enableAceSource() {
+  if (aceSourceMode.value === 'off' || !selectionFor('ace_step')) aceSourceValid.value = false
+  aceSourceMode.value = 'ace_complete'
+  if (!selectionFor('ace_step')) selections.value.push({ engine: 'ace_step', variations: 1 })
+}
+function setAceConditioning(value: AceSongConditioning | null) { const selection = selectionFor('ace_step'); if (selection) selection.conditioning = value }
+watch(pendingAceSongSource, value => { if (value && alive) { aceSourceDraft.value = value; enableAceSource() } }, { immediate: true })
+function aceDraftApplied() { if (pendingAceSongSource.value === aceSourceDraft.value) pendingAceSongSource.value = null; aceSourceDraft.value = null }
+const canEnqueue = computed(() => !!request.value && (!selectionFor('ace_step') || aceSourceMode.value === 'off' || aceSourceValid.value) && (!selectionFor('stable_audio3') || conditioningValid.value) && !!preview.value?.can_enqueue && !previewLoading.value && !busy.value && snapshot.value !== null && !selections.value.some(selection => termsBlocked.value[selection.engine]))
 function errorText(code: string | undefined, fallback = 'musicQueue.errors.action'): string {
+  if (code && (code.startsWith('conditioning_') || code === 'insufficient_disk')) return t(`musicConditioning.errors.${code}`)
   switch (code) {
+    case 'music_terms_required':
+    case 'music_noncommercial_disabled': return t('musicTerms.required')
     case 'ace_lora_selection_mismatch':
     case 'ace_lora_status_unavailable':
     case 'ace_lora_model_inactive': return t(`aceGen.loraErrors.${code}`)
     case 'music_queue_revision_conflict': return t('musicQueue.errors.stale')
     case 'music_queue_preview_changed': return t('musicQueue.errors.planChanged')
+    case 'music_queue_ace_vocal_lyrics_required': return t('songFromBeat.vocalLyrics')
+    case 'music_queue_instrumental_vocal_role': return t('songFromBeat.vocalConflict')
     case 'music_queue_yue_lyrics_required': return t('musicQueue.errors.lyrics')
     case 'music_queue_yue_vocals_required': return t('musicQueue.yueLyrics')
     case 'stable_audio3_instrumental_only': return t('musicQueue.instrumentalOnly')
@@ -92,6 +143,7 @@ function errorText(code: string | undefined, fallback = 'musicQueue.errors.actio
     case 'music_lora_runtime_unsupported': return t('musicLora.errors.runtime')
     case 'music_lora_target_mismatch':
     case 'music_lora_format_invalid': return t('musicLora.errors.format')
+    case 'local_music_worker_unverified':
     case 'music_queue_cleanup_failed':
     case 'music_queue_engine_cleanup_required':
     case 'music_queue_child_unavailable': return t('musicQueue.errors.cleanup')
@@ -135,7 +187,9 @@ async function loadCatalog() {
 watch([request, catalog], ([value]) => {
   const token = ++previewGeneration
   clearTimeout(previewTimer); previewController?.abort(); previewController = undefined
-  showInputs.value = false; preview.value = null; previewError.value = ''; previewLoading.value = value !== null; submissionKey = null
+  showInputs.value = false; preview.value = null; previewError.value = ''; previewLoading.value = value !== null
+  const body = value ? JSON.stringify(value) : ''
+  if (body !== submissionBody) { submissionKey = null; submissionBody = body }
   if (!value) return
   previewTimer = setTimeout(async () => {
     const controller = new AbortController(); previewController = controller
@@ -259,6 +313,7 @@ onBeforeUnmount(() => { alive = false; ++previewGeneration; ++actionGeneration; 
                 <RouterLink :to="`/settings#module-${engine}`" class="mq-text-button mt-1">{{ t('musicQueue.setup') }}</RouterLink>
               </div>
             </div>
+            <button type="button" class="mq-button" :disabled="busy" @click="enableAceSource">{{ t('songFromBeat.entry') }}</button>
             <p class="text-xs leading-relaxed text-text-dim">{{ t('musicQueue.orderHint') }}</p>
           </section>
         </div>
@@ -270,8 +325,15 @@ onBeforeUnmount(() => { alive = false; ++previewGeneration; ++actionGeneration; 
           <p v-if="!selections.length" class="rounded-lg border border-dashed border-border p-4 text-sm text-text-dim">{{ t('musicQueue.emptyPlan') }}</p>
           <ol :aria-label="t('musicQueue.modelOrder')" class="space-y-4">
             <li v-for="(selection, index) in selections" :key="selection.engine" class="space-y-3 border-t border-border pt-4">
+              <MusicTermsCard :engine="selection.engine" operation="generation" @blocked="termsBlocked[selection.engine] = $event" />
               <div class="flex items-start justify-between gap-3"><h3 class="text-sm font-medium text-text"><span class="mr-2 text-text-dim">{{ index + 1 }}.</span>{{ label(selection.engine) }}</h3><label class="mq-label w-24 shrink-0 text-xs">{{ t('musicQueue.variations') }}<input v-model.number="selection.variations" :name="`variations_${selection.engine}`" :aria-label="t('musicQueue.variationLabel', { model: label(selection.engine) })" type="number" min="1" max="8" step="1" required class="mq-input" /></label></div>
               <template v-if="modelPlan(selection.engine)"><p class="text-sm text-text-dim">{{ modelPlan(selection.engine)?.duration_mode === 'model_led' ? t('musicQueue.modelLed') : t('musicQueue.target', { duration: formatDuration(modelPlan(selection.engine)?.effective_duration_seconds ?? 0) }) }}</p><p v-for="adjustment in modelPlan(selection.engine)?.adjustments ?? []" :key="`${adjustment.field}-${adjustment.code}`" class="text-xs text-status-queued">{{ t('musicQueue.adjustment', { requested: adjustment.requested, effective: adjustment.effective }) }}</p><p v-if="modelPlan(selection.engine)?.readiness.ready === false" role="alert" class="text-sm text-status-failed">{{ readinessText(modelPlan(selection.engine)?.readiness) }}</p><p v-if="modelPlan(selection.engine)?.error_code" role="alert" class="text-sm text-status-failed">{{ errorText(modelPlan(selection.engine)?.error_code, 'musicQueue.errors.incompatible') }}</p></template>
+              <AceSongFromBeatControls v-if="selection.engine === 'ace_step'" v-model:mode="aceSourceMode" :preview="modelPlan('ace_step')?.conditioning_preview" :fingerprint="preview?.fingerprint" :instrumental="instrumental" :supported="readinessFor('ace_step')?.supported ?? false" :disabled="busy" :source-draft="aceSourceDraft" @change="setAceConditioning" @validity="aceSourceValid = $event" @refresh="loadCatalog" @draft-applied="aceDraftApplied" />
+              <template v-if="selection.engine === 'stable_audio3'">
+                <p class="text-xs text-text-dim">{{ t('musicQueue.retainedReference') }}</p>
+                <p v-if="conditioningDraft && !stableRequest" role="status" class="text-sm text-accent2">{{ t('musicQueue.referenceBrief') }} {{ conditioningDraft.label }}</p>
+                <MusicConditioningControls v-if="lastStableRequest" :request="lastStableRequest" :supported="readinessFor('stable_audio3')?.supported ?? false" :installed="readinessFor('stable_audio3')?.installed ?? false" :disabled="busy || !stableRequest" :source-draft="conditioningDraft" @change="setConditioning" @validity="conditioningValid = $event" @refresh="loadCatalog" @draft-applied="conditioningDraftApplied" />
+              </template>
               <p v-if="selection.engine === 'stable_audio3'" class="text-xs leading-relaxed text-text-dim">{{ t('musicQueue.oneShot') }}</p>
               <details><summary class="mq-summary text-xs">{{ t('musicQueue.modelSettings') }}</summary><div class="mt-3 space-y-3">
                 <template v-if="selection.engine === 'yue2'"><label class="mq-label">{{ t('musicQueue.precision') }}<select v-model="selection.precision" name="precision" class="mq-input"><option value="q8_0">Q8</option><option value="q4_0">Q4</option></select></label><h4 class="text-xs font-medium text-text">{{ t('musicQueue.arAdapter') }}</h4><MusicAdapterSelect v-model="selection.ar_adapter" engine="yue2" target="ar" @validity="arValid = $event" /><h4 class="text-xs font-medium text-text">{{ t('musicQueue.narAdapter') }}</h4><MusicAdapterSelect v-model="selection.nar_adapter" engine="yue2" target="nar" @validity="narValid = $event" /></template>

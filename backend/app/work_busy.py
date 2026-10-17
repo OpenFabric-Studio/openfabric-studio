@@ -78,8 +78,17 @@ def local_work_busy() -> bool:
     from .stable_lora import work_busy as stable_lora_busy
     from .music_training import work_busy as music_training_busy
     from .training_captions import work_busy as captions_busy
+    from .music_analysis import work_busy as music_analysis_busy
+    from .music_artifacts import work_busy as music_artifacts_busy
+    from .beat_jobs import work_busy as beats_busy
+    from .replacement_jobs import work_busy as replacements_busy
+    from .mashups import work_busy as mashups_busy
+    from .beat_song_mix import work_busy as beat_song_mix_busy
+    from .song_sources import work_busy as song_sources_busy
+    from .regional_datasets import work_busy as regional_datasets_busy
+    from .queued_music_sources import work_busy as queue_inputs_busy
     from .openrouter_client import work_busy as cloud_provider_busy
-    return captions_busy() or local_music_busy() or stable_lora_busy() or music_training_busy() or video_scene_busy() or character_swap_busy() or reading_busy() or cloud_music_busy() or cloud_provider_busy() or audiobook_busy() or audiobook_workflows.work_busy() or audiobook_review.work_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or video_character_comparison.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
+    return song_sources_busy() or queue_inputs_busy() or beat_song_mix_busy() or regional_datasets_busy() or mashups_busy() or replacements_busy() or beats_busy() or music_artifacts_busy() or music_analysis_busy() or captions_busy() or local_music_busy() or stable_lora_busy() or music_training_busy() or video_scene_busy() or character_swap_busy() or reading_busy() or cloud_music_busy() or cloud_provider_busy() or audiobook_busy() or audiobook_workflows.work_busy() or audiobook_review.work_busy() or setup_busy() or yue_upload.work_busy() or optional_engines.work_busy() or video_character_training.work_busy() or video_character_comparison.work_busy() or reference_imports.work_busy() or yue_jobs.work_busy() or audio_exports.work_busy() or voice_work_busy() or voice_comparisons.work_busy() or stems.work_busy() or midi.work_busy()
 
 
 async def _get_json(client: httpx.AsyncClient, url: str) -> JsonObject:

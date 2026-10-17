@@ -198,6 +198,56 @@ def register_source(path: Path, declaration: SourceDeclaration) -> SourceAsset:
     return asset
 
 
+def register_version_reference(track_id: int, version_id: str, expected_sha256: str) -> SourceAsset:
+    """Register an authoritative version as a reference, without a rights declaration.
+
+    This internal workflow boundary resolves its own path/classification. It
+    never scans unrelated media or turns catalog provenance into user approval.
+    """
+    from fastapi import HTTPException
+    from . import audio_version_store, audio_versions
+    if len(expected_sha256) != 64 or any(character not in '0123456789abcdef' for character in expected_sha256):
+        raise ProductionError('source_changed')
+    try:
+        path = owned_file(audio_versions.resolve_source(track_id, version_id))
+    except HTTPException as error:
+        raise ProductionError('artifact_missing') from error
+    record = audio_version_store.get(db.get_db(), version_id)
+    if record is None or record.public.track_id != track_id:
+        raise ProductionError('artifact_missing')
+    before = path.stat()
+    if before.st_size > 8 * 1024**3 or export_provenance.digest(path) != expected_sha256:
+        raise ProductionError('source_changed')
+    after = path.stat()
+    if ((before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+            != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns)):
+        raise ProductionError('source_changed')
+    component = export_provenance.track_component(track_id, version_id, expected_sha256,
+        is_voice=record.public.kind == 'voice')
+    generated = component.content_origin in {'generated', 'mixed'}
+    # A matching existing declaration/graph keeps its actual supplied evidence.
+    row = db.get_db().execute('SELECT id FROM production_assets WHERE sha256=? ORDER BY rowid LIMIT 1',
+        (expected_sha256,)).fetchone()
+    if row is not None:
+        existing = get_asset(str(row['id']))
+        try:
+            existing_path = asset_path(existing.id)
+            verified = existing_path.stat().st_size <= 8 * 1024**3 and export_provenance.digest(existing_path) == expected_sha256
+        except (OSError, ProductionError):
+            verified = False
+        if verified:
+            if generated and existing.origin not in {'ai_generated', 'unknown'}:
+                raise ProductionError('source_origin_conflict')
+            return existing
+    asset = SourceAsset(id=uuid.uuid4().hex, sha256=expected_sha256, role='reference',
+        origin='ai_generated' if generated else 'unknown', provider='openfabric-library', created_at=now(),
+        classification_basis='app_workflow', reference_only=True,
+        transformation=f'Exact library track {track_id} version {version_id}; source rights remain unreviewed.')
+    with transaction() as connection:
+        _insert_asset(connection, asset, path)
+    return asset
+
+
 def review_asset(identifier: str, request: RightsReviewRequest) -> SourceAsset:
     with transaction() as connection:
         asset = get_asset(identifier)

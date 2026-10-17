@@ -38,6 +38,7 @@ from ..voice_contracts import AnalyzeVoiceCoverageRequest, PrepareVoiceRequest, 
 from ..client_contracts import ApplyStatusResponse, VoiceProfileResponse, VoicesResponse, VoiceUploadResponse, VoiceReplacementResponse
 
 from ..client_contracts import ApplyVoiceRequest, BuildVoiceRequest, CreateVoiceRequest
+from ..voice_mix_contracts import VoiceMixSettings
 from ..voice_replacement import ReplacementRoute, _copy_upload
 from .. import voice_authorization
 from ..job_lifecycle import await_cleanup, run_owned_thread
@@ -125,7 +126,8 @@ def create_voice(body: CreateVoiceRequest) -> VoiceProfileResponse:
 
 @router.post("/apply", response_model=ApplyStatusResponse)
 async def apply_voice(body: ApplyVoiceRequest) -> ApplyStatusResponse:
-    return ApplyStatusResponse.model_validate(start_apply(body.voice_id, body.track_id))
+    return ApplyStatusResponse.model_validate(start_apply(body.voice_id, body.track_id, mix=body.mix)
+        if body.mix is not None else start_apply(body.voice_id, body.track_id))
 
 
 @router.get("/apply/{track_id}", response_model=ApplyStatusResponse)
@@ -141,9 +143,15 @@ async def cancel_voice_application(track_id: int) -> ApplyStatusResponse:
 
 @router.post('/replace', response_model=VoiceReplacementResponse)
 async def replace_voice(audio: Annotated[UploadFile, File()],
-                        voice_id: Annotated[str, Form(pattern=r'^[0-9a-f]{32}$')]) -> VoiceReplacementResponse:
+                        voice_id: Annotated[str, Form(pattern=r'^[0-9a-f]{32}$')],
+                        mix: Annotated[str | None, Form(max_length=16384)] = None) -> VoiceReplacementResponse:
     from ..voice_replacement import replace_voice as accept
-    return await accept(audio, voice_id)
+    try:
+        settings = VoiceMixSettings.model_validate_json(mix) if mix is not None else None
+    except ValidationError as error:
+        await await_cleanup(audio.close())
+        raise HTTPException(status_code=422, detail='voice_mix_settings_invalid') from error
+    return await accept(audio, voice_id, mix=settings) if settings is not None else await accept(audio, voice_id)
 
 
 @router.post("/{voice_id}/recordings", response_model=VoiceUploadResponse)
