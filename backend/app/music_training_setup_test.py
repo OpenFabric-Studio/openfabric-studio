@@ -24,6 +24,9 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.environment = catalog.ModuleEnvironment.for_root(self.root / 'managed', platform='darwin', architecture='arm64')
+        # Plans require a uv path. CI runners do not ship uv; the installer commands stay mocked.
+        if self.environment.uv is None:
+            self.environment = replace(self.environment, uv=str(self.root / 'fixture-uv'))
         self.commands: list[list[str]] = []
         self.downloads: list[str] = []
         self.enterContext(patch.object(catalog, 'available_bytes', return_value=100 * 1024**3))

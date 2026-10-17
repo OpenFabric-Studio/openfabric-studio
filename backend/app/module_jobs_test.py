@@ -21,6 +21,9 @@ class ModuleJobsTests(unittest.IsolatedAsyncioTestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.environment = catalog.ModuleEnvironment.for_root(self.root, platform='darwin', architecture='arm64')
+        # Automatic speech setup is reviewed only when uv is visible. The installer itself is mocked.
+        if self.environment.uv is None:
+            self.environment = replace(self.environment, uv=str(self.root / 'fixture-uv'))
         self.probe_patch = patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, '')))
         self.probe_patch.start()
         self.addCleanup(self.probe_patch.stop)

@@ -263,8 +263,10 @@ async def capabilities() -> ReplacementCapabilities:
     ready = native() is not None
     ir_supported = False
     try:
+        from .replacement_mix import afir_unnormalized_option
         support = await run_owned_command([tool('ffmpeg'), '-hide_banner', '-h', 'filter=afir'], timeout=10, max_bytes=65536)
-        ir_supported = support.returncode == 0 and all(option in support.stdout for option in (b'irnorm', b'irfmt', b'precision', b'maxir'))
+        ir_supported = support.returncode == 0 and afir_unnormalized_option(support.stdout) is not None and all(
+            option in support.stdout for option in (b'irfmt', b'precision', b'maxir'))
     except (OSError, TimeoutError):
         pass
     from .rvc_models import list_models

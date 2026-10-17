@@ -351,7 +351,8 @@ class TaggedDownloadTests(unittest.IsolatedAsyncioTestCase):
         async def send(message: dict[str, object]) -> None:
             messages.append(message)
         response = tagging.TaggedFileResponse(result)
-        await response({"type": "http", "method": "GET", "headers": [], "extensions": {"http.response.pathsend": {}}}, receive, send)
+        await response({"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "GET", "headers": [], "extensions": {"http.response.pathsend": {}}}, receive, send)
         self.assertFalse(any(message["type"] == "http.response.pathsend" for message in messages))
         self.assertEqual(b"".join(message.get("body", b"") for message in messages if message["type"] == "http.response.body"), expected)
         self.assertFalse(result.path.exists())

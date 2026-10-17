@@ -203,6 +203,19 @@ class ReplacementIrResult(MusicAnalysisContract):
     metrics: AudioMetrics
 
 
+def afir_unnormalized_option(help_text: bytes) -> str | None:
+    """Disable afir's own gain. FFmpeg 7+ uses irnorm; 6.1 uses gtype=none.
+
+    gtype remains as a no-op after irnorm exists, so irnorm must win when both
+    are advertised. Otherwise a delta impulse is rescaled before the owned mix.
+    """
+    if b'irnorm' in help_text:
+        return 'irnorm=-1'
+    if b'gtype' in help_text:
+        return 'gtype=none'
+    return None
+
+
 def _ir_gain(path: Path) -> float:
     info = sf.info(path)
     if info.channels not in (1, 2) or not 8000 <= info.samplerate <= 192000 or not 0 < info.frames <= info.samplerate * 10:
@@ -226,16 +239,24 @@ async def convolve_owned_ir(source: ResolvedDspSource, impulse: ResolvedDspSourc
     await _source(source, source.source, source.sha256)
     await _source(impulse, impulse.source, impulse.sha256)
     gain = await run_owned_thread(_ir_gain, impulse.path)
+    help_text = await run([tool('ffmpeg'), '-hide_banner', '-h', 'filter=afir'], 10)
+    normalization = afir_unnormalized_option(help_text)
+    if normalization is None:
+        raise ValueError('replacement_engine_unavailable')
     _disk(root, source.duration_frames * source.channels * 4 * 3 + 32 * 1024**2)
     identifier = uuid.uuid4().hex
     output = root / (identifier + '.wav')
-    layout = 'mono' if impulse.channels == 1 else 'stereo'
     channels = max(source.channels, impulse.channels)
-    upmix = 'pan=stereo|c0=c0|c1=c0,' if source.channels == 1 and channels == 2 else ''
-    graph = (f'[0:a]{upmix}asplit=2[dry][send];[1:a]'
-        f'aformat=sample_fmts=fltp:channel_layouts={layout},volume={gain:.17g}[ir];'
-        f'[send][ir]afir=dry=1:wet=1:irnorm=-1:irgain=1:irfmt={"mono" if impulse.channels == 1 else "input"}:'
-        f'maxir=10:minp=256:maxp=8192:precision=double[reverb];'
+    source_upmix = 'pan=stereo|c0=c0|c1=c0,' if source.channels == 1 and channels == 2 else ''
+    ir_layout = 'mono' if impulse.channels == 1 else 'stereo'
+    # FFmpeg 6 negotiates irfmt=mono onto the source and cancels an anti-phase pair.
+    ir_upmix = ',pan=stereo|c0=c0|c1=c0' if impulse.channels == 1 and channels == 2 else ''
+    # afir omits a short tail partition. Pad by maxp, then trim back to the owned length.
+    max_partition = 8192
+    graph = (f'[0:a]{source_upmix}apad=pad_len={max_partition},asplit=2[dry][send];[1:a]'
+        f'aformat=sample_fmts=fltp:channel_layouts={ir_layout},volume={gain:.17g}{ir_upmix}[ir];'
+        f'[send][ir]afir=dry=1:wet=1:{normalization}:irgain=1:irfmt=input:'
+        f'maxir=10:minp=256:maxp={max_partition}:precision=double[reverb];'
         f'[dry]volume={1-wet:.17g}[direct];[reverb]volume={wet:.17g}[tail];'
         f'[direct][tail]amix=inputs=2:duration=first:normalize=0,'
         f'apad=whole_len={source.duration_frames},atrim=end_sample={source.duration_frames}[out]')

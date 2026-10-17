@@ -310,7 +310,8 @@ class HumanGuidePipelineTests(unittest.IsolatedAsyncioTestCase):
                 from app.job_lifecycle import communicate_process, spawn_process
                 process = await spawn_process(sys.executable, *command[1:], cwd=str(Path(__file__).parents[1]),
                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                output, _ = await communicate_process(process, 20)
+                # A cold librosa/numba import on a fresh runner exceeds a 20s cap.
+                output, _ = await communicate_process(process, 120)
                 voice_build.LOG_DIR.mkdir(parents=True, exist_ok=True)
                 (voice_build.LOG_DIR / f'{kwargs["log_name"]}.log').write_bytes(output)
                 return process.returncode
@@ -318,7 +319,7 @@ class HumanGuidePipelineTests(unittest.IsolatedAsyncioTestCase):
                 import sys
                 from app.job_lifecycle import communicate_process, spawn_process
                 process = await spawn_process(sys.executable, *command[1:], stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-                await communicate_process(process, 10)
+                await communicate_process(process, 60)
                 return process.returncode
             output = Path(command[command.index('--output') + 1])
             shutil.copyfile(command[command.index('--source') + 1], output / 'vc_fixture.wav')
@@ -334,7 +335,7 @@ class HumanGuidePipelineTests(unittest.IsolatedAsyncioTestCase):
                 accompaniment_asset_id=backing, title='Independent fixture', guide_singer_confirmed=True, guide_isolated=True))
             job = voice_build._applies[run.track_id]
             # Real CPU probes have their own 20s/10s deadlines before publication.
-            await asyncio.wait_for(asyncio.shield(job.task), 60)
+            await asyncio.wait_for(asyncio.shield(job.task), 180)
         stored = get_run(run.id)
         self.assertEqual(stored.status, 'done', stored.error_code)
         self.assertIsNotNone(stored.audio_version_id)

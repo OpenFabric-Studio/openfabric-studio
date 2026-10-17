@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 
 from app.music_dsp_contracts import WarpAnchor
-from app.replacement_mix import phrase_spans
+from app.replacement_mix import afir_unnormalized_option, phrase_spans
 
 
 class ReplacementPhraseTests(unittest.TestCase):
@@ -27,6 +27,13 @@ class ReplacementPhraseTests(unittest.TestCase):
                 [WarpAnchor(source_sec=0.0, target_sec=0.0), WarpAnchor(source_sec=1.0, target_sec=3.0)]):
             with self.subTest(anchors=anchors), self.assertRaises(ValueError):
                 phrase_spans(anchors, 48000)
+
+
+class ImpulseNormalizationTests(unittest.TestCase):
+    def test_newer_afir_help_disables_irnorm_and_legacy_help_uses_gtype_none(self) -> None:
+        self.assertEqual(afir_unnormalized_option(b'irnorm\ngtype\nnone\n'), 'irnorm=-1')
+        self.assertEqual(afir_unnormalized_option(b'gtype\n none\n irfmt\n'), 'gtype=none')
+        self.assertIsNone(afir_unnormalized_option(b'irfmt\nprecision\n'))
 
 
 class PerformanceCleanupTests(unittest.TestCase):
@@ -131,3 +138,11 @@ class OwnedImpulseResponseTests(unittest.IsolatedAsyncioTestCase):
             np.testing.assert_array_equal(actual[:, 1], -actual[:, 0])
             self.assertEqual(result.ir_gain, 1.0)
             self.assertEqual((source.read_bytes(), impulse.read_bytes()), original)
+            kernel[0] = np.float32(.25)
+            sf.write(impulse, kernel, rate, subtype='FLOAT')
+            result, audio = await convolve_owned_ir(resolved(source, 'a' * 32, 2, rate),
+                resolved(impulse, 'b' * 32, 1, len(kernel)), .25, root, run_command)
+            actual, _ = sf.read(audio.path, dtype='float32', always_2d=True)
+            np.testing.assert_allclose(actual[:, 0], signal * np.float32(.8125), atol=2e-6)
+            np.testing.assert_array_equal(actual[:, 1], -actual[:, 0])
+            self.assertEqual(result.ir_gain, 1.0)

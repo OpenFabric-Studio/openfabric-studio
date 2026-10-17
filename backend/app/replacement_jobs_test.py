@@ -232,7 +232,8 @@ class ReplacementJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse((db.FILES_DIR / 'replacements' / plan.id).exists())
 
     async def wait(self, plan_id: str):
-        for _ in range(1500):
+        # Cold pitch analysis on a fresh runner can take longer than 30 seconds.
+        for _ in range(9000):
             plan = jobs.get(plan_id)
             if plan.active_attempt_id is None:
                 return plan

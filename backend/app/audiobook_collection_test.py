@@ -21,7 +21,10 @@ from app.api.routes_audiobooks import download_audiobook_collection, router
 
 
 def _scope(headers: list[tuple[bytes, bytes]] | None = None) -> Scope:
-    return {"type": "http", "method": "GET", "headers": headers or [],
+    # Starlette 1.8 cancels a file body when an ASGI 2.0 receive() reports
+    # disconnect. Uvicorn advertises spec 2.4 or newer and streams the body.
+    return {"type": "http", "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "method": "GET", "headers": headers or [],
             "extensions": {"http.response.pathsend": {}}}
 
 

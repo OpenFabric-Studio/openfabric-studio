@@ -502,6 +502,8 @@ class OptionalEngineCatalogTests(unittest.IsolatedAsyncioTestCase):
     async def test_local_music_modules_have_honest_platform_setup_and_licenses(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             mac = catalog.ModuleEnvironment.for_root(Path(temporary), platform='darwin', architecture='arm64')
+            if mac.uv is None:
+                mac = replace(mac, uv=str(Path(temporary) / 'fixture-uv'))
             linux = replace(mac, platform='linux', architecture='x86_64')
             with patch.object(catalog, 'probe', AsyncMock(return_value=catalog.ProbeResult(False, ''))):
                 inventory = await catalog.inventory(mac)
