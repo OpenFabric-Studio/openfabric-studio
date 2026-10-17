@@ -47,6 +47,54 @@ class StableTrainingSetupTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('stable_generation_variant', ModulePlanRequest.model_fields)
         return ModulePlanRequest.model_validate({'features': ['stable_audio3'], 'download_models': True, 'stable_generation_variant': variant})
 
+    def conditioning_request(self, variant: str = 'small-music') -> ModulePlanRequest:
+        return ModulePlanRequest.model_validate({'features': ['stable_audio3'], 'download_models': True,
+            'stable_conditioning_variant': variant})
+
+    async def test_conditioning_plan_downloads_only_missing_encoder_without_training_base(self) -> None:
+        for path in generation_runtime.weight_paths(self.environment, 'stable_audio3'):
+            self.put(path)
+        review = await catalog.plan(self.conditioning_request(), self.environment)
+        self.assertEqual(review.stable_conditioning_variant, 'small-music')
+        self.assertEqual(review.estimated_download_bytes, 214946620)
+        self.assertEqual(review.required_free_bytes, 2 * 214946620)
+        self.assertTrue(review.can_install)
+        identities = [identity for license in review.steps[0].licenses for identity in license.identities]
+        self.assertIn('a48f80d81c30d74c45e2a3047082c4891f715e24c44645adb9c1f4f07afdaf0c', [item.sha256 for item in identities])
+        self.assertFalse(any('-base_' in (item.filename or '') for item in identities))
+        self.assertNotEqual(review.plan_token, (await catalog.plan(self.request(), self.environment)).plan_token)
+        self.assertNotEqual(catalog.approval_scope(self.conditioning_request(), self.environment),
+            catalog.approval_scope(self.generation_request('small-music'), self.environment))
+
+    async def test_conditioning_cancel_reload_resume_keeps_variant_and_never_downloads_training_base(self) -> None:
+        for path in generation_runtime.weight_paths(self.environment, 'stable_audio3'):
+            self.put(path)
+        request = self.conditioning_request()
+        review = await catalog.plan(request, self.environment)
+        entered = asyncio.Event()
+        block = True
+        downloaded: list[str] = []
+        async def download(artifact: DownloadArtifact, destination: Path, context: jobs.InstallContext, **_: object) -> Path:
+            downloaded.append(destination.name)
+            if block:
+                entered.set(); await asyncio.Event().wait()
+            destination.parent.mkdir(parents=True, exist_ok=True); destination.write_bytes(npz())
+            return destination
+        service, reader = jobs.ModuleJobService(self.environment), jobs.ModuleJobService(self.environment)
+        try:
+            with patch('app.module_install.download_artifact', side_effect=download), patch('app.module_install.install', new=AsyncMock(side_effect=AssertionError('new environment forbidden'))):
+                created = await service.create(ModuleInstallRequest(**request.model_dump(), plan_token=review.plan_token))
+                await asyncio.wait_for(entered.wait(), 1)
+                await service.cancel(created.id)
+                self.assertEqual(reader.get(created.id).stable_conditioning_variant, 'small-music')
+                self.assertEqual(reader.store.read(created.id).plan.stable_conditioning_variant, 'small-music')
+                block = False
+                await reader.resume(created.id); await self.wait_for_terminal(reader, created.id)
+                self.assertEqual(reader.get(created.id).state, 'completed')
+                self.assertEqual(downloaded, ['same_s_encoder_f32.npz', 'same_s_encoder_f32.npz'])
+        finally:
+            await reader.shutdown(); await service.shutdown()
+
     async def test_generation_plan_uses_selected_inference_bundle_despite_ready_small_and_training_medium(self) -> None:
         for path in (*generation_runtime.weight_paths(self.environment, 'stable_audio3'), *runtime.training_weights(self.environment, 'medium')):
             self.put(path)

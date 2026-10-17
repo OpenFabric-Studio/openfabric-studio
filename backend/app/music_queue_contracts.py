@@ -9,6 +9,9 @@ from .contracts import Contract, SavedTrack
 from .generation_contracts import AceGenerationSettings
 from .local_music_contracts import LocalMusicRequest
 from .music_lora_contracts import MusicAdapter, MusicAdapterSelection
+from .music_conditioning_contracts import MusicConditioningPreview, StableMusicConditioning
+from .queued_music_source_contracts import QueuedMusicSource
+from .song_from_beat_contracts import AceMusicConditioning
 from .yue_contracts import YueSubmitRequest
 
 MusicQueueEngine = Literal['ace_step', 'yue2', 'stable_audio3']
@@ -61,9 +64,15 @@ class MusicQueueEngineSelection(MusicQueueContract):
     adapter: MusicAdapterSelection | None = None
     ar_adapter: MusicAdapterSelection | None = None
     nar_adapter: MusicAdapterSelection | None = None
+    conditioning: StableMusicConditioning | AceMusicConditioning | None = None
 
     @model_validator(mode='after')
     def validate_configuration(self) -> Self:
+        if self.conditioning is not None:
+            ace = self.conditioning.mode in ('ace_complete', 'ace_lego')
+            if (self.engine != ('ace_step' if ace else 'stable_audio3') or
+                    self.conditioning.source.kind not in ('version', 'beat_render')):
+                raise ValueError('conditioning_task_unsupported')
         if self.engine != 'stable_audio3' and (self.variant != 'small-music' or self.adapter is not None):
             raise ValueError('music_queue_adapter_or_variant_unsupported')
         if self.engine != 'yue2' and (self.precision != 'q8_0' or self.ar_adapter is not None or self.nar_adapter is not None):
@@ -116,11 +125,13 @@ class MusicQueueModelPlan(MusicQueueContract):
     adjustments: list[MusicQueueAdjustment] = Field(default_factory=list, max_length=20)
     warnings: list[Annotated[str, Field(max_length=120)]] = Field(default_factory=list, max_length=20)
     adapters: list[MusicAdapter] = Field(default_factory=list, max_length=2)
+    conditioning_preview: MusicConditioningPreview | None = None
 
 
 class MusicQueueAceRequest(MusicQueueContract):
     engine: Literal['ace_step']
     request: AceGenerationSettings
+    conditioning: AceMusicConditioning | None = Field(default=None, exclude_if=lambda value: value is None)
 
 
 class MusicQueueYueRequest(MusicQueueContract):
@@ -143,6 +154,14 @@ MusicQueuePayload: TypeAlias = Annotated[
     MusicQueueAceRequest | MusicQueueYueRequest | MusicQueueStableRequest,
     Field(discriminator='engine'),
 ]
+
+
+def payload_conditioning(payload: MusicQueuePayload) -> StableMusicConditioning | AceMusicConditioning | None:
+    if payload.engine == 'ace_step':
+        return payload.conditioning
+    if payload.engine == 'stable_audio3':
+        return payload.request.conditioning
+    return None
 
 
 class MusicQueueNormalizedItem(MusicQueueContract):
@@ -178,6 +197,7 @@ class MusicQueueItem(MusicQueueNormalizedItem):
     error_code: str = Field(default='', max_length=120)
     attempt: int = Field(default=1, ge=1, le=1000)
     retry_of_item_id: MusicQueueId | None = None
+    retained_input: QueuedMusicSource | None = None
 
 
 class MusicQueueBatch(MusicQueueContract):

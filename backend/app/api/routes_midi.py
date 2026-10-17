@@ -16,6 +16,7 @@ from ..orchestrator.manager import manager
 from ..orchestrator.state import ModelStatus
 
 from ..client_contracts import MidiStatusResponse
+from .routes_music_terms import require_usage
 
 router = APIRouter(prefix="/api/tracks", tags=["midi"])
 
@@ -64,7 +65,7 @@ async def start_midi(track_id: int, source: str, force: bool = False):
     path = midi.source_audio_path(track_id, source)
     if not path or not path.exists():
         raise HTTPException(status_code=404, detail=f"audio for source '{source}' not found")
-    await midi.start(track_id, source, force=force)
+    await midi.start(track_id, source, force=force, admit=lambda: require_usage('yue2', 'transcription'))
     return _payload(track_id)
 
 

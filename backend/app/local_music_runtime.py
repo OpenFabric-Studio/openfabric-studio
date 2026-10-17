@@ -10,6 +10,7 @@ from .module_catalog import ModuleEnvironment, configured_environment, engine_py
 from .module_evidence import environment_verified
 from .video_media import tool
 from .video_projects import atomic_text
+from .music_conditioning import RetainedConditioning, conditioning_weights_present
 import json
 
 
@@ -45,11 +46,13 @@ def engine_status(environment: ModuleEnvironment | None = None) -> LocalMusicEng
                   'Local files are present. Audio quality and speed require an actual generation.')
         engines.append(LocalMusicEngineStatus(id=engine, installed=installed, weights_ready=weights_ready,
             small_weights_ready=small_ready, medium_weights_ready=medium_ready,
+            small_conditioning_weights_ready=small_ready and conditioning_weights_present(env, 'small-music'),
+            medium_conditioning_weights_ready=medium_ready and conditioning_weights_present(env, 'medium'),
             supported=support, runtime='Official Stable Audio 3 MLX', detail=detail))
     return LocalMusicEngines(engines=engines)
 
 
-def prepare_worker(request: LocalMusicRequest, output: Path) -> tuple[list[str], Path, dict[str, str]]:
+def prepare_worker(request: LocalMusicRequest, output: Path, *, conditioning: RetainedConditioning | None = None) -> tuple[list[str], Path, dict[str, str]]:
     env = configured_environment()
     if not supported(request.engine, env):
         raise LocalMusicError('local_music_runtime_unsupported')
@@ -65,12 +68,37 @@ def prepare_worker(request: LocalMusicRequest, output: Path) -> tuple[list[str],
         '--dit', 'medium' if request.variant == 'medium' else 'sm-music',
         '--decoder', 'same-l' if request.variant == 'medium' else 'same-s',
         '--seconds', str(request.duration_seconds), '--seed', str(request.seed), '--out', str(raw)]
+    conditioning_payload: dict[str, str | int | float | None] | None = None
+    if request.conditioning is not None:
+        if conditioning is None:
+            raise LocalMusicError('conditioning_snapshot_invalid')
+        recipe = conditioning.recipe
+        prepared = output.parent / 'conditioning.wav'
+        if (not prepared.is_file() or prepared.is_symlink() or prepared.resolve().parent != output.parent.resolve()
+                or recipe.mode != request.conditioning.mode or recipe.source_sha256 != request.conditioning.source_sha256
+                or recipe.prepared_frames != request.duration_seconds * 44100):
+            raise LocalMusicError('conditioning_snapshot_invalid')
+        if not conditioning_weights_present(env, request.variant):
+            raise LocalMusicError('conditioning_encoder_missing')
+        command.extend(['--init-audio', str(prepared)])
+        if request.conditioning.mode == 'audio_to_audio':
+            command.extend(['--init-noise-level', str(request.conditioning.noise_level)])
+        else:
+            command.extend(['--inpaint-range', f'{request.conditioning.start_sec:.17g},{request.conditioning.end_sec:.17g}'])
+        conditioning_payload = {'mode': recipe.mode, 'source_wav': str(prepared),
+            'source_sha256': recipe.prepared_sha256, 'source_frames': recipe.prepared_frames,
+            'script_sha256': recipe.source_script_sha256, 'noise_level': recipe.noise_level,
+            'start_sec': request.conditioning.start_sec if request.conditioning.mode == 'inpaint' else None,
+            'end_sec': request.conditioning.end_sec if request.conditioning.mode == 'inpaint' else None}
+    elif conditioning is not None:
+        raise LocalMusicError('conditioning_snapshot_invalid')
     if request.adapter is not None:
         adapter = music_lora.resolve(request.adapter, engine=request.engine, target=request.variant)
         command.extend(['--lora', str(adapter), 'strength=' + str(request.adapter.strength)])
     request_path = output.parent / 'request.json'
     payload = {'request': request.model_dump(mode='json'), 'argv': command, 'cwd': str(cwd),
-               'raw_output': str(raw), 'output': str(output), 'ffmpeg': tool('ffmpeg')}
+               'raw_output': str(raw), 'output': str(output), 'ffmpeg': tool('ffmpeg'),
+               'conditioning': conditioning_payload}
     atomic_text(request_path, json.dumps(payload, ensure_ascii=False))
     child_env = os.environ.copy()
     child_env.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1', 'HF_HUB_DISABLE_TELEMETRY': '1',

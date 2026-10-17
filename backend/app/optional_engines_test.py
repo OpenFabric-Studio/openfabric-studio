@@ -86,6 +86,7 @@ class OptionalEngineTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('14b', lowered)
         self.assertIn('soundfile', install_command('uv', 'kokoro', Path('/venv/bin/python'), Path('/engine')))
         self.assertNotIn('-e', install_command('uv', 'rvc', Path('/venv/bin/python'), Path('/engine')))
+        self.assertIn('transformers', install_command('uv', 'rvc', Path('/venv/bin/python'), Path('/engine')))
 
     async def test_missing_engine_names_the_setup_script(self) -> None:
         with patch.object(config, 'KOKORO_DIR', self.root / 'kokoro'):

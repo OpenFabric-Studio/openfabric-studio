@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import errno
 from pathlib import Path
 import stat
 import tempfile
@@ -11,6 +12,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from app import config, lora_export
+from app import module_catalog
 from app.lora_export_contracts import LoraExportRequest, LoraTrainedCheckpoint, LoraTrainedFilesRequest, LoraTrainedFilesResponse
 
 
@@ -50,6 +52,43 @@ class LoraExportTests(unittest.TestCase):
         self.assertEqual(result.export_path, str(self.destination))
         self.assertEqual(result.adapter_path, str(self.destination / 'adapter'))
         self.assertEqual((self.destination / 'adapter' / 'adapter_model.safetensors').read_bytes(), b'final')
+        self.assertEqual((self.source / 'adapter' / 'adapter_model.safetensors').read_bytes(), b'final')
+
+    def test_preview_exposes_the_backend_forecast_without_writing_files(self) -> None:
+        with patch.object(lora_export, 'available_bytes', return_value=100 * 1024**2):
+            preview = lora_export.preview_export(self.body())
+        self.assertEqual(preview.model_dump().get('required_free_bytes'), 64 * 1024**2 + 9)
+        self.assertEqual(preview.model_dump().get('free_bytes'), 100 * 1024**2)
+        self.assertFalse(self.destination.exists())
+
+    def test_preview_and_export_require_space_for_the_whole_tree_and_reserve(self) -> None:
+        (self.source / 'other-stem.wav').write_bytes(b'retain this file too')
+        required = sum(path.stat().st_size for path in self.source.rglob('*') if path.is_file()) + 64 * 1024**2
+        usage = module_catalog.shutil.disk_usage(self.root)
+        for action in (lora_export.preview_export, lora_export.export_lora):
+            with self.subTest(action=action.__name__):
+                with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=required - 1)), \
+                        self.assertRaises(lora_export.LoraExportError) as caught:
+                    action(self.body())
+                self.assertEqual(caught.exception.code, 'insufficient_disk')
+                self.assertFalse(self.destination.exists())
+        self.assertEqual((self.source / 'other-stem.wav').read_bytes(), b'retain this file too')
+
+    def test_export_rechecks_space_after_preview_without_creating_a_partial_folder(self) -> None:
+        lora_export.preview_export(self.body())
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=1)):
+            self.assert_error('insufficient_disk')
+        self.assertFalse(self.destination.exists())
+
+    def test_disk_full_copy_reports_stable_code_and_preserves_source_and_partial(self) -> None:
+        def full(source: Path, destination: Path) -> None:
+            destination.mkdir()
+            (destination / 'partial').write_bytes(b'incomplete copy')
+            raise OSError(errno.ENOSPC, 'disk full')
+        with patch.object(lora_export, '_copy_tree', side_effect=full), self.assertLogs(lora_export.logger, level='ERROR'):
+            self.assert_error('insufficient_disk')
+        self.assertEqual((self.destination / 'partial').read_bytes(), b'incomplete copy')
         self.assertEqual((self.source / 'adapter' / 'adapter_model.safetensors').read_bytes(), b'final')
 
     def test_all_existing_destinations_and_source_are_preserved(self) -> None:

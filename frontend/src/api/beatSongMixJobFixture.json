@@ -1,0 +1,375 @@
+{
+  "id": "d1d1bf2c8d18421f8b9e855754942560",
+  "plan": {
+    "id": "b45e75d628ef4dbf9b69edf26511eade",
+    "revision": 0,
+    "draft": {
+      "title": "Owned layer",
+      "beat": {
+        "source": {
+          "kind": "version",
+          "track_id": 1,
+          "version_id": "b795c6d428394b8f9be527b9d5364465"
+        },
+        "sha256": "bdd8d6abfc6efe888fea2a9eaa9233e6cd10d29a70607efe6812fa57c291ffc7",
+        "excerpt_start_sec": 0.0,
+        "excerpt_end_sec": 0.2
+      },
+      "song": {
+        "source": {
+          "kind": "version",
+          "track_id": 2,
+          "version_id": "162184206c534765b7a06fd47706437b"
+        },
+        "sha256": "28fcccac9726aafab23efe143427581a58547bc71b15e4ea1d708a27e891e17d",
+        "excerpt_start_sec": 0.0,
+        "excerpt_end_sec": 0.2
+      },
+      "mode": "layer",
+      "tempo_strategy": "beat_to_song",
+      "beat_repeats": 1,
+      "anchors": [
+        {
+          "source_sec": 0.0,
+          "target_sec": 0.0
+        },
+        {
+          "source_sec": 0.2,
+          "target_sec": 0.2
+        }
+      ],
+      "project_bpm": 120.0,
+      "project_meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bass_leader": "none",
+      "kick_leader": "none",
+      "controls": [],
+      "loudness": {
+        "profile": "off",
+        "integrated_lufs": -16.0,
+        "true_peak_dbtp": -2.0
+      },
+      "audio_pitch_semitones": 0.0,
+      "audio_approximation": false,
+      "key_review": "unknown",
+      "symbolic_origin": null
+    },
+    "beat": {
+      "source": {
+        "kind": "version",
+        "track_id": 1,
+        "version_id": "b795c6d428394b8f9be527b9d5364465"
+      },
+      "sha256": "bdd8d6abfc6efe888fea2a9eaa9233e6cd10d29a70607efe6812fa57c291ffc7",
+      "source_bytes": 76888,
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "frames": 9600,
+      "duration_sec": 0.2,
+      "musical_duration_sec": null,
+      "track_id": 1,
+      "version_id": "b795c6d428394b8f9be527b9d5364465",
+      "music_evidence": {
+        "restriction": "unknown",
+        "identity_basis": "publisher_declared",
+        "components": [],
+        "adapters": [],
+        "lineage_complete": false,
+        "public_attributions": []
+      },
+      "content_origin": "unknown",
+      "beat_document": null
+    },
+    "song": {
+      "source": {
+        "kind": "version",
+        "track_id": 2,
+        "version_id": "162184206c534765b7a06fd47706437b"
+      },
+      "sha256": "28fcccac9726aafab23efe143427581a58547bc71b15e4ea1d708a27e891e17d",
+      "source_bytes": 76888,
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "frames": 9600,
+      "duration_sec": 0.2,
+      "musical_duration_sec": null,
+      "track_id": 2,
+      "version_id": "162184206c534765b7a06fd47706437b",
+      "music_evidence": {
+        "restriction": "unknown",
+        "identity_basis": "publisher_declared",
+        "components": [],
+        "adapters": [],
+        "lineage_complete": false,
+        "public_attributions": []
+      },
+      "content_origin": "unknown",
+      "beat_document": null
+    },
+    "lanes": [
+      {
+        "id": "1d3734ac370a92ce4650ed9933807cb6",
+        "label": "Beat mix",
+        "source": "beat",
+        "role": "mix",
+        "beat_lane_id": null,
+        "control": {
+          "lane_id": "1d3734ac370a92ce4650ed9933807cb6",
+          "muted": false,
+          "gain_db": 0.0,
+          "pan": 0.0,
+          "highpass_hz": null,
+          "eq_bands": [],
+          "duck": null
+        }
+      },
+      {
+        "id": "f28d2853234e0426019368e0ce2af4ac",
+        "label": "Song mix",
+        "source": "song",
+        "role": "mix",
+        "beat_lane_id": null,
+        "control": {
+          "lane_id": "f28d2853234e0426019368e0ce2af4ac",
+          "muted": false,
+          "gain_db": 0.0,
+          "pan": 0.0,
+          "highpass_hz": null,
+          "eq_bands": [],
+          "duck": null
+        }
+      }
+    ],
+    "source_duration_sec": 0.2,
+    "target_duration_sec": 0.2,
+    "minimum_ratio": 1.0,
+    "maximum_ratio": 1.0,
+    "needs_native": false,
+    "separator_ready": false,
+    "native_ready": false,
+    "warnings": [
+      "manual_anchors",
+      "rights_unknown",
+      "processed_stems_before_master",
+      "key_unknown"
+    ],
+    "sha256": "dc2598040040990c5632faa11f72d8d9cf0ddbea4ac5a378c9b1b3781a92ee29",
+    "created_at": "2026-10-17T12:19:20.011782+00:00"
+  },
+  "request": {
+    "plan_id": "b45e75d628ef4dbf9b69edf26511eade",
+    "expected_revision": 0,
+    "plan_sha256": "dc2598040040990c5632faa11f72d8d9cf0ddbea4ac5a378c9b1b3781a92ee29",
+    "submission_key": "fixture",
+    "mode": "full",
+    "preview_start_sec": null,
+    "preview_end_sec": null
+  },
+  "status": "done",
+  "progress": {
+    "phase": "publishing",
+    "completed": 1,
+    "total": 1
+  },
+  "manifest": {
+    "job_id": "d1d1bf2c8d18421f8b9e855754942560",
+    "plan_id": "b45e75d628ef4dbf9b69edf26511eade",
+    "plan_revision": 0,
+    "plan_sha256": "dc2598040040990c5632faa11f72d8d9cf0ddbea4ac5a378c9b1b3781a92ee29",
+    "mode": "full",
+    "frames": 9600,
+    "sample_rate_hz": 48000,
+    "channels": 2,
+    "sources": [
+      {
+        "source": {
+          "kind": "version",
+          "track_id": 1,
+          "version_id": "b795c6d428394b8f9be527b9d5364465"
+        },
+        "sha256": "bdd8d6abfc6efe888fea2a9eaa9233e6cd10d29a70607efe6812fa57c291ffc7",
+        "source_bytes": 76888,
+        "sample_rate_hz": 48000,
+        "channels": 2,
+        "frames": 9600,
+        "duration_sec": 0.2,
+        "musical_duration_sec": null,
+        "track_id": 1,
+        "version_id": "b795c6d428394b8f9be527b9d5364465",
+        "music_evidence": {
+          "restriction": "unknown",
+          "identity_basis": "publisher_declared",
+          "components": [],
+          "adapters": [],
+          "lineage_complete": false,
+          "public_attributions": []
+        },
+        "content_origin": "unknown",
+        "beat_document": null,
+        "source_id": "4e45da2785c245f3a89a1c44a8f05030",
+        "raw_filename": "raw.wav"
+      },
+      {
+        "source": {
+          "kind": "version",
+          "track_id": 2,
+          "version_id": "162184206c534765b7a06fd47706437b"
+        },
+        "sha256": "28fcccac9726aafab23efe143427581a58547bc71b15e4ea1d708a27e891e17d",
+        "source_bytes": 76888,
+        "sample_rate_hz": 48000,
+        "channels": 2,
+        "frames": 9600,
+        "duration_sec": 0.2,
+        "musical_duration_sec": null,
+        "track_id": 2,
+        "version_id": "162184206c534765b7a06fd47706437b",
+        "music_evidence": {
+          "restriction": "unknown",
+          "identity_basis": "publisher_declared",
+          "components": [],
+          "adapters": [],
+          "lineage_complete": false,
+          "public_attributions": []
+        },
+        "content_origin": "unknown",
+        "beat_document": null,
+        "source_id": "9f498a9a28ae4f6fb4c5328aef49ad21",
+        "raw_filename": "raw.wav"
+      }
+    ],
+    "artifacts": [
+      {
+        "id": "1a795badb786e082d7dd58fb5f0ffbe2",
+        "kind": "dry",
+        "filename": "dry-1d3734ac370a92ce4650ed9933807cb6.wav",
+        "sha256": "f3a4f797b2e3593fe5a521c94f242f4a0c931dccc41c35d0945b86f44033d73e",
+        "byte_count": 76892,
+        "media_type": "audio/wav",
+        "lane_id": "1d3734ac370a92ce4650ed9933807cb6",
+        "frames": 9600
+      },
+      {
+        "id": "14550e2e16cb0bba3dffbea8f758179a",
+        "kind": "dry",
+        "filename": "dry-f28d2853234e0426019368e0ce2af4ac.wav",
+        "sha256": "a442252899abd3d4268756d7f3bc3f67c7ffb2b0ca1231cfea9519ff97357c7b",
+        "byte_count": 76892,
+        "media_type": "audio/wav",
+        "lane_id": "f28d2853234e0426019368e0ce2af4ac",
+        "frames": 9600
+      },
+      {
+        "id": "8debac92e0aa411977d64dd8defb3106",
+        "kind": "processed",
+        "filename": "processed-1d3734ac370a92ce4650ed9933807cb6.wav",
+        "sha256": "f3a4f797b2e3593fe5a521c94f242f4a0c931dccc41c35d0945b86f44033d73e",
+        "byte_count": 76892,
+        "media_type": "audio/wav",
+        "lane_id": "1d3734ac370a92ce4650ed9933807cb6",
+        "frames": 9600
+      },
+      {
+        "id": "006cc63344355ac085539b8e81e5459c",
+        "kind": "processed",
+        "filename": "processed-f28d2853234e0426019368e0ce2af4ac.wav",
+        "sha256": "a442252899abd3d4268756d7f3bc3f67c7ffb2b0ca1231cfea9519ff97357c7b",
+        "byte_count": 76892,
+        "media_type": "audio/wav",
+        "lane_id": "f28d2853234e0426019368e0ce2af4ac",
+        "frames": 9600
+      },
+      {
+        "id": "566f565d2dc3e464920a806d004bd787",
+        "kind": "mix",
+        "filename": "mix.wav",
+        "sha256": "7bce36c1bf737f53a2c804b8a836b9f7029687ce71de42185a97278ee9d796e1",
+        "byte_count": 76892,
+        "media_type": "audio/wav",
+        "lane_id": null,
+        "frames": 9600
+      },
+      {
+        "id": "7e4c5af2ebf1c7a0d9216f38873d6532",
+        "kind": "plan",
+        "filename": "plan.json",
+        "sha256": "29ca6fa49fd61b96a480e57466440a5dffb4ee1dca2e93681b0e14a7e47308cd",
+        "byte_count": 4047,
+        "media_type": "application/json",
+        "lane_id": null,
+        "frames": null
+      },
+      {
+        "id": "c7bc716846e7756cc4fcd87f70ef5d8b",
+        "kind": "provenance",
+        "filename": "provenance.json",
+        "sha256": "aa3ee660ff16781dabda5105c78ff9894e69284ee055ad541f266f18a142dc80",
+        "byte_count": 168,
+        "media_type": "application/json",
+        "lane_id": null,
+        "frames": null
+      },
+      {
+        "id": "74f23296d4d445bebd690ee962fb4751",
+        "kind": "bundle",
+        "filename": "beat-song.zip",
+        "sha256": "43627782620a0ce22f81aea104e0bf33449c080958745ebce8588416a7318fd7",
+        "byte_count": 389635,
+        "media_type": "application/zip",
+        "lane_id": null,
+        "frames": null
+      }
+    ],
+    "lanes": [
+      {
+        "lane_id": "1d3734ac370a92ce4650ed9933807cb6",
+        "artifact_id": "8debac92e0aa411977d64dd8defb3106",
+        "dry_artifact_id": "1a795badb786e082d7dd58fb5f0ffbe2"
+      },
+      {
+        "lane_id": "f28d2853234e0426019368e0ce2af4ac",
+        "artifact_id": "006cc63344355ac085539b8e81e5459c",
+        "dry_artifact_id": "14550e2e16cb0bba3dffbea8f758179a"
+      }
+    ],
+    "metrics": {
+      "duration_sec": 0.2,
+      "integrated_lufs": null,
+      "loudness_range_lu": 0.0,
+      "true_peak_dbtp": -30.46,
+      "sample_peak_dbfs": -30.457575099751516,
+      "full_scale_fraction": 0.0,
+      "near_full_scale_fraction": 0.0,
+      "measurement_method": "ffmpeg-loudnorm-oversampled-v1",
+      "ffmpeg_version": "ffmpeg version 9.0.1 Copyright (c) 2000-2026 the FFmpeg developers",
+      "source_sha256": "7bce36c1bf737f53a2c804b8a836b9f7029687ce71de42185a97278ee9d796e1",
+      "samples_analyzed": 19200,
+      "warnings": [
+        "short_programme"
+      ]
+    },
+    "music_evidence": {
+      "restriction": "unknown",
+      "identity_basis": "publisher_declared",
+      "components": [],
+      "adapters": [],
+      "lineage_complete": false,
+      "public_attributions": []
+    },
+    "warnings": [
+      "manual_anchors",
+      "rights_unknown",
+      "processed_stems_before_master",
+      "key_unknown"
+    ],
+    "recipe": "reviewed-beat-song-v1",
+    "track_id": 3,
+    "project_id": 1
+  },
+  "error": null,
+  "created_at": "2026-10-17T12:19:20.459062+00:00",
+  "started_at": "2026-10-17T12:19:20.459557+00:00",
+  "finished_at": "2026-10-17T12:19:28.214235+00:00"
+}

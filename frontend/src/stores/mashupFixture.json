@@ -1,0 +1,525 @@
+{
+  "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "revision": 1,
+  "title": "Pair",
+  "status": "ready",
+  "source_a": {
+    "side": "a",
+    "input": {
+      "source": {
+        "kind": "version",
+        "track_id": 1,
+        "version_id": "11111111111111111111111111111111"
+      },
+      "excerpt_start_sec": 0.0,
+      "excerpt_end_sec": 8.0,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "analysis": null,
+      "operator_stems": []
+    },
+    "raw_filename": "raw.wav",
+    "source_bytes": 100,
+    "duration_sec": 8.0,
+    "prepared": {
+      "id": "11111111111111111111111111111111",
+      "filename": "prepared.wav",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "byte_count": 3072088,
+      "frames": 384000,
+      "sample_rate_hz": 48000,
+      "channels": 2
+    },
+    "stems": [
+      {
+        "stem": "vocals",
+        "artifact": {
+          "id": "00000000000000000000000000000001",
+          "filename": "vocals.wav",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "byte_count": 3072088,
+          "frames": 384000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "drums",
+        "artifact": {
+          "id": "00000000000000000000000000000002",
+          "filename": "drums.wav",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "byte_count": 3072088,
+          "frames": 384000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "bass",
+        "artifact": {
+          "id": "00000000000000000000000000000003",
+          "filename": "bass.wav",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "byte_count": 3072088,
+          "frames": 384000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "other",
+        "artifact": {
+          "id": "00000000000000000000000000000004",
+          "filename": "other.wav",
+          "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "byte_count": 3072088,
+          "frames": 384000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      }
+    ],
+    "association": "fresh_separation",
+    "content_origin": "unknown",
+    "preparation_recipe": "ffmpeg-excerpt-demucs-local-v1",
+    "separation_quality": "fast",
+    "music_evidence": {
+      "restriction": "unknown",
+      "identity_basis": "publisher_declared",
+      "components": [],
+      "adapters": [],
+      "lineage_complete": false,
+      "public_attributions": []
+    },
+    "analysis_key": {
+      "status": "unknown",
+      "tonic_pc": null,
+      "mode": null,
+      "confidence": null,
+      "method": "unavailable",
+      "candidates": [],
+      "unknown_reason": "insufficient_evidence"
+    },
+    "timing": {
+      "basis": "operator_confirmed",
+      "bpm": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "downbeat_frames": [
+        0,
+        96000,
+        192000,
+        288000,
+        384000
+      ],
+      "sections": [
+        {
+          "id": "S0",
+          "start_frame": 0,
+          "end_frame": 192000,
+          "bars": 2,
+          "musical_label": null
+        },
+        {
+          "id": "S1",
+          "start_frame": 192000,
+          "end_frame": 384000,
+          "bars": 2,
+          "musical_label": null
+        }
+      ],
+      "key": {
+        "status": "unknown",
+        "tonic_pc": null,
+        "mode": null,
+        "confidence": null,
+        "method": "unavailable",
+        "candidates": [],
+        "unknown_reason": "insufficient_evidence"
+      },
+      "supersedes_analysis": null
+    }
+  },
+  "source_b": {
+    "side": "b",
+    "input": {
+      "source": {
+        "kind": "version",
+        "track_id": 2,
+        "version_id": "22222222222222222222222222222222"
+      },
+      "excerpt_start_sec": 0.0,
+      "excerpt_end_sec": 6.0,
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "analysis": null,
+      "operator_stems": []
+    },
+    "raw_filename": "raw.wav",
+    "source_bytes": 100,
+    "duration_sec": 6.0,
+    "prepared": {
+      "id": "22222222222222222222222222222222",
+      "filename": "prepared.wav",
+      "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "byte_count": 2304088,
+      "frames": 288000,
+      "sample_rate_hz": 48000,
+      "channels": 2
+    },
+    "stems": [
+      {
+        "stem": "vocals",
+        "artifact": {
+          "id": "00000000000000000000000000000005",
+          "filename": "vocals.wav",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byte_count": 2304088,
+          "frames": 288000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "drums",
+        "artifact": {
+          "id": "00000000000000000000000000000006",
+          "filename": "drums.wav",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byte_count": 2304088,
+          "frames": 288000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "bass",
+        "artifact": {
+          "id": "00000000000000000000000000000007",
+          "filename": "bass.wav",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byte_count": 2304088,
+          "frames": 288000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      },
+      {
+        "stem": "other",
+        "artifact": {
+          "id": "00000000000000000000000000000008",
+          "filename": "other.wav",
+          "sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+          "byte_count": 2304088,
+          "frames": 288000,
+          "sample_rate_hz": 48000,
+          "channels": 2
+        }
+      }
+    ],
+    "association": "fresh_separation",
+    "content_origin": "unknown",
+    "preparation_recipe": "ffmpeg-excerpt-demucs-local-v1",
+    "separation_quality": "fast",
+    "music_evidence": {
+      "restriction": "unknown",
+      "identity_basis": "publisher_declared",
+      "components": [],
+      "adapters": [],
+      "lineage_complete": false,
+      "public_attributions": []
+    },
+    "analysis_key": {
+      "status": "unknown",
+      "tonic_pc": null,
+      "mode": null,
+      "confidence": null,
+      "method": "unavailable",
+      "candidates": [],
+      "unknown_reason": "insufficient_evidence"
+    },
+    "timing": {
+      "basis": "operator_confirmed",
+      "bpm": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "downbeat_frames": [
+        0,
+        96000,
+        192000,
+        288000
+      ],
+      "sections": [
+        {
+          "id": "S0",
+          "start_frame": 0,
+          "end_frame": 96000,
+          "bars": 1,
+          "musical_label": null
+        },
+        {
+          "id": "S1",
+          "start_frame": 96000,
+          "end_frame": 288000,
+          "bars": 2,
+          "musical_label": null
+        }
+      ],
+      "key": {
+        "status": "unknown",
+        "tonic_pc": null,
+        "mode": null,
+        "confidence": null,
+        "method": "unavailable",
+        "candidates": [],
+        "unknown_reason": "insufficient_evidence"
+      },
+      "supersedes_analysis": null
+    }
+  },
+  "candidates": [
+    {
+      "orientation": "a_vocals_b_backing",
+      "scoring_version": "mashup-heuristic-v1",
+      "score": null,
+      "key": {
+        "available": false,
+        "score": null,
+        "measurement": null,
+        "reason": "key_missing"
+      },
+      "tempo": {
+        "available": true,
+        "score": 100.0,
+        "measurement": 1.0,
+        "reason": "available"
+      },
+      "section_fit": {
+        "available": true,
+        "score": 83.39850002884626,
+        "measurement": 1.3333333333333333,
+        "reason": "available"
+      },
+      "energy_clash": {
+        "available": false,
+        "score": null,
+        "measurement": null,
+        "reason": "vocal_activity_missing"
+      },
+      "vocal_pitch_semitones": null,
+      "duration_ratio": 1.0,
+      "tempo_aliases": [
+        "declared"
+      ],
+      "warnings": [
+        "analysis_incomplete",
+        "separation_bleed_possible",
+        "key_unknown"
+      ]
+    },
+    {
+      "orientation": "b_vocals_a_backing",
+      "scoring_version": "mashup-heuristic-v1",
+      "score": null,
+      "key": {
+        "available": false,
+        "score": null,
+        "measurement": null,
+        "reason": "key_missing"
+      },
+      "tempo": {
+        "available": true,
+        "score": 100.0,
+        "measurement": 1.0,
+        "reason": "available"
+      },
+      "section_fit": {
+        "available": true,
+        "score": 83.39850002884624,
+        "measurement": 0.75,
+        "reason": "available"
+      },
+      "energy_clash": {
+        "available": false,
+        "score": null,
+        "measurement": null,
+        "reason": "vocal_activity_missing"
+      },
+      "vocal_pitch_semitones": null,
+      "duration_ratio": 1.0,
+      "tempo_aliases": [
+        "declared"
+      ],
+      "warnings": [
+        "analysis_incomplete",
+        "separation_bleed_possible",
+        "key_unknown"
+      ]
+    }
+  ],
+  "plan": {
+    "id": "1b48162c49e49c59a864be37598c6fac",
+    "revision": 1,
+    "settings": {
+      "expected_revision": 0,
+      "orientation": "a_vocals_b_backing",
+      "target_bpm": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "target_key": {
+        "status": "unknown",
+        "tonic_pc": null,
+        "mode": null,
+        "confidence": null,
+        "method": "unavailable",
+        "candidates": [],
+        "unknown_reason": "insufficient_evidence"
+      },
+      "vocal_tempo_alias": "declared",
+      "backing_tempo_alias": "declared",
+      "vocal_pitch_semitones": 0.0,
+      "backing_pitch_semitones": 0.0,
+      "allow_large_pitch_shift": false,
+      "locks": []
+    },
+    "placements": [
+      {
+        "id": "80e056cde7cd06d641b80f53fa8101b1",
+        "source": "a",
+        "stem": "vocals",
+        "section_id": "S0",
+        "source_start_frame": 0,
+        "source_end_frame": 192000,
+        "target_start_tick": 0,
+        "target_end_tick": 7680,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
+        "locked": false
+      },
+      {
+        "id": "bffe1e2ea9904eae5459019f8245a6fb",
+        "source": "b",
+        "stem": "drums",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 0,
+        "target_end_tick": 7680,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      },
+      {
+        "id": "f05ad24cdd92fd86530b1aa7bc99063c",
+        "source": "b",
+        "stem": "bass",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 0,
+        "target_end_tick": 7680,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      },
+      {
+        "id": "11832a210363f79a1508af067dc91215",
+        "source": "b",
+        "stem": "other",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 0,
+        "target_end_tick": 7680,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      },
+      {
+        "id": "a4f2ba0c584c52fed04f6ddbc2c8b99f",
+        "source": "a",
+        "stem": "vocals",
+        "section_id": "S1",
+        "source_start_frame": 192000,
+        "source_end_frame": 384000,
+        "target_start_tick": 7680,
+        "target_end_tick": 15360,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.0,
+        "fade_out_sec": 0.0,
+        "locked": false
+      },
+      {
+        "id": "897fa026857627f06971d74319773ae5",
+        "source": "b",
+        "stem": "drums",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 7680,
+        "target_end_tick": 15360,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      },
+      {
+        "id": "a7d7b34d19664bc607966d797957007f",
+        "source": "b",
+        "stem": "bass",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 7680,
+        "target_end_tick": 15360,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      },
+      {
+        "id": "18216982f9ed0face6913d00d74246df",
+        "source": "b",
+        "stem": "other",
+        "section_id": "S1",
+        "source_start_frame": 96000,
+        "source_end_frame": 288000,
+        "target_start_tick": 7680,
+        "target_end_tick": 15360,
+        "pitch_semitones": 0.0,
+        "gain_db": 0.0,
+        "fade_in_sec": 0.01,
+        "fade_out_sec": 0.01,
+        "locked": false
+      }
+    ],
+    "duration_ticks": 15360,
+    "warnings": [
+      "manual_timing",
+      "transition_review",
+      "separation_bleed_possible",
+      "key_unknown"
+    ],
+    "algorithm": "monotone-sections-v1"
+  },
+  "active_job_id": null,
+  "created_at": "2026-10-17T00:00:00+00:00",
+  "updated_at": "2026-10-17T00:00:00+00:00",
+  "error": null
+}

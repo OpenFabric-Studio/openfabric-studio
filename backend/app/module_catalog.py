@@ -28,9 +28,10 @@ from .module_contracts import (
 from .module_evidence import environment_verified
 from .module_licenses import declarations
 from .module_runtime import configured_targets, RuntimeEvidence, runtime_status, speaker_status
+from .job_lifecycle import run_owned_thread
 
 CATALOG_VERSION = 'openfabric-modules-3'
-MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review')
+MODULE_IDS: tuple[ModuleId, ...] = ('ace_step', 'yue2', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review', 'music_dsp', 'music_beats')
 DEPENDENCY_ONLY_MODULES = frozenset({'speaker_review'})
 AUTOMATIC_MUSIC_MODELS = frozenset({'ace_step', 'stable_audio3'})
 REINSTALLABLE_MODULES: frozenset[ModuleId] = frozenset({'ace_step', 'separation', 'speech', 'singing', 'stable_audio3', 'kokoro', 'chatterbox', 'wan22', 'rvc'})
@@ -41,6 +42,8 @@ ENGINE_FOLDERS: Mapping[ModuleId, str] = {
     'kokoro': 'kokoro', 'chatterbox': 'chatterbox', 'wan22': 'mlx-video', 'rvc': 'rvc',
     'speaker_review': 'SpeakerReview',
     'stable_audio3': 'stable-audio-3',
+    'music_dsp': 'music-dsp',
+    'music_beats': 'MusicBeats',
 }
 
 
@@ -58,6 +61,8 @@ class ModuleDefinition:
 
 
 DEFINITIONS: Mapping[ModuleId, ModuleDefinition] = {
+    'music_beats': ModuleDefinition('music_beats', 'Beat and downbeat analysis', 'Optional local CPU beat timing estimates; manual corrections remain available.', ('media',), ('.openfabric-beats-runtime.json', '.venv/pyvenv.cfg'), ('beat-this', 'torch', 'torchaudio', 'numpy', 'einops', 'rotary-embedding-torch', 'soxr', 'pydantic'), None, 'Install the isolated pinned CPU runtime and, when selected, the small beat timing checkpoint. Analysis never downloads a model. Timing estimates require review and do not establish musical quality.', 'https://github.com/CPJKU/beat_this/tree/ad7974846029835307ba19a3d5cefbf40b243041'),
+    'music_dsp': ModuleDefinition('music_dsp', 'Music processing', 'Optional native time-stretch and pitch processing; no music model.', ('media',), ('.openfabric-rubberband.json', 'bin/rubberband', 'COPYING', 'README.md', 'CHANGELOG', 'rubberband-4.0.0-source.tar.bz2'), (), 1736719, 'Install the pinned Rubber Band 4.0.0 executable with its license and corresponding source archive into this app’s managed tools. Initial runtime support is Apple Silicon macOS; quality requires listening review.', 'https://breakfastquay.com/rubberband/'),
     'speaker_review': ModuleDefinition('speaker_review', 'Speaker review', 'Optional local CPU speaker similarity screening with human-approved references.', (), ('.openfabric-speaker-runtime.json', '.venv/pyvenv.cfg'), ('speechbrain', 'torch', 'torchaudio'), None, 'Set up the separate CPU dependency environment. No weights are downloaded, even with model downloads selected. Obtain and verify the reviewed ECAPA checkpoint explicitly, then configure OPENFABRIC_SPEAKER_REVIEW_PYTHON and OPENFABRIC_SPEAKER_REVIEW_WEIGHTS. Similarity is a screening hint, not an identity verdict.', 'https://huggingface.co/speechbrain/spkrec-ecapa-voxceleb'),
     'ace_step': ModuleDefinition('ace_step', 'ACE-Step', 'Music generation, covers and section edits.', ('media',), ('acestep/api_server.py', 'pyproject.toml'), ('torch', 'fastapi'), None, 'Automatically check or install the isolated environment, reuse existing selected models and download missing pinned model files when included. Existing source and model files are preserved.', 'https://github.com/ace-step/ACE-Step-1.5'),
     'yue2': ModuleDefinition('yue2', 'YuE', 'Native music generation, melody planning and MIDI tools.', ('media',), ('tools/model_manager_v2.py',), (), None, 'Install the native engine and selected weights. Windows needs NVIDIA compute capability 7.5+ and driver 580+. Linux requires the documented CUDA source build.', 'https://github.com/0xShug0/audio.cpp'),
@@ -73,7 +78,7 @@ DEFINITIONS: Mapping[ModuleId, ModuleDefinition] = {
     'kokoro': ModuleDefinition('kokoro', 'Kokoro', 'Preset narration from Kokoro-82M (Apache-2.0, hexgrad). It does not clone a person. On a Mac, set PYTORCH_ENABLE_MPS_FALLBACK=1.', ('media',), ('pyproject.toml', 'kokoro/pipeline.py'), ('kokoro', 'soundfile'), None, 'Clone the pinned Kokoro checkout with ./setup_kokoro.sh or Settings. No voice weights are downloaded. Install espeak-ng yourself. This does not replace GPT-SoVITS. The community MLX port is not the path this setup installs.', 'https://github.com/hexgrad/kokoro'),
     'chatterbox': ModuleDefinition('chatterbox', 'Chatterbox', 'Zero-shot voice clone from Chatterbox (MIT, Resemble AI). Original and multilingual can use cuda, cpu, or mps. Turbo is not a Mac path.', ('media',), ('pyproject.toml', 'src/chatterbox/tts.py'), ('chatterbox-tts',), None, 'Clone the pinned Chatterbox checkout with ./setup_chatterbox.sh or Settings. Weights are not downloaded. Turbo is not called and is not claimed to work on a Mac. This does not replace GPT-SoVITS.', 'https://github.com/resemble-ai/chatterbox'),
     'wan22': ModuleDefinition('wan22', 'Wan 2.2 5B', 'Text and image to video with Wan 2.2 TI2V-5B through mlx-video on Apple Silicon. 14B, S2V, and Animate are not wired.', ('media',), ('pyproject.toml', 'mlx_video/models/wan_2/generate.py'), ('mlx-video',), None, 'Clone the pinned mlx-video checkout with ./setup_wan22.sh or Settings. Apple Silicon only. OpenFabric does not download Wan 2.2 TI2V-5B weights and does not set up 14B, S2V, or Animate.', 'https://github.com/Blaizzy/mlx-video'),
-    'rvc': ModuleDefinition('rvc', 'RVC', 'Timbre conversion with RVC (MIT). On a Mac this is CPU, not GPU. Seed-VC singing stays separate.', ('media',), ('webui.py', 'infer'), ('torch', 'soundfile', 'librosa', 'faiss-cpu'), None, 'Clone the pinned RVC checkout with ./setup_rvc.sh or Settings and install CPU packages from PyPI. HuBERT, RMVPE, and trained voices are not downloaded. On a Mac this does not use the GPU. Seed-VC is unchanged.', 'https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI'),
+    'rvc': ModuleDefinition('rvc', 'RVC', 'Timbre conversion with RVC (MIT). On a Mac this is CPU, not GPU. Seed-VC singing stays separate.', ('media',), ('webui.py', 'infer'), ('torch', 'soundfile', 'librosa', 'faiss-cpu', 'transformers'), None, 'Clone the pinned RVC checkout with ./setup_rvc.sh or Settings and install CPU packages from PyPI. HuBERT, RMVPE, and trained voices are not downloaded. On a Mac this does not use the GPU. Seed-VC is unchanged.', 'https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI'),
 }
 
 
@@ -93,7 +98,7 @@ class ModuleEnvironment:
     def for_root(cls, root: Path, *, platform: str | None = None, architecture: str | None = None,
                  paths: Mapping[ModuleId, Path] | None = None, data_dir: Path | None = None) -> ModuleEnvironment:
         resolved = root.expanduser().resolve()
-        mapped = {identifier: resolved / ('tools' if identifier in ('media', 'transcription', 'source_import', 'ebooks') else 'engines') / ENGINE_FOLDERS[identifier] for identifier in MODULE_IDS}
+        mapped = {identifier: resolved / ('tools' if identifier in ('media', 'transcription', 'source_import', 'ebooks', 'music_dsp') else 'engines') / ENGINE_FOLDERS[identifier] for identifier in MODULE_IDS}
         if paths is not None:
             mapped.update(paths)
         return cls(resolved, data_dir or resolved / 'data', platform or sys.platform,
@@ -154,17 +159,17 @@ def platform_key(environment: ModuleEnvironment) -> str:
 
 
 def supported(identifier: ModuleId, environment: ModuleEnvironment) -> bool:
-    if identifier in ('video', 'wan22', 'stable_audio3'):
+    if identifier in ('video', 'wan22', 'stable_audio3', 'music_dsp'):
         return platform_key(environment) == 'darwin-arm64'
     if identifier == 'singing':
         return platform_key(environment) in ('darwin-arm64', 'linux-x64', 'win32-x64')
-    if identifier in ('ace_step', 'yue2', 'separation', 'speech', 'kokoro', 'chatterbox', 'rvc'):
+    if identifier in ('ace_step', 'yue2', 'separation', 'speech', 'kokoro', 'chatterbox', 'rvc', 'music_beats'):
         return platform_key(environment) in ('darwin-arm64', 'linux-x64', 'win32-x64')
     return environment.platform in ('win32', 'darwin', 'linux')
 
 
 def is_managed(identifier: ModuleId, environment: ModuleEnvironment) -> bool:
-    expected = environment.root / ('tools' if identifier in ('media', 'transcription', 'source_import', 'ebooks') else 'engines') / ENGINE_FOLDERS[identifier]
+    expected = environment.root / ('tools' if identifier in ('media', 'transcription', 'source_import', 'ebooks', 'music_dsp') else 'engines') / ENGINE_FOLDERS[identifier]
     if expected.is_symlink() or not expected.resolve().is_relative_to(environment.root.resolve()):
         return False
     if identifier == 'media':
@@ -276,6 +281,18 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
             state = 'ready' if speaker_runtime.ready else 'partial' if speaker_runtime.installed or env.paths[identifier].exists() else 'missing'
             evidence.extend(speaker_runtime.evidence)
             capabilities.extend(speaker_runtime.capabilities)
+        elif identifier == 'music_beats':
+            from .music_beats_runtime import status as beats_status
+            timing = await run_owned_thread(beats_status, env)
+            state = 'ready' if timing.ready and media_ready else 'partial' if timing.installed or env.paths[identifier].is_dir() else 'missing'
+            evidence.extend(timing.evidence)
+            capabilities.extend(timing.capabilities if media_ready else ())
+        elif identifier == 'music_dsp':
+            from .music_dsp_runtime import status as dsp_status
+            processing = await run_owned_thread(dsp_status, env)
+            state = 'ready' if processing.ready and media_ready else 'installed' if processing.ready else 'partial' if processing.installed else 'missing'
+            evidence.extend(processing.evidence)
+            capabilities.extend(processing.capabilities if media_ready else ())
         else:
             engine = env.paths[identifier]
             source = all((engine / marker).exists() for marker in definition.source_markers)
@@ -309,7 +326,7 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
                 state = 'partial'
         prerequisites = env.uv is not None and (identifier == 'separation' or shutil.which('git') is not None)
         existing_music = identifier in AUTOMATIC_MUSIC_MODELS and engine_python(env.paths[identifier], env.platform).is_file() and all((env.paths[identifier] / marker).exists() for marker in definition.source_markers)
-        automatic = support and (existing_music or identifier == 'yue2' and native_installed or managed and (identifier == 'speaker_review' or (identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'stable_audio3') and prerequisites))
+        automatic = support and (existing_music or identifier == 'yue2' and native_installed or managed and (identifier in ('speaker_review', 'music_dsp', 'music_beats') or (identifier in ('media', 'yue2') and platform_key(env) in ('win32-x64', 'darwin-arm64')) or identifier in ('ace_step', 'separation', 'video', 'speech', 'singing', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'stable_audio3') and prerequisites))
         automation: Literal['unsupported', 'automatic', 'manual'] = 'unsupported' if not support else 'automatic' if automatic else 'manual'
         actions = [] if state == 'ready' else [_manual(definition)]
         if automatic and managed and state != 'ready':
@@ -318,7 +335,7 @@ async def inventory(environment: ModuleEnvironment | None = None) -> ModuleInven
             missing = 'uv' if env.uv is None else 'Git'
             evidence.append(_evidence('installer_prerequisite', f'{missing} is required before automatic setup.'))
             actions.insert(0, ModuleAction(kind='manual', label=f'Install {missing}', detail=f'Install {missing} and restart the app so its executable is available. Review the updated plan before source or model downloads.', url='https://docs.astral.sh/uv/getting-started/installation/' if missing == 'uv' else 'https://git-scm.com/downloads'))
-        if identifier not in ('media', 'ebooks', 'source_import', 'speaker_review') and state in ('installed', 'partial'):
+        if identifier not in ('media', 'ebooks', 'source_import', 'speaker_review', 'music_dsp', 'music_beats') and state in ('installed', 'partial'):
             actions.append(ModuleAction(kind='verify', label='Verify a short preview', detail='Review the selected model and a short output in its workspace; setup does not claim GPU quality or performance.'))
         if not managed and identifier not in ('ebooks', 'source_import', 'transcription'):
             evidence.append(_evidence('external_installation', 'Configured external installation is preserved; automatic replacement is disabled.', True))
@@ -360,6 +377,8 @@ def approval_scope(request: ModulePlanRequest, environment: ModuleEnvironment) -
         'native_model_adapter': native_model_manifest_hash(),
         'ace_models': {name: os.environ.get(name, default).strip() or default for name, default in (('ACE_STEP_DIT_MODEL', 'acestep-v15-turbo'), ('ACE_STEP_LM_MODEL', 'acestep-5Hz-lm-1.7B'))} if 'ace_step' in request.features else {},
         'source_pins': {identifier: pin.commit for identifier, pin in SOURCE_PINS.items()},
+        'licenses': {identifier: [declaration.model_dump(mode='json') for declaration in declarations(identifier)]
+            for identifier in expanded_features(request.features)},
         'paths': {identifier: str(environment.paths[identifier].resolve()) for identifier in expanded_features(request.features)}}
     if request.reinstall:
         canonical['reinstall'] = request.reinstall
@@ -367,10 +386,15 @@ def approval_scope(request: ModulePlanRequest, environment: ModuleEnvironment) -
         canonical['stable_training_variant'] = request.stable_training_variant
     if request.stable_generation_variant is not None:
         canonical['stable_generation_variant'] = request.stable_generation_variant
+    if request.stable_conditioning_variant is not None:
+        canonical['stable_conditioning_variant'] = request.stable_conditioning_variant
+    if request.ace_generation_model is not None:
+        canonical['ace_generation_model'] = request.ace_generation_model
     if request.music_training_engine is not None:
-        from .music_training_setup import recipe_hash
+        from .music_training_setup import recipe_hash, training_license_declarations
         canonical['music_training_engine'] = request.music_training_engine
         canonical['music_training_recipe'] = recipe_hash(request.music_training_engine)
+        canonical['music_training_licenses'] = [declaration.model_dump(mode='json') for declaration in training_license_declarations(request.music_training_engine)]
     return hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -379,6 +403,22 @@ def _download_bytes(identifier: ModuleId, environment: ModuleEnvironment, downlo
     from .module_install import load_manifest
     assets = load_manifest()
     key = platform_key(environment)
+    if identifier == 'music_dsp':
+        from .music_dsp_runtime import BINARY_ARCHIVE, SOURCE_ARCHIVE
+        return BINARY_ARCHIVE.bytes + SOURCE_ARCHIVE.bytes
+    if identifier == 'music_beats':
+        from .music_beats_runtime import BeatRuntimeError, WEIGHTS_BYTES, identity
+        try:
+            identity(environment.paths[identifier], require_weights=False)
+        except BeatRuntimeError:
+            return None
+        if not download_models:
+            return 0
+        try:
+            identity(environment.paths[identifier])
+        except BeatRuntimeError:
+            return WEIGHTS_BYTES
+        return 0
     if identifier in AUTOMATIC_MUSIC_MODELS:
         from .module_music_models import model_download_bytes
         return model_download_bytes(environment, identifier) if download_models else 0
@@ -403,10 +443,13 @@ async def plan(request: ModulePlanRequest, environment: ModuleEnvironment | None
     from .module_install import native_tools_need_repair
     from .module_native_setup import native_environment_present, native_setup_present
     env = environment or configured_environment()
+    if request.ace_generation_model is not None:
+        from .module_music_models import plan_ace_conditioning
+        return plan_ace_conditioning(request, env)
     if request.music_training_engine is not None:
         from .music_training_setup import plan as music_training_plan
         return music_training_plan(request, env)
-    if request.stable_training_variant is not None or request.stable_generation_variant is not None:
+    if request.stable_training_variant is not None or request.stable_generation_variant is not None or request.stable_conditioning_variant is not None:
         from .stable_lora_setup import plan as training_plan
         return training_plan(request, env)
     status = await inventory(env)
@@ -432,13 +475,15 @@ async def plan(request: ModulePlanRequest, environment: ModuleEnvironment | None
         elif identifier == 'yue2' and (native_tools_need_repair(env) or request.download_models
                 and (existing_verifiable or module.state in ('installed', 'ready')) and not native_setup_present(env)):
             operation = 'verify'
+        elif identifier == 'music_beats' and module.state == 'partial':
+            operation = 'verify'
         elif module.state in ('installed', 'ready'):
             operation = 'reuse'
         elif existing_verifiable:
             operation = 'verify'
         else:
             operation = 'install' if module.automation == 'automatic' else 'manual'
-        size = _download_bytes(identifier, env, request.download_models) if operation == 'install' or operation == 'verify' and (identifier in AUTOMATIC_MUSIC_MODELS or identifier == 'yue2' and request.download_models) else 0
+        size = _download_bytes(identifier, env, request.download_models) if operation == 'install' or operation == 'verify' and (identifier in AUTOMATIC_MUSIC_MODELS or identifier == 'music_beats' or identifier == 'yue2' and request.download_models) else 0
         detail = 'Already installed. Reuse existing components without running their installer.' if operation == 'reuse' else 'Reinstall isolated Python dependencies. Existing source, model files and user data are preserved.' if identifier in request.reinstall else DEFINITIONS[identifier].guidance
         steps.append(ModulePlanStep(module_id=identifier, name=module.name, operation=operation,
             estimated_download_bytes=size, detail=detail, actions=[] if operation == 'reuse' else module.actions, licenses=module.licenses))
@@ -449,11 +494,12 @@ async def plan(request: ModulePlanRequest, environment: ModuleEnvironment | None
     known = sum(step.estimated_download_bytes or 0 for step in steps)
     unknown = any(step.estimated_download_bytes is None for step in steps if step.operation in ('install', 'verify')) or any(step.operation == 'install' and step.module_id in AUTOMATIC_MUSIC_MODELS for step in steps)
     required = known + known // 2
+    required += sum(128 * 1024**2 for step in steps if step.operation == 'install' and step.module_id == 'music_dsp')
     required += sum((step.estimated_download_bytes or 0) // 2 for step in steps if step.module_id in AUTOMATIC_MUSIC_MODELS)
     required += sum(8 * 1024**3 for step in steps if step.operation == 'install' and step.module_id in AUTOMATIC_MUSIC_MODELS and step.estimated_download_bytes is not None)
     if unknown:
         # Admission floor, not an invented download estimate or sufficiency guarantee.
-        required += sum((24 if request.download_models and step.module_id not in DEPENDENCY_ONLY_MODULES else 8) * 1024**3 for step in steps if step.operation in ('install', 'verify') and step.estimated_download_bytes is None)
+        required += sum((24 if request.download_models and step.module_id not in DEPENDENCY_ONLY_MODULES and step.module_id != 'music_beats' else 8) * 1024**3 for step in steps if step.operation in ('install', 'verify') and step.estimated_download_bytes is None)
         warnings.append('Some dependency download sizes are unknown. The free-space check includes an 8 GiB environment allowance, or a 24 GiB minimum for unmeasured model installs. Known music downloads include cache and installation space; actual requirements may be larger.')
     destinations = {env.root}
     for step in steps:

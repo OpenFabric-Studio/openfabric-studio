@@ -12,6 +12,7 @@ from ..audio_encoding import AudioEncodingError
 from ..resource_admission import ResourceBusyError, native_admission
 from ..contracts import AceJobResponse, AceJobReleaseResponse, AceJobsResponse, AceJobQueryResponse, AceQueryRequest, AceAdoptRequest, JsonObject
 from ..generation_contracts import AceGenerationSettings
+from .routes_music_terms import require_usage
 
 router = APIRouter(prefix='/api/ace-jobs', tags=['ace-jobs'])
 logger = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ async def submit(params: str = Form(..., max_length=262144), title: str = Form('
         if settings is not None:
             snapshot = AceGenerationSettings.model_validate_json(settings)
             parsed['_generation_settings'] = TypeAdapter(JsonObject).validate_json(snapshot.model_dump_json())
+        require_usage('ace_step', 'generation')
         async with native_admission(video_jobs.work_busy):
             return await ace_jobs.submit(parsed, title, voice_id, ctx_audio, style_audio=ref_audio)
     except ResourceBusyError as exc:

@@ -19,6 +19,8 @@ export const musicQueueEn = {
   variations: 'Variations', variationLabel: '{model} variations', modelLed: 'Length is model-led; YuE has no duration input.',
   target: 'Target duration: {duration}',
   adjustment: 'Length adapted: {requested} → {effective} seconds.',
+  retainedReference: 'An audio reference is copied when you add this brief to the queue. All variations use that verified copy. The source stays unchanged.',
+  referenceBrief: 'Add a description to review this beat reference:',
   oneShot: 'Current runtime reloads for each variation.', modelSettings: 'Model settings & adapters', precision: 'Precision',
   variant: 'Model variant', arAdapter: 'AR adapter', narAdapter: 'NAR adapter',
   aceBase: 'Queue uses the base ACE model and clears any session adapter. Custom ACE adapters remain in Advanced generators.',

@@ -1,21 +1,36 @@
 """Fixed catalog and setup contracts shared with the browser."""
 from __future__ import annotations
 
-from typing import Literal
+from datetime import date
+from typing import Annotated, Literal, get_args
 
-from pydantic import ConfigDict, Field, StrictBool, model_validator
+from pydantic import AfterValidator, ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from .contracts import Contract
 from .music_training_contracts import MusicTrainingEngine
 from .stable_lora_contracts import StableLoraVariant
 
-ModuleId = Literal['ace_step', 'yue2', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review']
+ModuleId = Literal['ace_step', 'yue2', 'stable_audio3', 'speech', 'singing', 'separation', 'video', 'media', 'transcription', 'source_import', 'ebooks', 'kokoro', 'chatterbox', 'wan22', 'rvc', 'speaker_review', 'music_dsp', 'music_beats']
 ModuleState = Literal['unsupported', 'missing', 'partial', 'installed', 'ready']
 ModuleActionKind = Literal['install', 'download', 'manual', 'verify', 'restart']
 ModuleJobState = Literal['queued', 'running', 'completed', 'awaiting_manual', 'failed', 'cancelled', 'interrupted']
 ModuleStepState = Literal['queued', 'running', 'verified', 'manual', 'skipped', 'failed']
 ModuleErrorCode = Literal['plan_changed', 'setup_busy', 'insufficient_disk', 'job_missing', 'invalid_job', 'job_corrupt', 'installation_failed', 'installer_failed', 'installer_output_limit', 'installer_timeout', 'worker_unverified', 'unsafe_install_path', 'not_managed', 'unsupported_platform', 'artifact_integrity', 'archive_unsafe', 'installation_conflict', 'environment_unverified', 'setup_not_resumable', 'download_failed', 'download_stalled', 'already_installed', 'reinstall_unavailable']
-LicenseScope = Literal['code', 'model', 'tool', 'auxiliary', 'source_data']
+LicenseScope = Literal['code', 'model', 'tool', 'auxiliary', 'source_data', 'dataset', 'samples']
+LicenseRestriction = Literal['noncommercial', 'conditional', 'unrestricted_declared', 'unknown']
+LicenseRedistribution = Literal['declared_allowed', 'bank_only', 'forbidden', 'unknown']
+LicenseCopyleft = Literal['strong', 'weak', 'none_declared', 'unknown']
+LicenseSourceUrl = Annotated[str, Field(max_length=500, pattern=r'^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\s\\]*)?$')]
+LicenseRevision = Annotated[str, Field(min_length=1, max_length=200, pattern=r'^[A-Za-z0-9][A-Za-z0-9._/-]*$')]
+LicenseSha256 = Annotated[str, Field(min_length=64, max_length=64, pattern=r'^[0-9a-f]{64}$')]
+
+
+def _calendar_date(value: str) -> str:
+    date.fromisoformat(value)
+    return value
+
+
+LicenseDate = Annotated[str, Field(max_length=10, pattern=r'^\d{4}-\d{2}-\d{2}$'), AfterValidator(_calendar_date)]
 
 
 class ModuleEvidence(Contract):
@@ -31,6 +46,49 @@ class ModuleAction(Contract):
     url: str | None = Field(default=None, max_length=500)
 
 
+class ModuleComponentIdentity(Contract):
+    """Published/expected identity, not proof of a locally loaded artifact."""
+    model_config = ConfigDict(extra='forbid')
+    repository_url: LicenseSourceUrl | None = None
+    revision: LicenseRevision | None = None
+    filename: str | None = Field(default=None, min_length=1, max_length=300, pattern=r'^[A-Za-z0-9][A-Za-z0-9._/-]*$')
+    sha256: LicenseSha256 | None = None
+
+    @field_validator('filename')
+    @classmethod
+    def relative_filename(cls, value: str | None) -> str | None:
+        if value is not None and any(part in ('', '.', '..') for part in value.split('/')):
+            raise ValueError('license_identity_filename_invalid')
+        return value
+
+    @model_validator(mode='after')
+    def identity_present(self) -> ModuleComponentIdentity:
+        if not any((self.repository_url, self.revision, self.filename, self.sha256)):
+            raise ValueError('license_identity_required')
+        return self
+
+
+class ModuleLicenseEvidence(Contract):
+    """An observation of one public resource; no inference of source rights."""
+    model_config = ConfigDict(extra='forbid')
+    kind: Literal['license_file', 'publisher_model_card', 'publisher_terms', 'artifact_hash', 'unavailable']
+    source_url: LicenseSourceUrl | None = None
+    revision: LicenseRevision | None = None
+    sha256: LicenseSha256 | None = None
+    observed_at: LicenseDate
+    reviewer: str = Field(min_length=1, max_length=120, pattern=r'\S')
+
+    @model_validator(mode='after')
+    def observation_reference(self) -> ModuleLicenseEvidence:
+        if self.kind != 'unavailable' and self.source_url is None:
+            raise ValueError('license_evidence_source_required')
+        if self.kind == 'artifact_hash' and self.sha256 is None:
+            raise ValueError('license_evidence_hash_required')
+        if self.kind == 'unavailable' and self.sha256 is not None:
+            raise ValueError('unavailable_evidence_cannot_have_hash')
+        return self
+
+
 class ModuleLicenseDeclaration(Contract):
     model_config = ConfigDict(extra='forbid')
     component_id: str = Field(min_length=1, max_length=120)
@@ -38,9 +96,14 @@ class ModuleLicenseDeclaration(Contract):
     scope: LicenseScope
     status: Literal['declared', 'unknown']
     declared_license: str | None = Field(default=None, min_length=1, max_length=120)
-    source_url: str | None = Field(default=None, max_length=500, pattern=r'^https://[^\s]+$')
+    source_url: LicenseSourceUrl | None = None
     notes: str = Field(max_length=1000)
-    reviewed_at: str = Field(pattern=r'^\d{4}-\d{2}-\d{2}$')
+    reviewed_at: LicenseDate
+    restriction: LicenseRestriction = 'unknown'
+    redistribution: LicenseRedistribution = 'unknown'
+    copyleft: LicenseCopyleft = 'unknown'
+    evidence: list[ModuleLicenseEvidence] = Field(default_factory=list, max_length=20)
+    identities: list[ModuleComponentIdentity] = Field(default_factory=list, max_length=40)
 
     @model_validator(mode='after')
     def declaration_source(self) -> ModuleLicenseDeclaration:
@@ -48,6 +111,9 @@ class ModuleLicenseDeclaration(Contract):
             raise ValueError('license_source_required')
         if self.status == 'unknown' and self.declared_license is not None:
             raise ValueError('unknown_license_cannot_be_declared')
+        if self.restriction == 'unrestricted_declared' or self.redistribution == 'declared_allowed':
+            if self.status != 'declared' or not any(item.kind in ('license_file', 'publisher_model_card', 'publisher_terms') for item in self.evidence):
+                raise ValueError('license_permission_evidence_required')
         return self
 
 
@@ -77,24 +143,34 @@ class ModuleInventory(Contract):
     free_bytes: int | None = Field(default=None, ge=0)
     checked_at: str
     modules: list[ModuleInfo]
-    recommended_features: list[ModuleId] = Field(default_factory=list, max_length=16)
+    recommended_features: list[ModuleId] = Field(default_factory=list, max_length=len(get_args(ModuleId)))
 
 
 class ModulePlanRequest(Contract):
     model_config = ConfigDict(extra='forbid', allow_inf_nan=False)
-    features: list[ModuleId] = Field(min_length=1, max_length=16)
+    features: list[ModuleId] = Field(min_length=1, max_length=len(get_args(ModuleId)))
     download_models: StrictBool = False
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=len(get_args(ModuleId)))
     stable_training_variant: StableLoraVariant | None = None
     stable_generation_variant: StableLoraVariant | None = None
+    stable_conditioning_variant: StableLoraVariant | None = None
+    ace_generation_model: Literal['acestep-v15-base'] | None = None
     music_training_engine: MusicTrainingEngine | None = None
 
     @model_validator(mode='after')
     def unique_features(self) -> ModulePlanRequest:
+        if self.ace_generation_model is not None and (self.features != ['ace_step'] or not self.download_models
+                or self.reinstall or self.stable_training_variant is not None or self.stable_generation_variant is not None
+                or self.stable_conditioning_variant is not None or self.music_training_engine is not None):
+            raise ValueError('invalid_ace_generation_selection')
         if len(set(self.features)) != len(self.features):
             raise ValueError('duplicate_module')
         if len(set(self.reinstall)) != len(self.reinstall) or not set(self.reinstall).issubset(self.features):
             raise ValueError('invalid_reinstall_selection')
+        if self.stable_conditioning_variant is not None and (self.features != ['stable_audio3'] or not self.download_models
+                or self.reinstall or self.stable_training_variant is not None or self.stable_generation_variant is not None
+                or self.music_training_engine is not None):
+            raise ValueError('invalid_stable_conditioning_selection')
         if self.stable_training_variant is not None and (self.features != ['stable_audio3'] or not self.download_models or self.reinstall):
             raise ValueError('invalid_stable_training_selection')
         if self.stable_generation_variant is not None and (self.features != ['stable_audio3'] or not self.download_models or self.reinstall or self.stable_training_variant is not None or self.music_training_engine is not None):
@@ -117,9 +193,11 @@ class ModulePlanStep(Contract):
 class ModulePlan(Contract):
     features: list[ModuleId]
     download_models: bool
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=len(get_args(ModuleId)))
     stable_training_variant: StableLoraVariant | None = None
     stable_generation_variant: StableLoraVariant | None = None
+    stable_conditioning_variant: StableLoraVariant | None = None
+    ace_generation_model: Literal['acestep-v15-base'] | None = None
     music_training_engine: MusicTrainingEngine | None = None
     plan_token: str
     steps: list[ModulePlanStep]
@@ -184,9 +262,11 @@ class ModuleInstallJob(Contract):
     updated_at: str
     features: list[ModuleId]
     download_models: bool
-    reinstall: list[ModuleId] = Field(default_factory=list, max_length=16)
+    reinstall: list[ModuleId] = Field(default_factory=list, max_length=len(get_args(ModuleId)))
     stable_training_variant: StableLoraVariant | None = None
     stable_generation_variant: StableLoraVariant | None = None
+    stable_conditioning_variant: StableLoraVariant | None = None
+    ace_generation_model: Literal['acestep-v15-base'] | None = None
     music_training_engine: MusicTrainingEngine | None = None
     steps: list[ModuleJobStep]
     current_step: int | None = Field(default=None, ge=0)
@@ -199,6 +279,6 @@ class ModuleJobsResponse(Contract):
 
 
 MODULE_CLIENT_MODELS: tuple[type[Contract], ...] = (
-    ModuleEvidence, ModuleAction, ModuleLicenseDeclaration, ModuleInfo, ModuleInventory, ModulePlanRequest,
+    ModuleEvidence, ModuleAction, ModuleComponentIdentity, ModuleLicenseEvidence, ModuleLicenseDeclaration, ModuleInfo, ModuleInventory, ModulePlanRequest,
     ModulePlanStep, ModulePlan, ModuleInstallRequest, ModuleDownloadProgress, ModuleSetupFailure, ModuleSetupEvent, ModuleJobStep, ModuleInstallJob, ModuleJobsResponse,
 )

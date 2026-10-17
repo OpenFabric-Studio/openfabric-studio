@@ -8,21 +8,25 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from . import config, local_music_runtime, music_lora
+from . import config, local_music_runtime, music_lora, music_conditioning, song_capabilities, song_from_beat
+from .contracts import JsonObject
 from .generation_contracts import AceGenerationSettings, YueGenerationSettings
-from .local_music_contracts import LocalMusicRequest
+from .local_music_contracts import LocalMusicError, LocalMusicRequest
 from .module_catalog import DEFINITIONS, ModuleEnvironment, configured_environment, engine_python, supported
 from .module_evidence import environment_fingerprint, environment_verified
 from .module_runtime import RuntimeEvidence, RuntimeTarget, runtime_status
 from .music_lora_contracts import MusicAdapter, MusicLoraError
+from .queued_music_source_contracts import QueuedMusicSource
 from .music_queue_contracts import (
     MusicQueueAceRequest, MusicQueueAdjustment, MusicQueueBrief, MusicQueueCatalog,
     MusicQueueEngine, MusicQueueEngineSelection, MusicQueueModelPlan,
     MusicQueueNormalizedItem, MusicQueuePayload, MusicQueuePreview, MusicQueuePreviewRequest,
     MusicQueueReadiness, MusicQueueStableRequest, MusicQueueYueRequest,
+    MusicQueueError,
 )
+from .song_from_beat_contracts import AceCompleteConditioning, AceLegoConditioning
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 from .yue_contracts import YueOptions, YueSubmitRequest
@@ -30,6 +34,21 @@ from .yue_contracts import YueOptions, YueSubmitRequest
 ENGINES: tuple[MusicQueueEngine, ...] = ('ace_step', 'yue2', 'stable_audio3')
 _WEIGHT_NAMES = ('model.safetensors', 'pytorch_model.bin', 'diffusion_pytorch_model.safetensors',
                  'diffusion_pytorch_model.bin')
+_object = TypeAdapter(JsonObject)
+
+
+def selection_document(selection: MusicQueueEngineSelection) -> JsonObject:
+    payload = _object.validate_json(selection.model_dump_json())
+    if payload.get('conditioning') is None:
+        payload.pop('conditioning', None)
+    return payload
+
+
+def request_hash(request: MusicQueuePreviewRequest) -> str:
+    # Keep pre-conditioning submission replays byte-compatible with their old JSON.
+    document = {'brief': request.brief.model_dump(mode='json'),
+        'selections': [selection_document(selection) for selection in request.selections]}
+    return hashlib.sha256(json.dumps(document, ensure_ascii=False, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
 
 
 class _WeightIndex(BaseModel):
@@ -69,6 +88,8 @@ def _yue_root(environment: ModuleEnvironment) -> Path:
 
 def _weights_ready(environment: ModuleEnvironment, selection: MusicQueueEngineSelection) -> bool:
     if selection.engine == 'ace_step':
+        if isinstance(selection.conditioning, (AceCompleteConditioning, AceLegoConditioning)):
+            return song_capabilities.weights_present(environment)
         root = Path(os.environ.get('ACESTEP_CHECKPOINTS_DIR') or environment.paths['ace_step'] / 'checkpoints').expanduser()
         # Match the reviewed downloader's components, including real shards behind indexes.
         return all(_ace_component(root / component) for component in
@@ -171,11 +192,19 @@ def _adapters(selection: MusicQueueEngineSelection) -> list[MusicAdapter]:
 
 def _payload(brief: MusicQueueBrief, selection: MusicQueueEngineSelection, duration: int | None) -> MusicQueuePayload:
     if selection.engine == 'ace_step':
+        conditioning = selection.conditioning
+        if conditioning is not None and not isinstance(conditioning, (AceCompleteConditioning, AceLegoConditioning)):
+            raise ValueError('conditioning_task_unsupported')
         return MusicQueueAceRequest(engine='ace_step', request=AceGenerationSettings(engine='ace_step',
             mode='custom', customPrompt=brief.description, customLyrics=brief.lyrics, instrumental=brief.instrumental,
-            duration=float(duration if duration is not None else brief.duration_seconds), durationAuto=False,
-            bpm=brief.bpm, keyScale=brief.key, vocalLanguage=brief.language, selectedModel=config.ACE_STEP_DIT_MODEL,
-            seed=0, randomSeed=False, batchSize=1, useCotCaption=False, audioFormat='wav'))
+            duration=float(duration if duration is not None else min(brief.duration_seconds, 300)), durationAuto=False,
+            bpm=brief.bpm, keyScale=brief.key, vocalLanguage=brief.language,
+            selectedModel=song_capabilities.BASE_MODEL if conditioning is not None else config.ACE_STEP_DIT_MODEL,
+            taskType='complete' if isinstance(conditioning, AceCompleteConditioning) else 'lego' if conditioning is not None else 'text2music',
+            useRefAudio=conditioning is not None,
+            trackClasses=list(conditioning.track_classes) if isinstance(conditioning, AceCompleteConditioning) else [],
+            trackName=conditioning.track_name if isinstance(conditioning, AceLegoConditioning) else 'vocals',
+            seed=0, randomSeed=False, batchSize=1, useCotCaption=False, audioFormat='wav'), conditioning=conditioning)
     prompt = _directions(brief)
     if selection.engine == 'yue2':
         return MusicQueueYueRequest(engine='yue2', request=YueSubmitRequest(title=brief.title, lyrics=brief.lyrics,
@@ -186,13 +215,16 @@ def _payload(brief: MusicQueueBrief, selection: MusicQueueEngineSelection, durat
                 arAdapter=selection.ar_adapter, narAdapter=selection.nar_adapter)))
     if len(prompt) > 4000:
         raise ValueError('music_queue_prompt_too_long')
+    if isinstance(selection.conditioning, (AceCompleteConditioning, AceLegoConditioning)):
+        raise ValueError('conditioning_task_unsupported')
     request = LocalMusicRequest(engine=selection.engine, title=brief.title, prompt=prompt, lyrics=brief.lyrics,
         duration_seconds=duration if duration is not None else brief.duration_seconds,
-        seed=0, variant=selection.variant, adapter=selection.adapter)
+        seed=0, variant=selection.variant, adapter=selection.adapter, conditioning=selection.conditioning)
     return MusicQueueStableRequest(engine='stable_audio3', request=request)
 
 
-async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironment | None = None) -> MusicQueuePreview:
+async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironment | None = None, *,
+                  retained_inputs: list[QueuedMusicSource] | None = None) -> MusicQueuePreview:
     """Keep incompatible/missing engines visible without changing the original brief."""
     env = environment or configured_environment()
     available = await catalog(env)
@@ -202,16 +234,30 @@ async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironm
     brief = request.brief
     for selection in request.selections:
         readiness = by_engine[selection.engine].model_copy(deep=True)
+        ace = selection.conditioning if isinstance(selection.conditioning, (AceCompleteConditioning, AceLegoConditioning)) else None
+        if ace is not None:
+            capability = song_capabilities.capabilities(env).modes[0]
+            readiness.installed = capability.installed
+            readiness.weights_ready = capability.weights_ready
+            transition_error = readiness.error_code if readiness.error_code not in (
+                'music_queue_weights_missing', 'music_queue_engine_not_installed') else ''
+            readiness.error_code = transition_error or (capability.reason or '')
+            readiness.ready = not readiness.error_code
         if readiness.ready and not _weights_ready(env, selection):
             readiness.weights_ready = False
             readiness.ready = False
             readiness.error_code = 'music_queue_weights_missing'
-        mode: Literal['target', 'model_led'] = 'model_led' if selection.engine == 'yue2' else 'target'
+        mode: Literal['target', 'model_led'] = 'model_led' if selection.engine == 'yue2' or ace is not None else 'target'
         cap = 300 if selection.engine == 'ace_step' else 120 if selection.variant == 'small-music' else 380
-        duration = None if selection.engine == 'yue2' else min(brief.duration_seconds, cap)
+        duration = None if selection.engine == 'yue2' or ace is not None else min(brief.duration_seconds, cap)
         error = ('music_queue_yue_vocals_required' if selection.engine == 'yue2' and brief.instrumental else
                  'music_queue_yue_lyrics_required' if selection.engine == 'yue2' and not brief.lyrics.strip() else
                  'stable_audio3_instrumental_only' if selection.engine == 'stable_audio3' and not brief.instrumental else '')
+        roles = ace.track_classes if isinstance(ace, AceCompleteConditioning) else [ace.track_name] if ace is not None else []
+        if brief.instrumental and any(role in ('vocals', 'backing_vocals') for role in roles):
+            error = 'music_queue_instrumental_vocal_role'
+        elif any(role in ('vocals', 'backing_vocals') for role in roles) and brief.lyrics.strip().lower() in ('', '[inst]', '[instrumental]'):
+            error = 'music_queue_ace_vocal_lyrics_required'
         model = MusicQueueModelPlan(selection=selection, readiness=readiness, compatible=not error, error_code=error,
             effective_duration_seconds=duration, duration_mode=mode)
         if duration is not None and duration != brief.duration_seconds:
@@ -225,9 +271,46 @@ async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironm
             try:
                 model.adapters = _adapters(selection)
                 payload = _payload(brief, selection, duration)
-                items.extend(MusicQueueNormalizedItem(engine=selection.engine, variation_index=index,
-                    payload=payload.model_copy(deep=True), adapters=model.adapters)
-                    for index in range(1, selection.variations + 1))
+                if payload.engine == 'ace_step' and payload.conditioning is not None:
+                    retained = next((value for value in retained_inputs or [] if value.snapshot.source == payload.conditioning.source
+                        and value.snapshot.sha256 == payload.conditioning.source_sha256), None)
+                    if retained_inputs is not None and retained is None:
+                        raise MusicQueueError('conditioning_snapshot_invalid')
+                    model.conditioning_preview = await song_from_beat.preview(payload.conditioning,
+                        retained_input=retained, environment=env)
+                    model.warnings.extend(['music_queue_ace_generated_full_mix', 'music_queue_ace_source_duration',
+                        'music_queue_ace_runtime_unverified'])
+                    if not model.conditioning_preview.can_start:
+                        model.compatible = False
+                        model.error_code = model.conditioning_preview.error_code or 'conditioning_runtime_unavailable'
+                if payload.engine == 'stable_audio3' and payload.request.conditioning is not None:
+                    if retained_inputs is None:
+                        model.conditioning_preview = await music_conditioning.preview(payload.request)
+                        forecast = model.conditioning_preview
+                        required = forecast.required_free_bytes + forecast.source_bytes
+                        enough = forecast.free_bytes is not None and forecast.free_bytes >= required
+                        model.conditioning_preview = forecast.model_copy(update={'required_free_bytes': required,
+                            'can_start': forecast.can_start and enough,
+                            'error_code': forecast.error_code if forecast.error_code is not None or enough else 'insufficient_disk'})
+                    else:
+                        retained = next((value for value in retained_inputs if value.snapshot.source == payload.request.conditioning.source
+                            and value.snapshot.sha256 == payload.request.conditioning.source_sha256), None)
+                        if retained is None:
+                            raise LocalMusicError('conditioning_snapshot_invalid')
+                        model.conditioning_preview = await music_conditioning.preview(payload.request, retained_input=retained)
+                    if not model.conditioning_preview.can_start:
+                        model.compatible = False
+                        model.error_code = model.conditioning_preview.error_code or 'conditioning_runtime_unavailable'
+                if model.compatible:
+                    items.extend(MusicQueueNormalizedItem(engine=selection.engine, variation_index=index,
+                        payload=payload.model_copy(deep=True), adapters=model.adapters)
+                        for index in range(1, selection.variations + 1))
+            except LocalMusicError as exc:
+                model.compatible = False
+                model.error_code = exc.code
+            except MusicQueueError as exc:
+                model.compatible = False
+                model.error_code = exc.code
             except MusicLoraError as exc:
                 model.compatible = False
                 model.error_code = exc.code
@@ -235,8 +318,26 @@ async def preview(request: MusicQueuePreviewRequest, environment: ModuleEnvironm
                 model.compatible = False
                 model.error_code = 'music_queue_prompt_too_long' if str(exc) == 'music_queue_prompt_too_long' else 'music_queue_plan_invalid'
         models.append(model)
+    if retained_inputs is None:
+        # Every selected engine captures its own immutable input before enqueue.
+        intake_bytes = sum(model.conditioning_preview.source_bytes for model in models
+            if model.conditioning_preview is not None)
+        for model in models:
+            combined_forecast = model.conditioning_preview
+            if combined_forecast is None or intake_bytes == combined_forecast.source_bytes:
+                continue
+            required = combined_forecast.required_free_bytes + intake_bytes - combined_forecast.source_bytes
+            enough = combined_forecast.free_bytes is not None and combined_forecast.free_bytes >= required
+            model.conditioning_preview = combined_forecast.model_copy(update={'required_free_bytes': required,
+                'can_start': combined_forecast.can_start and enough,
+                'error_code': combined_forecast.error_code if combined_forecast.error_code is not None or enough else 'insufficient_disk'})
+            if not enough:
+                model.compatible = False
+                model.error_code = model.error_code or 'insufficient_disk'
+        compatible = {model.selection.engine for model in models if model.compatible}
+        items = [item for item in items if item.engine in compatible]
     canonical = {'brief': brief.model_dump(mode='json'),
-        'selections': [selection.model_dump(mode='json') for selection in request.selections],
+        'selections': [selection_document(selection) for selection in request.selections],
         'items': [item.model_dump(mode='json') for item in items]}
     fingerprint = hashlib.sha256(json.dumps(canonical, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()).hexdigest()
     return MusicQueuePreview(brief=brief, selections=request.selections, models=models, items=items,

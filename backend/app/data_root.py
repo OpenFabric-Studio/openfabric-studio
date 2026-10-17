@@ -29,12 +29,14 @@ logger = logging.getLogger(__name__)
 LIBRARY_FILES = ("aicollector.db", "aicollector.db-wal", "aicollector.db-shm", "video_character_trainer.json")
 LIBRARY_DIRS = ("files", "voices", "videos", "models", "logs", "audiobooks", "voice-profiles", "speech-clone-trials",
                 "video_projects", "video_characters", "video_character_training", "providers",
-                "local-music", "music-lora", "stable-lora-training", "music-lora-training", "lora-datasets")
+                "local-music", "music-lora", "stable-lora-training", "music-lora-training", "lora-datasets",
+                "music-analysis", "music-artifacts")
 _PATH_COLUMNS = ("audio_path", "abc_path", "captured_source_path")
-_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('audiobooks'), Path('voice-profiles'),
+_METADATA_ROOTS = (Path('voices'), Path('files') / '_exports', Path('files') / '_beats', Path('files') / '_mashups', Path('files') / '_song_mixes', Path('files') / '_song_sources', Path('files') / 'replacements', Path('audiobooks'), Path('voice-profiles'),
                    Path('videos'), Path('video_projects'), Path('video_characters'), Path('video_character_training'),
                    Path('providers'), Path('video_character_trainer.json'), Path('local-music'),
-                   Path('music-lora'), Path('stable-lora-training'), Path('music-lora-training'), Path('lora-datasets'))
+                   Path('music-lora'), Path('stable-lora-training'), Path('music-lora-training'), Path('lora-datasets'),
+                   Path('music-analysis'), Path('music-artifacts'))
 _DATABASES = (Path('aicollector.db'), Path('voice-profiles') / 'profiles.db', Path('audiobooks') / 'audiobooks.db')
 _JSON_COLUMNS = ("stems_json", "midi_json")
 JsonValue: TypeAlias = str | int | float | bool | None | list["JsonValue"] | dict[str, "JsonValue"]
@@ -59,6 +61,8 @@ _LAYOUT = (
     ("music-lora", "musicAdapters"),
     ("stable-lora-training", "musicTraining"),
     ("music-lora-training", "musicTrainingRuns"),
+    ("music-analysis", "musicAnalysis"),
+    ("music-artifacts", "musicArtifacts"),
     ("models/seed-vc", "models"),
     ("logs", "logs"),
     ("aicollector.db", "database"),
@@ -242,7 +246,12 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                                   ('audiobook_workflows', ('payload',)),
                                   ('local_music_jobs', ('worker_json',)),
                                   ('stable_lora_jobs', ('worker_json',)),
-                                  ('music_training_jobs', ('worker_json',))):
+                                  ('music_training_jobs', ('worker_json',)),
+                                  ('music_analysis_jobs', ('worker_identity_json',)),
+                                  ('beat_render_jobs', ('worker_identity_json',)),
+                                  ('mashup_jobs', ('worker_identity_json',)),
+                                  ('beat_song_mix_jobs', ('worker_identity_json',)),
+                                  ('replacement_attempts', ('worker_json', 'body_json'))):
             if table not in tables:
                 continue
             columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
@@ -253,7 +262,7 @@ def rewrite_library_paths(db_path: Path, src: Path, dest: Path) -> None:
                 for rowid, value in connection.execute(f"SELECT rowid, {column} FROM {table}").fetchall():
                     if not isinstance(value, str) or not value:
                         continue
-                    if column not in (*_JSON_COLUMNS, 'data_json', 'snapshot_json', 'payload', 'worker_json'):
+                    if column not in (*_JSON_COLUMNS, 'data_json', 'snapshot_json', 'payload', 'body_json', 'worker_json', 'worker_identity_json'):
                         rewritten = _rewrite_path(value, src, dest)
                     else:
                         try:

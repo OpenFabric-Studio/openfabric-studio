@@ -6,6 +6,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { i18n, setLocale } from '../../i18n'
 import * as api from '../../api/modules'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 import { useModulesStore } from '../../stores/modules'
 import ModuleSetupPanel from './ModuleSetupPanel.vue'
 import type { ModuleInventory, ModulePlan, ModuleLicenseDeclaration, ModuleInstallJob } from '../../api/generated'
@@ -18,6 +20,7 @@ const inventory: ModuleInventory = { platform: 'darwin', architecture: 'arm64', 
 const plan: ModulePlan = { features: ['speech'], download_models: true, plan_token: 'a'.repeat(64), steps: [{ module_id: 'speech', name: 'GPT-SoVITS', operation: 'manual', detail: 'Review the setup guide', actions: [] }], estimated_download_bytes: 0, download_size_unknown: true, required_free_bytes: 10, free_bytes: 100, can_install: true, warnings: ['Weights need manual verification'] }
 let app: App | undefined
 beforeEach(() => { vi.clearAllMocks(); setLocale('en'); vi.mocked(api.getModules).mockResolvedValue(inventory); vi.mocked(api.listModuleJobs).mockResolvedValue([]); vi.mocked(api.planModules).mockResolvedValue(plan) })
+beforeEach(() => { vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true })) })
 afterEach(() => { app?.unmount(); document.body.replaceChildren() })
 async function settle() { for (let i = 0; i < 8; i++) await nextTick() }
 async function mount(hash = '') { const pinia = createPinia(); useModulesStore(pinia).inventory = inventory; const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/settings', component: { render: () => null } }] }); await router.push({ path: '/settings', hash }); app = createApp(ModuleSetupPanel).use(pinia).use(router).use(i18n); const node = document.body.appendChild(document.createElement('div')); app.mount(node); await settle(); return node }

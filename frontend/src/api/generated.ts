@@ -13,6 +13,13 @@ export type AceAdoptRequest = {
   "track_ids"?: Array<number>
 }
 
+export type AceCompleteConditioning = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+  "source_sha256": string
+  "mode": "ace_complete"
+  "track_classes": Array<"woodwinds" | "brass" | "fx" | "synth" | "strings" | "percussion" | "keyboard" | "guitar" | "bass" | "drums" | "backing_vocals" | "vocals">
+}
+
 export type AceGenerationSettings = {
   "referenceImportId": (string | null)
   "engine": "ace_step"
@@ -80,6 +87,13 @@ export type AceJobResponse = {
 
 export type AceJobsResponse = {
   "jobs": Array<AceJobResponse>
+}
+
+export type AceLegoConditioning = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+  "source_sha256": string
+  "mode": "ace_lego"
+  "track_name": "woodwinds" | "brass" | "fx" | "synth" | "strings" | "percussion" | "keyboard" | "guitar" | "bass" | "drums" | "backing_vocals" | "vocals"
 }
 
 export type AceLoraFailure = {
@@ -163,9 +177,113 @@ export type AgreementsResponse = {
   "agreements": Array<Agreement>
 }
 
+export type AlignmentEditRequest = {
+  "expected_revision": number
+  "alignment": AlignmentResult
+  "reviewed_phrase_ids"?: Array<string>
+}
+
+export type AlignmentPhraseDiagnostic = {
+  "phrase_id": string
+  "reference_start_sec"?: (number | null)
+  "reference_end_sec"?: (number | null)
+  "prepared_start_sec"?: (number | null)
+  "prepared_end_sec"?: (number | null)
+  "mean_cost"?: (number | null)
+  "onset_error_sec"?: (number | null)
+  "confidence"?: (number | null)
+  "reason": "aligned" | "manual" | "unmatched_reference" | "unmatched_prepared" | "ambiguous" | "budget_exceeded" | "insufficient_activity" | "unsafe_slope"
+}
+
+export type AlignmentRequest = {
+  "schema_version"?: 1
+  "reference": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "reference_sha256": string
+  "prepared": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "prepared_sha256": string
+  "revision": number
+  "manual_anchors"?: Array<WarpAnchor>
+  "min_duration_ratio"?: number
+  "max_duration_ratio"?: number
+}
+
+export type AlignmentResult = {
+  "schema_version"?: 1
+  "id": string
+  "request": AlignmentRequest
+  "status": "accepted" | "needs_review" | "unavailable"
+  "anchors"?: Array<WarpAnchor>
+  "phrases"?: Array<AlignmentPhraseDiagnostic>
+  "feature_method": string
+  "matcher_method": string
+  "configuration_sha256": string
+  "warnings"?: Array<"pitch_artifact_risk" | "level_match_unavailable" | "gain_capped" | "loudness_target_unmet" | "loudness_inconclusive" | "true_peak_over" | "hard_clip_risk" | "unmatched_phrases" | "phrase_ambiguous" | "alignment_unverified" | "alignment_budget_exceeded" | "stretch_unavailable" | "anchor_boundary_uncertain">
+  "created_at": string
+}
+
 export type AmendSourceRequest = {
   "declaration": SourceDeclaration
   "reviewer_label": string
+}
+
+export type AnalysisEnergyPoint = {
+  "time_sec": number
+  "rms_dbfs": number
+  "centroid_hz": number
+  "overlap_band_power": number
+}
+
+export type AnalysisEngine = {
+  "task": "features" | "key" | "sections" | "beats" | "loudness" | "vocal_activity"
+  "name": string
+  "revision": string
+  "configuration_sha256": string
+  "weights_sha256"?: (string | null)
+  "device"?: "cpu"
+  "precision"?: "float32" | "float64"
+}
+
+export type AnalysisResult = {
+  "duration_sec": number
+  "analysis_sample_rate_hz": number
+  "hop_sec": number
+  "method"?: "numpy-summary-v1"
+  "tempo"?: TempoEstimate
+  "beats_sec"?: Array<number>
+  "downbeats_sec"?: Array<number>
+  "meter"?: MeterEstimate
+  "key"?: KeyEstimate
+  "key_changes"?: Array<KeyChange>
+  "sections"?: Array<AnalysisSection>
+  "vocal_activity"?: VocalActivity
+  "energy"?: Array<AnalysisEnergyPoint>
+  "warnings"?: Array<"silence" | "short_audio" | "beat_grid_uncertain" | "tempo_half_double" | "meter_unknown" | "key_unknown" | "key_changes" | "generic_sections" | "vocal_activity_unavailable" | "channel_disagreement" | "window_boundary_uncertain" | "analysis_partial">
+  "schema_version"?: 1
+  "id": string
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "audio_sha256": string
+  "sample_rate_hz": number
+  "channels": number
+  "duration_frames": number
+  "analyzer_revision": string
+  "configuration_sha256": string
+  "weights_sha256"?: (string | null)
+  "loudness": AudioMetrics
+  "engines"?: Array<AnalysisEngine>
+  "license_evidence_ids"?: Array<string>
+  "created_at": string
+  "override_revision"?: number
+}
+
+export type AnalysisSection = {
+  "start_sec": number
+  "end_sec": number
+  "id": string
+  "group": string
+  "label": string
+  "musical_label"?: ("intro" | "verse" | "chorus" | "bridge" | "outro" | "instrumental" | null)
+  "confidence"?: (number | null)
+  "bars"?: (number | null)
 }
 
 export type AnalyzeVoiceCoverageRequest = {
@@ -183,6 +301,8 @@ export type ApplyStatusResponse = {
   "started_at"?: number
   "duration_sec"?: number
   "job_progress"?: (VoiceJobProgress | null)
+  "mix_settings"?: (VoiceMixSettings | null)
+  "mix"?: (VoiceMixReport | null)
 }
 
 export type ApplyVideoCharacterAdapterRequest = {
@@ -198,6 +318,7 @@ export type ApplyVideoCharacterRequest = {
 export type ApplyVoiceRequest = {
   "voice_id": string
   "track_id": number
+  "mix"?: (VoiceMixSettings | null)
 }
 
 export type ApproveVideoVariantRequest = {
@@ -368,6 +489,8 @@ export type AudioVersion = {
   "duration_ms"?: (number | null)
   "source_version_id"?: (string | null)
   "job_progress"?: (VoiceJobProgress | null)
+  "mix_settings"?: (VoiceMixSettings | null)
+  "mix"?: (VoiceMixReport | null)
 }
 
 export type AudiobookAudition = {
@@ -569,8 +692,638 @@ export type AutoLabelLoraDatasetRequest = {
   "only_unlabeled"?: boolean
 }
 
+export type BeatArchiveResponse = {
+  "beat_id": string
+  "archived"?: boolean
+}
+
+export type BeatArtifact = {
+  "id": string
+  "kind": "mix" | "stem" | "pattern" | "events" | "midi" | "tuning" | "provenance" | "bundle"
+  "lane_id"?: (string | null)
+  "sha256": string
+  "byte_size": number
+  "media_type": string
+  "filename": string
+}
+
+export type BeatClipLink = {
+  "beat_id": string
+  "beat_revision": number
+  "render_id": string
+  "lane_id": string
+  "occurrence_index"?: (number | null)
+}
+
+export type BeatCreateRequest = {
+  "title"?: string
+  "bpm"?: number
+  "seed"?: number
+  "kit_id"?: string
+  "document"?: (BeatDocument | null)
+}
+
+export type BeatDocument = {
+  "schema_version"?: 1
+  "id": string
+  "revision": number
+  "title": string
+  "bpm": number
+  "seed": number
+  "kit_id": string
+  "kit_manifest_sha256": string
+  "patterns": Array<BeatPattern>
+  "chain": Array<PatternPlacement>
+  "global_swing"?: number
+  "scale"?: (BeatScale | null)
+  "renderer_version"?: string
+  "preset_origin"?: (BeatPresetOrigin | null)
+}
+
+export type BeatDocumentSummary = {
+  "id": string
+  "revision": number
+  "title": string
+  "bpm": number
+  "updated_at": string
+}
+
+export type BeatDocuments = {
+  "documents": Array<BeatDocumentSummary>
+}
+
+export type BeatHumanizeRequest = {
+  "expected_revision": number
+  "pattern_id": "A" | "B" | "C" | "D"
+  "lane_ids": Array<string>
+  "timing_steps"?: number
+  "velocity"?: number
+}
+
+export type BeatInstrument = {
+  "instrument_id": string
+  "label": string
+  "role": "drum" | "bass" | "pitched"
+  "pitched"?: boolean
+  "supports_pitch_curve"?: boolean
+  "midi_program"?: number
+  "midi_note"?: number
+  "regions": Array<BeatSampleRegion>
+}
+
+export type BeatInstrumentManifest = {
+  "schema_version"?: 1
+  "kit_id": string
+  "revision": string
+  "instruments": Array<BeatInstrument>
+}
+
+export type BeatJob = {
+  "id": string
+  "beat_id": string
+  "beat_revision": number
+  "request": BeatJobRequest
+  "status": "queued" | "running" | "cancelling" | "done" | "failed" | "cancelled" | "interrupted" | "blocked" | "saving"
+  "phase": "queued" | "compiling" | "rendering" | "publishing" | "done" | "cancelling" | "failed" | "cancelled" | "interrupted" | "blocked" | "saving"
+  "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
+  "progress_frames"?: (number | null)
+  "total_frames"?: (number | null)
+  "error_code"?: ("beat_pattern_invalid" | "beat_render_limit" | "beat_swing_grid_unsupported" | "beat_sample_changed" | "beat_instrument_missing" | "beat_midi_channels_exhausted" | "beat_midi_percussion_overlap" | "beat_not_found" | "beat_job_not_found" | "beat_revision_conflict" | "beat_submission_conflict" | "beat_queue_full" | "beat_disk_full" | "beat_worker_failed" | "beat_cleanup_failed" | "beat_save_failed" | "beat_storage_unavailable" | "beat_kit_invalid" | "beat_cancelled" | "beat_interrupted" | null)
+  "manifest"?: (BeatRenderManifest | null)
+}
+
+export type BeatJobRequest = {
+  "beat_id": string
+  "expected_revision": number
+  "mode": "preview" | "full"
+  "preview_pattern_id"?: ("A" | "B" | "C" | "D" | null)
+  "occurrence_index"?: number
+  "submission_key": string
+  "midi_approximation"?: boolean
+}
+
+export type BeatJobs = {
+  "jobs": Array<BeatJob>
+}
+
+export type BeatKitInfo = {
+  "manifest": BeatInstrumentManifest
+  "sha256": string
+}
+
+export type BeatKits = {
+  "kits": Array<BeatKitInfo>
+}
+
+export type BeatLane = {
+  "lane_id": string
+  "label": string
+  "instrument_id": string
+  "role": "drum" | "bass" | "pitched"
+  "muted"?: boolean
+  "gain_db"?: number
+  "pan"?: number
+  "swing"?: (number | null)
+  "steps"?: Array<BeatStep>
+}
+
+export type BeatMeter = {
+  "numerator": number
+  "denominator": 2 | 4 | 8 | 16
+}
+
+export type BeatMidiNoteMapping = {
+  "event_id": string
+  "lane_id": string
+  "instrument_id": string
+  "asset_id": string
+  "sample_sha256": string
+  "channel": number
+  "program": number
+  "note_midi": number
+  "cents": number
+  "pitch_curve"?: Array<BeatPitchPoint>
+  "output_note_midi": number
+  "onset_tick": number
+  "end_tick": number
+  "bend_range_semitones": number
+  "timing_quantized": boolean
+  "tuning_approximated": boolean
+  "percussion_retriggered"?: boolean
+}
+
+export type BeatMidiTuning = {
+  "schema_version"?: 1
+  "beat_id": string
+  "beat_revision": number
+  "document_sha256": string
+  "events_sha256": string
+  "ppq"?: 960
+  "approximation": boolean
+  "warnings": Array<"beat_event_clamped" | "beat_midi_timing_quantized" | "beat_midi_approximation" | "beat_midi_generic_sounds" | "beat_midi_percussion_retrigger">
+  "notes": Array<BeatMidiNoteMapping>
+}
+
+export type BeatPattern = {
+  "id": "A" | "B" | "C" | "D"
+  "bars"?: number
+  "meter": BeatMeter
+  "steps_per_quarter"?: 2 | 3 | 4 | 6 | 8
+  "lanes": Array<BeatLane>
+}
+
+export type BeatPitchPoint = {
+  "position": number
+  "cents": number
+}
+
+export type BeatPresetCatalog = {
+  "schema_version"?: 1
+  "version": string
+  "presets": Array<BeatPresetInfo>
+  "scales": Array<BeatPresetScale>
+  "tunings": Array<BeatPresetTuning>
+  "rhythms": Array<BeatRhythmDefinition>
+}
+
+export type BeatPresetCompilation = {
+  "preset_id": string
+  "preset_sha256": string
+  "catalog_version": string
+  "review_status"?: "unreviewed"
+  "warnings": Array<"candidate_arrangement_unreviewed" | "scale_is_report_approximation" | "fixed_grid_free_time_approximation" | "raga_phrase_rules_not_implemented">
+  "document": BeatDocument
+}
+
+export type BeatPresetCompileRequest = {
+  "preset_id": string
+  "kit_id": string
+  "document_id": string
+  "seed": number
+  "bpm"?: (number | null)
+  "tonic_midi"?: number
+}
+
+export type BeatPresetDefinition = {
+  "id": string
+  "version"?: 1
+  "title": string
+  "region": "china" | "japan" | "korea" | "indonesia" | "india" | "thailand"
+  "tradition": string
+  "category": "traditional" | "fusion" | "modern_pop"
+  "bpm_default": number
+  "bpm_min": number
+  "bpm_max": number
+  "meter": BeatMeter
+  "bars": number
+  "steps_per_quarter": 2 | 3 | 4 | 6 | 8
+  "scale_id"?: (string | null)
+  "tuning_id": string
+  "rhythm_id"?: (string | null)
+  "lanes": Array<BeatPresetLane>
+  "swing"?: number
+  "timing"?: "candidate_grid" | "fixed_grid_free_time_approximation" | "tempo_envelope_required" | "cycle_progression_required"
+  "prompt_tags": Array<string>
+  "notes": string
+  "report_section"?: "6.4"
+  "report_number": number
+  "review_status"?: "unreviewed"
+}
+
+export type BeatPresetHit = {
+  "index": number
+  "velocity"?: number
+  "degree"?: (number | null)
+  "octave"?: number
+  "gate_steps"?: number
+  "articulation_id"?: (string | null)
+}
+
+export type BeatPresetInfo = {
+  "preset": BeatPresetDefinition
+  "preset_sha256": string
+  "availability": "available" | "pack_missing" | "license_unresolved" | "unsupported_articulation" | "tuning_unresolved" | "timing_unsupported"
+  "compatible_kit_ids"?: Array<string>
+  "missing_instrument_ids"?: Array<string>
+  "reasons"?: Array<"available" | "pack_missing" | "license_unresolved" | "unsupported_articulation" | "tuning_unresolved" | "timing_unsupported">
+}
+
+export type BeatPresetLane = {
+  "id": string
+  "instrument_id": string
+  "label": string
+  "role": "drum" | "bass" | "pitched"
+  "hits"?: Array<BeatPresetHit>
+}
+
+export type BeatPresetOrigin = {
+  "preset_id": string
+  "preset_sha256": string
+  "catalog_version": string
+  "review_status"?: "unreviewed"
+  "warnings": Array<"candidate_arrangement_unreviewed" | "scale_is_report_approximation" | "fixed_grid_free_time_approximation" | "raga_phrase_rules_not_implemented">
+}
+
+export type BeatPresetScale = {
+  "id": string
+  "title": string
+  "region": "china" | "japan" | "korea" | "indonesia" | "india" | "thailand"
+  "degrees_cents": Array<number>
+  "notes": string
+  "report_section"?: "6.2"
+  "review_status"?: "unreviewed"
+}
+
+export type BeatPresetTuning = {
+  "id": string
+  "title": string
+  "kind": "twelve_tet_candidate" | "sample_specific_required" | "equal_division_experiment"
+  "degrees_cents"?: (Array<number> | null)
+  "reference_hz"?: number
+  "notes": string
+  "review_status"?: "unreviewed"
+}
+
+export type BeatRenderConditioningSource = {
+  "kind": "beat_render"
+  "beat_id": string
+  "beat_revision": number
+  "render_id": string
+  "sha256": string
+}
+
+export type BeatRenderManifest = {
+  "schema_version"?: 1
+  "beat_id": string
+  "beat_revision": number
+  "document_sha256": string
+  "render_id": string
+  "seed": number
+  "renderer_version": string
+  "algorithm_version": string
+  "sample_rate_hz"?: number
+  "channels"?: number
+  "frames": number
+  "musical_frames": number
+  "master_gain"?: number
+  "peak": number
+  "kit_manifest_sha256": string
+  "events_sha256": string
+  "artifacts": Array<BeatArtifact>
+  "warnings"?: Array<("beat_event_clamped" | "beat_midi_timing_quantized" | "beat_midi_approximation" | "beat_midi_generic_sounds" | "beat_midi_percussion_retrigger" | "beat_silent" | "beat_peak_over_one" | "beat_midi_unavailable")>
+  "midi_error_code"?: ("beat_pattern_invalid" | "beat_render_limit" | "beat_swing_grid_unsupported" | "beat_sample_changed" | "beat_instrument_missing" | "beat_midi_channels_exhausted" | "beat_midi_percussion_overlap" | "beat_not_found" | "beat_job_not_found" | "beat_revision_conflict" | "beat_submission_conflict" | "beat_queue_full" | "beat_disk_full" | "beat_worker_failed" | "beat_cleanup_failed" | "beat_save_failed" | "beat_storage_unavailable" | "beat_kit_invalid" | "beat_cancelled" | "beat_interrupted" | null)
+  "track_id"?: (number | null)
+}
+
+export type BeatRenderRequest = {
+  "beat_id": string
+  "expected_revision": number
+  "mode": "preview" | "full"
+  "preview_pattern_id"?: ("A" | "B" | "C" | "D" | null)
+  "occurrence_index"?: number
+  "submission_key": string
+}
+
+export type BeatRestoreRequest = {
+  "expected_revision": number
+  "revision": number
+}
+
+export type BeatRevisionInfo = {
+  "revision": number
+  "document_sha256": string
+  "title": string
+  "created_at": string
+}
+
+export type BeatRevisions = {
+  "revisions": Array<BeatRevisionInfo>
+}
+
+export type BeatRhythmDefinition = {
+  "id": string
+  "title": string
+  "region": "china" | "japan" | "korea" | "indonesia" | "india" | "thailand"
+  "meter": BeatMeter
+  "bars": number
+  "steps_per_quarter": 2 | 3 | 4 | 6 | 8
+  "grouping_steps": Array<number>
+  "markers"?: Array<BeatRhythmMarker>
+  "bpm_min": number
+  "bpm_max": number
+  "notes": string
+  "report_section"?: "6.3"
+  "review_status"?: "unreviewed"
+}
+
+export type BeatRhythmMarker = {
+  "index": number
+  "label": string
+}
+
+export type BeatSampleRegion = {
+  "region_id": string
+  "asset_id": string
+  "sha256": string
+  "byte_size": number
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "frames": number
+  "root_note_midi": number
+  "root_cents"?: number
+  "note_min"?: number
+  "note_max"?: number
+  "velocity_min"?: number
+  "velocity_max"?: number
+  "articulation_id"?: (string | null)
+  "one_shot"?: boolean
+  "choke_group"?: (string | null)
+  "gain_db"?: number
+  "attack_ms"?: number
+  "release_ms"?: number
+  "terms": ModuleLicenseDeclaration
+  "attribution": string
+  "source_revision"?: (string | null)
+}
+
+export type BeatScale = {
+  "scale_id": string
+  "root_note_midi": number
+  "degrees_cents": Array<number>
+  "reference_hz"?: number
+}
+
+export type BeatSongLane = {
+  "id": string
+  "label": string
+  "source": "beat" | "song"
+  "role": "drum" | "bass" | "pitched" | "vocals" | "other" | "mix"
+  "beat_lane_id"?: (string | null)
+  "control": BeatSongLaneControl
+}
+
+export type BeatSongLaneControl = {
+  "lane_id": string
+  "muted"?: boolean
+  "gain_db"?: number
+  "pan"?: number
+  "highpass_hz"?: (number | null)
+  "eq_bands"?: Array<EqBand>
+  "duck"?: (DuckSettings | null)
+}
+
+export type BeatSongMixArtifact = {
+  "id": string
+  "kind": "mix" | "processed" | "dry" | "plan" | "provenance" | "bundle"
+  "filename": string
+  "sha256": string
+  "byte_count": number
+  "media_type": "audio/wav" | "application/json" | "application/zip"
+  "lane_id"?: (string | null)
+  "frames"?: (number | null)
+}
+
+export type BeatSongMixDraft = {
+  "title": string
+  "beat": SongSourceInput
+  "song": SongSourceInput
+  "mode"?: "layer" | "replace_drums"
+  "tempo_strategy"?: "beat_to_song" | "song_to_beat"
+  "beat_repeats"?: number
+  "anchors": Array<WarpAnchor>
+  "project_bpm": number
+  "project_meter": BeatMeter
+  "bass_leader"?: "song" | "beat" | "none"
+  "kick_leader"?: "song" | "beat" | "none"
+  "controls"?: Array<BeatSongLaneControl>
+  "loudness"?: LoudnessSettings
+  "audio_pitch_semitones"?: number
+  "audio_approximation"?: boolean
+  "key_review"?: "unknown" | "operator_reviewed"
+  "symbolic_origin"?: (BeatSongSymbolicOrigin | null)
+}
+
+export type BeatSongMixFailure = {
+  "code": "song_source_missing" | "song_source_changed" | "song_conditioning_invalid" | "beat_mix_alignment_invalid" | "beat_mix_key_review_required" | "beat_mix_drums_required" | "beat_mix_stretch_required" | "beat_mix_invalid" | "beat_mix_not_found" | "beat_mix_revision_conflict" | "beat_mix_submission_conflict" | "beat_mix_busy" | "beat_mix_budget_exceeded" | "beat_mix_render_failed" | "song_save_failed" | "song_cleanup_failed" | "song_storage_unavailable" | "insufficient_disk"
+}
+
+export type BeatSongMixJob = {
+  "id": string
+  "plan": BeatSongMixPlan
+  "request": BeatSongMixStartRequest
+  "status": "queued" | "running" | "cancelling" | "cancelled" | "done" | "failed" | "interrupted" | "blocked" | "saving"
+  "progress": BeatSongMixProgress
+  "manifest"?: (BeatSongMixManifest | null)
+  "error"?: (BeatSongMixFailure | null)
+  "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
+}
+
+export type BeatSongMixJobs = {
+  "jobs": Array<BeatSongMixJob>
+}
+
+export type BeatSongMixManifest = {
+  "job_id": string
+  "plan_id": string
+  "plan_revision": number
+  "plan_sha256": string
+  "mode": "preview" | "full"
+  "frames": number
+  "sample_rate_hz"?: 48000
+  "channels"?: 2
+  "sources": Array<SongSourceSnapshot>
+  "artifacts": Array<BeatSongMixArtifact>
+  "lanes": Array<BeatSongRenderedLane>
+  "metrics": AudioMetrics
+  "music_evidence": MusicEvidence
+  "warnings": Array<"manual_anchors" | "key_unknown" | "audio_pitch_approximation" | "audio_loop_approximation" | "separation_bleed_possible" | "rights_unknown" | "hard_clip_risk" | "processed_stems_before_master" | "authored_repeats_recompiled" | "tails_trimmed_to_song" | "chunked_warp_review">
+  "recipe"?: "reviewed-beat-song-v1"
+  "track_id"?: (number | null)
+  "project_id"?: (number | null)
+}
+
+export type BeatSongMixPlan = {
+  "id": string
+  "revision": number
+  "draft": BeatSongMixDraft
+  "beat": SongSourceInfo
+  "song": SongSourceInfo
+  "lanes": Array<BeatSongLane>
+  "source_duration_sec": number
+  "target_duration_sec": number
+  "minimum_ratio": number
+  "maximum_ratio": number
+  "needs_native": boolean
+  "separator_ready": boolean
+  "native_ready": boolean
+  "warnings": Array<"manual_anchors" | "key_unknown" | "audio_pitch_approximation" | "audio_loop_approximation" | "separation_bleed_possible" | "rights_unknown" | "hard_clip_risk" | "processed_stems_before_master" | "authored_repeats_recompiled" | "tails_trimmed_to_song" | "chunked_warp_review">
+  "sha256": string
+  "created_at": string
+}
+
+export type BeatSongMixPreview = {
+  "plan": BeatSongMixPlan
+  "storage": BeatSongMixStorage
+}
+
+export type BeatSongMixProgress = {
+  "phase": "queued" | "snapshotting" | "separating" | "warping" | "mixing" | "publishing"
+  "completed"?: number
+  "total"?: (number | null)
+}
+
+export type BeatSongMixStartRequest = {
+  "plan_id": string
+  "expected_revision": number
+  "plan_sha256": string
+  "submission_key": string
+  "mode"?: "preview" | "full"
+  "preview_start_sec"?: (number | null)
+  "preview_end_sec"?: (number | null)
+}
+
+export type BeatSongMixStorage = {
+  "retained_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+}
+
+export type BeatSongMixUpdate = {
+  "expected_revision": number
+  "draft": BeatSongMixDraft
+}
+
+export type BeatSongRenderedLane = {
+  "lane_id": string
+  "artifact_id": string
+  "dry_artifact_id": string
+}
+
+export type BeatSongSymbolicOrigin = {
+  "original": BeatRenderConditioningSource
+  "semitones": number
+  "musical_sha256": string
+}
+
+export type BeatSongTransposePreview = {
+  "document": BeatDocument
+  "symbolic_origin": BeatSongSymbolicOrigin
+}
+
+export type BeatSongTransposeRequest = {
+  "source": BeatRenderConditioningSource
+  "semitones": number
+}
+
+export type BeatStep = {
+  "index": number
+  "velocity"?: number
+  "probability"?: number
+  "offset_steps"?: number
+  "ratchet"?: number
+  "note_midi"?: (number | null)
+  "cents"?: number
+  "gate_steps"?: number
+  "articulation_id"?: (string | null)
+  "pitch_curve"?: Array<BeatPitchPoint>
+}
+
+export type BeatStoragePreview = {
+  "output_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+  "frames": number
+  "duration_sec": number
+}
+
+export type BeatUpdateRequest = {
+  "expected_revision": number
+  "document": BeatDocument
+}
+
+export type BeatVariationRequest = {
+  "expected_revision": number
+  "pattern_id": "A" | "B" | "C" | "D"
+  "seed": number
+}
+
 export type BindArtistVoiceRequest = {
   "voice_id": string
+}
+
+export type BleedDiagnostic = {
+  "vocal_artifact_id": string
+  "backing_artifact_id": string
+  "status": "measured" | "inconclusive"
+  "reason"?: ("missing_new_vocal" | "insufficient_active_audio" | "insufficient_bands" | "bandwidth_unavailable" | "timeline_unmapped" | "no_variable_signal" | null)
+  "correlation_strength": "weak" | "medium" | "high" | "inconclusive"
+  "median_absolute_correlation"?: (number | null)
+  "medium_threshold"?: number
+  "high_threshold"?: number
+  "windows"?: Array<BleedWindow>
+  "confidence"?: null
+  "interpretation"?: "accompaniment_similarity_only"
+}
+
+export type BleedWindow = {
+  "window_index": number
+  "active_samples": number
+  "vocal_channel": number
+  "backing_channel": number
+  "signed_correlation": number
+  "absolute_correlation": number
+  "lag_frames": number
+  "lag_ms": number
+  "polarity": "positive" | "inverted"
+  "lag_ambiguous"?: boolean
 }
 
 export type BuildVoiceRequest = {
@@ -579,6 +1332,12 @@ export type BuildVoiceRequest = {
   "training_steps"?: 0 | 200 | 500 | 1000
   "resume"?: boolean
   "compare_checkpoints"?: boolean
+}
+
+export type BuiltMusicProject = {
+  "name": string
+  "data": EditorProjectDocument
+  "provenance": MusicProjectProvenance
 }
 
 export type CastMember = {
@@ -811,10 +1570,34 @@ export type CloudSpeechTrialsResponse = {
   "trials"?: Array<CloudSpeechTrial>
 }
 
+export type CompressionSettings = {
+  "threshold_dbfs"?: number
+  "ratio"?: number
+  "knee_db"?: number
+  "attack_ms"?: number
+  "release_ms"?: number
+  "makeup_db"?: number
+}
+
+export type ConfirmMusicArtifactCleanup = {
+  "plan_sha256": string
+  "confirm_cleanup": true
+}
+
 export type ConfirmVoiceDeletionRequest = {
   "plan_sha256": string
   "confirm_voice_id": string
   "delete_voice_assets": boolean
+}
+
+export type ConvertReplacementRequest = {
+  "schema_version"?: 1
+  "title": string
+  "source": SelectedSource
+  "separator"?: "fast" | "high" | "roformer"
+  "fit"?: ReplacementFitSettings
+  "mode": "convert"
+  "target": ((SeedTarget | RvcTarget) & { "engine": "rvc" | "seed-vc" })
 }
 
 export type CreateArtistRequest = {
@@ -832,6 +1615,7 @@ export type CreateAudioExportRequest = {
 
 export type CreateAudioVersionRequest = {
   "voice_id": string
+  "mix"?: (VoiceMixSettings | null)
 }
 
 export type CreateAudiobookAuditionRequest = {
@@ -981,12 +1765,143 @@ export type DeletedVideoSceneCutResponse = {
   "deleted": string
 }
 
+export type DiagnosticArtifactIdentity = {
+  "artifact_id": string
+  "sha256": string
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "duration_frames": number
+}
+
+export type DiagnosticWindow = {
+  "start_frame": number
+  "end_frame": number
+}
+
 export type DialogueReelSelection = {
   "passage_id": string
   "clip_start_ms"?: number
   "clip_end_ms"?: (number | null)
   "prompt"?: string
   "caption"?: (string | null)
+}
+
+export type DspArtifactRef = {
+  "kind"?: "transform"
+  "id": string
+  "revision": number
+  "sha256": string
+}
+
+export type DspEngineIdentity = {
+  "name": string
+  "revision": string
+  "configuration_sha256": string
+  "executable_sha256"?: (string | null)
+  "recipe"?: string
+  "input_gain_power_of_two"?: number
+  "output_gain_power_of_two"?: number
+  "license_evidence_ids"?: Array<string>
+}
+
+export type DspMeasuredInput = {
+  "id": string
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | DspArtifactRef) & { "kind": "production_asset" | "stem" | "transform" | "version" })
+  "source_sha256": string
+  "metrics": AudioMetrics
+}
+
+export type DspMixInput = {
+  "id": string
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | DspArtifactRef) & { "kind": "production_asset" | "stem" | "transform" | "version" })
+  "source_sha256": string
+  "source_start_sec"?: number
+  "start_sec"?: number
+  "duration_sec": number
+  "gain_db"?: number
+  "pan"?: number
+  "muted"?: boolean
+  "duck"?: (DuckSettings | null)
+}
+
+export type DspMixRequest = {
+  "schema_version"?: 1
+  "revision": number
+  "sample_rate_hz"?: 44100 | 48000
+  "channels"?: 1 | 2
+  "duration_sec": number
+  "inputs": Array<DspMixInput>
+  "loudness"?: LoudnessSettings
+}
+
+export type DspMixResult = {
+  "schema_version"?: 1
+  "id": string
+  "revision": number
+  "artifact_name": string
+  "audio_sha256": string
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "duration_frames": number
+  "output_metrics": AudioMetrics
+  "target_result": "off" | "met" | "warning" | "inconclusive"
+  "engines": Array<DspEngineIdentity>
+  "configuration_sha256": string
+  "warnings"?: Array<"pitch_artifact_risk" | "level_match_unavailable" | "gain_capped" | "loudness_target_unmet" | "loudness_inconclusive" | "true_peak_over" | "hard_clip_risk" | "unmatched_phrases" | "phrase_ambiguous" | "alignment_unverified" | "alignment_budget_exceeded" | "stretch_unavailable" | "anchor_boundary_uncertain">
+  "created_at": string
+  "request": DspMixRequest
+  "input_metrics": Array<DspMeasuredInput>
+}
+
+export type DspTransformRequest = {
+  "schema_version"?: 1
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "source_sha256": string
+  "revision": number
+  "sample_rate_hz"?: (44100 | 48000 | null)
+  "channels"?: (1 | 2 | null)
+  "anchors": Array<WarpAnchor>
+  "output_duration_sec": number
+  "pitch_shift_semitones"?: number
+  "min_duration_ratio"?: number
+  "max_duration_ratio"?: number
+  "gain_db"?: number
+  "highpass_hz"?: (number | null)
+  "eq_bands"?: Array<EqBand>
+  "compression"?: (CompressionSettings | null)
+  "fades"?: FadeSettings
+  "loudness"?: LoudnessSettings
+}
+
+export type DspTransformResult = {
+  "schema_version"?: 1
+  "id": string
+  "revision": number
+  "artifact_name": string
+  "audio_sha256": string
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "duration_frames": number
+  "output_metrics": AudioMetrics
+  "target_result": "off" | "met" | "warning" | "inconclusive"
+  "engines": Array<DspEngineIdentity>
+  "configuration_sha256": string
+  "warnings"?: Array<"pitch_artifact_risk" | "level_match_unavailable" | "gain_capped" | "loudness_target_unmet" | "loudness_inconclusive" | "true_peak_over" | "hard_clip_risk" | "unmatched_phrases" | "phrase_ambiguous" | "alignment_unverified" | "alignment_budget_exceeded" | "stretch_unavailable" | "anchor_boundary_uncertain">
+  "created_at": string
+  "request": DspTransformRequest
+  "input_metrics": AudioMetrics
+  "target_start_frame": number
+  "applied_gain_db": number
+}
+
+export type DuckSettings = {
+  "sidechain_input_id": string
+  "threshold_dbfs"?: number
+  "ratio"?: number
+  "knee_db"?: number
+  "attack_ms"?: number
+  "release_ms"?: number
+  "max_reduction_db"?: number
 }
 
 export type DuplicateGenerationPresetRequest = {
@@ -1036,6 +1951,123 @@ export type EbookImportWarning = {
   "message": string
 }
 
+export type EditorAudioClip = {
+  "id": string
+  "type"?: "audio"
+  "sourceUrl": string
+  "sourceLabel": string
+  "timelineStart": number
+  "trimStart": number
+  "trimEnd": number
+  "fadeInDuration"?: number
+  "fadeOutDuration"?: number
+  "warpEnabled"?: boolean
+  "originalBpm": number
+  "muted"?: boolean
+  "solo"?: boolean
+  "beatLink"?: (BeatClipLink | null)
+  "sourceArtifact"?: (MusicProjectArtifact | null)
+}
+
+export type EditorBitcrusher = {
+  "enabled"?: boolean
+  "bits"?: number
+  "mix"?: number
+}
+
+export type EditorChannelSettings = {
+  "volume"?: number
+  "eq"?: EditorEq
+  "comp"?: EditorComp
+  "reverb"?: EditorReverb
+  "filter"?: EditorFilter
+  "distortion"?: EditorDistortion
+  "chorus"?: EditorChorus
+  "bitcrusher"?: EditorBitcrusher
+  "delay"?: EditorDelay
+  "pan"?: number
+  "muted"?: boolean
+  "solo"?: boolean
+}
+
+export type EditorChorus = {
+  "enabled"?: boolean
+  "rate"?: number
+  "depth"?: number
+  "mix"?: number
+}
+
+export type EditorComp = {
+  "threshold"?: number
+  "ratio"?: number
+}
+
+export type EditorDelay = {
+  "enabled"?: boolean
+  "time"?: number
+  "feedback"?: number
+  "mix"?: number
+}
+
+export type EditorDistortion = {
+  "enabled"?: boolean
+  "amount"?: number
+  "mix"?: number
+}
+
+export type EditorEq = {
+  "low"?: number
+  "mid"?: number
+  "high"?: number
+}
+
+export type EditorFilter = {
+  "enabled"?: boolean
+  "type"?: "lowpass" | "highpass"
+  "frequency"?: number
+  "resonance"?: number
+}
+
+export type EditorLane = {
+  "id": string
+  "name": string
+  "clips": Array<EditorAudioClip>
+  "settings"?: EditorChannelSettings
+}
+
+export type EditorLoopRegion = {
+  "start": number
+  "end": number
+  "enabled": boolean
+}
+
+export type EditorMasterSettings = {
+  "volume"?: number
+  "eq"?: EditorEq
+  "comp"?: EditorComp
+  "reverb"?: EditorReverb
+  "filter"?: EditorFilter
+  "distortion"?: EditorDistortion
+  "chorus"?: EditorChorus
+  "bitcrusher"?: EditorBitcrusher
+  "delay"?: EditorDelay
+}
+
+export type EditorProjectDocument = {
+  "version"?: 1
+  "lanes": Array<EditorLane>
+  "master"?: EditorMasterSettings
+  "pxPerSecond"?: number
+  "bpm": number
+  "snapEnabled"?: boolean
+  "loopRegion"?: (EditorLoopRegion | null)
+  "musicProvenance"?: (MusicProjectProvenance | null)
+}
+
+export type EditorReverb = {
+  "mix"?: number
+}
+
 export type EngineRuntime = {
   "id": "ace_step" | "yue2"
   "state": "stopped" | "starting" | "running" | "stopping" | "error"
@@ -1047,6 +2079,12 @@ export type EngineRuntime = {
 
 export type EngineRuntimeResponse = {
   "engines": Array<EngineRuntime>
+}
+
+export type EqBand = {
+  "frequency_hz": number
+  "q"?: number
+  "gain_db": number
 }
 
 export type ExportProvenance = {
@@ -1065,6 +2103,13 @@ export type ExportProvenance = {
   "visible_ai_label"?: boolean
   "informational_only"?: true
   "production"?: (ProductionProvenance | null)
+  "music_evidence"?: (MusicEvidence | null)
+}
+
+export type FadeSettings = {
+  "fade_in_sec"?: number
+  "fade_out_sec"?: number
+  "curve"?: "equal_power" | "linear"
 }
 
 export type FlacEncodingSettings = {
@@ -1148,6 +2193,17 @@ export type GenerationSamplingSettings = {
   "max_tokens": (number | null)
 }
 
+export type HybridReplacementRequest = {
+  "schema_version"?: 1
+  "title": string
+  "source": SelectedSource
+  "separator"?: "fast" | "high" | "roformer"
+  "fit"?: ReplacementFitSettings
+  "prepared": SelectedSource
+  "mode": "hybrid"
+  "target": ((SeedTarget | RvcTarget) & { "engine": "rvc" | "seed-vc" })
+}
+
 export type ImportGenerationPreset = {
   "name": string
   "settings": (AceGenerationSettings | YueGenerationSettings)
@@ -1201,6 +2257,28 @@ export type InspectRecordingRequest = {
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
 
+export type KeyCandidate = {
+  "tonic_pc": number
+  "mode": "major" | "minor"
+  "score": number
+}
+
+export type KeyChange = {
+  "start_sec": number
+  "end_sec": number
+  "key": KeyEstimate
+}
+
+export type KeyEstimate = {
+  "status"?: "known" | "unknown"
+  "tonic_pc"?: (number | null)
+  "mode"?: ("major" | "minor" | null)
+  "confidence"?: (number | null)
+  "method"?: string
+  "candidates"?: Array<KeyCandidate>
+  "unknown_reason"?: ("insufficient_evidence" | "silence" | "short_audio" | "ambiguous" | "tuning_unsupported" | "channel_disagreement" | "unstable" | null)
+}
+
 export type KokoroRequest = {
   "text": string
   "voice"?: string
@@ -1209,7 +2287,7 @@ export type KokoroRequest = {
 
 export type LibraryFolderInfo = {
   "path": string
-  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers" | "localMusic" | "musicAdapters" | "musicTraining" | "musicTrainingRuns"
+  "key": "tracks" | "voices" | "videos" | "audiobooks" | "speechProfiles" | "speechTrials" | "models" | "logs" | "database" | "videoProjects" | "videoCharacters" | "videoCharacterTraining" | "videoCharacterTrainer" | "providers" | "localMusic" | "musicAdapters" | "musicTraining" | "musicTrainingRuns" | "musicAnalysis" | "musicArtifacts"
 }
 
 export type LibraryPickResponse = {
@@ -1263,6 +2341,8 @@ export type LocalMusicEngineStatus = {
   "weights_ready": boolean
   "small_weights_ready"?: boolean
   "medium_weights_ready"?: boolean
+  "small_conditioning_weights_ready"?: boolean
+  "medium_conditioning_weights_ready"?: boolean
   "supported": boolean
   "runtime": string
   "detail": string
@@ -1280,6 +2360,7 @@ export type LocalMusicJob = {
   "track"?: (SavedTrack | null)
   "adapter"?: (MusicAdapter | null)
   "error_code"?: (string | null)
+  "conditioning_recipe"?: (MusicConditioningRecipe | null)
 }
 
 export type LocalMusicJobs = {
@@ -1297,6 +2378,7 @@ export type LocalMusicRequest = {
   "seed"?: number
   "variant"?: "small-music" | "medium"
   "adapter"?: (MusicAdapterSelection | null)
+  "conditioning"?: (((StableAudioConditioning | StableInpaintConditioning) & { "mode": "audio_to_audio" | "inpaint" }) | null)
 }
 
 export type LocalVideoProviderConfig = {
@@ -1394,6 +2476,8 @@ export type LoraExportResponse = {
   "adapter_path": string
   "source": string
   "message": string
+  "required_free_bytes"?: (number | null)
+  "free_bytes"?: (number | null)
 }
 
 export type LoraObservedTask = {
@@ -1469,6 +2553,307 @@ export type LoudnessSettings = {
   "profile"?: "off" | "music" | "spoken_word" | "ebu" | "custom"
   "integrated_lufs"?: number
   "true_peak_dbtp"?: number
+}
+
+export type MashupAnalysisRef = {
+  "job_id": string
+  "result_id": string
+  "override_revision": number
+  "configuration_sha256": string
+}
+
+export type MashupAudioArtifact = {
+  "id": string
+  "filename": string
+  "sha256": string
+  "byte_count": number
+  "frames": number
+  "sample_rate_hz"?: 48000
+  "channels"?: 2
+}
+
+export type MashupCandidate = {
+  "orientation": "a_vocals_b_backing" | "b_vocals_a_backing"
+  "scoring_version"?: "mashup-heuristic-v1"
+  "score"?: (number | null)
+  "key": MashupCompatibilityComponent
+  "tempo": MashupCompatibilityComponent
+  "section_fit": MashupCompatibilityComponent
+  "energy_clash": MashupCompatibilityComponent
+  "vocal_pitch_semitones"?: (number | null)
+  "duration_ratio"?: (number | null)
+  "tempo_aliases"?: Array<"half" | "declared" | "double">
+  "warnings"?: Array<"analysis_incomplete" | "manual_timing" | "key_unknown" | "meter_mismatch" | "large_pitch_shift" | "stretch_risk" | "transition_review" | "operator_stems_unverified" | "separation_bleed_possible" | "rights_unknown" | "hard_clip_risk" | "tempo_alias_selected">
+}
+
+export type MashupCompatibilityComponent = {
+  "available": boolean
+  "score"?: (number | null)
+  "measurement"?: (number | null)
+  "reason": "available" | "timing_missing" | "key_missing" | "vocal_activity_missing" | "meter_mismatch"
+}
+
+export type MashupCreateRequest = {
+  "title": string
+  "submission_key": string
+  "source_a": MashupSourceInput
+  "source_b": MashupSourceInput
+  "separation_quality"?: "fast" | "high"
+}
+
+export type MashupEditPlanRequest = {
+  "expected_revision": number
+  "placements": Array<MashupPlacement>
+}
+
+export type MashupFailure = {
+  "code": "mashup_invalid" | "mashup_not_found" | "mashup_job_not_found" | "mashup_revision_conflict" | "mashup_submission_conflict" | "mashup_source_changed" | "mashup_source_missing" | "mashup_analysis_incomplete" | "mashup_analysis_changed" | "mashup_alignment_unsafe" | "mashup_pitch_override_required" | "mashup_lock_conflict" | "mashup_separation_needed" | "mashup_separation_failed" | "mashup_stretch_needed" | "mashup_busy" | "mashup_budget_exceeded" | "mashup_worker_unverified" | "mashup_render_failed" | "mashup_save_failed" | "mashup_storage_unavailable" | "insufficient_disk"
+  "conflicting_ids"?: Array<string>
+}
+
+export type MashupGeneratePlanRequest = {
+  "expected_revision": number
+  "orientation": "a_vocals_b_backing" | "b_vocals_a_backing"
+  "target_bpm": number
+  "meter": BeatMeter
+  "target_key"?: KeyEstimate
+  "vocal_tempo_alias"?: "half" | "declared" | "double"
+  "backing_tempo_alias"?: "half" | "declared" | "double"
+  "vocal_pitch_semitones"?: number
+  "backing_pitch_semitones"?: number
+  "allow_large_pitch_shift"?: boolean
+  "locks"?: Array<MashupPlanLock>
+}
+
+export type MashupJob = {
+  "id": string
+  "mashup_id": string
+  "mashup_revision": number
+  "kind": "preparation" | "preview" | "full"
+  "status": "queued" | "running" | "cancelling" | "done" | "failed" | "cancelled" | "interrupted" | "blocked" | "saving"
+  "request"?: (MashupJobRequest | null)
+  "progress": MashupProgress
+  "manifest"?: (MashupRenderManifest | null)
+  "error"?: (MashupFailure | null)
+  "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
+}
+
+export type MashupJobRequest = {
+  "expected_revision": number
+  "submission_key": string
+  "mode"?: "preview" | "full"
+  "preview_start_tick"?: (number | null)
+  "preview_end_tick"?: (number | null)
+}
+
+export type MashupJobs = {
+  "jobs": Array<MashupJob>
+}
+
+export type MashupPlacement = {
+  "id": string
+  "source": "a" | "b"
+  "stem": "vocals" | "drums" | "bass" | "other"
+  "section_id": string
+  "source_start_frame": number
+  "source_end_frame": number
+  "target_start_tick": number
+  "target_end_tick": number
+  "pitch_semitones"?: number
+  "gain_db"?: number
+  "fade_in_sec"?: number
+  "fade_out_sec"?: number
+  "locked"?: boolean
+}
+
+export type MashupPlan = {
+  "id": string
+  "revision": number
+  "settings": MashupGeneratePlanRequest
+  "placements": Array<MashupPlacement>
+  "duration_ticks": number
+  "warnings"?: Array<"analysis_incomplete" | "manual_timing" | "key_unknown" | "meter_mismatch" | "large_pitch_shift" | "stretch_risk" | "transition_review" | "operator_stems_unverified" | "separation_bleed_possible" | "rights_unknown" | "hard_clip_risk" | "tempo_alias_selected">
+  "algorithm"?: "monotone-sections-v1"
+}
+
+export type MashupPlanLock = {
+  "placement_id": string
+  "target_start_tick": number
+}
+
+export type MashupProgress = {
+  "phase": "queued" | "retaining" | "decoding" | "separating" | "transforming" | "mixing" | "publishing"
+  "completed"?: number
+  "total"?: (number | null)
+}
+
+export type MashupRenderArtifact = {
+  "id": string
+  "kind": "mix" | "stem" | "dry" | "placement" | "plan" | "provenance" | "bundle"
+  "filename": string
+  "sha256": string
+  "byte_count": number
+  "media_type": "audio/wav" | "application/json" | "application/zip"
+  "source"?: ("a" | "b" | null)
+  "stem"?: ("vocals" | "drums" | "bass" | "other" | null)
+  "placement_id"?: (string | null)
+  "frames"?: (number | null)
+}
+
+export type MashupRenderManifest = {
+  "schema_version"?: 1
+  "mashup_id": string
+  "mashup_revision": number
+  "job_id": string
+  "plan_sha256": string
+  "source_a_sha256": string
+  "source_b_sha256": string
+  "mode": "preview" | "full"
+  "frames": number
+  "sample_rate_hz"?: 48000
+  "channels"?: 2
+  "start_tick"?: number
+  "artifacts": Array<MashupRenderArtifact>
+  "placements": Array<MashupRenderedPlacement>
+  "metrics": AudioMetrics
+  "warnings"?: Array<"analysis_incomplete" | "manual_timing" | "key_unknown" | "meter_mismatch" | "large_pitch_shift" | "stretch_risk" | "transition_review" | "operator_stems_unverified" | "separation_bleed_possible" | "rights_unknown" | "hard_clip_risk" | "tempo_alias_selected">
+  "music_evidence": MusicEvidence
+  "track_id"?: (number | null)
+  "project_id"?: (number | null)
+}
+
+export type MashupRenderedPlacement = {
+  "placement_id": string
+  "artifact_id": string
+  "source_start_frame": number
+  "source_end_frame": number
+  "target_start_frame": number
+  "target_end_frame": number
+  "artifact_start_frame"?: number
+}
+
+export type MashupSourceInput = {
+  "source": VersionMusicSource
+  "excerpt_start_sec"?: number
+  "excerpt_end_sec": number
+  "sha256": string
+  "analysis"?: (MashupAnalysisRef | null)
+  "operator_stems"?: Array<StemMusicSource>
+}
+
+export type MashupSourcePreview = {
+  "sha256": string
+  "sample_rate_hz": number
+  "channels": number
+  "duration_sec": number
+  "source_bytes": number
+  "retained_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+  "separator_ready": boolean
+}
+
+export type MashupSourcePreviewRequest = {
+  "source": VersionMusicSource
+  "excerpt_start_sec"?: number
+  "excerpt_end_sec": number
+}
+
+export type MashupSourceSnapshot = {
+  "side": "a" | "b"
+  "input": MashupSourceInput
+  "raw_filename": string
+  "source_bytes": number
+  "duration_sec": number
+  "prepared"?: (MashupAudioArtifact | null)
+  "stems"?: Array<MashupStemSnapshot>
+  "association": "fresh_separation" | "operator_declared_unverified"
+  "content_origin"?: "generated" | "mixed" | "recorded" | "unknown"
+  "preparation_recipe"?: "ffmpeg-excerpt-demucs-local-v1" | "ffmpeg-excerpt-operator-stems-v1"
+  "separation_quality"?: "fast" | "high"
+  "music_evidence": MusicEvidence
+  "analysis_key"?: KeyEstimate
+  "timing"?: (MashupTiming | null)
+}
+
+export type MashupState = {
+  "id": string
+  "revision": number
+  "title": string
+  "status": "preparing" | "ready" | "failed" | "cancelled" | "interrupted"
+  "source_a": MashupSourceSnapshot
+  "source_b": MashupSourceSnapshot
+  "candidates"?: Array<MashupCandidate>
+  "plan"?: (MashupPlan | null)
+  "active_job_id"?: (string | null)
+  "created_at": string
+  "updated_at": string
+  "error"?: (MashupFailure | null)
+}
+
+export type MashupStates = {
+  "documents": Array<MashupState>
+}
+
+export type MashupStemSnapshot = {
+  "stem": "vocals" | "drums" | "bass" | "other"
+  "artifact": MashupAudioArtifact
+}
+
+export type MashupStoragePreview = {
+  "retained_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+  "frames": number
+  "duration_sec": number
+  "stretch_ready": boolean
+}
+
+export type MashupTiming = {
+  "basis"?: "operator_confirmed"
+  "bpm": number
+  "meter": BeatMeter
+  "downbeat_frames": Array<number>
+  "sections": Array<MashupTimingSection>
+  "key"?: KeyEstimate
+  "supersedes_analysis"?: (MashupAnalysisRef | null)
+}
+
+export type MashupTimingSection = {
+  "id": string
+  "start_frame": number
+  "end_frame": number
+  "bars": number
+  "musical_label"?: ("intro" | "verse" | "chorus" | "bridge" | "outro" | "instrumental" | null)
+}
+
+export type MashupTimingUpdate = {
+  "expected_revision": number
+  "source": "a" | "b"
+  "timing": MashupTiming
+}
+
+export type MatchingEqDiagnostic = {
+  "status": "available" | "inconclusive"
+  "reason"?: ("missing_new_vocal" | "insufficient_active_audio" | "insufficient_bands" | "bandwidth_unavailable" | "timeline_unmapped" | "no_variable_signal" | null)
+  "bands": Array<TonalBand>
+  "suggested_eq_bands"?: Array<EqBand>
+  "before_difference_db"?: (number | null)
+  "after_difference_db"?: (number | null)
+  "requires_review"?: true
+}
+
+export type MeterEstimate = {
+  "status"?: "known" | "unknown"
+  "beats_per_bar"?: (number | null)
+  "confidence"?: (number | null)
+  "method"?: string
 }
 
 export type MidiSourceState = {
@@ -1554,6 +2939,13 @@ export type ModuleAction = {
   "url"?: (string | null)
 }
 
+export type ModuleComponentIdentity = {
+  "repository_url"?: (string | null)
+  "revision"?: (string | null)
+  "filename"?: (string | null)
+  "sha256"?: (string | null)
+}
+
 export type ModuleDownloadProgress = {
   "artifact_name": string
   "bytes_received": number
@@ -1571,14 +2963,14 @@ export type ModuleEvidence = {
 }
 
 export type ModuleInfo = {
-  "id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats"
   "name": string
   "description": string
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
   "automation": "automatic" | "manual" | "unsupported"
-  "dependencies": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "dependencies": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "capabilities": Array<string>
   "evidence": Array<ModuleEvidence>
   "actions": Array<ModuleAction>
@@ -1593,11 +2985,13 @@ export type ModuleInstallJob = {
   "state": "queued" | "running" | "completed" | "awaiting_manual" | "failed" | "cancelled" | "interrupted"
   "created_at": string
   "updated_at": string
-  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "download_models": boolean
-  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "stable_training_variant"?: ("small-music" | "medium" | null)
   "stable_generation_variant"?: ("small-music" | "medium" | null)
+  "stable_conditioning_variant"?: ("small-music" | "medium" | null)
+  "ace_generation_model"?: ("acestep-v15-base" | null)
   "music_training_engine"?: ("yue2" | null)
   "steps": Array<ModuleJobStep>
   "current_step"?: (number | null)
@@ -1606,11 +3000,13 @@ export type ModuleInstallJob = {
 }
 
 export type ModuleInstallRequest = {
-  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "download_models"?: boolean
-  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "stable_training_variant"?: ("small-music" | "medium" | null)
   "stable_generation_variant"?: ("small-music" | "medium" | null)
+  "stable_conditioning_variant"?: ("small-music" | "medium" | null)
+  "ace_generation_model"?: ("acestep-v15-base" | null)
   "music_training_engine"?: ("yue2" | null)
   "plan_token": string
 }
@@ -1623,11 +3019,11 @@ export type ModuleInventory = {
   "free_bytes"?: (number | null)
   "checked_at": string
   "modules": Array<ModuleInfo>
-  "recommended_features"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "recommended_features"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
 }
 
 export type ModuleJobStep = {
-  "module_id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "module_id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats"
   "name": string
   "state": "queued" | "running" | "verified" | "manual" | "skipped" | "failed"
   "detail": string
@@ -1645,20 +3041,36 @@ export type ModuleJobsResponse = {
 export type ModuleLicenseDeclaration = {
   "component_id": string
   "name": string
-  "scope": "code" | "model" | "tool" | "auxiliary" | "source_data"
+  "scope": "code" | "model" | "tool" | "auxiliary" | "source_data" | "dataset" | "samples"
   "status": "declared" | "unknown"
   "declared_license"?: (string | null)
   "source_url"?: (string | null)
   "notes": string
   "reviewed_at": string
+  "restriction"?: "noncommercial" | "conditional" | "unrestricted_declared" | "unknown"
+  "redistribution"?: "declared_allowed" | "bank_only" | "forbidden" | "unknown"
+  "copyleft"?: "strong" | "weak" | "none_declared" | "unknown"
+  "evidence"?: Array<ModuleLicenseEvidence>
+  "identities"?: Array<ModuleComponentIdentity>
+}
+
+export type ModuleLicenseEvidence = {
+  "kind": "license_file" | "publisher_model_card" | "publisher_terms" | "artifact_hash" | "unavailable"
+  "source_url"?: (string | null)
+  "revision"?: (string | null)
+  "sha256"?: (string | null)
+  "observed_at": string
+  "reviewer": string
 }
 
 export type ModulePlan = {
-  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "download_models": boolean
-  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "stable_training_variant"?: ("small-music" | "medium" | null)
   "stable_generation_variant"?: ("small-music" | "medium" | null)
+  "stable_conditioning_variant"?: ("small-music" | "medium" | null)
+  "ace_generation_model"?: ("acestep-v15-base" | null)
   "music_training_engine"?: ("yue2" | null)
   "plan_token": string
   "steps": Array<ModulePlanStep>
@@ -1671,16 +3083,18 @@ export type ModulePlan = {
 }
 
 export type ModulePlanRequest = {
-  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "features": Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "download_models"?: boolean
-  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review">
+  "reinstall"?: Array<"ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats">
   "stable_training_variant"?: ("small-music" | "medium" | null)
   "stable_generation_variant"?: ("small-music" | "medium" | null)
+  "stable_conditioning_variant"?: ("small-music" | "medium" | null)
+  "ace_generation_model"?: ("acestep-v15-base" | null)
   "music_training_engine"?: ("yue2" | null)
 }
 
 export type ModulePlanStep = {
-  "module_id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "module_id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats"
   "name": string
   "operation": "install" | "verify" | "reuse" | "manual" | "unsupported"
   "estimated_download_bytes"?: (number | null)
@@ -1720,6 +3134,15 @@ export type MusicAdapter = {
   "source_job_id"?: (string | null)
 }
 
+export type MusicAdapterIdentity = {
+  "id": string
+  "engine": "stable_audio3" | "yue2"
+  "target": "small-music" | "medium" | "ar" | "nar"
+  "sha256": string
+  "strength": number
+  "source_job_id"?: (string | null)
+}
+
 export type MusicAdapterSelection = {
   "id": string
   "strength"?: number
@@ -1728,6 +3151,218 @@ export type MusicAdapterSelection = {
 export type MusicAdapters = {
   "adapters": Array<MusicAdapter>
   "history_incomplete"?: boolean
+}
+
+export type MusicAnalysisFeatures = {
+  "duration_sec": number
+  "analysis_sample_rate_hz": number
+  "hop_sec": number
+  "method"?: "numpy-summary-v1"
+  "tempo"?: TempoEstimate
+  "beats_sec"?: Array<number>
+  "downbeats_sec"?: Array<number>
+  "meter"?: MeterEstimate
+  "key"?: KeyEstimate
+  "key_changes"?: Array<KeyChange>
+  "sections"?: Array<AnalysisSection>
+  "vocal_activity"?: VocalActivity
+  "energy"?: Array<AnalysisEnergyPoint>
+  "warnings"?: Array<"silence" | "short_audio" | "beat_grid_uncertain" | "tempo_half_double" | "meter_unknown" | "key_unknown" | "key_changes" | "generic_sections" | "vocal_activity_unavailable" | "channel_disagreement" | "window_boundary_uncertain" | "analysis_partial">
+}
+
+export type MusicAnalysisJob = {
+  "id": string
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "status"?: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "phase"?: "waiting" | "snapshot" | "decode" | "beats" | "features" | "loudness" | "publishing" | "complete"
+  "attempt"?: number
+  "cancellation_requested"?: boolean
+  "progress"?: (MusicAnalysisProgress | null)
+  "created_at": string
+  "started_at"?: (string | null)
+  "finished_at"?: (string | null)
+  "error_code"?: ("analysis_unavailable" | "analysis_weights_missing" | "analysis_runtime_unverified" | "analysis_failed" | "invalid_audio" | "source_missing" | "source_changed" | "decode_budget_exceeded" | "analysis_budget_exceeded" | "insufficient_disk" | "analysis_timeout" | "worker_output_limit" | "worker_unverified" | "analysis_cancelled" | "analysis_interrupted" | "analysis_revision_conflict" | "analysis_storage_unavailable" | "setup_busy" | "analysis_busy" | "unsupported_audio" | "analysis_job_not_found" | null)
+  "result"?: (AnalysisResult | null)
+}
+
+export type MusicAnalysisOverrides = {
+  "analysis_id": string
+  "expected_revision": number
+  "beats_sec"?: (Array<number> | null)
+  "downbeats_sec"?: (Array<number> | null)
+  "tempo"?: (TempoEstimate | null)
+  "meter"?: (MeterEstimate | null)
+  "key"?: (KeyEstimate | null)
+  "sections"?: (Array<AnalysisSection> | null)
+}
+
+export type MusicAnalysisProgress = {
+  "current": number
+  "total": number
+  "unit": "windows" | "frames" | "bytes"
+}
+
+export type MusicAnalysisRequest = {
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "profile"?: "music-v1" | "music-beats-v1"
+}
+
+export type MusicAnalysisStoragePreview = {
+  "source_bytes": number
+  "retained_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+}
+
+export type MusicArtifactCleanupItem = {
+  "job_id": string
+  "source"?: (((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" }) | null)
+  "result_id"?: (string | null)
+  "source_sha256"?: (string | null)
+  "bytes"?: (number | null)
+  "file_count"?: number
+  "disposition": "eligible" | "blocked"
+  "reasons"?: Array<"active_job" | "owner_busy" | "worker_unverified" | "protected_media" | "protected_dataset" | "protected_adapter" | "protected_model" | "protected_checkpoint" | "ar_training_parent" | "source_missing" | "source_changed" | "unsafe_path" | "unrecognized_files" | "referenced" | "incomplete_inventory" | "metadata_invalid" | "cleanup_pending">
+}
+
+export type MusicArtifactCleanupOutcome = {
+  "job_id": string
+  "status": "removed" | "pending" | "retained"
+  "removed_bytes"?: number
+  "error_code"?: ("music_artifact_not_found" | "music_artifact_invalid" | "music_artifact_busy" | "music_artifact_limit" | "music_artifact_plan_changed" | "music_artifact_confirmation_required" | "music_artifact_source_missing" | "music_artifact_source_changed" | "music_artifact_worker_unverified" | "music_artifact_unsafe_path" | "music_artifact_referenced" | "music_artifact_storage_unavailable" | null)
+}
+
+export type MusicArtifactCleanupPlan = {
+  "id": string
+  "created_at": string
+  "plan_sha256": string
+  "status"?: "pending" | "executing" | "completed" | "partial"
+  "items": Array<MusicArtifactCleanupItem>
+}
+
+export type MusicArtifactCleanupReceipt = {
+  "plan_id": string
+  "plan_sha256": string
+  "status": "completed" | "partial" | "blocked"
+  "items": Array<MusicArtifactCleanupOutcome>
+}
+
+export type MusicArtifactCleanupRequest = {
+  "analysis_job_ids": Array<string>
+}
+
+export type MusicArtifactDependency = {
+  "kind": "analysis_job" | "analysis_result" | "track" | "production_asset" | "training_job" | "dataset" | "adapter" | "module" | "cleanup_plan"
+  "id": string
+}
+
+export type MusicArtifactGroup = {
+  "id": string
+  "kind": "analysis_workspace" | "generation_workspace" | "training_workspace" | "dataset" | "registered_adapter" | "model" | "installer_cache" | "original_media" | "cleanup_staging"
+  "root_alias": "music_analysis" | "local_music" | "music_training" | "stable_training" | "datasets" | "registered_adapters" | "library_files" | "library_models" | "module_runtime" | "cleanup_staging"
+  "relative_path"?: (string | null)
+  "size_bytes"?: (number | null)
+  "size_complete"?: boolean
+  "disposition": "review" | "retained" | "blocked"
+  "reasons"?: Array<"active_job" | "owner_busy" | "worker_unverified" | "protected_media" | "protected_dataset" | "protected_adapter" | "protected_model" | "protected_checkpoint" | "ar_training_parent" | "source_missing" | "source_changed" | "unsafe_path" | "unrecognized_files" | "referenced" | "incomplete_inventory" | "metadata_invalid" | "cleanup_pending">
+  "dependencies"?: Array<MusicArtifactDependency>
+}
+
+export type MusicArtifactInventory = {
+  "schema_version"?: 1
+  "generated_at": string
+  "groups": Array<MusicArtifactGroup>
+  "scan_complete": boolean
+}
+
+export type MusicComponentEvidence = {
+  "component_id": string
+  "scope": "code" | "model" | "tool" | "auxiliary" | "source_data" | "dataset" | "samples"
+  "restriction"?: "noncommercial" | "conditional" | "unrestricted_declared" | "unknown"
+  "redistribution"?: "declared_allowed" | "bank_only" | "forbidden" | "unknown"
+  "copyleft"?: "strong" | "weak" | "none_declared" | "unknown"
+  "declared_license"?: (string | null)
+  "source_url"?: (string | null)
+  "evidence"?: Array<ModuleLicenseEvidence>
+  "identities"?: Array<ModuleComponentIdentity>
+}
+
+export type MusicConditioningCapabilities = {
+  "modes": Array<MusicConditioningCapability>
+}
+
+export type MusicConditioningCapability = {
+  "engine": "ace_step" | "stable_audio3" | "yue2"
+  "mode": "ace_complete" | "ace_lego" | "ace_cover" | "audio_to_audio" | "inpaint" | "yue_audio_conditioning"
+  "proof_status": "source_verified" | "unverified"
+  "runtime_verified"?: false
+  "enabled_small": boolean
+  "enabled_medium": boolean
+  "source_commit"?: (string | null)
+  "proof_sha256"?: (string | null)
+  "output_semantics": "generated_full_mix" | "original_pcm_outside_region" | "unverified"
+  "reason"?: ("conditioning_source_missing" | "conditioning_source_changed" | "conditioning_source_invalid" | "conditioning_invalid_region" | "conditioning_invalid_request" | "conditioning_source_busy" | "conditioning_encoder_missing" | "conditioning_model_changed" | "conditioning_runtime_changed" | "conditioning_runtime_unavailable" | "conditioning_inpaint_format_unsupported" | "conditioning_inpaint_duration_mismatch" | "conditioning_native_source_unused" | "conditioning_snapshot_invalid" | "conditioning_output_invalid" | "conditioning_task_unsupported" | "insufficient_disk" | null)
+  "notes": string
+}
+
+export type MusicConditioningPreview = {
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "production_asset" | "stem" | "version" })
+  "source_sha256": string
+  "source_bytes": number
+  "source_rate_hz": number
+  "source_channels": 1 | 2
+  "source_frames": number
+  "duration_sec": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+  "error_code"?: ("conditioning_source_missing" | "conditioning_source_changed" | "conditioning_source_invalid" | "conditioning_invalid_region" | "conditioning_invalid_request" | "conditioning_source_busy" | "conditioning_encoder_missing" | "conditioning_model_changed" | "conditioning_runtime_changed" | "conditioning_runtime_unavailable" | "conditioning_inpaint_format_unsupported" | "conditioning_inpaint_duration_mismatch" | "conditioning_native_source_unused" | "conditioning_snapshot_invalid" | "conditioning_output_invalid" | "conditioning_task_unsupported" | "insufficient_disk" | null)
+}
+
+export type MusicConditioningRecipe = {
+  "source_sha256": string
+  "prepared_sha256": string
+  "source_rate_hz": number
+  "source_channels": 1 | 2
+  "source_frames": number
+  "prepared_rate_hz"?: 44100
+  "prepared_channels"?: 2
+  "prepared_frames": number
+  "prepared_gain_db"?: number
+  "mode": "audio_to_audio" | "inpaint"
+  "noise_level"?: (number | null)
+  "region_start_frame"?: (number | null)
+  "region_end_frame"?: (number | null)
+  "crossfade_frames"?: number
+  "source_commit": string
+  "source_script_sha256": string
+  "encoder_sha256": string
+  "output_semantics": "generated_full_mix" | "original_pcm_outside_region"
+}
+
+export type MusicConditioningSourceInfo = {
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "production_asset" | "stem" | "version" })
+  "source_sha256": string
+  "source_bytes": number
+  "source_rate_hz": number
+  "source_channels": 1 | 2
+  "source_frames": number
+  "duration_sec": number
+}
+
+export type MusicConditioningSourceRequest = {
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "production_asset" | "stem" | "version" })
+}
+
+export type MusicEvidence = {
+  "restriction"?: "noncommercial" | "conditional" | "unknown"
+  "identity_basis"?: "publisher_declared"
+  "components"?: Array<MusicComponentEvidence>
+  "adapters"?: Array<MusicAdapterIdentity>
+  "lineage_complete"?: boolean
+  "public_attributions"?: Array<string>
 }
 
 export type MusicLoraCapabilities = {
@@ -1747,9 +3382,16 @@ export type MusicLoraDatasetSource = {
   "sample_id": string
 }
 
+export type MusicLoraRegionalSource = {
+  "manifest_id": string
+  "manifest_sha256": string
+  "excerpt_id": string
+}
+
 export type MusicLoraSource = {
   "track_id"?: (number | null)
   "dataset"?: (MusicLoraDatasetSource | null)
+  "regional_manifest"?: (MusicLoraRegionalSource | null)
 }
 
 export type MusicLoraTrainingJob = {
@@ -1799,6 +3441,7 @@ export type MusicLoraTrainingRequest = {
 export type MusicLoraTrainingSample = {
   "track_id"?: (number | null)
   "dataset"?: (MusicLoraDatasetSource | null)
+  "regional_manifest"?: (MusicLoraRegionalSource | null)
   "caption": string
   "lyrics"?: string
   "instrumental"?: boolean
@@ -1819,9 +3462,34 @@ export type MusicLoraTrainingStatuses = {
   "engines": Array<MusicLoraTrainingStatus>
 }
 
+export type MusicProjectArtifact = {
+  "artifact_id": string
+  "sha256": string
+}
+
+export type MusicProjectProvenance = {
+  "workflow": "beat" | "beat_song" | "mashup"
+  "workflow_id": string
+  "workflow_revision": number
+  "source_manifest_sha256": string
+  "sources"?: Array<MusicProjectSource>
+}
+
+export type MusicProjectPublication = {
+  "project_id": number
+  "provenance": MusicProjectProvenance
+}
+
+export type MusicProjectSource = {
+  "track_id": number
+  "version_id": string
+  "sha256": string
+}
+
 export type MusicQueueAceRequest = {
   "engine": "ace_step"
   "request": AceGenerationSettings
+  "conditioning"?: (((AceCompleteConditioning | AceLegoConditioning) & { "mode": "ace_complete" | "ace_lego" }) | null)
 }
 
 export type MusicQueueAdjustment = {
@@ -1875,6 +3543,7 @@ export type MusicQueueEngineSelection = {
   "adapter"?: (MusicAdapterSelection | null)
   "ar_adapter"?: (MusicAdapterSelection | null)
   "nar_adapter"?: (MusicAdapterSelection | null)
+  "conditioning"?: (((StableAudioConditioning | StableInpaintConditioning) & { "mode": "audio_to_audio" | "inpaint" }) | ((AceCompleteConditioning | AceLegoConditioning) & { "mode": "ace_complete" | "ace_lego" }) | null)
 }
 
 export type MusicQueueEnqueueRequest = {
@@ -1903,6 +3572,7 @@ export type MusicQueueItem = {
   "error_code"?: string
   "attempt"?: number
   "retry_of_item_id"?: (string | null)
+  "retained_input"?: (QueuedMusicSource | null)
 }
 
 export type MusicQueueModelPlan = {
@@ -1915,6 +3585,7 @@ export type MusicQueueModelPlan = {
   "adjustments"?: Array<MusicQueueAdjustment>
   "warnings"?: Array<string>
   "adapters"?: Array<MusicAdapter>
+  "conditioning_preview"?: (MusicConditioningPreview | null)
 }
 
 export type MusicQueueNormalizedItem = {
@@ -1979,6 +3650,43 @@ export type MusicQueueStableRequest = {
 export type MusicQueueYueRequest = {
   "engine": "yue2"
   "request": YueSubmitRequest
+}
+
+export type MusicTermsAcceptRequest = {
+  "engine": "ace_step" | "yue2" | "stable_audio3"
+  "operation": "setup" | "generation" | "training" | "transcription"
+  "expected_revision": number
+  "terms_digests": Array<string>
+  "allow_noncommercial"?: boolean
+}
+
+export type MusicTermsRequirement = {
+  "component_id": string
+  "name": string
+  "scope": "code" | "model" | "tool" | "auxiliary" | "source_data" | "dataset" | "samples"
+  "restriction": "noncommercial" | "conditional"
+  "source_url": string
+  "terms_digest": string
+  "acknowledged": boolean
+}
+
+export type MusicTermsSettingsRequest = {
+  "expected_revision": number
+  "noncommercial_enabled": boolean
+}
+
+export type MusicTermsSettingsResponse = {
+  "revision": number
+  "noncommercial_enabled": boolean
+}
+
+export type MusicTermsSnapshot = {
+  "engine": "ace_step" | "yue2" | "stable_audio3"
+  "operation": "setup" | "generation" | "training" | "transcription"
+  "revision": number
+  "noncommercial_enabled": boolean
+  "requirements": Array<MusicTermsRequirement>
+  "allowed": boolean
 }
 
 export type NarrationDurationGuidance = {
@@ -2178,6 +3886,12 @@ export type PatchSpeechVoiceProfileRequest = {
   "reference_language"?: (string | null)
 }
 
+export type PatternPlacement = {
+  "pattern_id": "A" | "B" | "C" | "D"
+  "repeats"?: number
+  "section_label"?: string
+}
+
 export type PauseAnalysisSettings = {
   "energy_ratio"?: number
   "min_silence_ms"?: number
@@ -2205,6 +3919,59 @@ export type PaymentCreate = {
   "idempotency_key": string
 }
 
+export type PitchArtifactReport = {
+  "identity": DiagnosticArtifactIdentity
+  "role": "reference" | "candidate" | "converted" | "matched"
+  "applied_pitch_semitones": number
+  "status": "observed" | "unknown"
+  "unknown_reason"?: ("analysis_unavailable" | "analysis_failed" | "no_reliable_pitch" | "insufficient_voiced_support" | "alignment_unreviewed" | "insufficient_paired_windows" | "inconsistent_pitch_difference" | "shift_outside_advisory_bound" | "already_matches" | "pitch_near_analysis_boundary" | null)
+  "windows"?: Array<PitchWindowObservation>
+  "sampled_sec": number
+  "analyzed_sec": number
+  "voiced_sec": number
+  "reliable_voiced_sec": number
+  "pitch_p05_hz"?: (number | null)
+  "pitch_median_hz"?: (number | null)
+  "pitch_p95_hz"?: (number | null)
+}
+
+export type PitchComparison = {
+  "kind": "prepared_fit" | "conversion_drift"
+  "reference_artifact_id": string
+  "candidate_artifact_id": string
+  "status": "observed" | "unknown" | "no_change"
+  "reason"?: ("analysis_unavailable" | "analysis_failed" | "no_reliable_pitch" | "insufficient_voiced_support" | "alignment_unreviewed" | "insufficient_paired_windows" | "inconsistent_pitch_difference" | "shift_outside_advisory_bound" | "already_matches" | "pitch_near_analysis_boundary" | null)
+  "paired_windows": number
+  "supported_windows": number
+  "median_delta_semitones"?: (number | null)
+  "spread_semitones"?: (number | null)
+  "recommendation"?: (PitchRecommendation | null)
+}
+
+export type PitchRecommendation = {
+  "pitch_shift_semitones": number
+  "pitch_nudge_semitones": number
+  "requires_review"?: true
+}
+
+export type PitchRuntimeVersions = {
+  "python": string
+  "librosa"?: (string | null)
+  "numpy"?: (string | null)
+  "scipy"?: (string | null)
+}
+
+export type PitchWindowObservation = {
+  "window": DiagnosticWindow
+  "analyzed_sec": number
+  "voiced_sec": number
+  "reliable_voiced_sec": number
+  "pitch_p05_hz"?: (number | null)
+  "pitch_median_hz"?: (number | null)
+  "pitch_p95_hz"?: (number | null)
+  "median_voicing_probability"?: (number | null)
+}
+
 export type PlanRequest = {
   "track_id": number
 }
@@ -2230,6 +3997,16 @@ export type PrepareVoiceRequest = {
   "max_selected_seconds"?: number
 }
 
+export type PreparedReplacementRequest = {
+  "schema_version"?: 1
+  "title": string
+  "source": SelectedSource
+  "separator"?: "fast" | "high" | "roformer"
+  "fit"?: ReplacementFitSettings
+  "prepared": SelectedSource
+  "mode": "prepared"
+}
+
 export type PreprocessLoraDatasetRequest = {
   "revision": number
   "output_dir": string
@@ -2241,6 +4018,12 @@ export type ProductionGate = {
   "approved_for_release"?: boolean
   "blockers"?: Array<string>
   "legal_review_required"?: true
+}
+
+export type ProductionMusicSource = {
+  "kind"?: "production_asset"
+  "asset_id": string
+  "sha256": string
 }
 
 export type ProductionProvenance = {
@@ -2332,6 +4115,12 @@ export type ProvenanceComponent = {
   "engine_fingerprint"?: (string | null)
   "provider_receipt_id"?: (string | null)
   "provider_job_id"?: (string | null)
+  "music_evidence"?: (MusicEvidence | null)
+}
+
+export type QueuedMusicSource = {
+  "owner_id": string
+  "snapshot": SongSourceSnapshot
 }
 
 export type RangeApproval = {
@@ -2603,6 +4392,394 @@ export type RefreshDialogueCueRequest = {
   "source": CreateDialogueReelRequest
 }
 
+export type RegionalAcousticAudition = {
+  "sha256": string
+  "bytes": number
+  "sample_rate_hz"?: 8000
+  "channels": 1 | 2
+  "frames": number
+  "source_start_frame": number
+  "source_end_frame": number
+}
+
+export type RegionalAcousticCandidate = {
+  "id": string
+  "left_excerpt_id": string
+  "right_excerpt_id": string
+  "left_channel": number
+  "right_channel": number
+  "left_start_frame": number
+  "left_end_frame": number
+  "right_start_frame": number
+  "right_end_frame": number
+  "offset_tolerance_sec"?: number
+  "aligned_seconds": number
+  "matched_landmarks": number
+  "distinct_anchors": number
+  "spectral_agreement": number
+  "left_audition"?: (RegionalAcousticAudition | null)
+  "right_audition"?: (RegionalAcousticAudition | null)
+  "audition_unavailable_reason"?: ("not_retained" | "capacity" | null)
+}
+
+export type RegionalAcousticDecision = {
+  "candidate_id": string
+  "decision": "keep_together" | "distinct_after_review"
+  "reviewed_by": string
+  "reviewed_at": string
+  "note": string
+}
+
+export type RegionalAcousticExcerpt = {
+  "excerpt_id": string
+  "recording_id": string
+  "source_sha256": string
+  "decoded_pcm_sha256": string
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "start_frame": number
+  "end_frame": number
+  "coverage": "screened" | "insufficient_information"
+  "landmark_count": number
+}
+
+export type RegionalAcousticJob = {
+  "id": string
+  "request": RegionalAcousticScanRequest
+  "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "created_at": string
+  "result"?: (RegionalAcousticResult | null)
+  "error_code"?: ("regional_dataset_invalid" | "regional_dataset_source_changed" | "regional_dataset_source_missing" | "regional_dataset_limit" | "regional_dataset_storage_unavailable" | "regional_dataset_cancelled" | "regional_dataset_interrupted" | "regional_dataset_worker_unverified" | "regional_dataset_revision_conflict" | "insufficient_disk" | null)
+}
+
+export type RegionalAcousticJobs = {
+  "jobs": Array<RegionalAcousticJob>
+}
+
+export type RegionalAcousticReport = {
+  "schema_version"?: 1
+  "method_revision"?: "regional-landmarks-v1"
+  "configuration_sha256": string
+  "selection_sha256": string
+  "excerpts": Array<RegionalAcousticExcerpt>
+  "candidates"?: Array<RegionalAcousticCandidate>
+  "limitations"?: Array<"heuristic_uncalibrated" | "selected_excerpts_only" | "pitch_and_time_changes_may_be_missed" | "window_boundaries_limited" | "insufficient_information">
+}
+
+export type RegionalAcousticResult = {
+  "sha256": string
+  "report": RegionalAcousticReport
+}
+
+export type RegionalAcousticReview = {
+  "scan_id": string
+  "scan_sha256": string
+  "decisions"?: Array<RegionalAcousticDecision>
+}
+
+export type RegionalAcousticScanRequest = {
+  "dataset_id": string
+  "review_revision": number
+  "review_sha256": string
+  "submission_key": string
+}
+
+export type RegionalComparisonArm = {
+  "arm": "base" | "adapter"
+  "job"?: (LocalMusicJob | null)
+  "output_sha256"?: (string | null)
+  "audio_url"?: (string | null)
+  "submission_unverified"?: boolean
+}
+
+export type RegionalComparisonPlan = {
+  "sha256": string
+  "spec": RegionalComparisonSpec
+}
+
+export type RegionalComparisonSpec = {
+  "id": string
+  "created_at": string
+  "request": RegionalEvaluationRequest
+  "adapter": MusicAdapter
+  "training_job_id": string
+  "training_request": StableLoraTrainingRequest
+  "training_receipt": RegionalTrainingReceipt
+  "held_out_excerpt_ids": Array<string>
+  "publisher_declarations": MusicEvidence
+  "quality_status"?: "unverified"
+  "generation_runtime_identity"?: "unverified"
+  "unavailable_metrics"?: Array<"fad" | "clap" | "instrument_classifier" | "cultural_authenticity">
+}
+
+export type RegionalComparisonState = {
+  "plan": RegionalComparisonPlan
+  "arms": Array<RegionalComparisonArm>
+  "listener_reviews": number
+}
+
+export type RegionalComparisons = {
+  "comparisons": Array<RegionalComparisonState>
+}
+
+export type RegionalDatasetInspectionRequest = {
+  "recording_id": string
+  "source": MusicLoraDatasetSource
+}
+
+export type RegionalDatasetManifest = {
+  "schema_version"?: 1
+  "id": string
+  "dataset_id": string
+  "review_revision": number
+  "review_sha256": string
+  "created_at": string
+  "tradition": string
+  "split_seed": number
+  "split": RegionalSplitPlan
+  "recordings": Array<RegionalManifestRecording>
+  "excerpts": Array<RegionalPreparedExcerpt>
+  "acoustic_report"?: (RegionalAcousticResult | null)
+  "acoustic_review"?: (RegionalAcousticReview | null)
+}
+
+export type RegionalDatasetPreview = {
+  "review_revision": number
+  "review_sha256": string
+  "split": RegionalSplitPlan
+  "source_bytes": number
+  "excerpt_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_prepare": boolean
+  "error_code"?: ("regional_dataset_not_found" | "regional_dataset_invalid" | "regional_dataset_revision_conflict" | "regional_dataset_source_changed" | "regional_dataset_source_missing" | "regional_dataset_rights_required" | "regional_dataset_split_insufficient" | "regional_dataset_holdout" | "regional_dataset_busy" | "regional_dataset_storage_unavailable" | "regional_dataset_interrupted" | "regional_dataset_cancelled" | "regional_dataset_worker_unverified" | "regional_dataset_limit" | "insufficient_disk" | null)
+}
+
+export type RegionalDatasetReview = {
+  "revision": number
+  "sha256": string
+  "created_at": string
+  "request": RegionalDatasetReviewRequest
+}
+
+export type RegionalDatasetReviewRequest = {
+  "dataset_id": string
+  "dataset_revision": number
+  "expected_revision": number
+  "tradition": string
+  "split_seed"?: number
+  "recordings": Array<RegionalRecordingReview>
+  "excerpts": Array<RegionalExcerpt>
+  "acoustic_review"?: (RegionalAcousticReview | null)
+}
+
+export type RegionalEvaluationRequest = {
+  "manifest_id": string
+  "manifest_sha256": string
+  "submission_key": string
+  "adapter_id": string
+  "adapter_sha256": string
+  "request": LocalMusicRequest
+}
+
+export type RegionalExcerpt = {
+  "id": string
+  "recording_id": string
+  "start_frame": number
+  "end_frame": number
+}
+
+export type RegionalListeningReview = {
+  "comparison_sha256": string
+  "base_output_sha256": string
+  "adapter_output_sha256": string
+  "reviewer_reference": string
+  "reviewed_at": string
+  "tradition_scope": string
+  "preference": "base" | "adapter" | "tie" | "neither"
+  "timbre": number
+  "phrasing": number
+  "rhythm": number
+  "coherence": number
+  "artifacts": number
+  "cultural_appropriateness": number
+  "notes"?: string
+  "public_attribution"?: string
+  "attribution_consented"?: boolean
+}
+
+export type RegionalManifestRecording = {
+  "review": RegionalRecordingReview
+  "inspection": RegionalRecordingInspection
+}
+
+export type RegionalManifestSelection = {
+  "dataset_id": string
+  "review_revision": number
+  "review_sha256": string
+}
+
+export type RegionalMeasuredModel = {
+  "file_name": string
+  "sha256": string
+  "bytes": number
+}
+
+export type RegionalMeasuredRuntime = {
+  "models": Array<RegionalMeasuredModel>
+  "source_sha256": string
+  "source_file_count": number
+  "python_executable_sha256": string
+  "python_version": string
+  "platform": string
+  "machine": string
+  "mlx_version": string
+  "numpy_version": string
+}
+
+export type RegionalPermissions = {
+  "reference"?: "allowed" | "blocked" | "unknown"
+  "training"?: "allowed" | "blocked" | "unknown"
+  "source_redistribution"?: "allowed" | "blocked" | "unknown"
+  "adapter_distribution"?: "allowed" | "blocked" | "unknown"
+}
+
+export type RegionalPreparationJob = {
+  "id": string
+  "request": RegionalPreparationRequest
+  "status": "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "phase"?: "waiting" | "snapshot" | "cropping" | "publishing" | "complete"
+  "created_at": string
+  "completed_items"?: number
+  "total_items"?: number
+  "result"?: (RegionalPreparedManifest | null)
+  "prepared_manifest_sha256"?: (string | null)
+  "can_retry_save"?: boolean
+  "error_code"?: ("regional_dataset_not_found" | "regional_dataset_invalid" | "regional_dataset_revision_conflict" | "regional_dataset_source_changed" | "regional_dataset_source_missing" | "regional_dataset_rights_required" | "regional_dataset_split_insufficient" | "regional_dataset_holdout" | "regional_dataset_busy" | "regional_dataset_storage_unavailable" | "regional_dataset_interrupted" | "regional_dataset_cancelled" | "regional_dataset_worker_unverified" | "regional_dataset_limit" | "insufficient_disk" | null)
+}
+
+export type RegionalPreparationJobs = {
+  "jobs": Array<RegionalPreparationJob>
+}
+
+export type RegionalPreparationRequest = {
+  "dataset_id": string
+  "review_revision": number
+  "review_sha256": string
+  "submission_key": string
+}
+
+export type RegionalPreparedExcerpt = {
+  "id": string
+  "recording_id": string
+  "split": "train" | "holdout"
+  "source_start_frame": number
+  "source_end_frame": number
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "frames": number
+  "sha256": string
+  "preprocessing"?: "decoded_float32_excerpt_v1"
+}
+
+export type RegionalPreparedManifest = {
+  "sha256": string
+  "manifest": RegionalDatasetManifest
+}
+
+export type RegionalPreparedSelection = {
+  "manifest_id": string
+  "manifest_sha256": string
+}
+
+export type RegionalRecordingInspection = {
+  "recording_id": string
+  "source_sha256": string
+  "decoded_pcm_sha256": string
+  "source_bytes": number
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "frames": number
+}
+
+export type RegionalRecordingReview = {
+  "id": string
+  "source": MusicLoraDatasetSource
+  "source_sha256": string
+  "author"?: string
+  "performer"?: string
+  "acquired_at"?: (string | null)
+  "original_filename"?: string
+  "original_recording_sha256"?: (string | null)
+  "performer_group_sha256"?: (string | null)
+  "session_group_sha256"?: (string | null)
+  "declared_near_copy_group_sha256"?: (string | null)
+  "evaluation_only"?: boolean
+  "caption": string
+  "captions_reviewed"?: boolean
+  "instrument"?: string
+  "technique"?: string
+  "tuning"?: string
+  "tags"?: Array<string>
+  "rights"?: Array<RegionalRightsEvidence>
+}
+
+export type RegionalRightsEvidence = {
+  "id": string
+  "source_sha256": string
+  "evidence_sha256": string
+  "restriction": "conditional" | "unrestricted_declared" | "noncommercial" | "no_derivatives" | "unknown"
+  "reviewed_by": string
+  "reviewed_at": string
+  "permissions": RegionalPermissions
+  "public_url"?: (string | null)
+  "private_reference"?: (string | null)
+  "public_attribution"?: string
+}
+
+export type RegionalSplitPlan = {
+  "recordings": Array<RegionalSplitRecording>
+  "independent_groups": number
+  "training_recordings": number
+  "holdout_recordings": number
+  "evaluation_sufficient": boolean
+  "warnings": Array<"near_copy_detection_unavailable" | "provenance_incomplete" | "independent_groups_insufficient" | "distribution_permission_missing" | "source_redistribution_not_permitted" | "cultural_labels_user_declared" | "rights_declaration_unverified" | "holdout_fraction_approximate" | "stratification_incomplete" | "acoustic_candidates_grouped" | "acoustic_screening_limited" | "acoustic_information_insufficient">
+  "acoustic_status"?: "legacy_unscanned" | "screened" | "insufficient_information"
+}
+
+export type RegionalSplitRecording = {
+  "recording_id": string
+  "cluster_sha256": string
+  "split": "train" | "holdout" | "excluded"
+  "exclusion_reason"?: ("rights_unknown" | "rights_conflict" | "restricted_license" | "caption_unreviewed" | null)
+  "adapter_distribution_permitted": boolean
+  "source_redistribution_permitted": boolean
+}
+
+export type RegionalTrainingReceipt = {
+  "job_id": string
+  "request_sha256": string
+  "dataset_sha256": string
+  "runtime"?: (RegionalMeasuredRuntime | null)
+  "identity_status": "worker_measured" | "unavailable"
+}
+
+export type RegionalTrainingSelection = {
+  "manifest_id": string
+  "manifest_sha256": string
+  "samples": Array<StableLoraSample>
+  "held_out_excerpts": number
+  "evaluation_sufficient": boolean
+  "adapter_distribution_permitted": boolean
+  "quality_status"?: "unverified"
+}
+
+export type RegionalTrainingSubmission = {
+  "manifest_id": string
+  "manifest_sha256": string
+  "request": StableLoraTrainingRequest
+}
+
 export type Release = {
   "agreement_id": string
   "run_id": string
@@ -2675,6 +4852,215 @@ export type RenameCharacterSwapRequest = {
 export type RenameLoraDatasetRequest = {
   "revision": number
   "name": string
+}
+
+export type ReplacementActionRequest = {
+  "expected_revision": number
+  "request_id": string
+}
+
+export type ReplacementArtifact = {
+  "id": string
+  "evidence_asset_id": string
+  "role": "source_vocal" | "backing" | "prepared_dry" | "prepared_clean" | "aligned_dry" | "converted_dry" | "matched_vocal" | "preview" | "master" | "impulse_response"
+  "sha256": string
+  "source_sha256s": Array<string>
+  "settings_sha256": string
+  "duration_sec": number
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "alignment_revision"?: (number | null)
+  "audio_url"?: (string | null)
+  "measurement"?: (AudioMetrics | null)
+  "processing"?: (ReplacementProcessing | null)
+}
+
+export type ReplacementAssetImport = {
+  "request_id": string
+  "role": "source" | "prepared" | "impulse_response"
+  "title": string
+  "declaration": SourceDeclaration
+}
+
+export type ReplacementAssetResponse = {
+  "request_id": string
+  "role": "source" | "prepared" | "impulse_response"
+  "selection": SelectedSource
+  "evidence_asset_id": string
+  "track_id"?: (number | null)
+}
+
+export type ReplacementCapabilities = {
+  "native_stretch_available"?: boolean
+  "native_uniform_max_input_sec"?: number
+  "native_mapped_max_input_sec"?: number
+  "min_duration_ratio"?: number
+  "max_duration_ratio"?: number
+  "max_pitch_shift_semitones"?: number
+  "max_source_sec"?: number
+  "alignment_max_phrase_sec"?: number
+  "alignment_max_dtw_cells"?: number
+  "alignment_requires_review"?: true
+  "rvc_inference_ready"?: boolean
+  "owned_ir_supported"?: boolean
+  "cleanup_supported"?: boolean
+  "separation": VoiceSeparationOptionsResponse
+}
+
+export type ReplacementDiagnostics = {
+  "revision": number
+  "request_sha256": string
+  "alignment_sha256"?: (string | null)
+  "attempt_id": string
+  "created_at": string
+  "pitch"?: (ReplacementPitchReport | null)
+  "tonal"?: (ReplacementTonalReport | null)
+  "unavailable"?: Array<"pitch" | "tonal">
+}
+
+export type ReplacementFitSettings = {
+  "max_stretch"?: number
+  "pitch_shift_semitones"?: number
+  "pitch_nudge_semitones"?: number
+  "cleanup"?: "off" | "light"
+  "keep_breaths"?: boolean
+}
+
+export type ReplacementMixEditRequest = {
+  "expected_revision": number
+  "mix": ReplacementMixSettings
+}
+
+export type ReplacementMixSettings = {
+  "schema_version"?: 1
+  "vocal_level"?: "match_original" | "manual"
+  "manual_gain_db"?: number
+  "eq_bands"?: Array<EqBand>
+  "compression"?: (CompressionSettings | null)
+  "loudness"?: LoudnessSettings
+  "master_level"?: "match_original" | "custom" | "off"
+  "space"?: "off" | "owned_ir"
+  "ir_asset_id"?: (string | null)
+  "wet"?: number
+}
+
+export type ReplacementPitchReport = {
+  "schema_version"?: 1
+  "method"?: "pyin_50_2000_hz_20ms_probability_0_8"
+  "sampling_method"?: "uniform-disjoint-5s-max60s-v1"
+  "configuration_sha256": string
+  "runtime": PitchRuntimeVersions
+  "artifacts": Array<PitchArtifactReport>
+  "comparisons"?: Array<PitchComparison>
+  "confidence"?: null
+  "confidence_method"?: "uncalibrated"
+  "warnings"?: Array<"sampled_passages_only" | "observed_pitch_not_full_range" | "voicing_probability_not_pitch_confidence" | "monophonic_estimator" | "melody_correspondence_unverified" | "user_review_required" | "key_not_inferred" | "analysis_unavailable">
+}
+
+export type ReplacementPlanResponse = {
+  "id": string
+  "revision"?: number
+  "request": ((ConvertReplacementRequest | PreparedReplacementRequest | HybridReplacementRequest) & { "mode": "convert" | "hybrid" | "prepared" })
+  "mix"?: ReplacementMixSettings
+  "status"?: "draft" | "queued" | "running" | "needs_review" | "done" | "failed" | "cancelled" | "interrupted"
+  "phase"?: "inspecting" | "separating" | "analyzing" | "cleaning" | "aligning" | "converting" | "mixing" | "measuring" | "publishing" | "complete"
+  "active_attempt_id"?: (string | null)
+  "alignment"?: (AlignmentResult | null)
+  "reviewed_phrase_ids"?: Array<string>
+  "alignment_reviewed"?: boolean
+  "artifacts"?: Array<ReplacementArtifact>
+  "renders"?: Array<ReplacementRender>
+  "error_code"?: ("replacement_invalid_request" | "upload_too_large" | "invalid_audio" | "audio_too_long" | "unsupported_audio_format" | "replacement_plan_missing" | "replacement_source_changed" | "replacement_artifact_changed" | "replacement_model_changed" | "replacement_source_missing" | "replacement_artifact_missing" | "replacement_revision_conflict" | "replacement_request_conflict" | "replacement_busy" | "replacement_cleanup_pending" | "replacement_engine_unavailable" | "replacement_separator_unavailable" | "replacement_engine_incompatible" | "replacement_alignment_capacity" | "replacement_alignment_unavailable" | "replacement_alignment_invalid" | "replacement_loudness_unavailable" | "replacement_target_unattainable" | "replacement_output_duration_mismatch" | "replacement_output_invalid" | "replacement_disk_full" | "replacement_storage_failed" | "replacement_storage_incompatible" | "replacement_source_in_use" | "replacement_model_in_use" | "replacement_model_untrusted" | "replacement_evidence_required" | "replacement_interrupted" | "replacement_timeout" | "replacement_cancelled" | "replacement_failed" | null)
+  "warnings"?: Array<("pitch_artifact_risk" | "level_match_unavailable" | "gain_capped" | "loudness_target_unmet" | "loudness_inconclusive" | "true_peak_over" | "hard_clip_risk" | "unmatched_phrases" | "phrase_ambiguous" | "alignment_unverified" | "alignment_budget_exceeded" | "stretch_unavailable" | "anchor_boundary_uncertain" | "replacement_loudness_unavailable" | "replacement_target_unattainable" | "replacement_alignment_capacity" | "replacement_alignment_unavailable")>
+  "diagnostics"?: (ReplacementDiagnostics | null)
+  "updated_at": string
+}
+
+export type ReplacementPlanSummary = {
+  "id": string
+  "revision": number
+  "title": string
+  "mode": "convert" | "prepared" | "hybrid"
+  "status": "draft" | "queued" | "running" | "needs_review" | "done" | "failed" | "cancelled" | "interrupted"
+  "phase": "inspecting" | "separating" | "analyzing" | "cleaning" | "aligning" | "converting" | "mixing" | "measuring" | "publishing" | "complete"
+  "error_code"?: ("replacement_invalid_request" | "upload_too_large" | "invalid_audio" | "audio_too_long" | "unsupported_audio_format" | "replacement_plan_missing" | "replacement_source_changed" | "replacement_artifact_changed" | "replacement_model_changed" | "replacement_source_missing" | "replacement_artifact_missing" | "replacement_revision_conflict" | "replacement_request_conflict" | "replacement_busy" | "replacement_cleanup_pending" | "replacement_engine_unavailable" | "replacement_separator_unavailable" | "replacement_engine_incompatible" | "replacement_alignment_capacity" | "replacement_alignment_unavailable" | "replacement_alignment_invalid" | "replacement_loudness_unavailable" | "replacement_target_unattainable" | "replacement_output_duration_mismatch" | "replacement_output_invalid" | "replacement_disk_full" | "replacement_storage_failed" | "replacement_storage_incompatible" | "replacement_source_in_use" | "replacement_model_in_use" | "replacement_model_untrusted" | "replacement_evidence_required" | "replacement_interrupted" | "replacement_timeout" | "replacement_cancelled" | "replacement_failed" | null)
+  "updated_at": string
+}
+
+export type ReplacementPlansResponse = {
+  "plans"?: Array<ReplacementPlanSummary>
+  "next_cursor"?: (string | null)
+}
+
+export type ReplacementPreviewWindow = {
+  "start_sec": number
+  "duration_sec": number
+}
+
+export type ReplacementProcessing = {
+  "cleanup_recipe"?: (string | null)
+  "low_level_attenuation_db"?: (number | null)
+  "applied_gain_db"?: (number | null)
+  "residual_lu"?: (number | null)
+  "ir_sha256"?: (string | null)
+  "ir_gain"?: (number | null)
+  "wet"?: (number | null)
+  "stitch_recipe"?: (string | null)
+  "stitched_phrases"?: number
+  "native_recipes"?: Array<string>
+  "native_executable_sha256s"?: Array<string>
+  "quality_verified"?: false
+}
+
+export type ReplacementRender = {
+  "id": string
+  "plan_id": string
+  "revision": number
+  "request_id": string
+  "status"?: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted"
+  "master_artifact_id"?: (string | null)
+  "track_id"?: (number | null)
+  "track_deleted"?: boolean
+  "settings_sha256": string
+  "created_at": string
+  "error_code"?: ("replacement_invalid_request" | "upload_too_large" | "invalid_audio" | "audio_too_long" | "unsupported_audio_format" | "replacement_plan_missing" | "replacement_source_changed" | "replacement_artifact_changed" | "replacement_model_changed" | "replacement_source_missing" | "replacement_artifact_missing" | "replacement_revision_conflict" | "replacement_request_conflict" | "replacement_busy" | "replacement_cleanup_pending" | "replacement_engine_unavailable" | "replacement_separator_unavailable" | "replacement_engine_incompatible" | "replacement_alignment_capacity" | "replacement_alignment_unavailable" | "replacement_alignment_invalid" | "replacement_loudness_unavailable" | "replacement_target_unattainable" | "replacement_output_duration_mismatch" | "replacement_output_invalid" | "replacement_disk_full" | "replacement_storage_failed" | "replacement_storage_incompatible" | "replacement_source_in_use" | "replacement_model_in_use" | "replacement_model_untrusted" | "replacement_evidence_required" | "replacement_interrupted" | "replacement_timeout" | "replacement_cancelled" | "replacement_failed" | null)
+}
+
+export type ReplacementRenderRequest = {
+  "expected_revision": number
+  "request_id": string
+  "mix": ReplacementMixSettings
+  "preview_window"?: (ReplacementPreviewWindow | null)
+}
+
+export type ReplacementStoragePreview = {
+  "source_bytes": number
+  "retained_bytes": number
+  "temporary_bytes": number
+  "required_free_bytes": number
+  "free_bytes"?: (number | null)
+  "can_start": boolean
+}
+
+export type ReplacementTonalReport = {
+  "schema_version"?: 1
+  "plan_id": string
+  "revision": number
+  "method"?: "masked-octave-median-lagged-correlation-v1"
+  "sampling_method"?: "uniform-disjoint-5s-max60s-v1"
+  "configuration_sha256": string
+  "analysis_sample_rate_hz"?: 22050
+  "ffmpeg_version": string
+  "numpy_version": string
+  "artifacts": Array<TonalArtifactBasis>
+  "matching_eq": MatchingEqDiagnostic
+  "bleed": Array<BleedDiagnostic>
+  "warnings"?: Array<"sampled_passages_only" | "amplitude_activity_not_voicing" | "spectral_difference_not_quality" | "vowels_and_timbre_affect_spectra" | "correlation_not_singer_detection" | "shared_instrumentation_can_correlate" | "low_correlation_not_absence_of_bleed" | "correlation_thresholds_uncalibrated" | "lag_ambiguous" | "user_review_required" | "overlapping_timeline_only">
+}
+
+export type ReplacementUpdateRequest = {
+  "expected_revision": number
+  "request": ((ConvertReplacementRequest | PreparedReplacementRequest | HybridReplacementRequest) & { "mode": "convert" | "hybrid" | "prepared" })
 }
 
 export type RetainedAudioInfo = {
@@ -2768,9 +5154,71 @@ export type RoyaltyStatement = {
   "actor_context"?: "unauthenticated_local_operator"
 }
 
+export type RvcModelImport = {
+  "request_id"?: (string | null)
+  "voice_id": string
+  "label": string
+  "source_url"?: (string | null)
+  "evidence_ref": string
+  "weights_license": ModuleLicenseDeclaration
+  "rights_declaration": string
+  "trusted_local_checkpoint": true
+  "pickle_execution_acknowledged": true
+  "declared_terms_acknowledged": true
+  "speaker_id"?: number
+  "index_rate"?: number
+}
+
+export type RvcModelsResponse = {
+  "models"?: Array<RvcRegisteredModel>
+}
+
+export type RvcRegisteredModel = {
+  "request_id"?: (string | null)
+  "voice_id": string
+  "label": string
+  "source_url"?: (string | null)
+  "evidence_ref": string
+  "weights_license": ModuleLicenseDeclaration
+  "rights_declaration": string
+  "trusted_local_checkpoint": true
+  "pickle_execution_acknowledged": true
+  "declared_terms_acknowledged": true
+  "speaker_id"?: number
+  "index_rate"?: number
+  "id": string
+  "engine"?: "rvc"
+  "checkpoint_sha256": string
+  "index_sha256"?: (string | null)
+  "observed_runtime"?: (RvcRuntimeIdentity | null)
+  "ready"?: boolean
+  "blocked_reasons"?: Array<"replacement_invalid_request" | "upload_too_large" | "invalid_audio" | "audio_too_long" | "unsupported_audio_format" | "replacement_plan_missing" | "replacement_source_changed" | "replacement_artifact_changed" | "replacement_model_changed" | "replacement_source_missing" | "replacement_artifact_missing" | "replacement_revision_conflict" | "replacement_request_conflict" | "replacement_busy" | "replacement_cleanup_pending" | "replacement_engine_unavailable" | "replacement_separator_unavailable" | "replacement_engine_incompatible" | "replacement_alignment_capacity" | "replacement_alignment_unavailable" | "replacement_alignment_invalid" | "replacement_loudness_unavailable" | "replacement_target_unattainable" | "replacement_output_duration_mismatch" | "replacement_output_invalid" | "replacement_disk_full" | "replacement_storage_failed" | "replacement_storage_incompatible" | "replacement_source_in_use" | "replacement_model_in_use" | "replacement_model_untrusted" | "replacement_evidence_required" | "replacement_interrupted" | "replacement_timeout" | "replacement_cancelled" | "replacement_failed">
+  "created_at": string
+}
+
 export type RvcRequest = {
   "model_path": string
   "input_path": string
+}
+
+export type RvcRuntimeFile = {
+  "role": "engine_source" | "hubert_configuration" | "hubert_weights" | "rmvpe_weights"
+  "filename": string
+  "sha256": string
+}
+
+export type RvcRuntimeIdentity = {
+  "engine"?: "rvc"
+  "source_revision"?: "81eed5e8f68b6bed1789f682fe78cdd324495afc"
+  "files": Array<RvcRuntimeFile>
+  "configuration_sha256": string
+  "environment_sha256": string
+  "runtime": string
+}
+
+export type RvcTarget = {
+  "engine": "rvc"
+  "registered_model_id": string
 }
 
 export type SaveLoraDatasetRequest = {
@@ -2785,7 +5233,7 @@ export type SavedTrack = {
   "id": number
   "short_id": (number | null)
   "is_favorite"?: boolean
-  "model": "ace_step" | "yue2" | "editor" | "upload" | "openrouter" | "heartmula" | "stable_audio3"
+  "model": "ace_step" | "yue2" | "editor" | "upload" | "openrouter" | "heartmula" | "stable_audio3" | "beat" | "mashup" | "beat_song"
   "created_at": string
   "title": string
   "lyrics": string
@@ -2808,6 +5256,12 @@ export type ScanLoraDatasetRequest = {
   "all_instrumental"?: boolean
 }
 
+export type SeedTarget = {
+  "engine": "seed-vc"
+  "voice_id": string
+  "model_revision_id": string
+}
+
 export type SelectVoiceModelRequest = {
   "model_id": string
 }
@@ -2818,6 +5272,11 @@ export type SelectVoiceSamplesRequest = {
   "reference_id": string
   "cleaned_segment_ids"?: Array<string>
   "max_selected_seconds"?: (number | null)
+}
+
+export type SelectedSource = {
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource) & { "kind": "production_asset" | "stem" | "version" })
+  "audio_sha256": string
 }
 
 export type SetAudiobookLanguagesRequest = {
@@ -2881,6 +5340,72 @@ export type SingerRangeRequest = {
   "operator_label": string
   "operator_declaration": string
   "artist_confirmation_declaration": string
+}
+
+export type SongFromBeatCapabilities = {
+  "modes": Array<SongFromBeatCapability>
+}
+
+export type SongFromBeatCapability = {
+  "mode": "ace_complete" | "ace_lego"
+  "base_model"?: "acestep-v15-base"
+  "proof_status": "source_verified" | "unverified"
+  "runtime_verified"?: false
+  "installed": boolean
+  "weights_ready": boolean
+  "ready": boolean
+  "source_commit": string
+  "proof_sha256": string
+  "output_semantics"?: "generated_full_mix"
+  "minimum_source_seconds"?: 10
+  "maximum_source_seconds"?: 300
+  "reason"?: ("conditioning_source_missing" | "conditioning_source_changed" | "conditioning_source_invalid" | "conditioning_invalid_region" | "conditioning_invalid_request" | "conditioning_source_busy" | "conditioning_encoder_missing" | "conditioning_model_changed" | "conditioning_runtime_changed" | "conditioning_runtime_unavailable" | "conditioning_inpaint_format_unsupported" | "conditioning_inpaint_duration_mismatch" | "conditioning_native_source_unused" | "conditioning_snapshot_invalid" | "conditioning_output_invalid" | "conditioning_task_unsupported" | "insufficient_disk" | null)
+  "notes": string
+}
+
+export type SongSourceInfo = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+  "sha256": string
+  "source_bytes": number
+  "sample_rate_hz": number
+  "channels": number
+  "frames": number
+  "duration_sec": number
+  "musical_duration_sec"?: (number | null)
+  "track_id": number
+  "version_id": string
+  "music_evidence": MusicEvidence
+  "content_origin": "generated" | "mixed" | "recorded" | "unknown"
+  "beat_document"?: (BeatDocument | null)
+}
+
+export type SongSourceInput = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+  "sha256": string
+  "excerpt_start_sec"?: number
+  "excerpt_end_sec": number
+}
+
+export type SongSourceRequest = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+}
+
+export type SongSourceSnapshot = {
+  "source": ((VersionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "version" })
+  "sha256": string
+  "source_bytes": number
+  "sample_rate_hz": number
+  "channels": number
+  "frames": number
+  "duration_sec": number
+  "musical_duration_sec"?: (number | null)
+  "track_id": number
+  "version_id": string
+  "music_evidence": MusicEvidence
+  "content_origin": "generated" | "mixed" | "recorded" | "unknown"
+  "beat_document"?: (BeatDocument | null)
+  "source_id": string
+  "raw_filename": string
 }
 
 export type SourceAsset = {
@@ -3055,6 +5580,22 @@ export type SpeechVoiceProfilesResponse = {
   "profiles": Array<SpeechVoiceProfile>
 }
 
+export type StableAudioConditioning = {
+  "mode": "audio_to_audio"
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "production_asset" | "stem" | "version" })
+  "source_sha256": string
+  "noise_level": number
+}
+
+export type StableInpaintConditioning = {
+  "mode": "inpaint"
+  "source": ((VersionMusicSource | StemMusicSource | ProductionMusicSource | BeatRenderConditioningSource) & { "kind": "beat_render" | "production_asset" | "stem" | "version" })
+  "source_sha256": string
+  "start_sec": number
+  "end_sec": number
+  "crossfade_sec"?: number
+}
+
 export type StableLoraProgress = {
   "stage"?: "preparing" | "encoding" | "loading" | "training" | "publishing" | "done"
   "target"?: ("ar" | "nar" | null)
@@ -3068,6 +5609,7 @@ export type StableLoraProgress = {
 export type StableLoraSample = {
   "track_id"?: (number | null)
   "dataset"?: (MusicLoraDatasetSource | null)
+  "regional_manifest"?: (MusicLoraRegionalSource | null)
   "caption": string
 }
 
@@ -3187,6 +5729,13 @@ export type StemAudioExportsResponse = {
   "exports"?: Array<StemAudioExportResponse>
 }
 
+export type StemMusicSource = {
+  "kind"?: "stem"
+  "track_id": number
+  "stem": "vocals" | "drums" | "bass" | "other" | "accompaniment"
+  "sha256": string
+}
+
 export type StemsStatusResponse = {
   "status": "idle" | "queued" | "running" | "done" | "failed" | "cancelled"
   "error": (string | null)
@@ -3228,7 +5777,7 @@ export type SupportEngineState = {
 }
 
 export type SupportModuleState = {
-  "id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review"
+  "id": "ace_step" | "yue2" | "stable_audio3" | "speech" | "singing" | "separation" | "video" | "media" | "transcription" | "source_import" | "ebooks" | "kokoro" | "chatterbox" | "wan22" | "rvc" | "speaker_review" | "music_dsp" | "music_beats"
   "state": "unsupported" | "missing" | "partial" | "installed" | "ready"
   "supported": boolean
   "managed": boolean
@@ -3257,6 +5806,38 @@ export type SwitchRequest = {
 export type TaggedDownloadOptions = {
   "album"?: (string | null)
   "track_no"?: (number | null)
+}
+
+export type TempoEstimate = {
+  "status"?: "known" | "unknown"
+  "bpm"?: (number | null)
+  "confidence"?: (number | null)
+  "confidence_method"?: string
+  "half_double_ambiguous"?: boolean
+  "map"?: Array<TempoPoint>
+}
+
+export type TempoPoint = {
+  "start_sec": number
+  "bpm": number
+}
+
+export type TonalArtifactBasis = {
+  "role": "source_vocal" | "backing" | "new_vocal" | "matched_vocal"
+  "identity": DiagnosticArtifactIdentity
+  "windows": Array<DiagnosticWindow>
+  "active_samples": number
+}
+
+export type TonalBand = {
+  "frequency_hz": 125 | 250 | 500 | 1000 | 2000 | 4000
+  "status": "supported" | "unsupported"
+  "reason"?: ("missing_new_vocal" | "insufficient_active_audio" | "insufficient_bands" | "bandwidth_unavailable" | "timeline_unmapped" | "no_variable_signal" | null)
+  "reference_db"?: (number | null)
+  "new_db"?: (number | null)
+  "matched_db"?: (number | null)
+  "difference_db"?: (number | null)
+  "suggested_gain_db"?: number
 }
 
 export type TrackActivityResponse = {
@@ -3348,6 +5929,12 @@ export type UploadDatasetFilesResponse = {
 export type UsageArtifact = {
   "id": string
   "sha256": string
+}
+
+export type VersionMusicSource = {
+  "kind"?: "version"
+  "track_id": number
+  "version_id": string
 }
 
 export type VideoActivityResponse = {
@@ -3834,6 +6421,18 @@ export type VideosResponse = {
   "videos": Array<VideoJobResponse>
 }
 
+export type VocalActivity = {
+  "status"?: "known" | "unknown"
+  "method"?: string
+  "intervals"?: Array<VocalInterval>
+}
+
+export type VocalInterval = {
+  "start_sec": number
+  "end_sec": number
+  "confidence"?: (number | null)
+}
+
 export type VoiceComparisonRequest = {
   "source_id": string
   "start_sec"?: number
@@ -3980,6 +6579,45 @@ export type VoiceJobProgress = {
   "estimated_phase_remaining_sec"?: (number | null)
   "queue_reason"?: "" | "voice_training" | "voice_conversion" | "voice_preparation" | "stem_separation" | "video_generation" | "gpu_busy"
   "queue_label"?: string
+}
+
+export type VoiceMixArtifact = {
+  "id": string
+  "role": "original_vocal" | "converted_dry" | "backing" | "matched_vocal" | "master"
+  "sha256": string
+  "evidence_asset_id": string
+  "sample_rate_hz": number
+  "channels": 1 | 2
+  "duration_frames": number
+  "audio_url": string
+}
+
+export type VoiceMixReport = {
+  "schema_version"?: 1
+  "id": string
+  "audio_version_id": string
+  "source": VersionMusicSource
+  "source_sha256": string
+  "settings": VoiceMixSettings
+  "conversion": VoiceModelSnapshot
+  "reference_metrics": AudioMetrics
+  "converted_metrics": AudioMetrics
+  "applied_gain_db": number
+  "residual_lu"?: (number | null)
+  "warnings"?: Array<"pitch_artifact_risk" | "level_match_unavailable" | "gain_capped" | "loudness_target_unmet" | "loudness_inconclusive" | "true_peak_over" | "hard_clip_risk" | "unmatched_phrases" | "phrase_ambiguous" | "alignment_unverified" | "alignment_budget_exceeded" | "stretch_unavailable" | "anchor_boundary_uncertain">
+  "transform": DspTransformResult
+  "mix": DspMixResult
+  "artifacts": Array<VoiceMixArtifact>
+  "created_at": string
+}
+
+export type VoiceMixSettings = {
+  "schema_version"?: 1
+  "vocal_level"?: "match_original" | "manual"
+  "manual_gain_db"?: number
+  "eq_bands"?: Array<EqBand>
+  "compression"?: (CompressionSettings | null)
+  "loudness"?: LoudnessSettings
 }
 
 export type VoiceModelChoice = {
@@ -4170,6 +6808,11 @@ export type WanRequest = {
   "num_frames"?: number
 }
 
+export type WarpAnchor = {
+  "source_sec": number
+  "target_sec": number
+}
+
 export type WavEncodingSettings = {
   "bit_depth"?: 16 | 24 | 32
   "sample_rate"?: 44100 | 48000
@@ -4352,7 +6995,10 @@ const schemas = {
           "upload",
           "openrouter",
           "heartmula",
-          "stable_audio3"
+          "stable_audio3",
+          "beat",
+          "mashup",
+          "beat_song"
         ],
         "type": "string"
       },
@@ -4679,6 +7325,1086 @@ const schemas = {
     ],
     "type": "object"
   },
+  "AudioMetrics": {
+    "additionalProperties": false,
+    "properties": {
+      "duration_sec": {
+        "maximum": 86400,
+        "minimum": 0,
+        "type": "number"
+      },
+      "integrated_lufs": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loudness_range_lu": {
+        "anyOf": [
+          {
+            "maximum": 200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "true_peak_dbtp": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sample_peak_dbfs": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "full_scale_fraction": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "near_full_scale_fraction": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "measurement_method": {
+        "const": "ffmpeg-loudnorm-oversampled-v1",
+        "type": "string"
+      },
+      "ffmpeg_version": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "source_sha256": {
+        "pattern": "^(?:[0-9a-f]{64})?$",
+        "type": "string"
+      },
+      "samples_analyzed": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "silence",
+            "full_scale_samples",
+            "true_peak_over",
+            "short_programme"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "type": "array"
+      }
+    },
+    "required": [
+      "duration_sec"
+    ],
+    "type": "object"
+  },
+  "CompressionSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "threshold_dbfs": {
+        "maximum": 0,
+        "minimum": -60,
+        "type": "number"
+      },
+      "ratio": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "number"
+      },
+      "knee_db": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "number"
+      },
+      "attack_ms": {
+        "maximum": 100,
+        "minimum": 1,
+        "type": "number"
+      },
+      "release_ms": {
+        "maximum": 2000,
+        "minimum": 10,
+        "type": "number"
+      },
+      "makeup_db": {
+        "maximum": 6,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "DspArtifactRef": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "transform",
+        "type": "string"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "DspEngineIdentity": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "revision": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "executable_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "recipe": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "input_gain_power_of_two": {
+        "maximum": 0,
+        "minimum": -32,
+        "type": "integer"
+      },
+      "output_gain_power_of_two": {
+        "maximum": 32,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "license_evidence_ids": {
+        "items": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "type": "string"
+        },
+        "maxItems": 64,
+        "type": "array"
+      }
+    },
+    "required": [
+      "name",
+      "revision",
+      "configuration_sha256"
+    ],
+    "type": "object"
+  },
+  "DspMeasuredInput": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "transform": "#/$defs/DspArtifactRef",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/DspArtifactRef"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "source_sha256",
+      "metrics"
+    ],
+    "type": "object"
+  },
+  "DspMixInput": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "transform": "#/$defs/DspArtifactRef",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/DspArtifactRef"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "pan": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "muted": {
+        "type": "boolean"
+      },
+      "duck": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DuckSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "source_sha256",
+      "duration_sec"
+    ],
+    "type": "object"
+  },
+  "DspMixRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "enum": [
+          44100,
+          48000
+        ],
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "inputs": {
+        "items": {
+          "$ref": "#/$defs/DspMixInput"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      }
+    },
+    "required": [
+      "revision",
+      "duration_sec",
+      "inputs"
+    ],
+    "type": "object"
+  },
+  "DspMixResult": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "artifact_name": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^[0-9a-f]{32}\\.wav$",
+        "type": "string"
+      },
+      "audio_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "duration_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "output_metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "target_result": {
+        "enum": [
+          "off",
+          "met",
+          "warning",
+          "inconclusive"
+        ],
+        "type": "string"
+      },
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/DspEngineIdentity"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "type": "array"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "pitch_artifact_risk",
+            "level_match_unavailable",
+            "gain_capped",
+            "loudness_target_unmet",
+            "loudness_inconclusive",
+            "true_peak_over",
+            "hard_clip_risk",
+            "unmatched_phrases",
+            "phrase_ambiguous",
+            "alignment_unverified",
+            "alignment_budget_exceeded",
+            "stretch_unavailable",
+            "anchor_boundary_uncertain"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/DspMixRequest"
+      },
+      "input_metrics": {
+        "items": {
+          "$ref": "#/$defs/DspMeasuredInput"
+        },
+        "maxItems": 32,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "artifact_name",
+      "audio_sha256",
+      "sample_rate_hz",
+      "channels",
+      "duration_frames",
+      "output_metrics",
+      "target_result",
+      "engines",
+      "configuration_sha256",
+      "created_at",
+      "request",
+      "input_metrics"
+    ],
+    "type": "object"
+  },
+  "DspTransformRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "anyOf": [
+          {
+            "enum": [
+              44100,
+              48000
+            ],
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "channels": {
+        "anyOf": [
+          {
+            "enum": [
+              1,
+              2
+            ],
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "anchors": {
+        "items": {
+          "$ref": "#/$defs/WarpAnchor"
+        },
+        "maxItems": 4096,
+        "minItems": 2,
+        "type": "array"
+      },
+      "output_duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "pitch_shift_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "min_duration_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "max_duration_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "highpass_hz": {
+        "anyOf": [
+          {
+            "maximum": 500,
+            "minimum": 20,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "eq_bands": {
+        "items": {
+          "$ref": "#/$defs/EqBand"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "compression": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CompressionSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "fades": {
+        "$ref": "#/$defs/FadeSettings"
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256",
+      "revision",
+      "anchors",
+      "output_duration_sec"
+    ],
+    "type": "object"
+  },
+  "DspTransformResult": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "artifact_name": {
+        "maxLength": 36,
+        "minLength": 36,
+        "pattern": "^[0-9a-f]{32}\\.wav$",
+        "type": "string"
+      },
+      "audio_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "duration_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "output_metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "target_result": {
+        "enum": [
+          "off",
+          "met",
+          "warning",
+          "inconclusive"
+        ],
+        "type": "string"
+      },
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/DspEngineIdentity"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "type": "array"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "pitch_artifact_risk",
+            "level_match_unavailable",
+            "gain_capped",
+            "loudness_target_unmet",
+            "loudness_inconclusive",
+            "true_peak_over",
+            "hard_clip_risk",
+            "unmatched_phrases",
+            "phrase_ambiguous",
+            "alignment_unverified",
+            "alignment_budget_exceeded",
+            "stretch_unavailable",
+            "anchor_boundary_uncertain"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/DspTransformRequest"
+      },
+      "input_metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "target_start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "applied_gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "artifact_name",
+      "audio_sha256",
+      "sample_rate_hz",
+      "channels",
+      "duration_frames",
+      "output_metrics",
+      "target_result",
+      "engines",
+      "configuration_sha256",
+      "created_at",
+      "request",
+      "input_metrics",
+      "target_start_frame",
+      "applied_gain_db"
+    ],
+    "type": "object"
+  },
+  "DuckSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "sidechain_input_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "threshold_dbfs": {
+        "maximum": 0,
+        "minimum": -60,
+        "type": "number"
+      },
+      "ratio": {
+        "maximum": 8,
+        "minimum": 1,
+        "type": "number"
+      },
+      "knee_db": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "number"
+      },
+      "attack_ms": {
+        "maximum": 100,
+        "minimum": 1,
+        "type": "number"
+      },
+      "release_ms": {
+        "maximum": 2000,
+        "minimum": 20,
+        "type": "number"
+      },
+      "max_reduction_db": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "sidechain_input_id"
+    ],
+    "type": "object"
+  },
+  "EqBand": {
+    "additionalProperties": false,
+    "properties": {
+      "frequency_hz": {
+        "maximum": 20000,
+        "minimum": 20,
+        "type": "number"
+      },
+      "q": {
+        "maximum": 12,
+        "minimum": 0.1,
+        "type": "number"
+      },
+      "gain_db": {
+        "maximum": 6,
+        "minimum": -6,
+        "type": "number"
+      }
+    },
+    "required": [
+      "frequency_hz",
+      "gain_db"
+    ],
+    "type": "object"
+  },
+  "FadeSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "fade_in_sec": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "number"
+      },
+      "fade_out_sec": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "number"
+      },
+      "curve": {
+        "enum": [
+          "equal_power",
+          "linear"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "LoudnessSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "profile": {
+        "enum": [
+          "off",
+          "music",
+          "spoken_word",
+          "ebu",
+          "custom"
+        ],
+        "type": "string"
+      },
+      "integrated_lufs": {
+        "maximum": -8,
+        "minimum": -40,
+        "type": "number"
+      },
+      "true_peak_dbtp": {
+        "maximum": -0.1,
+        "minimum": -9,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "ModelFileIdentity": {
+    "additionalProperties": false,
+    "properties": {
+      "role": {
+        "enum": [
+          "checkpoint",
+          "configuration",
+          "voice_reference",
+          "engine_source",
+          "installed_auxiliary_candidate"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      },
+      "sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "authentication": {
+        "const": "observed_local_bytes",
+        "type": "string"
+      }
+    },
+    "required": [
+      "role",
+      "name",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "ProductionMusicSource": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "production_asset",
+        "type": "string"
+      },
+      "asset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "asset_id",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "StemMusicSource": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "stem",
+        "type": "string"
+      },
+      "track_id": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "stem": {
+        "enum": [
+          "vocals",
+          "drums",
+          "bass",
+          "other",
+          "accompaniment"
+        ],
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "track_id",
+      "stem",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "VersionMusicSource": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "version",
+        "type": "string"
+      },
+      "track_id": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "version_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "track_id",
+      "version_id"
+    ],
+    "type": "object"
+  },
   "VoiceJobProgress": {
     "properties": {
       "job_id": {
@@ -4842,6 +8568,365 @@ const schemas = {
     ],
     "type": "object"
   },
+  "VoiceMixArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "original_vocal",
+          "converted_dry",
+          "backing",
+          "matched_vocal",
+          "master"
+        ],
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "evidence_asset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "duration_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "audio_url": {
+        "maxLength": 200,
+        "pattern": "^/api/tracks/[1-9][0-9]*/versions/[0-9a-f]{32}/mix/artifacts/[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "role",
+      "sha256",
+      "evidence_asset_id",
+      "sample_rate_hz",
+      "channels",
+      "duration_frames",
+      "audio_url"
+    ],
+    "type": "object"
+  },
+  "VoiceMixReport": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "audio_version_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/VersionMusicSource"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "settings": {
+        "$ref": "#/$defs/VoiceMixSettings"
+      },
+      "conversion": {
+        "$ref": "#/$defs/VoiceModelSnapshot"
+      },
+      "reference_metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "converted_metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "applied_gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "residual_lu": {
+        "anyOf": [
+          {
+            "maximum": 200,
+            "minimum": -200,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "pitch_artifact_risk",
+            "level_match_unavailable",
+            "gain_capped",
+            "loudness_target_unmet",
+            "loudness_inconclusive",
+            "true_peak_over",
+            "hard_clip_risk",
+            "unmatched_phrases",
+            "phrase_ambiguous",
+            "alignment_unverified",
+            "alignment_budget_exceeded",
+            "stretch_unavailable",
+            "anchor_boundary_uncertain"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "transform": {
+        "$ref": "#/$defs/DspTransformResult"
+      },
+      "mix": {
+        "$ref": "#/$defs/DspMixResult"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/VoiceMixArtifact"
+        },
+        "maxItems": 8,
+        "minItems": 5,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "audio_version_id",
+      "source",
+      "source_sha256",
+      "settings",
+      "conversion",
+      "reference_metrics",
+      "converted_metrics",
+      "applied_gain_db",
+      "transform",
+      "mix",
+      "artifacts",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "VoiceMixSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "vocal_level": {
+        "enum": [
+          "match_original",
+          "manual"
+        ],
+        "type": "string"
+      },
+      "manual_gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "eq_bands": {
+        "items": {
+          "$ref": "#/$defs/EqBand"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "compression": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CompressionSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      }
+    },
+    "type": "object"
+  },
+  "VoiceModelSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "voice_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "model_revision_id": {
+        "maxLength": 128,
+        "minLength": 1,
+        "type": "string"
+      },
+      "files": {
+        "items": {
+          "$ref": "#/$defs/ModelFileIdentity"
+        },
+        "maxItems": 512,
+        "minItems": 3,
+        "type": "array"
+      },
+      "engine": {
+        "const": "seed-vc",
+        "type": "string"
+      },
+      "engine_commit": {
+        "maxLength": 64,
+        "type": "string"
+      },
+      "software_version": {
+        "maxLength": 100,
+        "type": "string"
+      },
+      "diffusion_steps": {
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "inference_cfg_rate": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "number"
+      },
+      "f0_condition": {
+        "const": true,
+        "type": "boolean"
+      },
+      "auto_f0_adjust": {
+        "const": false,
+        "type": "boolean"
+      },
+      "seed": {
+        "anyOf": [
+          {
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dependency_inventory_complete": {
+        "const": false,
+        "type": "boolean"
+      },
+      "bitwise_determinism_verified": {
+        "const": false,
+        "type": "boolean"
+      },
+      "training_steps": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "baseline_recorded_sha256": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "selection_fingerprint": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "preparation_revision": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "voice_id",
+      "model_revision_id",
+      "files",
+      "diffusion_steps"
+    ],
+    "type": "object"
+  },
+  "WarpAnchor": {
+    "additionalProperties": false,
+    "properties": {
+      "source_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "target_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "source_sec",
+      "target_sec"
+    ],
+    "type": "object"
+  },
   "AudioVersion": {
     "additionalProperties": false,
     "properties": {
@@ -4949,6 +9034,26 @@ const schemas = {
             "type": "null"
           }
         ]
+      },
+      "mix_settings": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "mix": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixReport"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -4988,6 +9093,16 @@ const schemas = {
       "voice_id": {
         "pattern": "^[0-9a-f]{32}$",
         "type": "string"
+      },
+      "mix": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -5096,32 +9211,6 @@ const schemas = {
     },
     "type": "object"
   },
-  "LoudnessSettings": {
-    "additionalProperties": false,
-    "properties": {
-      "profile": {
-        "enum": [
-          "off",
-          "music",
-          "spoken_word",
-          "ebu",
-          "custom"
-        ],
-        "type": "string"
-      },
-      "integrated_lufs": {
-        "maximum": -8,
-        "minimum": -40,
-        "type": "number"
-      },
-      "true_peak_dbtp": {
-        "maximum": -0.1,
-        "minimum": -9,
-        "type": "number"
-      }
-    },
-    "type": "object"
-  },
   "AudioEncodingSettings": {
     "additionalProperties": false,
     "properties": {
@@ -5204,107 +9293,6 @@ const schemas = {
     },
     "required": [
       "format"
-    ],
-    "type": "object"
-  },
-  "AudioMetrics": {
-    "additionalProperties": false,
-    "properties": {
-      "duration_sec": {
-        "maximum": 86400,
-        "minimum": 0,
-        "type": "number"
-      },
-      "integrated_lufs": {
-        "anyOf": [
-          {
-            "maximum": 100,
-            "minimum": -200,
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "loudness_range_lu": {
-        "anyOf": [
-          {
-            "maximum": 200,
-            "minimum": 0,
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "true_peak_dbtp": {
-        "anyOf": [
-          {
-            "maximum": 100,
-            "minimum": -200,
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "sample_peak_dbfs": {
-        "anyOf": [
-          {
-            "maximum": 100,
-            "minimum": -200,
-            "type": "number"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "full_scale_fraction": {
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      },
-      "near_full_scale_fraction": {
-        "maximum": 1,
-        "minimum": 0,
-        "type": "number"
-      },
-      "measurement_method": {
-        "const": "ffmpeg-loudnorm-oversampled-v1",
-        "type": "string"
-      },
-      "ffmpeg_version": {
-        "maxLength": 200,
-        "type": "string"
-      },
-      "source_sha256": {
-        "pattern": "^(?:[0-9a-f]{64})?$",
-        "type": "string"
-      },
-      "samples_analyzed": {
-        "minimum": 0,
-        "type": "integer"
-      },
-      "warnings": {
-        "items": {
-          "enum": [
-            "silence",
-            "full_scale_samples",
-            "true_peak_over",
-            "short_programme"
-          ],
-          "type": "string"
-        },
-        "maxItems": 4,
-        "type": "array"
-      }
-    },
-    "required": [
-      "duration_sec"
     ],
     "type": "object"
   },
@@ -5422,6 +9410,16 @@ const schemas = {
             "type": "null"
           }
         ]
+      },
+      "music_evidence": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicEvidence"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -5469,38 +9467,320 @@ const schemas = {
     ],
     "type": "object"
   },
-  "ModelFileIdentity": {
+  "ModuleComponentIdentity": {
     "additionalProperties": false,
     "properties": {
-      "role": {
+      "repository_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "revision": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "filename": {
+        "anyOf": [
+          {
+            "maxLength": 300,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ModuleLicenseEvidence": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
         "enum": [
-          "checkpoint",
-          "configuration",
-          "voice_reference",
-          "engine_source",
-          "installed_auxiliary_candidate"
+          "license_file",
+          "publisher_model_card",
+          "publisher_terms",
+          "artifact_hash",
+          "unavailable"
         ],
         "type": "string"
       },
-      "name": {
-        "maxLength": 300,
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "revision": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "observed_at": {
+        "maxLength": 10,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "reviewer": {
+        "maxLength": 120,
         "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "observed_at",
+      "reviewer"
+    ],
+    "type": "object"
+  },
+  "MusicAdapterIdentity": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "engine": {
+        "enum": [
+          "stable_audio3",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "enum": [
+          "small-music",
+          "medium",
+          "ar",
+          "nar"
+        ],
         "type": "string"
       },
       "sha256": {
         "pattern": "^[0-9a-f]{64}$",
         "type": "string"
       },
-      "authentication": {
-        "const": "observed_local_bytes",
-        "type": "string"
+      "strength": {
+        "maximum": 2,
+        "minimum": 0,
+        "type": "number"
+      },
+      "source_job_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
-      "role",
-      "name",
-      "sha256"
+      "id",
+      "engine",
+      "target",
+      "sha256",
+      "strength"
     ],
+    "type": "object"
+  },
+  "MusicComponentEvidence": {
+    "additionalProperties": false,
+    "properties": {
+      "component_id": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "type": "string"
+      },
+      "scope": {
+        "enum": [
+          "code",
+          "model",
+          "tool",
+          "auxiliary",
+          "source_data",
+          "dataset",
+          "samples"
+        ],
+        "type": "string"
+      },
+      "restriction": {
+        "enum": [
+          "noncommercial",
+          "conditional",
+          "unrestricted_declared",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "redistribution": {
+        "enum": [
+          "declared_allowed",
+          "bank_only",
+          "forbidden",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "copyleft": {
+        "enum": [
+          "strong",
+          "weak",
+          "none_declared",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "declared_license": {
+        "anyOf": [
+          {
+            "maxLength": 120,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence": {
+        "items": {
+          "$ref": "#/$defs/ModuleLicenseEvidence"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "identities": {
+        "items": {
+          "$ref": "#/$defs/ModuleComponentIdentity"
+        },
+        "maxItems": 40,
+        "type": "array"
+      }
+    },
+    "required": [
+      "component_id",
+      "scope"
+    ],
+    "type": "object"
+  },
+  "MusicEvidence": {
+    "additionalProperties": false,
+    "properties": {
+      "restriction": {
+        "enum": [
+          "noncommercial",
+          "conditional",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "identity_basis": {
+        "const": "publisher_declared",
+        "type": "string"
+      },
+      "components": {
+        "items": {
+          "$ref": "#/$defs/MusicComponentEvidence"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "adapters": {
+        "items": {
+          "$ref": "#/$defs/MusicAdapterIdentity"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "lineage_complete": {
+        "type": "boolean"
+      },
+      "public_attributions": {
+        "items": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
     "type": "object"
   },
   "OutOfRangeNote": {
@@ -5792,6 +10072,16 @@ const schemas = {
           {
             "maxLength": 200,
             "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "music_evidence": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicEvidence"
           },
           {
             "type": "null"
@@ -6284,120 +10574,6 @@ const schemas = {
       "reviewer_label",
       "id",
       "created_at"
-    ],
-    "type": "object"
-  },
-  "VoiceModelSnapshot": {
-    "additionalProperties": false,
-    "properties": {
-      "voice_id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "type": "string"
-      },
-      "model_revision_id": {
-        "maxLength": 128,
-        "minLength": 1,
-        "type": "string"
-      },
-      "files": {
-        "items": {
-          "$ref": "#/$defs/ModelFileIdentity"
-        },
-        "maxItems": 512,
-        "minItems": 3,
-        "type": "array"
-      },
-      "engine": {
-        "const": "seed-vc",
-        "type": "string"
-      },
-      "engine_commit": {
-        "maxLength": 64,
-        "type": "string"
-      },
-      "software_version": {
-        "maxLength": 100,
-        "type": "string"
-      },
-      "diffusion_steps": {
-        "maximum": 100,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "inference_cfg_rate": {
-        "maximum": 10,
-        "minimum": 0,
-        "type": "number"
-      },
-      "f0_condition": {
-        "const": true,
-        "type": "boolean"
-      },
-      "auto_f0_adjust": {
-        "const": false,
-        "type": "boolean"
-      },
-      "seed": {
-        "anyOf": [
-          {
-            "type": "integer"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "dependency_inventory_complete": {
-        "const": false,
-        "type": "boolean"
-      },
-      "bitwise_determinism_verified": {
-        "const": false,
-        "type": "boolean"
-      },
-      "training_steps": {
-        "minimum": 0,
-        "type": "integer"
-      },
-      "baseline_recorded_sha256": {
-        "anyOf": [
-          {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "selection_fingerprint": {
-        "anyOf": [
-          {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "preparation_revision": {
-        "anyOf": [
-          {
-            "maxLength": 128,
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      }
-    },
-    "required": [
-      "voice_id",
-      "model_revision_id",
-      "files",
-      "diffusion_steps"
     ],
     "type": "object"
   },
@@ -10526,6 +14702,16 @@ const schemas = {
       },
       "track_id": {
         "type": "integer"
+      },
+      "mix": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -11054,6 +15240,26 @@ const schemas = {
         "anyOf": [
           {
             "$ref": "#/$defs/VoiceJobProgress"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "mix_settings": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "mix": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/VoiceMixReport"
           },
           {
             "type": "null"
@@ -11700,7 +15906,9 @@ const schemas = {
           "localMusic",
           "musicAdapters",
           "musicTraining",
-          "musicTrainingRuns"
+          "musicTrainingRuns",
+          "musicAnalysis",
+          "musicArtifacts"
         ],
         "type": "string"
       }
@@ -17108,7 +21316,9 @@ const schemas = {
           "model",
           "tool",
           "auxiliary",
-          "source_data"
+          "source_data",
+          "dataset",
+          "samples"
         ],
         "type": "string"
       },
@@ -17135,7 +21345,7 @@ const schemas = {
         "anyOf": [
           {
             "maxLength": 500,
-            "pattern": "^https://[^\\s]+$",
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
             "type": "string"
           },
           {
@@ -17148,8 +21358,50 @@ const schemas = {
         "type": "string"
       },
       "reviewed_at": {
+        "maxLength": 10,
         "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
         "type": "string"
+      },
+      "restriction": {
+        "enum": [
+          "noncommercial",
+          "conditional",
+          "unrestricted_declared",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "redistribution": {
+        "enum": [
+          "declared_allowed",
+          "bank_only",
+          "forbidden",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "copyleft": {
+        "enum": [
+          "strong",
+          "weak",
+          "none_declared",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "evidence": {
+        "items": {
+          "$ref": "#/$defs/ModuleLicenseEvidence"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "identities": {
+        "items": {
+          "$ref": "#/$defs/ModuleComponentIdentity"
+        },
+        "maxItems": 40,
+        "type": "array"
       }
     },
     "required": [
@@ -17181,7 +21433,9 @@ const schemas = {
           "chatterbox",
           "wan22",
           "rvc",
-          "speaker_review"
+          "speaker_review",
+          "music_dsp",
+          "music_beats"
         ],
         "type": "string"
       },
@@ -17235,7 +21489,9 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
@@ -17357,11 +21613,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "type": "array"
       }
     },
@@ -17396,11 +21654,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "minItems": 1,
         "type": "array"
       },
@@ -17425,11 +21685,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "type": "array"
       },
       "stable_training_variant": {
@@ -17453,6 +21715,31 @@ const schemas = {
               "small-music",
               "medium"
             ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stable_conditioning_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ace_generation_model": {
+        "anyOf": [
+          {
+            "const": "acestep-v15-base",
             "type": "string"
           },
           {
@@ -17496,7 +21783,9 @@ const schemas = {
           "chatterbox",
           "wan22",
           "rvc",
-          "speaker_review"
+          "speaker_review",
+          "music_dsp",
+          "music_beats"
         ],
         "type": "string"
       },
@@ -17570,7 +21859,9 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
@@ -17597,11 +21888,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "type": "array"
       },
       "stable_training_variant": {
@@ -17625,6 +21918,31 @@ const schemas = {
               "small-music",
               "medium"
             ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stable_conditioning_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ace_generation_model": {
+        "anyOf": [
+          {
+            "const": "acestep-v15-base",
             "type": "string"
           },
           {
@@ -17718,11 +22036,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "minItems": 1,
         "type": "array"
       },
@@ -17747,11 +22067,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "type": "array"
       },
       "stable_training_variant": {
@@ -17775,6 +22097,31 @@ const schemas = {
               "small-music",
               "medium"
             ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stable_conditioning_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ace_generation_model": {
+        "anyOf": [
+          {
+            "const": "acestep-v15-base",
             "type": "string"
           },
           {
@@ -17970,7 +22317,9 @@ const schemas = {
           "chatterbox",
           "wan22",
           "rvc",
-          "speaker_review"
+          "speaker_review",
+          "music_dsp",
+          "music_beats"
         ],
         "type": "string"
       },
@@ -18090,7 +22439,9 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
@@ -18117,11 +22468,13 @@ const schemas = {
             "chatterbox",
             "wan22",
             "rvc",
-            "speaker_review"
+            "speaker_review",
+            "music_dsp",
+            "music_beats"
           ],
           "type": "string"
         },
-        "maxItems": 16,
+        "maxItems": 18,
         "type": "array"
       },
       "stable_training_variant": {
@@ -18145,6 +22498,31 @@ const schemas = {
               "small-music",
               "medium"
             ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stable_conditioning_variant": {
+        "anyOf": [
+          {
+            "enum": [
+              "small-music",
+              "medium"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ace_generation_model": {
+        "anyOf": [
+          {
+            "const": "acestep-v15-base",
             "type": "string"
           },
           {
@@ -19835,6 +24213,14450 @@ const schemas = {
     ],
     "type": "object"
   },
+  "TempoPoint": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "bpm": {
+        "maximum": 400,
+        "minimum": 20,
+        "type": "number"
+      }
+    },
+    "required": [
+      "start_sec",
+      "bpm"
+    ],
+    "type": "object"
+  },
+  "TempoEstimate": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "known",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "bpm": {
+        "anyOf": [
+          {
+            "maximum": 400,
+            "minimum": 20,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence_method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "half_double_ambiguous": {
+        "type": "boolean"
+      },
+      "map": {
+        "items": {
+          "$ref": "#/$defs/TempoPoint"
+        },
+        "maxItems": 20000,
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "MeterEstimate": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "known",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "beats_per_bar": {
+        "anyOf": [
+          {
+            "maximum": 32,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "KeyCandidate": {
+    "additionalProperties": false,
+    "properties": {
+      "tonic_pc": {
+        "maximum": 11,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "mode": {
+        "enum": [
+          "major",
+          "minor"
+        ],
+        "type": "string"
+      },
+      "score": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      }
+    },
+    "required": [
+      "tonic_pc",
+      "mode",
+      "score"
+    ],
+    "type": "object"
+  },
+  "KeyEstimate": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "known",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "tonic_pc": {
+        "anyOf": [
+          {
+            "maximum": 11,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "mode": {
+        "anyOf": [
+          {
+            "enum": [
+              "major",
+              "minor"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/KeyCandidate"
+        },
+        "maxItems": 24,
+        "type": "array"
+      },
+      "unknown_reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "insufficient_evidence",
+              "silence",
+              "short_audio",
+              "ambiguous",
+              "tuning_unsupported",
+              "channel_disagreement",
+              "unstable"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "KeyChange": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "key": {
+        "$ref": "#/$defs/KeyEstimate"
+      }
+    },
+    "required": [
+      "start_sec",
+      "end_sec",
+      "key"
+    ],
+    "type": "object"
+  },
+  "AnalysisSection": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "group": {
+        "maxLength": 32,
+        "minLength": 1,
+        "pattern": "^[A-Z][0-9]*$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 32,
+        "minLength": 1,
+        "pattern": "^[A-Z][0-9]*$",
+        "type": "string"
+      },
+      "musical_label": {
+        "anyOf": [
+          {
+            "enum": [
+              "intro",
+              "verse",
+              "chorus",
+              "bridge",
+              "outro",
+              "instrumental"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "bars": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "start_sec",
+      "end_sec",
+      "id",
+      "group",
+      "label"
+    ],
+    "type": "object"
+  },
+  "VocalInterval": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "start_sec",
+      "end_sec"
+    ],
+    "type": "object"
+  },
+  "VocalActivity": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "known",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "intervals": {
+        "items": {
+          "$ref": "#/$defs/VocalInterval"
+        },
+        "maxItems": 10000,
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "AnalysisEnergyPoint": {
+    "additionalProperties": false,
+    "properties": {
+      "time_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "rms_dbfs": {
+        "maximum": 25,
+        "minimum": -200,
+        "type": "number"
+      },
+      "centroid_hz": {
+        "maximum": 96000,
+        "minimum": 0,
+        "type": "number"
+      },
+      "overlap_band_power": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "time_sec",
+      "rms_dbfs",
+      "centroid_hz",
+      "overlap_band_power"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisFeatures": {
+    "additionalProperties": false,
+    "properties": {
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "analysis_sample_rate_hz": {
+        "maximum": 22050,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "hop_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 1,
+        "type": "number"
+      },
+      "method": {
+        "const": "numpy-summary-v1",
+        "type": "string"
+      },
+      "tempo": {
+        "$ref": "#/$defs/TempoEstimate"
+      },
+      "beats_sec": {
+        "items": {
+          "maximum": 7200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 50000,
+        "type": "array"
+      },
+      "downbeats_sec": {
+        "items": {
+          "maximum": 7200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 50000,
+        "type": "array"
+      },
+      "meter": {
+        "$ref": "#/$defs/MeterEstimate"
+      },
+      "key": {
+        "$ref": "#/$defs/KeyEstimate"
+      },
+      "key_changes": {
+        "items": {
+          "$ref": "#/$defs/KeyChange"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      },
+      "sections": {
+        "items": {
+          "$ref": "#/$defs/AnalysisSection"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      },
+      "vocal_activity": {
+        "$ref": "#/$defs/VocalActivity"
+      },
+      "energy": {
+        "items": {
+          "$ref": "#/$defs/AnalysisEnergyPoint"
+        },
+        "maxItems": 4000,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "silence",
+            "short_audio",
+            "beat_grid_uncertain",
+            "tempo_half_double",
+            "meter_unknown",
+            "key_unknown",
+            "key_changes",
+            "generic_sections",
+            "vocal_activity_unavailable",
+            "channel_disagreement",
+            "window_boundary_uncertain",
+            "analysis_partial"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      }
+    },
+    "required": [
+      "duration_sec",
+      "analysis_sample_rate_hz",
+      "hop_sec"
+    ],
+    "type": "object"
+  },
+  "AnalysisEngine": {
+    "additionalProperties": false,
+    "properties": {
+      "task": {
+        "enum": [
+          "features",
+          "key",
+          "sections",
+          "beats",
+          "loudness",
+          "vocal_activity"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "revision": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "weights_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "device": {
+        "const": "cpu",
+        "type": "string"
+      },
+      "precision": {
+        "enum": [
+          "float32",
+          "float64"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "task",
+      "name",
+      "revision",
+      "configuration_sha256"
+    ],
+    "type": "object"
+  },
+  "AnalysisResult": {
+    "additionalProperties": false,
+    "properties": {
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "analysis_sample_rate_hz": {
+        "maximum": 22050,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "hop_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 1,
+        "type": "number"
+      },
+      "method": {
+        "const": "numpy-summary-v1",
+        "type": "string"
+      },
+      "tempo": {
+        "$ref": "#/$defs/TempoEstimate"
+      },
+      "beats_sec": {
+        "items": {
+          "maximum": 7200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 50000,
+        "type": "array"
+      },
+      "downbeats_sec": {
+        "items": {
+          "maximum": 7200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 50000,
+        "type": "array"
+      },
+      "meter": {
+        "$ref": "#/$defs/MeterEstimate"
+      },
+      "key": {
+        "$ref": "#/$defs/KeyEstimate"
+      },
+      "key_changes": {
+        "items": {
+          "$ref": "#/$defs/KeyChange"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      },
+      "sections": {
+        "items": {
+          "$ref": "#/$defs/AnalysisSection"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      },
+      "vocal_activity": {
+        "$ref": "#/$defs/VocalActivity"
+      },
+      "energy": {
+        "items": {
+          "$ref": "#/$defs/AnalysisEnergyPoint"
+        },
+        "maxItems": 4000,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "silence",
+            "short_audio",
+            "beat_grid_uncertain",
+            "tempo_half_double",
+            "meter_unknown",
+            "key_unknown",
+            "key_changes",
+            "generic_sections",
+            "vocal_activity_unavailable",
+            "channel_disagreement",
+            "window_boundary_uncertain",
+            "analysis_partial"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "audio_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 2,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "analyzer_revision": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "weights_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loudness": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "engines": {
+        "items": {
+          "$ref": "#/$defs/AnalysisEngine"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "license_evidence_ids": {
+        "items": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "type": "string"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "override_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "duration_sec",
+      "analysis_sample_rate_hz",
+      "hop_sec",
+      "id",
+      "source",
+      "audio_sha256",
+      "sample_rate_hz",
+      "channels",
+      "duration_frames",
+      "analyzer_revision",
+      "configuration_sha256",
+      "loudness",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "profile": {
+        "enum": [
+          "music-v1",
+          "music-beats-v1"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisStoragePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "source_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "retained_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "source_bytes",
+      "retained_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "current": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "total": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "unit": {
+        "enum": [
+          "windows",
+          "frames",
+          "bytes"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "current",
+      "total",
+      "unit"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "phase": {
+        "enum": [
+          "waiting",
+          "snapshot",
+          "decode",
+          "beats",
+          "features",
+          "loudness",
+          "publishing",
+          "complete"
+        ],
+        "type": "string"
+      },
+      "attempt": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "cancellation_requested": {
+        "type": "boolean"
+      },
+      "progress": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAnalysisProgress"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "minLength": 20,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "minLength": 20,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "analysis_unavailable",
+              "analysis_weights_missing",
+              "analysis_runtime_unverified",
+              "analysis_failed",
+              "invalid_audio",
+              "source_missing",
+              "source_changed",
+              "decode_budget_exceeded",
+              "analysis_budget_exceeded",
+              "insufficient_disk",
+              "analysis_timeout",
+              "worker_output_limit",
+              "worker_unverified",
+              "analysis_cancelled",
+              "analysis_interrupted",
+              "analysis_revision_conflict",
+              "analysis_storage_unavailable",
+              "setup_busy",
+              "analysis_busy",
+              "unsupported_audio",
+              "analysis_job_not_found"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "result": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AnalysisResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "MusicAnalysisOverrides": {
+    "additionalProperties": false,
+    "properties": {
+      "analysis_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "beats_sec": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 7200,
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 50000,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "downbeats_sec": {
+        "anyOf": [
+          {
+            "items": {
+              "maximum": 7200,
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 50000,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tempo": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/TempoEstimate"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "meter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MeterEstimate"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "key": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/KeyEstimate"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sections": {
+        "anyOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/AnalysisSection"
+            },
+            "maxItems": 1024,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "analysis_id",
+      "expected_revision"
+    ],
+    "type": "object"
+  },
+  "AlignmentRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "reference": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "reference_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "prepared": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "prepared_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "manual_anchors": {
+        "items": {
+          "$ref": "#/$defs/WarpAnchor"
+        },
+        "maxItems": 4096,
+        "type": "array"
+      },
+      "min_duration_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "max_duration_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      }
+    },
+    "required": [
+      "reference",
+      "reference_sha256",
+      "prepared",
+      "prepared_sha256",
+      "revision"
+    ],
+    "type": "object"
+  },
+  "AlignmentPhraseDiagnostic": {
+    "additionalProperties": false,
+    "properties": {
+      "phrase_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "reference_start_sec": {
+        "anyOf": [
+          {
+            "maximum": 7200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reference_end_sec": {
+        "anyOf": [
+          {
+            "maximum": 7200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prepared_start_sec": {
+        "anyOf": [
+          {
+            "maximum": 7200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prepared_end_sec": {
+        "anyOf": [
+          {
+            "maximum": 7200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "mean_cost": {
+        "anyOf": [
+          {
+            "maximum": 1000000,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "onset_error_sec": {
+        "anyOf": [
+          {
+            "maximum": 7200,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "confidence": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reason": {
+        "enum": [
+          "aligned",
+          "manual",
+          "unmatched_reference",
+          "unmatched_prepared",
+          "ambiguous",
+          "budget_exceeded",
+          "insufficient_activity",
+          "unsafe_slope"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "phrase_id",
+      "reason"
+    ],
+    "type": "object"
+  },
+  "AlignmentResult": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/AlignmentRequest"
+      },
+      "status": {
+        "enum": [
+          "accepted",
+          "needs_review",
+          "unavailable"
+        ],
+        "type": "string"
+      },
+      "anchors": {
+        "items": {
+          "$ref": "#/$defs/WarpAnchor"
+        },
+        "maxItems": 4096,
+        "type": "array"
+      },
+      "phrases": {
+        "items": {
+          "$ref": "#/$defs/AlignmentPhraseDiagnostic"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      },
+      "feature_method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "matcher_method": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.:-]+$",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "pitch_artifact_risk",
+            "level_match_unavailable",
+            "gain_capped",
+            "loudness_target_unmet",
+            "loudness_inconclusive",
+            "true_peak_over",
+            "hard_clip_risk",
+            "unmatched_phrases",
+            "phrase_ambiguous",
+            "alignment_unverified",
+            "alignment_budget_exceeded",
+            "stretch_unavailable",
+            "anchor_boundary_uncertain"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "request",
+      "status",
+      "feature_method",
+      "matcher_method",
+      "configuration_sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactDependency": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "analysis_job",
+          "analysis_result",
+          "track",
+          "production_asset",
+          "training_job",
+          "dataset",
+          "adapter",
+          "module",
+          "cleanup_plan"
+        ],
+        "type": "string"
+      },
+      "id": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_.:-]+$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "id"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactGroup": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[a-zA-Z0-9_.:-]+$",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "analysis_workspace",
+          "generation_workspace",
+          "training_workspace",
+          "dataset",
+          "registered_adapter",
+          "model",
+          "installer_cache",
+          "original_media",
+          "cleanup_staging"
+        ],
+        "type": "string"
+      },
+      "root_alias": {
+        "enum": [
+          "music_analysis",
+          "local_music",
+          "music_training",
+          "stable_training",
+          "datasets",
+          "registered_adapters",
+          "library_files",
+          "library_models",
+          "module_runtime",
+          "cleanup_staging"
+        ],
+        "type": "string"
+      },
+      "relative_path": {
+        "anyOf": [
+          {
+            "maxLength": 256,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "size_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "size_complete": {
+        "type": "boolean"
+      },
+      "disposition": {
+        "enum": [
+          "review",
+          "retained",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "reasons": {
+        "items": {
+          "enum": [
+            "active_job",
+            "owner_busy",
+            "worker_unverified",
+            "protected_media",
+            "protected_dataset",
+            "protected_adapter",
+            "protected_model",
+            "protected_checkpoint",
+            "ar_training_parent",
+            "source_missing",
+            "source_changed",
+            "unsafe_path",
+            "unrecognized_files",
+            "referenced",
+            "incomplete_inventory",
+            "metadata_invalid",
+            "cleanup_pending"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "dependencies": {
+        "items": {
+          "$ref": "#/$defs/MusicArtifactDependency"
+        },
+        "maxItems": 128,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "root_alias",
+      "disposition"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactInventory": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "generated_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "groups": {
+        "items": {
+          "$ref": "#/$defs/MusicArtifactGroup"
+        },
+        "maxItems": 1100,
+        "type": "array"
+      },
+      "scan_complete": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "generated_at",
+      "groups",
+      "scan_complete"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactCleanupRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "analysis_job_ids": {
+        "items": {
+          "maxLength": 32,
+          "minLength": 32,
+          "pattern": "^[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "maxItems": 20,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "analysis_job_ids"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactCleanupItem": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "production_asset": "#/$defs/ProductionMusicSource",
+                "stem": "#/$defs/StemMusicSource",
+                "version": "#/$defs/VersionMusicSource"
+              },
+              "propertyName": "kind"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/VersionMusicSource"
+              },
+              {
+                "$ref": "#/$defs/StemMusicSource"
+              },
+              {
+                "$ref": "#/$defs/ProductionMusicSource"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "result_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "source_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "file_count": {
+        "maximum": 128,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "disposition": {
+        "enum": [
+          "eligible",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "reasons": {
+        "items": {
+          "enum": [
+            "active_job",
+            "owner_busy",
+            "worker_unverified",
+            "protected_media",
+            "protected_dataset",
+            "protected_adapter",
+            "protected_model",
+            "protected_checkpoint",
+            "ar_training_parent",
+            "source_missing",
+            "source_changed",
+            "unsafe_path",
+            "unrecognized_files",
+            "referenced",
+            "incomplete_inventory",
+            "metadata_invalid",
+            "cleanup_pending"
+          ],
+          "type": "string"
+        },
+        "maxItems": 32,
+        "type": "array"
+      }
+    },
+    "required": [
+      "job_id",
+      "disposition"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactCleanupPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "pending",
+          "executing",
+          "completed",
+          "partial"
+        ],
+        "type": "string"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MusicArtifactCleanupItem"
+        },
+        "maxItems": 20,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "created_at",
+      "plan_sha256",
+      "items"
+    ],
+    "type": "object"
+  },
+  "ConfirmMusicArtifactCleanup": {
+    "additionalProperties": false,
+    "properties": {
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "confirm_cleanup": {
+        "const": true,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "plan_sha256",
+      "confirm_cleanup"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactCleanupOutcome": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "removed",
+          "pending",
+          "retained"
+        ],
+        "type": "string"
+      },
+      "removed_bytes": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "music_artifact_not_found",
+              "music_artifact_invalid",
+              "music_artifact_busy",
+              "music_artifact_limit",
+              "music_artifact_plan_changed",
+              "music_artifact_confirmation_required",
+              "music_artifact_source_missing",
+              "music_artifact_source_changed",
+              "music_artifact_worker_unverified",
+              "music_artifact_unsafe_path",
+              "music_artifact_referenced",
+              "music_artifact_storage_unavailable"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "job_id",
+      "status"
+    ],
+    "type": "object"
+  },
+  "MusicArtifactCleanupReceipt": {
+    "additionalProperties": false,
+    "properties": {
+      "plan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "completed",
+          "partial",
+          "blocked"
+        ],
+        "type": "string"
+      },
+      "items": {
+        "items": {
+          "$ref": "#/$defs/MusicArtifactCleanupOutcome"
+        },
+        "maxItems": 20,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "plan_id",
+      "plan_sha256",
+      "status",
+      "items"
+    ],
+    "type": "object"
+  },
+  "BeatLane": {
+    "additionalProperties": false,
+    "properties": {
+      "lane_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "instrument_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "drum",
+          "bass",
+          "pitched"
+        ],
+        "type": "string"
+      },
+      "muted": {
+        "type": "boolean"
+      },
+      "gain_db": {
+        "maximum": 12,
+        "minimum": -60,
+        "type": "number"
+      },
+      "pan": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "swing": {
+        "anyOf": [
+          {
+            "maximum": 0.75,
+            "minimum": 0.5,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "steps": {
+        "items": {
+          "$ref": "#/$defs/BeatStep"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      }
+    },
+    "required": [
+      "lane_id",
+      "label",
+      "instrument_id",
+      "role"
+    ],
+    "type": "object"
+  },
+  "BeatMeter": {
+    "additionalProperties": false,
+    "properties": {
+      "numerator": {
+        "maximum": 32,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "denominator": {
+        "enum": [
+          2,
+          4,
+          8,
+          16
+        ],
+        "type": "integer"
+      }
+    },
+    "required": [
+      "numerator",
+      "denominator"
+    ],
+    "type": "object"
+  },
+  "BeatPattern": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "enum": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "type": "string"
+      },
+      "bars": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "steps_per_quarter": {
+        "enum": [
+          2,
+          3,
+          4,
+          6,
+          8
+        ],
+        "type": "integer"
+      },
+      "lanes": {
+        "items": {
+          "$ref": "#/$defs/BeatLane"
+        },
+        "maxItems": 16,
+        "minItems": 8,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "meter",
+      "lanes"
+    ],
+    "type": "object"
+  },
+  "BeatPitchPoint": {
+    "additionalProperties": false,
+    "properties": {
+      "position": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "cents": {
+        "maximum": 2400,
+        "minimum": -2400,
+        "type": "number"
+      }
+    },
+    "required": [
+      "position",
+      "cents"
+    ],
+    "type": "object"
+  },
+  "BeatPresetOrigin": {
+    "additionalProperties": false,
+    "properties": {
+      "preset_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "preset_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "catalog_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "candidate_arrangement_unreviewed",
+            "scale_is_report_approximation",
+            "fixed_grid_free_time_approximation",
+            "raga_phrase_rules_not_implemented"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "preset_id",
+      "preset_sha256",
+      "catalog_version",
+      "warnings"
+    ],
+    "type": "object"
+  },
+  "BeatScale": {
+    "additionalProperties": false,
+    "properties": {
+      "scale_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "root_note_midi": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "degrees_cents": {
+        "items": {
+          "exclusiveMaximum": 1200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 24,
+        "minItems": 1,
+        "type": "array"
+      },
+      "reference_hz": {
+        "maximum": 480,
+        "minimum": 400,
+        "type": "number"
+      }
+    },
+    "required": [
+      "scale_id",
+      "root_note_midi",
+      "degrees_cents"
+    ],
+    "type": "object"
+  },
+  "BeatStep": {
+    "additionalProperties": false,
+    "properties": {
+      "index": {
+        "maximum": 1023,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "velocity": {
+        "maximum": 127,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "probability": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "offset_steps": {
+        "maximum": 0.5,
+        "minimum": -0.5,
+        "type": "number"
+      },
+      "ratchet": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "note_midi": {
+        "anyOf": [
+          {
+            "maximum": 127,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "cents": {
+        "maximum": 100,
+        "minimum": -100,
+        "type": "number"
+      },
+      "gate_steps": {
+        "maximum": 8,
+        "minimum": 0.05,
+        "type": "number"
+      },
+      "articulation_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pitch_curve": {
+        "items": {
+          "$ref": "#/$defs/BeatPitchPoint"
+        },
+        "maxItems": 16,
+        "type": "array"
+      }
+    },
+    "required": [
+      "index"
+    ],
+    "type": "object"
+  },
+  "PatternPlacement": {
+    "additionalProperties": false,
+    "properties": {
+      "pattern_id": {
+        "enum": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "type": "string"
+      },
+      "repeats": {
+        "maximum": 64,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "section_label": {
+        "maxLength": 80,
+        "type": "string"
+      }
+    },
+    "required": [
+      "pattern_id"
+    ],
+    "type": "object"
+  },
+  "BeatDocument": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "kit_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "kit_manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "patterns": {
+        "items": {
+          "$ref": "#/$defs/BeatPattern"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "chain": {
+        "items": {
+          "$ref": "#/$defs/PatternPlacement"
+        },
+        "maxItems": 128,
+        "minItems": 1,
+        "type": "array"
+      },
+      "global_swing": {
+        "maximum": 0.75,
+        "minimum": 0.5,
+        "type": "number"
+      },
+      "scale": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatScale"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "renderer_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "preset_origin": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatPresetOrigin"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "title",
+      "bpm",
+      "seed",
+      "kit_id",
+      "kit_manifest_sha256",
+      "patterns",
+      "chain"
+    ],
+    "type": "object"
+  },
+  "BeatRenderRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "preview_pattern_id": {
+        "anyOf": [
+          {
+            "enum": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "occurrence_index": {
+        "maximum": 4095,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "submission_key": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "beat_id",
+      "expected_revision",
+      "mode",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "BeatInstrument": {
+    "additionalProperties": false,
+    "properties": {
+      "instrument_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "drum",
+          "bass",
+          "pitched"
+        ],
+        "type": "string"
+      },
+      "pitched": {
+        "type": "boolean"
+      },
+      "supports_pitch_curve": {
+        "type": "boolean"
+      },
+      "midi_program": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "midi_note": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "regions": {
+        "items": {
+          "$ref": "#/$defs/BeatSampleRegion"
+        },
+        "maxItems": 128,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "instrument_id",
+      "label",
+      "role",
+      "regions"
+    ],
+    "type": "object"
+  },
+  "BeatSampleRegion": {
+    "additionalProperties": false,
+    "properties": {
+      "region_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "asset_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "byte_size": {
+        "maximum": 536870912,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 5760000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "root_note_midi": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "root_cents": {
+        "maximum": 100,
+        "minimum": -100,
+        "type": "number"
+      },
+      "note_min": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "note_max": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "velocity_min": {
+        "maximum": 127,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "velocity_max": {
+        "maximum": 127,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "articulation_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "one_shot": {
+        "type": "boolean"
+      },
+      "choke_group": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "gain_db": {
+        "maximum": 12,
+        "minimum": -60,
+        "type": "number"
+      },
+      "attack_ms": {
+        "maximum": 1000,
+        "minimum": 0,
+        "type": "number"
+      },
+      "release_ms": {
+        "maximum": 2000,
+        "minimum": 1,
+        "type": "number"
+      },
+      "terms": {
+        "$ref": "#/$defs/ModuleLicenseDeclaration"
+      },
+      "attribution": {
+        "maxLength": 2000,
+        "type": "string"
+      },
+      "source_revision": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "region_id",
+      "asset_id",
+      "sha256",
+      "byte_size",
+      "sample_rate_hz",
+      "channels",
+      "frames",
+      "root_note_midi",
+      "terms",
+      "attribution"
+    ],
+    "type": "object"
+  },
+  "BeatInstrumentManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "kit_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "revision": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "instruments": {
+        "items": {
+          "$ref": "#/$defs/BeatInstrument"
+        },
+        "maxItems": 128,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "kit_id",
+      "revision",
+      "instruments"
+    ],
+    "type": "object"
+  },
+  "BeatMidiNoteMapping": {
+    "additionalProperties": false,
+    "properties": {
+      "event_id": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "lane_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "instrument_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "asset_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "sample_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "channel": {
+        "maximum": 15,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "program": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "note_midi": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "cents": {
+        "maximum": 100,
+        "minimum": -100,
+        "type": "number"
+      },
+      "pitch_curve": {
+        "items": {
+          "$ref": "#/$defs/BeatPitchPoint"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "output_note_midi": {
+        "maximum": 127,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "onset_tick": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "end_tick": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "bend_range_semitones": {
+        "maximum": 25,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "timing_quantized": {
+        "type": "boolean"
+      },
+      "tuning_approximated": {
+        "type": "boolean"
+      },
+      "percussion_retriggered": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "event_id",
+      "lane_id",
+      "instrument_id",
+      "asset_id",
+      "sample_sha256",
+      "channel",
+      "program",
+      "note_midi",
+      "cents",
+      "output_note_midi",
+      "onset_tick",
+      "end_tick",
+      "bend_range_semitones",
+      "timing_quantized",
+      "tuning_approximated"
+    ],
+    "type": "object"
+  },
+  "BeatMidiTuning": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "document_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "events_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "ppq": {
+        "const": 960,
+        "type": "integer"
+      },
+      "approximation": {
+        "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "beat_event_clamped",
+            "beat_midi_timing_quantized",
+            "beat_midi_approximation",
+            "beat_midi_generic_sounds",
+            "beat_midi_percussion_retrigger"
+          ],
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      },
+      "notes": {
+        "items": {
+          "$ref": "#/$defs/BeatMidiNoteMapping"
+        },
+        "maxItems": 262144,
+        "type": "array"
+      }
+    },
+    "required": [
+      "beat_id",
+      "beat_revision",
+      "document_sha256",
+      "events_sha256",
+      "approximation",
+      "warnings",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "BeatCreateRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "kit_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "document": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatDocument"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "BeatUpdateRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "document": {
+        "$ref": "#/$defs/BeatDocument"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "document"
+    ],
+    "type": "object"
+  },
+  "BeatRestoreRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "revision"
+    ],
+    "type": "object"
+  },
+  "BeatVariationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "pattern_id": {
+        "enum": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "type": "string"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "pattern_id",
+      "seed"
+    ],
+    "type": "object"
+  },
+  "BeatHumanizeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "pattern_id": {
+        "enum": [
+          "A",
+          "B",
+          "C",
+          "D"
+        ],
+        "type": "string"
+      },
+      "lane_ids": {
+        "items": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "timing_steps": {
+        "maximum": 0.1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "velocity": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "pattern_id",
+      "lane_ids"
+    ],
+    "type": "object"
+  },
+  "BeatDocumentSummary": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "updated_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "title",
+      "bpm",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "BeatDocuments": {
+    "additionalProperties": false,
+    "properties": {
+      "documents": {
+        "items": {
+          "$ref": "#/$defs/BeatDocumentSummary"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "documents"
+    ],
+    "type": "object"
+  },
+  "BeatRevisionInfo": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "document_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "revision",
+      "document_sha256",
+      "title",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "BeatRevisions": {
+    "additionalProperties": false,
+    "properties": {
+      "revisions": {
+        "items": {
+          "$ref": "#/$defs/BeatRevisionInfo"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "revisions"
+    ],
+    "type": "object"
+  },
+  "BeatArchiveResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "archived": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "beat_id"
+    ],
+    "type": "object"
+  },
+  "BeatKitInfo": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest": {
+        "$ref": "#/$defs/BeatInstrumentManifest"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "manifest",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "BeatKits": {
+    "additionalProperties": false,
+    "properties": {
+      "kits": {
+        "items": {
+          "$ref": "#/$defs/BeatKitInfo"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "kits"
+    ],
+    "type": "object"
+  },
+  "BeatJobRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "preview_pattern_id": {
+        "anyOf": [
+          {
+            "enum": [
+              "A",
+              "B",
+              "C",
+              "D"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "occurrence_index": {
+        "maximum": 4095,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "submission_key": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "midi_approximation": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "beat_id",
+      "expected_revision",
+      "mode",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "BeatArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "mix",
+          "stem",
+          "pattern",
+          "events",
+          "midi",
+          "tuning",
+          "provenance",
+          "bundle"
+        ],
+        "type": "string"
+      },
+      "lane_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "byte_size": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "media_type": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "sha256",
+      "byte_size",
+      "media_type",
+      "filename"
+    ],
+    "type": "object"
+  },
+  "BeatRenderManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "document_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "render_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "renderer_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "algorithm_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 48000,
+        "minimum": 48000,
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 2,
+        "minimum": 2,
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 30240000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "musical_frames": {
+        "maximum": 28800000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "master_gain": {
+        "maximum": 1,
+        "minimum": 1,
+        "type": "number"
+      },
+      "peak": {
+        "minimum": 0,
+        "type": "number"
+      },
+      "kit_manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "events_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/BeatArtifact"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "anyOf": [
+            {
+              "enum": [
+                "beat_event_clamped",
+                "beat_midi_timing_quantized",
+                "beat_midi_approximation",
+                "beat_midi_generic_sounds",
+                "beat_midi_percussion_retrigger"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "beat_silent",
+                "beat_peak_over_one",
+                "beat_midi_unavailable"
+              ],
+              "type": "string"
+            }
+          ]
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "midi_error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "beat_pattern_invalid",
+              "beat_render_limit",
+              "beat_swing_grid_unsupported",
+              "beat_sample_changed",
+              "beat_instrument_missing",
+              "beat_midi_channels_exhausted",
+              "beat_midi_percussion_overlap",
+              "beat_not_found",
+              "beat_job_not_found",
+              "beat_revision_conflict",
+              "beat_submission_conflict",
+              "beat_queue_full",
+              "beat_disk_full",
+              "beat_worker_failed",
+              "beat_cleanup_failed",
+              "beat_save_failed",
+              "beat_storage_unavailable",
+              "beat_kit_invalid",
+              "beat_cancelled",
+              "beat_interrupted"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "track_id": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "beat_id",
+      "beat_revision",
+      "document_sha256",
+      "render_id",
+      "seed",
+      "renderer_version",
+      "algorithm_version",
+      "frames",
+      "musical_frames",
+      "peak",
+      "kit_manifest_sha256",
+      "events_sha256",
+      "artifacts"
+    ],
+    "type": "object"
+  },
+  "BeatJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "request": {
+        "$ref": "#/$defs/BeatJobRequest"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "blocked",
+          "saving"
+        ],
+        "type": "string"
+      },
+      "phase": {
+        "enum": [
+          "queued",
+          "compiling",
+          "rendering",
+          "publishing",
+          "done",
+          "cancelling",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "blocked",
+          "saving"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "type": "string"
+      },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "progress_frames": {
+        "anyOf": [
+          {
+            "maximum": 30240000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "total_frames": {
+        "anyOf": [
+          {
+            "maximum": 30240000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "beat_pattern_invalid",
+              "beat_render_limit",
+              "beat_swing_grid_unsupported",
+              "beat_sample_changed",
+              "beat_instrument_missing",
+              "beat_midi_channels_exhausted",
+              "beat_midi_percussion_overlap",
+              "beat_not_found",
+              "beat_job_not_found",
+              "beat_revision_conflict",
+              "beat_submission_conflict",
+              "beat_queue_full",
+              "beat_disk_full",
+              "beat_worker_failed",
+              "beat_cleanup_failed",
+              "beat_save_failed",
+              "beat_storage_unavailable",
+              "beat_kit_invalid",
+              "beat_cancelled",
+              "beat_interrupted"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatRenderManifest"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "beat_id",
+      "beat_revision",
+      "request",
+      "status",
+      "phase",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "BeatJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/BeatJob"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "BeatStoragePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "output_bytes": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      },
+      "frames": {
+        "maximum": 30240000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 630,
+        "type": "number"
+      }
+    },
+    "required": [
+      "output_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start",
+      "frames",
+      "duration_sec"
+    ],
+    "type": "object"
+  },
+  "BeatPresetDefinition": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "enum": [
+          "china",
+          "japan",
+          "korea",
+          "indonesia",
+          "india",
+          "thailand"
+        ],
+        "type": "string"
+      },
+      "tradition": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "category": {
+        "enum": [
+          "traditional",
+          "fusion",
+          "modern_pop"
+        ],
+        "type": "string"
+      },
+      "bpm_default": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "bpm_min": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "bpm_max": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "bars": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "steps_per_quarter": {
+        "enum": [
+          2,
+          3,
+          4,
+          6,
+          8
+        ],
+        "type": "integer"
+      },
+      "scale_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tuning_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "rhythm_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "lanes": {
+        "items": {
+          "$ref": "#/$defs/BeatPresetLane"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "swing": {
+        "maximum": 0.75,
+        "minimum": 0.5,
+        "type": "number"
+      },
+      "timing": {
+        "enum": [
+          "candidate_grid",
+          "fixed_grid_free_time_approximation",
+          "tempo_envelope_required",
+          "cycle_progression_required"
+        ],
+        "type": "string"
+      },
+      "prompt_tags": {
+        "items": {
+          "maxLength": 100,
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "notes": {
+        "maxLength": 3000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "report_section": {
+        "const": "6.4",
+        "type": "string"
+      },
+      "report_number": {
+        "maximum": 24,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "region",
+      "tradition",
+      "category",
+      "bpm_default",
+      "bpm_min",
+      "bpm_max",
+      "meter",
+      "bars",
+      "steps_per_quarter",
+      "tuning_id",
+      "lanes",
+      "prompt_tags",
+      "notes",
+      "report_number"
+    ],
+    "type": "object"
+  },
+  "BeatPresetHit": {
+    "additionalProperties": false,
+    "properties": {
+      "index": {
+        "maximum": 1023,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "velocity": {
+        "maximum": 127,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "degree": {
+        "anyOf": [
+          {
+            "maximum": 23,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "octave": {
+        "maximum": 2,
+        "minimum": -2,
+        "type": "integer"
+      },
+      "gate_steps": {
+        "maximum": 8,
+        "minimum": 0.05,
+        "type": "number"
+      },
+      "articulation_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "index"
+    ],
+    "type": "object"
+  },
+  "BeatPresetInfo": {
+    "additionalProperties": false,
+    "properties": {
+      "preset": {
+        "$ref": "#/$defs/BeatPresetDefinition"
+      },
+      "preset_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "availability": {
+        "enum": [
+          "available",
+          "pack_missing",
+          "license_unresolved",
+          "unsupported_articulation",
+          "tuning_unresolved",
+          "timing_unsupported"
+        ],
+        "type": "string"
+      },
+      "compatible_kit_ids": {
+        "items": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "maxItems": 100,
+        "type": "array"
+      },
+      "missing_instrument_ids": {
+        "items": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "reasons": {
+        "items": {
+          "enum": [
+            "available",
+            "pack_missing",
+            "license_unresolved",
+            "unsupported_articulation",
+            "tuning_unresolved",
+            "timing_unsupported"
+          ],
+          "type": "string"
+        },
+        "maxItems": 5,
+        "type": "array"
+      }
+    },
+    "required": [
+      "preset",
+      "preset_sha256",
+      "availability"
+    ],
+    "type": "object"
+  },
+  "BeatPresetLane": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "instrument_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "drum",
+          "bass",
+          "pitched"
+        ],
+        "type": "string"
+      },
+      "hits": {
+        "items": {
+          "$ref": "#/$defs/BeatPresetHit"
+        },
+        "maxItems": 1024,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "instrument_id",
+      "label",
+      "role"
+    ],
+    "type": "object"
+  },
+  "BeatPresetScale": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "enum": [
+          "china",
+          "japan",
+          "korea",
+          "indonesia",
+          "india",
+          "thailand"
+        ],
+        "type": "string"
+      },
+      "degrees_cents": {
+        "items": {
+          "exclusiveMaximum": 1200,
+          "minimum": 0,
+          "type": "number"
+        },
+        "maxItems": 24,
+        "minItems": 1,
+        "type": "array"
+      },
+      "notes": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "report_section": {
+        "const": "6.2",
+        "type": "string"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "region",
+      "degrees_cents",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "BeatPresetTuning": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "twelve_tet_candidate",
+          "sample_specific_required",
+          "equal_division_experiment"
+        ],
+        "type": "string"
+      },
+      "degrees_cents": {
+        "anyOf": [
+          {
+            "items": {
+              "exclusiveMaximum": 1200,
+              "minimum": 0,
+              "type": "number"
+            },
+            "maxItems": 24,
+            "minItems": 1,
+            "type": "array"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reference_hz": {
+        "maximum": 480,
+        "minimum": 400,
+        "type": "number"
+      },
+      "notes": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "kind",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "BeatRhythmDefinition": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "region": {
+        "enum": [
+          "china",
+          "japan",
+          "korea",
+          "indonesia",
+          "india",
+          "thailand"
+        ],
+        "type": "string"
+      },
+      "meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "bars": {
+        "maximum": 4,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "steps_per_quarter": {
+        "enum": [
+          2,
+          3,
+          4,
+          6,
+          8
+        ],
+        "type": "integer"
+      },
+      "grouping_steps": {
+        "items": {
+          "maximum": 1024,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "markers": {
+        "items": {
+          "$ref": "#/$defs/BeatRhythmMarker"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "bpm_min": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "bpm_max": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "notes": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "report_section": {
+        "const": "6.3",
+        "type": "string"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "title",
+      "region",
+      "meter",
+      "bars",
+      "steps_per_quarter",
+      "grouping_steps",
+      "bpm_min",
+      "bpm_max",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "BeatRhythmMarker": {
+    "additionalProperties": false,
+    "properties": {
+      "index": {
+        "maximum": 1023,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "label": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "index",
+      "label"
+    ],
+    "type": "object"
+  },
+  "BeatPresetCatalog": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "presets": {
+        "items": {
+          "$ref": "#/$defs/BeatPresetInfo"
+        },
+        "maxItems": 24,
+        "minItems": 24,
+        "type": "array"
+      },
+      "scales": {
+        "items": {
+          "$ref": "#/$defs/BeatPresetScale"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "tunings": {
+        "items": {
+          "$ref": "#/$defs/BeatPresetTuning"
+        },
+        "maxItems": 16,
+        "minItems": 1,
+        "type": "array"
+      },
+      "rhythms": {
+        "items": {
+          "$ref": "#/$defs/BeatRhythmDefinition"
+        },
+        "maxItems": 15,
+        "minItems": 15,
+        "type": "array"
+      }
+    },
+    "required": [
+      "version",
+      "presets",
+      "scales",
+      "tunings",
+      "rhythms"
+    ],
+    "type": "object"
+  },
+  "BeatPresetCompileRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "preset_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "kit_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "document_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "bpm": {
+        "anyOf": [
+          {
+            "maximum": 300,
+            "minimum": 20,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tonic_midi": {
+        "maximum": 96,
+        "minimum": 24,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "preset_id",
+      "kit_id",
+      "document_id",
+      "seed"
+    ],
+    "type": "object"
+  },
+  "BeatPresetCompilation": {
+    "additionalProperties": false,
+    "properties": {
+      "preset_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "preset_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "catalog_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "review_status": {
+        "const": "unreviewed",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "candidate_arrangement_unreviewed",
+            "scale_is_report_approximation",
+            "fixed_grid_free_time_approximation",
+            "raga_phrase_rules_not_implemented"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "document": {
+        "$ref": "#/$defs/BeatDocument"
+      }
+    },
+    "required": [
+      "preset_id",
+      "preset_sha256",
+      "catalog_version",
+      "warnings",
+      "document"
+    ],
+    "type": "object"
+  },
+  "BeatClipLink": {
+    "additionalProperties": false,
+    "properties": {
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "render_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "lane_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "occurrence_index": {
+        "anyOf": [
+          {
+            "maximum": 4095,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "beat_id",
+      "beat_revision",
+      "render_id",
+      "lane_id"
+    ],
+    "type": "object"
+  },
+  "EditorAudioClip": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "type": {
+        "const": "audio",
+        "type": "string"
+      },
+      "sourceUrl": {
+        "maxLength": 500,
+        "minLength": 6,
+        "pattern": "^/api/[A-Za-z0-9][A-Za-z0-9/_-]*$",
+        "type": "string"
+      },
+      "sourceLabel": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "timelineStart": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "trimStart": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "trimEnd": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "fadeInDuration": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "fadeOutDuration": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "warpEnabled": {
+        "type": "boolean"
+      },
+      "originalBpm": {
+        "maximum": 999,
+        "minimum": 20,
+        "type": "number"
+      },
+      "muted": {
+        "type": "boolean"
+      },
+      "solo": {
+        "type": "boolean"
+      },
+      "beatLink": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatClipLink"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "sourceArtifact": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicProjectArtifact"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "sourceUrl",
+      "sourceLabel",
+      "timelineStart",
+      "trimStart",
+      "trimEnd",
+      "originalBpm"
+    ],
+    "type": "object"
+  },
+  "EditorBitcrusher": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "bits": {
+        "maximum": 16,
+        "minimum": 2,
+        "type": "integer"
+      },
+      "mix": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorChannelSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "volume": {
+        "maximum": 1.5,
+        "minimum": 0,
+        "type": "number"
+      },
+      "eq": {
+        "$ref": "#/$defs/EditorEq"
+      },
+      "comp": {
+        "$ref": "#/$defs/EditorComp"
+      },
+      "reverb": {
+        "$ref": "#/$defs/EditorReverb"
+      },
+      "filter": {
+        "$ref": "#/$defs/EditorFilter"
+      },
+      "distortion": {
+        "$ref": "#/$defs/EditorDistortion"
+      },
+      "chorus": {
+        "$ref": "#/$defs/EditorChorus"
+      },
+      "bitcrusher": {
+        "$ref": "#/$defs/EditorBitcrusher"
+      },
+      "delay": {
+        "$ref": "#/$defs/EditorDelay"
+      },
+      "pan": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "muted": {
+        "type": "boolean"
+      },
+      "solo": {
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "EditorChorus": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "rate": {
+        "maximum": 5,
+        "minimum": 0.1,
+        "type": "number"
+      },
+      "depth": {
+        "maximum": 0.01,
+        "minimum": 0.001,
+        "type": "number"
+      },
+      "mix": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorComp": {
+    "additionalProperties": false,
+    "properties": {
+      "threshold": {
+        "maximum": 0,
+        "minimum": -60,
+        "type": "number"
+      },
+      "ratio": {
+        "maximum": 20,
+        "minimum": 1,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorDelay": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "time": {
+        "maximum": 2,
+        "minimum": 0.01,
+        "type": "number"
+      },
+      "feedback": {
+        "maximum": 0.95,
+        "minimum": 0,
+        "type": "number"
+      },
+      "mix": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorDistortion": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "amount": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "mix": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorEq": {
+    "additionalProperties": false,
+    "properties": {
+      "low": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "mid": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "high": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorFilter": {
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "type": {
+        "enum": [
+          "lowpass",
+          "highpass"
+        ],
+        "type": "string"
+      },
+      "frequency": {
+        "maximum": 22000,
+        "minimum": 20,
+        "type": "number"
+      },
+      "resonance": {
+        "maximum": 20,
+        "minimum": 0.1,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "EditorLane": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "clips": {
+        "items": {
+          "$ref": "#/$defs/EditorAudioClip"
+        },
+        "maxItems": 4096,
+        "type": "array"
+      },
+      "settings": {
+        "$ref": "#/$defs/EditorChannelSettings"
+      }
+    },
+    "required": [
+      "id",
+      "name",
+      "clips"
+    ],
+    "type": "object"
+  },
+  "EditorLoopRegion": {
+    "additionalProperties": false,
+    "properties": {
+      "start": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "end": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "enabled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "start",
+      "end",
+      "enabled"
+    ],
+    "type": "object"
+  },
+  "EditorMasterSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "volume": {
+        "maximum": 1.5,
+        "minimum": 0,
+        "type": "number"
+      },
+      "eq": {
+        "$ref": "#/$defs/EditorEq"
+      },
+      "comp": {
+        "$ref": "#/$defs/EditorComp"
+      },
+      "reverb": {
+        "$ref": "#/$defs/EditorReverb"
+      },
+      "filter": {
+        "$ref": "#/$defs/EditorFilter"
+      },
+      "distortion": {
+        "$ref": "#/$defs/EditorDistortion"
+      },
+      "chorus": {
+        "$ref": "#/$defs/EditorChorus"
+      },
+      "bitcrusher": {
+        "$ref": "#/$defs/EditorBitcrusher"
+      },
+      "delay": {
+        "$ref": "#/$defs/EditorDelay"
+      }
+    },
+    "type": "object"
+  },
+  "EditorProjectDocument": {
+    "additionalProperties": false,
+    "properties": {
+      "version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "lanes": {
+        "items": {
+          "$ref": "#/$defs/EditorLane"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "master": {
+        "$ref": "#/$defs/EditorMasterSettings"
+      },
+      "pxPerSecond": {
+        "maximum": 400,
+        "minimum": 5,
+        "type": "number"
+      },
+      "bpm": {
+        "maximum": 999,
+        "minimum": 20,
+        "type": "number"
+      },
+      "snapEnabled": {
+        "type": "boolean"
+      },
+      "loopRegion": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/EditorLoopRegion"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "musicProvenance": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicProjectProvenance"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "lanes",
+      "bpm"
+    ],
+    "type": "object"
+  },
+  "EditorReverb": {
+    "additionalProperties": false,
+    "properties": {
+      "mix": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "MusicProjectArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "artifact_id",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "MusicProjectProvenance": {
+    "additionalProperties": false,
+    "properties": {
+      "workflow": {
+        "enum": [
+          "beat",
+          "beat_song",
+          "mashup"
+        ],
+        "type": "string"
+      },
+      "workflow_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "workflow_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/MusicProjectSource"
+        },
+        "maxItems": 32,
+        "type": "array"
+      }
+    },
+    "required": [
+      "workflow",
+      "workflow_id",
+      "workflow_revision",
+      "source_manifest_sha256"
+    ],
+    "type": "object"
+  },
+  "MusicProjectSource": {
+    "additionalProperties": false,
+    "properties": {
+      "track_id": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      },
+      "version_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "track_id",
+      "version_id",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "BuiltMusicProject": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      },
+      "data": {
+        "$ref": "#/$defs/EditorProjectDocument"
+      },
+      "provenance": {
+        "$ref": "#/$defs/MusicProjectProvenance"
+      }
+    },
+    "required": [
+      "name",
+      "data",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "MusicProjectPublication": {
+    "additionalProperties": false,
+    "properties": {
+      "project_id": {
+        "exclusiveMinimum": 0,
+        "maximum": 9007199254740991,
+        "type": "integer"
+      },
+      "provenance": {
+        "$ref": "#/$defs/MusicProjectProvenance"
+      }
+    },
+    "required": [
+      "project_id",
+      "provenance"
+    ],
+    "type": "object"
+  },
+  "SelectedSource": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          }
+        ]
+      },
+      "audio_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "audio_sha256"
+    ],
+    "type": "object"
+  },
+  "ReplacementAssetImport": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "source",
+          "prepared",
+          "impulse_response"
+        ],
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "declaration": {
+        "$ref": "#/$defs/SourceDeclaration"
+      }
+    },
+    "required": [
+      "request_id",
+      "role",
+      "title",
+      "declaration"
+    ],
+    "type": "object"
+  },
+  "ReplacementAssetResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "source",
+          "prepared",
+          "impulse_response"
+        ],
+        "type": "string"
+      },
+      "selection": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "evidence_asset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "track_id": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "request_id",
+      "role",
+      "selection",
+      "evidence_asset_id"
+    ],
+    "type": "object"
+  },
+  "SeedTarget": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "seed-vc",
+        "type": "string"
+      },
+      "voice_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "model_revision_id": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine",
+      "voice_id",
+      "model_revision_id"
+    ],
+    "type": "object"
+  },
+  "RvcTarget": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "rvc",
+        "type": "string"
+      },
+      "registered_model_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine",
+      "registered_model_id"
+    ],
+    "type": "object"
+  },
+  "ReplacementFitSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "max_stretch": {
+        "maximum": 1.5,
+        "minimum": 1,
+        "type": "number"
+      },
+      "pitch_shift_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "integer"
+      },
+      "pitch_nudge_semitones": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "cleanup": {
+        "enum": [
+          "off",
+          "light"
+        ],
+        "type": "string"
+      },
+      "keep_breaths": {
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "BleedDiagnostic": {
+    "additionalProperties": false,
+    "properties": {
+      "vocal_artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "backing_artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "measured",
+          "inconclusive"
+        ],
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "missing_new_vocal",
+              "insufficient_active_audio",
+              "insufficient_bands",
+              "bandwidth_unavailable",
+              "timeline_unmapped",
+              "no_variable_signal"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "correlation_strength": {
+        "enum": [
+          "weak",
+          "medium",
+          "high",
+          "inconclusive"
+        ],
+        "type": "string"
+      },
+      "median_absolute_correlation": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "medium_threshold": {
+        "maximum": 0.3,
+        "minimum": 0.3,
+        "type": "number"
+      },
+      "high_threshold": {
+        "maximum": 0.6,
+        "minimum": 0.6,
+        "type": "number"
+      },
+      "windows": {
+        "items": {
+          "$ref": "#/$defs/BleedWindow"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "confidence": {
+        "type": "null"
+      },
+      "interpretation": {
+        "const": "accompaniment_similarity_only",
+        "type": "string"
+      }
+    },
+    "required": [
+      "vocal_artifact_id",
+      "backing_artifact_id",
+      "status",
+      "correlation_strength"
+    ],
+    "type": "object"
+  },
+  "BleedWindow": {
+    "additionalProperties": false,
+    "properties": {
+      "window_index": {
+        "maximum": 11,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "active_samples": {
+        "maximum": 110250,
+        "minimum": 22050,
+        "type": "integer"
+      },
+      "vocal_channel": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "backing_channel": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "signed_correlation": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "absolute_correlation": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "lag_frames": {
+        "maximum": 5512,
+        "minimum": -5512,
+        "type": "integer"
+      },
+      "lag_ms": {
+        "maximum": 250,
+        "minimum": -250,
+        "type": "number"
+      },
+      "polarity": {
+        "enum": [
+          "positive",
+          "inverted"
+        ],
+        "type": "string"
+      },
+      "lag_ambiguous": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "window_index",
+      "active_samples",
+      "vocal_channel",
+      "backing_channel",
+      "signed_correlation",
+      "absolute_correlation",
+      "lag_frames",
+      "lag_ms",
+      "polarity"
+    ],
+    "type": "object"
+  },
+  "DiagnosticArtifactIdentity": {
+    "additionalProperties": false,
+    "properties": {
+      "artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "duration_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "artifact_id",
+      "sha256",
+      "sample_rate_hz",
+      "channels",
+      "duration_frames"
+    ],
+    "type": "object"
+  },
+  "DiagnosticWindow": {
+    "additionalProperties": false,
+    "properties": {
+      "start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "start_frame",
+      "end_frame"
+    ],
+    "type": "object"
+  },
+  "MatchingEqDiagnostic": {
+    "additionalProperties": false,
+    "properties": {
+      "status": {
+        "enum": [
+          "available",
+          "inconclusive"
+        ],
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "missing_new_vocal",
+              "insufficient_active_audio",
+              "insufficient_bands",
+              "bandwidth_unavailable",
+              "timeline_unmapped",
+              "no_variable_signal"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "bands": {
+        "items": {
+          "$ref": "#/$defs/TonalBand"
+        },
+        "maxItems": 6,
+        "minItems": 6,
+        "type": "array"
+      },
+      "suggested_eq_bands": {
+        "items": {
+          "$ref": "#/$defs/EqBand"
+        },
+        "maxItems": 6,
+        "type": "array"
+      },
+      "before_difference_db": {
+        "anyOf": [
+          {
+            "maximum": 160,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "after_difference_db": {
+        "anyOf": [
+          {
+            "maximum": 160,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "requires_review": {
+        "const": true,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "status",
+      "bands"
+    ],
+    "type": "object"
+  },
+  "PitchArtifactReport": {
+    "additionalProperties": false,
+    "properties": {
+      "identity": {
+        "$ref": "#/$defs/DiagnosticArtifactIdentity"
+      },
+      "role": {
+        "enum": [
+          "reference",
+          "candidate",
+          "converted",
+          "matched"
+        ],
+        "type": "string"
+      },
+      "applied_pitch_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "status": {
+        "enum": [
+          "observed",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "unknown_reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "analysis_unavailable",
+              "analysis_failed",
+              "no_reliable_pitch",
+              "insufficient_voiced_support",
+              "alignment_unreviewed",
+              "insufficient_paired_windows",
+              "inconsistent_pitch_difference",
+              "shift_outside_advisory_bound",
+              "already_matches",
+              "pitch_near_analysis_boundary"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "windows": {
+        "items": {
+          "$ref": "#/$defs/PitchWindowObservation"
+        },
+        "maxItems": 12,
+        "type": "array"
+      },
+      "sampled_sec": {
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+      },
+      "analyzed_sec": {
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+      },
+      "voiced_sec": {
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+      },
+      "reliable_voiced_sec": {
+        "maximum": 60,
+        "minimum": 0,
+        "type": "number"
+      },
+      "pitch_p05_hz": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 2100,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pitch_median_hz": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 2100,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pitch_p95_hz": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 2100,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "identity",
+      "role",
+      "applied_pitch_semitones",
+      "status",
+      "sampled_sec",
+      "analyzed_sec",
+      "voiced_sec",
+      "reliable_voiced_sec"
+    ],
+    "type": "object"
+  },
+  "PitchComparison": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "enum": [
+          "prepared_fit",
+          "conversion_drift"
+        ],
+        "type": "string"
+      },
+      "reference_artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "candidate_artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "observed",
+          "unknown",
+          "no_change"
+        ],
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "analysis_unavailable",
+              "analysis_failed",
+              "no_reliable_pitch",
+              "insufficient_voiced_support",
+              "alignment_unreviewed",
+              "insufficient_paired_windows",
+              "inconsistent_pitch_difference",
+              "shift_outside_advisory_bound",
+              "already_matches",
+              "pitch_near_analysis_boundary"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "paired_windows": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "supported_windows": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "median_delta_semitones": {
+        "anyOf": [
+          {
+            "maximum": 96,
+            "minimum": -96,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "spread_semitones": {
+        "anyOf": [
+          {
+            "maximum": 192,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "recommendation": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/PitchRecommendation"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "kind",
+      "reference_artifact_id",
+      "candidate_artifact_id",
+      "status",
+      "paired_windows",
+      "supported_windows"
+    ],
+    "type": "object"
+  },
+  "PitchRecommendation": {
+    "additionalProperties": false,
+    "properties": {
+      "pitch_shift_semitones": {
+        "maximum": 2,
+        "minimum": -2,
+        "type": "integer"
+      },
+      "pitch_nudge_semitones": {
+        "maximum": 0.5,
+        "minimum": -0.5,
+        "type": "number"
+      },
+      "requires_review": {
+        "const": true,
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "pitch_shift_semitones",
+      "pitch_nudge_semitones"
+    ],
+    "type": "object"
+  },
+  "PitchRuntimeVersions": {
+    "additionalProperties": false,
+    "properties": {
+      "python": {
+        "maxLength": 60,
+        "minLength": 3,
+        "type": "string"
+      },
+      "librosa": {
+        "anyOf": [
+          {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "numpy": {
+        "anyOf": [
+          {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "scipy": {
+        "anyOf": [
+          {
+            "maxLength": 60,
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "python"
+    ],
+    "type": "object"
+  },
+  "PitchWindowObservation": {
+    "additionalProperties": false,
+    "properties": {
+      "window": {
+        "$ref": "#/$defs/DiagnosticWindow"
+      },
+      "analyzed_sec": {
+        "maximum": 5,
+        "minimum": 0,
+        "type": "number"
+      },
+      "voiced_sec": {
+        "maximum": 5,
+        "minimum": 0,
+        "type": "number"
+      },
+      "reliable_voiced_sec": {
+        "maximum": 5,
+        "minimum": 0,
+        "type": "number"
+      },
+      "pitch_p05_hz": {
+        "anyOf": [
+          {
+            "maximum": 2000,
+            "minimum": 50,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pitch_median_hz": {
+        "anyOf": [
+          {
+            "maximum": 2000,
+            "minimum": 50,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "pitch_p95_hz": {
+        "anyOf": [
+          {
+            "maximum": 2000,
+            "minimum": 50,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "median_voicing_probability": {
+        "anyOf": [
+          {
+            "maximum": 1,
+            "minimum": 0.8,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "window",
+      "analyzed_sec",
+      "voiced_sec",
+      "reliable_voiced_sec"
+    ],
+    "type": "object"
+  },
+  "ReplacementPitchReport": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "method": {
+        "const": "pyin_50_2000_hz_20ms_probability_0_8",
+        "type": "string"
+      },
+      "sampling_method": {
+        "const": "uniform-disjoint-5s-max60s-v1",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "runtime": {
+        "$ref": "#/$defs/PitchRuntimeVersions"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/PitchArtifactReport"
+        },
+        "maxItems": 4,
+        "minItems": 1,
+        "type": "array"
+      },
+      "comparisons": {
+        "items": {
+          "$ref": "#/$defs/PitchComparison"
+        },
+        "maxItems": 2,
+        "type": "array"
+      },
+      "confidence": {
+        "type": "null"
+      },
+      "confidence_method": {
+        "const": "uncalibrated",
+        "type": "string"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "sampled_passages_only",
+            "observed_pitch_not_full_range",
+            "voicing_probability_not_pitch_confidence",
+            "monophonic_estimator",
+            "melody_correspondence_unverified",
+            "user_review_required",
+            "key_not_inferred",
+            "analysis_unavailable"
+          ],
+          "type": "string"
+        },
+        "maxItems": 12,
+        "type": "array"
+      }
+    },
+    "required": [
+      "configuration_sha256",
+      "runtime",
+      "artifacts"
+    ],
+    "type": "object"
+  },
+  "ReplacementTonalReport": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "plan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 2147483647,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "method": {
+        "const": "masked-octave-median-lagged-correlation-v1",
+        "type": "string"
+      },
+      "sampling_method": {
+        "const": "uniform-disjoint-5s-max60s-v1",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "analysis_sample_rate_hz": {
+        "const": 22050,
+        "type": "integer"
+      },
+      "ffmpeg_version": {
+        "maxLength": 512,
+        "minLength": 1,
+        "type": "string"
+      },
+      "numpy_version": {
+        "maxLength": 60,
+        "minLength": 1,
+        "type": "string"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/TonalArtifactBasis"
+        },
+        "maxItems": 4,
+        "minItems": 2,
+        "type": "array"
+      },
+      "matching_eq": {
+        "$ref": "#/$defs/MatchingEqDiagnostic"
+      },
+      "bleed": {
+        "items": {
+          "$ref": "#/$defs/BleedDiagnostic"
+        },
+        "maxItems": 2,
+        "minItems": 1,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "sampled_passages_only",
+            "amplitude_activity_not_voicing",
+            "spectral_difference_not_quality",
+            "vowels_and_timbre_affect_spectra",
+            "correlation_not_singer_detection",
+            "shared_instrumentation_can_correlate",
+            "low_correlation_not_absence_of_bleed",
+            "correlation_thresholds_uncalibrated",
+            "lag_ambiguous",
+            "user_review_required",
+            "overlapping_timeline_only"
+          ],
+          "type": "string"
+        },
+        "maxItems": 12,
+        "type": "array"
+      }
+    },
+    "required": [
+      "plan_id",
+      "revision",
+      "configuration_sha256",
+      "ffmpeg_version",
+      "numpy_version",
+      "artifacts",
+      "matching_eq",
+      "bleed"
+    ],
+    "type": "object"
+  },
+  "TonalArtifactBasis": {
+    "additionalProperties": false,
+    "properties": {
+      "role": {
+        "enum": [
+          "source_vocal",
+          "backing",
+          "new_vocal",
+          "matched_vocal"
+        ],
+        "type": "string"
+      },
+      "identity": {
+        "$ref": "#/$defs/DiagnosticArtifactIdentity"
+      },
+      "windows": {
+        "items": {
+          "$ref": "#/$defs/DiagnosticWindow"
+        },
+        "maxItems": 12,
+        "minItems": 1,
+        "type": "array"
+      },
+      "active_samples": {
+        "maximum": 1323000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "role",
+      "identity",
+      "windows",
+      "active_samples"
+    ],
+    "type": "object"
+  },
+  "TonalBand": {
+    "additionalProperties": false,
+    "properties": {
+      "frequency_hz": {
+        "enum": [
+          125,
+          250,
+          500,
+          1000,
+          2000,
+          4000
+        ],
+        "type": "integer"
+      },
+      "status": {
+        "enum": [
+          "supported",
+          "unsupported"
+        ],
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "missing_new_vocal",
+              "insufficient_active_audio",
+              "insufficient_bands",
+              "bandwidth_unavailable",
+              "timeline_unmapped",
+              "no_variable_signal"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reference_db": {
+        "anyOf": [
+          {
+            "maximum": 0,
+            "minimum": -160,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "new_db": {
+        "anyOf": [
+          {
+            "maximum": 0,
+            "minimum": -160,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "matched_db": {
+        "anyOf": [
+          {
+            "maximum": 0,
+            "minimum": -160,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "difference_db": {
+        "anyOf": [
+          {
+            "maximum": 160,
+            "minimum": -160,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "suggested_gain_db": {
+        "maximum": 6,
+        "minimum": -6,
+        "type": "number"
+      }
+    },
+    "required": [
+      "frequency_hz",
+      "status"
+    ],
+    "type": "object"
+  },
+  "ReplacementDiagnostics": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "alignment_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "attempt_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "pitch": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReplacementPitchReport"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tonal": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReplacementTonalReport"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "unavailable": {
+        "items": {
+          "enum": [
+            "pitch",
+            "tonal"
+          ],
+          "type": "string"
+        },
+        "maxItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "revision",
+      "request_sha256",
+      "attempt_id",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "ConvertReplacementRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "separator": {
+        "enum": [
+          "fast",
+          "high",
+          "roformer"
+        ],
+        "type": "string"
+      },
+      "fit": {
+        "$ref": "#/$defs/ReplacementFitSettings"
+      },
+      "mode": {
+        "const": "convert",
+        "type": "string"
+      },
+      "target": {
+        "discriminator": {
+          "mapping": {
+            "rvc": "#/$defs/RvcTarget",
+            "seed-vc": "#/$defs/SeedTarget"
+          },
+          "propertyName": "engine"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SeedTarget"
+          },
+          {
+            "$ref": "#/$defs/RvcTarget"
+          }
+        ]
+      }
+    },
+    "required": [
+      "title",
+      "source",
+      "mode",
+      "target"
+    ],
+    "type": "object"
+  },
+  "PreparedReplacementRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "separator": {
+        "enum": [
+          "fast",
+          "high",
+          "roformer"
+        ],
+        "type": "string"
+      },
+      "fit": {
+        "$ref": "#/$defs/ReplacementFitSettings"
+      },
+      "prepared": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "mode": {
+        "const": "prepared",
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "source",
+      "prepared",
+      "mode"
+    ],
+    "type": "object"
+  },
+  "HybridReplacementRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "separator": {
+        "enum": [
+          "fast",
+          "high",
+          "roformer"
+        ],
+        "type": "string"
+      },
+      "fit": {
+        "$ref": "#/$defs/ReplacementFitSettings"
+      },
+      "prepared": {
+        "$ref": "#/$defs/SelectedSource"
+      },
+      "mode": {
+        "const": "hybrid",
+        "type": "string"
+      },
+      "target": {
+        "discriminator": {
+          "mapping": {
+            "rvc": "#/$defs/RvcTarget",
+            "seed-vc": "#/$defs/SeedTarget"
+          },
+          "propertyName": "engine"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/SeedTarget"
+          },
+          {
+            "$ref": "#/$defs/RvcTarget"
+          }
+        ]
+      }
+    },
+    "required": [
+      "title",
+      "source",
+      "prepared",
+      "mode",
+      "target"
+    ],
+    "type": "object"
+  },
+  "ReplacementMixSettings": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "vocal_level": {
+        "enum": [
+          "match_original",
+          "manual"
+        ],
+        "type": "string"
+      },
+      "manual_gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "eq_bands": {
+        "items": {
+          "$ref": "#/$defs/EqBand"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "compression": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/CompressionSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      },
+      "master_level": {
+        "enum": [
+          "match_original",
+          "custom",
+          "off"
+        ],
+        "type": "string"
+      },
+      "space": {
+        "enum": [
+          "off",
+          "owned_ir"
+        ],
+        "type": "string"
+      },
+      "ir_asset_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "wet": {
+        "maximum": 0.25,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "type": "object"
+  },
+  "ReplacementProcessing": {
+    "additionalProperties": false,
+    "properties": {
+      "cleanup_recipe": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "low_level_attenuation_db": {
+        "anyOf": [
+          {
+            "maximum": 3,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "applied_gain_db": {
+        "anyOf": [
+          {
+            "maximum": 12.0412,
+            "minimum": -12.0412,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "residual_lu": {
+        "anyOf": [
+          {
+            "maximum": 300,
+            "minimum": -300,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ir_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ir_gain": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 1,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "wet": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 0.25,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stitch_recipe": {
+        "anyOf": [
+          {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9_.:-]+$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stitched_phrases": {
+        "maximum": 1000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "native_recipes": {
+        "items": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_.:-]+$",
+          "type": "string"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "native_executable_sha256s": {
+        "items": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "maxItems": 4,
+        "type": "array"
+      },
+      "quality_verified": {
+        "const": false,
+        "type": "boolean"
+      }
+    },
+    "type": "object"
+  },
+  "ReplacementArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "evidence_asset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "source_vocal",
+          "backing",
+          "prepared_dry",
+          "prepared_clean",
+          "aligned_dry",
+          "converted_dry",
+          "matched_vocal",
+          "preview",
+          "master",
+          "impulse_response"
+        ],
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_sha256s": {
+        "items": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "maxItems": 8,
+        "minItems": 1,
+        "type": "array"
+      },
+      "settings_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "alignment_revision": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "audio_url": {
+        "anyOf": [
+          {
+            "maxLength": 200,
+            "pattern": "^/api/voices/replace/plans/[0-9a-f]{32}/artifacts/[0-9a-f]{32}/audio$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "measurement": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AudioMetrics"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "processing": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReplacementProcessing"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "evidence_asset_id",
+      "role",
+      "sha256",
+      "source_sha256s",
+      "settings_sha256",
+      "duration_sec",
+      "sample_rate_hz",
+      "channels"
+    ],
+    "type": "object"
+  },
+  "ReplacementRender": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "master_artifact_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "track_id": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "track_deleted": {
+        "type": "boolean"
+      },
+      "settings_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "replacement_invalid_request",
+              "upload_too_large",
+              "invalid_audio",
+              "audio_too_long",
+              "unsupported_audio_format",
+              "replacement_plan_missing",
+              "replacement_source_changed",
+              "replacement_artifact_changed",
+              "replacement_model_changed",
+              "replacement_source_missing",
+              "replacement_artifact_missing",
+              "replacement_revision_conflict",
+              "replacement_request_conflict",
+              "replacement_busy",
+              "replacement_cleanup_pending",
+              "replacement_engine_unavailable",
+              "replacement_separator_unavailable",
+              "replacement_engine_incompatible",
+              "replacement_alignment_capacity",
+              "replacement_alignment_unavailable",
+              "replacement_alignment_invalid",
+              "replacement_loudness_unavailable",
+              "replacement_target_unattainable",
+              "replacement_output_duration_mismatch",
+              "replacement_output_invalid",
+              "replacement_disk_full",
+              "replacement_storage_failed",
+              "replacement_storage_incompatible",
+              "replacement_source_in_use",
+              "replacement_model_in_use",
+              "replacement_model_untrusted",
+              "replacement_evidence_required",
+              "replacement_interrupted",
+              "replacement_timeout",
+              "replacement_cancelled",
+              "replacement_failed"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "plan_id",
+      "revision",
+      "request_id",
+      "settings_sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "ReplacementActionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "request_id"
+    ],
+    "type": "object"
+  },
+  "ReplacementUpdateRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request": {
+        "discriminator": {
+          "mapping": {
+            "convert": "#/$defs/ConvertReplacementRequest",
+            "hybrid": "#/$defs/HybridReplacementRequest",
+            "prepared": "#/$defs/PreparedReplacementRequest"
+          },
+          "propertyName": "mode"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ConvertReplacementRequest"
+          },
+          {
+            "$ref": "#/$defs/PreparedReplacementRequest"
+          },
+          {
+            "$ref": "#/$defs/HybridReplacementRequest"
+          }
+        ]
+      }
+    },
+    "required": [
+      "expected_revision",
+      "request"
+    ],
+    "type": "object"
+  },
+  "ReplacementMixEditRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "mix": {
+        "$ref": "#/$defs/ReplacementMixSettings"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "mix"
+    ],
+    "type": "object"
+  },
+  "AlignmentEditRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "alignment": {
+        "$ref": "#/$defs/AlignmentResult"
+      },
+      "reviewed_phrase_ids": {
+        "items": {
+          "maxLength": 32,
+          "minLength": 32,
+          "pattern": "^[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "alignment"
+    ],
+    "type": "object"
+  },
+  "ReplacementPreviewWindow": {
+    "additionalProperties": false,
+    "properties": {
+      "start_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 30,
+        "type": "number"
+      }
+    },
+    "required": [
+      "start_sec",
+      "duration_sec"
+    ],
+    "type": "object"
+  },
+  "ReplacementRenderRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "mix": {
+        "$ref": "#/$defs/ReplacementMixSettings"
+      },
+      "preview_window": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReplacementPreviewWindow"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "expected_revision",
+      "request_id",
+      "mix"
+    ],
+    "type": "object"
+  },
+  "ReplacementPlanResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "request": {
+        "discriminator": {
+          "mapping": {
+            "convert": "#/$defs/ConvertReplacementRequest",
+            "hybrid": "#/$defs/HybridReplacementRequest",
+            "prepared": "#/$defs/PreparedReplacementRequest"
+          },
+          "propertyName": "mode"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ConvertReplacementRequest"
+          },
+          {
+            "$ref": "#/$defs/PreparedReplacementRequest"
+          },
+          {
+            "$ref": "#/$defs/HybridReplacementRequest"
+          }
+        ]
+      },
+      "mix": {
+        "$ref": "#/$defs/ReplacementMixSettings"
+      },
+      "status": {
+        "enum": [
+          "draft",
+          "queued",
+          "running",
+          "needs_review",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "phase": {
+        "enum": [
+          "inspecting",
+          "separating",
+          "analyzing",
+          "cleaning",
+          "aligning",
+          "converting",
+          "mixing",
+          "measuring",
+          "publishing",
+          "complete"
+        ],
+        "type": "string"
+      },
+      "active_attempt_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "alignment": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/AlignmentResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reviewed_phrase_ids": {
+        "items": {
+          "maxLength": 32,
+          "minLength": 32,
+          "pattern": "^[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "maxItems": 1000,
+        "type": "array"
+      },
+      "alignment_reviewed": {
+        "type": "boolean"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/ReplacementArtifact"
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "renders": {
+        "items": {
+          "$ref": "#/$defs/ReplacementRender"
+        },
+        "maxItems": 100,
+        "type": "array"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "replacement_invalid_request",
+              "upload_too_large",
+              "invalid_audio",
+              "audio_too_long",
+              "unsupported_audio_format",
+              "replacement_plan_missing",
+              "replacement_source_changed",
+              "replacement_artifact_changed",
+              "replacement_model_changed",
+              "replacement_source_missing",
+              "replacement_artifact_missing",
+              "replacement_revision_conflict",
+              "replacement_request_conflict",
+              "replacement_busy",
+              "replacement_cleanup_pending",
+              "replacement_engine_unavailable",
+              "replacement_separator_unavailable",
+              "replacement_engine_incompatible",
+              "replacement_alignment_capacity",
+              "replacement_alignment_unavailable",
+              "replacement_alignment_invalid",
+              "replacement_loudness_unavailable",
+              "replacement_target_unattainable",
+              "replacement_output_duration_mismatch",
+              "replacement_output_invalid",
+              "replacement_disk_full",
+              "replacement_storage_failed",
+              "replacement_storage_incompatible",
+              "replacement_source_in_use",
+              "replacement_model_in_use",
+              "replacement_model_untrusted",
+              "replacement_evidence_required",
+              "replacement_interrupted",
+              "replacement_timeout",
+              "replacement_cancelled",
+              "replacement_failed"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "warnings": {
+        "items": {
+          "anyOf": [
+            {
+              "enum": [
+                "pitch_artifact_risk",
+                "level_match_unavailable",
+                "gain_capped",
+                "loudness_target_unmet",
+                "loudness_inconclusive",
+                "true_peak_over",
+                "hard_clip_risk",
+                "unmatched_phrases",
+                "phrase_ambiguous",
+                "alignment_unverified",
+                "alignment_budget_exceeded",
+                "stretch_unavailable",
+                "anchor_boundary_uncertain"
+              ],
+              "type": "string"
+            },
+            {
+              "enum": [
+                "replacement_loudness_unavailable",
+                "replacement_target_unattainable",
+                "replacement_alignment_capacity",
+                "replacement_alignment_unavailable"
+              ],
+              "type": "string"
+            }
+          ]
+        },
+        "maxItems": 64,
+        "type": "array"
+      },
+      "diagnostics": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ReplacementDiagnostics"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "updated_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "request",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "ReplacementPlanSummary": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "convert",
+          "prepared",
+          "hybrid"
+        ],
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "draft",
+          "queued",
+          "running",
+          "needs_review",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "phase": {
+        "enum": [
+          "inspecting",
+          "separating",
+          "analyzing",
+          "cleaning",
+          "aligning",
+          "converting",
+          "mixing",
+          "measuring",
+          "publishing",
+          "complete"
+        ],
+        "type": "string"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "replacement_invalid_request",
+              "upload_too_large",
+              "invalid_audio",
+              "audio_too_long",
+              "unsupported_audio_format",
+              "replacement_plan_missing",
+              "replacement_source_changed",
+              "replacement_artifact_changed",
+              "replacement_model_changed",
+              "replacement_source_missing",
+              "replacement_artifact_missing",
+              "replacement_revision_conflict",
+              "replacement_request_conflict",
+              "replacement_busy",
+              "replacement_cleanup_pending",
+              "replacement_engine_unavailable",
+              "replacement_separator_unavailable",
+              "replacement_engine_incompatible",
+              "replacement_alignment_capacity",
+              "replacement_alignment_unavailable",
+              "replacement_alignment_invalid",
+              "replacement_loudness_unavailable",
+              "replacement_target_unattainable",
+              "replacement_output_duration_mismatch",
+              "replacement_output_invalid",
+              "replacement_disk_full",
+              "replacement_storage_failed",
+              "replacement_storage_incompatible",
+              "replacement_source_in_use",
+              "replacement_model_in_use",
+              "replacement_model_untrusted",
+              "replacement_evidence_required",
+              "replacement_interrupted",
+              "replacement_timeout",
+              "replacement_cancelled",
+              "replacement_failed"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "updated_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "title",
+      "mode",
+      "status",
+      "phase",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "ReplacementPlansResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "plans": {
+        "items": {
+          "$ref": "#/$defs/ReplacementPlanSummary"
+        },
+        "maxItems": 100,
+        "type": "array"
+      },
+      "next_cursor": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "type": "object"
+  },
+  "ReplacementCapabilities": {
+    "additionalProperties": false,
+    "properties": {
+      "native_stretch_available": {
+        "type": "boolean"
+      },
+      "native_uniform_max_input_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "native_mapped_max_input_sec": {
+        "maximum": 7200,
+        "minimum": 0,
+        "type": "number"
+      },
+      "min_duration_ratio": {
+        "maximum": 1,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "max_duration_ratio": {
+        "maximum": 1.5,
+        "minimum": 1,
+        "type": "number"
+      },
+      "max_pitch_shift_semitones": {
+        "maximum": 12,
+        "minimum": 0,
+        "type": "number"
+      },
+      "max_source_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      },
+      "alignment_max_phrase_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 40,
+        "type": "number"
+      },
+      "alignment_max_dtw_cells": {
+        "maximum": 4000000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "alignment_requires_review": {
+        "const": true,
+        "type": "boolean"
+      },
+      "rvc_inference_ready": {
+        "type": "boolean"
+      },
+      "owned_ir_supported": {
+        "type": "boolean"
+      },
+      "cleanup_supported": {
+        "type": "boolean"
+      },
+      "separation": {
+        "$ref": "#/$defs/VoiceSeparationOptionsResponse"
+      }
+    },
+    "required": [
+      "separation"
+    ],
+    "type": "object"
+  },
+  "ReplacementStoragePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "source_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "retained_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 9223372036854775807,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9223372036854775807,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "source_bytes",
+      "retained_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start"
+    ],
+    "type": "object"
+  },
+  "RvcRuntimeFile": {
+    "additionalProperties": false,
+    "properties": {
+      "role": {
+        "enum": [
+          "engine_source",
+          "hubert_configuration",
+          "hubert_weights",
+          "rmvpe_weights"
+        ],
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]*$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "role",
+      "filename",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "RvcRuntimeIdentity": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "rvc",
+        "type": "string"
+      },
+      "source_revision": {
+        "const": "81eed5e8f68b6bed1789f682fe78cdd324495afc",
+        "type": "string"
+      },
+      "files": {
+        "items": {
+          "$ref": "#/$defs/RvcRuntimeFile"
+        },
+        "maxItems": 20,
+        "minItems": 9,
+        "type": "array"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "environment_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "runtime": {
+        "maxLength": 300,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "files",
+      "configuration_sha256",
+      "environment_sha256",
+      "runtime"
+    ],
+    "type": "object"
+  },
+  "RvcModelImport": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "voice_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence_ref": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "weights_license": {
+        "$ref": "#/$defs/ModuleLicenseDeclaration"
+      },
+      "rights_declaration": {
+        "maxLength": 2000,
+        "minLength": 16,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "trusted_local_checkpoint": {
+        "const": true,
+        "type": "boolean"
+      },
+      "pickle_execution_acknowledged": {
+        "const": true,
+        "type": "boolean"
+      },
+      "declared_terms_acknowledged": {
+        "const": true,
+        "type": "boolean"
+      },
+      "speaker_id": {
+        "maximum": 1023,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "index_rate": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "voice_id",
+      "label",
+      "evidence_ref",
+      "weights_license",
+      "rights_declaration",
+      "trusted_local_checkpoint",
+      "pickle_execution_acknowledged",
+      "declared_terms_acknowledged"
+    ],
+    "type": "object"
+  },
+  "RvcRegisteredModel": {
+    "additionalProperties": false,
+    "properties": {
+      "request_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "voice_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "source_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evidence_ref": {
+        "maxLength": 1000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "weights_license": {
+        "$ref": "#/$defs/ModuleLicenseDeclaration"
+      },
+      "rights_declaration": {
+        "maxLength": 2000,
+        "minLength": 16,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "trusted_local_checkpoint": {
+        "const": true,
+        "type": "boolean"
+      },
+      "pickle_execution_acknowledged": {
+        "const": true,
+        "type": "boolean"
+      },
+      "declared_terms_acknowledged": {
+        "const": true,
+        "type": "boolean"
+      },
+      "speaker_id": {
+        "maximum": 1023,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "index_rate": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "engine": {
+        "const": "rvc",
+        "type": "string"
+      },
+      "checkpoint_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "index_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "observed_runtime": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RvcRuntimeIdentity"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "ready": {
+        "type": "boolean"
+      },
+      "blocked_reasons": {
+        "items": {
+          "enum": [
+            "replacement_invalid_request",
+            "upload_too_large",
+            "invalid_audio",
+            "audio_too_long",
+            "unsupported_audio_format",
+            "replacement_plan_missing",
+            "replacement_source_changed",
+            "replacement_artifact_changed",
+            "replacement_model_changed",
+            "replacement_source_missing",
+            "replacement_artifact_missing",
+            "replacement_revision_conflict",
+            "replacement_request_conflict",
+            "replacement_busy",
+            "replacement_cleanup_pending",
+            "replacement_engine_unavailable",
+            "replacement_separator_unavailable",
+            "replacement_engine_incompatible",
+            "replacement_alignment_capacity",
+            "replacement_alignment_unavailable",
+            "replacement_alignment_invalid",
+            "replacement_loudness_unavailable",
+            "replacement_target_unattainable",
+            "replacement_output_duration_mismatch",
+            "replacement_output_invalid",
+            "replacement_disk_full",
+            "replacement_storage_failed",
+            "replacement_storage_incompatible",
+            "replacement_source_in_use",
+            "replacement_model_in_use",
+            "replacement_model_untrusted",
+            "replacement_evidence_required",
+            "replacement_interrupted",
+            "replacement_timeout",
+            "replacement_cancelled",
+            "replacement_failed"
+          ],
+          "type": "string"
+        },
+        "maxItems": 8,
+        "type": "array"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "voice_id",
+      "label",
+      "evidence_ref",
+      "weights_license",
+      "rights_declaration",
+      "trusted_local_checkpoint",
+      "pickle_execution_acknowledged",
+      "declared_terms_acknowledged",
+      "id",
+      "checkpoint_sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "RvcModelsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "models": {
+        "items": {
+          "$ref": "#/$defs/RvcRegisteredModel"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "type": "object"
+  },
+  "MashupSourcePreviewRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/VersionMusicSource"
+      },
+      "excerpt_start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "excerpt_end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      }
+    },
+    "required": [
+      "source",
+      "excerpt_end_sec"
+    ],
+    "type": "object"
+  },
+  "MashupSourcePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 2,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      },
+      "source_bytes": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "retained_bytes": {
+        "maximum": 68719476736,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "maximum": 68719476736,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 137438953472,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      },
+      "separator_ready": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "sha256",
+      "sample_rate_hz",
+      "channels",
+      "duration_sec",
+      "source_bytes",
+      "retained_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start",
+      "separator_ready"
+    ],
+    "type": "object"
+  },
+  "MashupAnalysisRef": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "result_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "override_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id",
+      "result_id",
+      "override_revision",
+      "configuration_sha256"
+    ],
+    "type": "object"
+  },
+  "MashupSourceInput": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/VersionMusicSource"
+      },
+      "excerpt_start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "excerpt_end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "analysis": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupAnalysisRef"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "operator_stems": {
+        "items": {
+          "$ref": "#/$defs/StemMusicSource"
+        },
+        "maxItems": 4,
+        "type": "array"
+      }
+    },
+    "required": [
+      "source",
+      "excerpt_end_sec",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "MashupCreateRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "submission_key": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "source_a": {
+        "$ref": "#/$defs/MashupSourceInput"
+      },
+      "source_b": {
+        "$ref": "#/$defs/MashupSourceInput"
+      },
+      "separation_quality": {
+        "enum": [
+          "fast",
+          "high"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "title",
+      "submission_key",
+      "source_a",
+      "source_b"
+    ],
+    "type": "object"
+  },
+  "MashupAudioArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "byte_count": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "const": 48000,
+        "type": "integer"
+      },
+      "channels": {
+        "const": 2,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "filename",
+      "sha256",
+      "byte_count",
+      "frames"
+    ],
+    "type": "object"
+  },
+  "MashupCandidate": {
+    "additionalProperties": false,
+    "properties": {
+      "orientation": {
+        "enum": [
+          "a_vocals_b_backing",
+          "b_vocals_a_backing"
+        ],
+        "type": "string"
+      },
+      "scoring_version": {
+        "const": "mashup-heuristic-v1",
+        "type": "string"
+      },
+      "score": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "key": {
+        "$ref": "#/$defs/MashupCompatibilityComponent"
+      },
+      "tempo": {
+        "$ref": "#/$defs/MashupCompatibilityComponent"
+      },
+      "section_fit": {
+        "$ref": "#/$defs/MashupCompatibilityComponent"
+      },
+      "energy_clash": {
+        "$ref": "#/$defs/MashupCompatibilityComponent"
+      },
+      "vocal_pitch_semitones": {
+        "anyOf": [
+          {
+            "maximum": 12,
+            "minimum": -12,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "duration_ratio": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 15,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "tempo_aliases": {
+        "items": {
+          "enum": [
+            "half",
+            "declared",
+            "double"
+          ],
+          "type": "string"
+        },
+        "maxItems": 3,
+        "type": "array"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "analysis_incomplete",
+            "manual_timing",
+            "key_unknown",
+            "meter_mismatch",
+            "large_pitch_shift",
+            "stretch_risk",
+            "transition_review",
+            "operator_stems_unverified",
+            "separation_bleed_possible",
+            "rights_unknown",
+            "hard_clip_risk",
+            "tempo_alias_selected"
+          ],
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      }
+    },
+    "required": [
+      "orientation",
+      "key",
+      "tempo",
+      "section_fit",
+      "energy_clash"
+    ],
+    "type": "object"
+  },
+  "MashupCompatibilityComponent": {
+    "additionalProperties": false,
+    "properties": {
+      "available": {
+        "type": "boolean"
+      },
+      "score": {
+        "anyOf": [
+          {
+            "maximum": 100,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "measurement": {
+        "anyOf": [
+          {
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "reason": {
+        "enum": [
+          "available",
+          "timing_missing",
+          "key_missing",
+          "vocal_activity_missing",
+          "meter_mismatch"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "available",
+      "reason"
+    ],
+    "type": "object"
+  },
+  "MashupFailure": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "enum": [
+          "mashup_invalid",
+          "mashup_not_found",
+          "mashup_job_not_found",
+          "mashup_revision_conflict",
+          "mashup_submission_conflict",
+          "mashup_source_changed",
+          "mashup_source_missing",
+          "mashup_analysis_incomplete",
+          "mashup_analysis_changed",
+          "mashup_alignment_unsafe",
+          "mashup_pitch_override_required",
+          "mashup_lock_conflict",
+          "mashup_separation_needed",
+          "mashup_separation_failed",
+          "mashup_stretch_needed",
+          "mashup_busy",
+          "mashup_budget_exceeded",
+          "mashup_worker_unverified",
+          "mashup_render_failed",
+          "mashup_save_failed",
+          "mashup_storage_unavailable",
+          "insufficient_disk"
+        ],
+        "type": "string"
+      },
+      "conflicting_ids": {
+        "items": {
+          "maxLength": 80,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+          "type": "string"
+        },
+        "maxItems": 256,
+        "type": "array"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "type": "object"
+  },
+  "MashupGeneratePlanRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "orientation": {
+        "enum": [
+          "a_vocals_b_backing",
+          "b_vocals_a_backing"
+        ],
+        "type": "string"
+      },
+      "target_bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "target_key": {
+        "$ref": "#/$defs/KeyEstimate"
+      },
+      "vocal_tempo_alias": {
+        "enum": [
+          "half",
+          "declared",
+          "double"
+        ],
+        "type": "string"
+      },
+      "backing_tempo_alias": {
+        "enum": [
+          "half",
+          "declared",
+          "double"
+        ],
+        "type": "string"
+      },
+      "vocal_pitch_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "backing_pitch_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "allow_large_pitch_shift": {
+        "type": "boolean"
+      },
+      "locks": {
+        "items": {
+          "$ref": "#/$defs/MashupPlanLock"
+        },
+        "maxItems": 256,
+        "type": "array"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "orientation",
+      "target_bpm",
+      "meter"
+    ],
+    "type": "object"
+  },
+  "MashupPlacement": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "source": {
+        "enum": [
+          "a",
+          "b"
+        ],
+        "type": "string"
+      },
+      "stem": {
+        "enum": [
+          "vocals",
+          "drums",
+          "bass",
+          "other"
+        ],
+        "type": "string"
+      },
+      "section_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "source_start_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_end_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "target_start_tick": {
+        "maximum": 5760000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "target_end_tick": {
+        "maximum": 5760000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "pitch_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "fade_in_sec": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "number"
+      },
+      "fade_out_sec": {
+        "maximum": 10,
+        "minimum": 0,
+        "type": "number"
+      },
+      "locked": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "stem",
+      "section_id",
+      "source_start_frame",
+      "source_end_frame",
+      "target_start_tick",
+      "target_end_tick"
+    ],
+    "type": "object"
+  },
+  "MashupPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "settings": {
+        "$ref": "#/$defs/MashupGeneratePlanRequest"
+      },
+      "placements": {
+        "items": {
+          "$ref": "#/$defs/MashupPlacement"
+        },
+        "maxItems": 256,
+        "minItems": 1,
+        "type": "array"
+      },
+      "duration_ticks": {
+        "exclusiveMinimum": 0,
+        "maximum": 5760000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "analysis_incomplete",
+            "manual_timing",
+            "key_unknown",
+            "meter_mismatch",
+            "large_pitch_shift",
+            "stretch_risk",
+            "transition_review",
+            "operator_stems_unverified",
+            "separation_bleed_possible",
+            "rights_unknown",
+            "hard_clip_risk",
+            "tempo_alias_selected"
+          ],
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "algorithm": {
+        "const": "monotone-sections-v1",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "settings",
+      "placements",
+      "duration_ticks"
+    ],
+    "type": "object"
+  },
+  "MashupPlanLock": {
+    "additionalProperties": false,
+    "properties": {
+      "placement_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "target_start_tick": {
+        "maximum": 5760000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "placement_id",
+      "target_start_tick"
+    ],
+    "type": "object"
+  },
+  "MashupSourceSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "side": {
+        "enum": [
+          "a",
+          "b"
+        ],
+        "type": "string"
+      },
+      "input": {
+        "$ref": "#/$defs/MashupSourceInput"
+      },
+      "raw_filename": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^raw\\.(wav|mp3|flac|ogg|m4a)$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      },
+      "prepared": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupAudioArtifact"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stems": {
+        "items": {
+          "$ref": "#/$defs/MashupStemSnapshot"
+        },
+        "maxItems": 4,
+        "type": "array"
+      },
+      "association": {
+        "enum": [
+          "fresh_separation",
+          "operator_declared_unverified"
+        ],
+        "type": "string"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "preparation_recipe": {
+        "enum": [
+          "ffmpeg-excerpt-demucs-local-v1",
+          "ffmpeg-excerpt-operator-stems-v1"
+        ],
+        "type": "string"
+      },
+      "separation_quality": {
+        "enum": [
+          "fast",
+          "high"
+        ],
+        "type": "string"
+      },
+      "music_evidence": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "analysis_key": {
+        "$ref": "#/$defs/KeyEstimate"
+      },
+      "timing": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupTiming"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "side",
+      "input",
+      "raw_filename",
+      "source_bytes",
+      "duration_sec",
+      "association",
+      "music_evidence"
+    ],
+    "type": "object"
+  },
+  "MashupStemSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "stem": {
+        "enum": [
+          "vocals",
+          "drums",
+          "bass",
+          "other"
+        ],
+        "type": "string"
+      },
+      "artifact": {
+        "$ref": "#/$defs/MashupAudioArtifact"
+      }
+    },
+    "required": [
+      "stem",
+      "artifact"
+    ],
+    "type": "object"
+  },
+  "MashupTiming": {
+    "additionalProperties": false,
+    "properties": {
+      "basis": {
+        "const": "operator_confirmed",
+        "type": "string"
+      },
+      "bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "downbeat_frames": {
+        "items": {
+          "maximum": 57600000,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "maxItems": 4096,
+        "minItems": 2,
+        "type": "array"
+      },
+      "sections": {
+        "items": {
+          "$ref": "#/$defs/MashupTimingSection"
+        },
+        "maxItems": 64,
+        "minItems": 1,
+        "type": "array"
+      },
+      "key": {
+        "$ref": "#/$defs/KeyEstimate"
+      },
+      "supersedes_analysis": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupAnalysisRef"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "bpm",
+      "meter",
+      "downbeat_frames",
+      "sections"
+    ],
+    "type": "object"
+  },
+  "MashupTimingSection": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "start_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "end_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "bars": {
+        "maximum": 256,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "musical_label": {
+        "anyOf": [
+          {
+            "enum": [
+              "intro",
+              "verse",
+              "chorus",
+              "bridge",
+              "outro",
+              "instrumental"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "start_frame",
+      "end_frame",
+      "bars"
+    ],
+    "type": "object"
+  },
+  "MashupState": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "preparing",
+          "ready",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "source_a": {
+        "$ref": "#/$defs/MashupSourceSnapshot"
+      },
+      "source_b": {
+        "$ref": "#/$defs/MashupSourceSnapshot"
+      },
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/MashupCandidate"
+        },
+        "maxItems": 2,
+        "type": "array"
+      },
+      "plan": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupPlan"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "active_job_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 20,
+        "type": "string"
+      },
+      "updated_at": {
+        "maxLength": 64,
+        "minLength": 20,
+        "type": "string"
+      },
+      "error": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupFailure"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "title",
+      "status",
+      "source_a",
+      "source_b",
+      "created_at",
+      "updated_at"
+    ],
+    "type": "object"
+  },
+  "MashupStates": {
+    "additionalProperties": false,
+    "properties": {
+      "documents": {
+        "items": {
+          "$ref": "#/$defs/MashupState"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "documents"
+    ],
+    "type": "object"
+  },
+  "MashupTimingUpdate": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source": {
+        "enum": [
+          "a",
+          "b"
+        ],
+        "type": "string"
+      },
+      "timing": {
+        "$ref": "#/$defs/MashupTiming"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "source",
+      "timing"
+    ],
+    "type": "object"
+  },
+  "MashupEditPlanRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "placements": {
+        "items": {
+          "$ref": "#/$defs/MashupPlacement"
+        },
+        "maxItems": 256,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "placements"
+    ],
+    "type": "object"
+  },
+  "MashupJobRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "submission_key": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "preview_start_tick": {
+        "anyOf": [
+          {
+            "maximum": 5760000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "preview_end_tick": {
+        "anyOf": [
+          {
+            "maximum": 5760000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "expected_revision",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "MashupProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "phase": {
+        "enum": [
+          "queued",
+          "retaining",
+          "decoding",
+          "separating",
+          "transforming",
+          "mixing",
+          "publishing"
+        ],
+        "type": "string"
+      },
+      "completed": {
+        "maximum": 1024,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "total": {
+        "anyOf": [
+          {
+            "maximum": 1024,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "phase"
+    ],
+    "type": "object"
+  },
+  "MashupRenderArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "mix",
+          "stem",
+          "dry",
+          "placement",
+          "plan",
+          "provenance",
+          "bundle"
+        ],
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "byte_count": {
+        "maximum": 17179869184,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "media_type": {
+        "enum": [
+          "audio/wav",
+          "application/json",
+          "application/zip"
+        ],
+        "type": "string"
+      },
+      "source": {
+        "anyOf": [
+          {
+            "enum": [
+              "a",
+              "b"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "stem": {
+        "anyOf": [
+          {
+            "enum": [
+              "vocals",
+              "drums",
+              "bass",
+              "other"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "placement_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "frames": {
+        "anyOf": [
+          {
+            "maximum": 57600000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "filename",
+      "sha256",
+      "byte_count",
+      "media_type"
+    ],
+    "type": "object"
+  },
+  "MashupRenderManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "mashup_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "mashup_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_a_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_b_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "frames": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "const": 48000,
+        "type": "integer"
+      },
+      "channels": {
+        "const": 2,
+        "type": "integer"
+      },
+      "start_tick": {
+        "maximum": 5760000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/MashupRenderArtifact"
+        },
+        "maxItems": 1024,
+        "minItems": 1,
+        "type": "array"
+      },
+      "placements": {
+        "items": {
+          "$ref": "#/$defs/MashupRenderedPlacement"
+        },
+        "maxItems": 256,
+        "type": "array"
+      },
+      "metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "analysis_incomplete",
+            "manual_timing",
+            "key_unknown",
+            "meter_mismatch",
+            "large_pitch_shift",
+            "stretch_risk",
+            "transition_review",
+            "operator_stems_unverified",
+            "separation_bleed_possible",
+            "rights_unknown",
+            "hard_clip_risk",
+            "tempo_alias_selected"
+          ],
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "music_evidence": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "track_id": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "project_id": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "mashup_id",
+      "mashup_revision",
+      "job_id",
+      "plan_sha256",
+      "source_a_sha256",
+      "source_b_sha256",
+      "mode",
+      "frames",
+      "artifacts",
+      "placements",
+      "metrics",
+      "music_evidence"
+    ],
+    "type": "object"
+  },
+  "MashupRenderedPlacement": {
+    "additionalProperties": false,
+    "properties": {
+      "placement_id": {
+        "maxLength": 80,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source_start_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_end_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "target_start_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "target_end_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "artifact_start_frame": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "placement_id",
+      "artifact_id",
+      "source_start_frame",
+      "source_end_frame",
+      "target_start_frame",
+      "target_end_frame"
+    ],
+    "type": "object"
+  },
+  "MashupJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "mashup_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "mashup_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "kind": {
+        "enum": [
+          "preparation",
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "blocked",
+          "saving"
+        ],
+        "type": "string"
+      },
+      "request": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupJobRequest"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "progress": {
+        "$ref": "#/$defs/MashupProgress"
+      },
+      "manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupRenderManifest"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MashupFailure"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 20,
+        "type": "string"
+      },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "mashup_id",
+      "mashup_revision",
+      "kind",
+      "status",
+      "progress",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "MashupJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/MashupJob"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "MashupStoragePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "retained_bytes": {
+        "maximum": 68719476736,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "maximum": 68719476736,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 137438953472,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      },
+      "frames": {
+        "maximum": 57600000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 1200,
+        "type": "number"
+      },
+      "stretch_ready": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "retained_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start",
+      "frames",
+      "duration_sec",
+      "stretch_ready"
+    ],
+    "type": "object"
+  },
+  "MusicLoraDatasetSource": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sample_id": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_-]+$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "revision",
+      "sample_id"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticDecision": {
+    "additionalProperties": false,
+    "properties": {
+      "candidate_id": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "decision": {
+        "enum": [
+          "keep_together",
+          "distinct_after_review"
+        ],
+        "type": "string"
+      },
+      "reviewed_by": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "maxLength": 10,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "note": {
+        "maxLength": 2000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      }
+    },
+    "required": [
+      "candidate_id",
+      "decision",
+      "reviewed_by",
+      "reviewed_at",
+      "note"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticReview": {
+    "additionalProperties": false,
+    "properties": {
+      "scan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "scan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "decisions": {
+        "items": {
+          "$ref": "#/$defs/RegionalAcousticDecision"
+        },
+        "maxItems": 4950,
+        "type": "array"
+      }
+    },
+    "required": [
+      "scan_id",
+      "scan_sha256"
+    ],
+    "type": "object"
+  },
+  "RegionalExcerpt": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "id",
+      "recording_id",
+      "start_frame",
+      "end_frame"
+    ],
+    "type": "object"
+  },
+  "RegionalPermissions": {
+    "additionalProperties": false,
+    "properties": {
+      "reference": {
+        "enum": [
+          "allowed",
+          "blocked",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "training": {
+        "enum": [
+          "allowed",
+          "blocked",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "source_redistribution": {
+        "enum": [
+          "allowed",
+          "blocked",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "adapter_distribution": {
+        "enum": [
+          "allowed",
+          "blocked",
+          "unknown"
+        ],
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "RegionalRecordingReview": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/MusicLoraDatasetSource"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "author": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "performer": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "acquired_at": {
+        "anyOf": [
+          {
+            "maxLength": 10,
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "original_filename": {
+        "maxLength": 255,
+        "pattern": "^[^/\\\\\\x00-\\x1f]*$",
+        "type": "string"
+      },
+      "original_recording_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "performer_group_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "session_group_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "declared_near_copy_group_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "evaluation_only": {
+        "type": "boolean"
+      },
+      "caption": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "captions_reviewed": {
+        "type": "boolean"
+      },
+      "instrument": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "technique": {
+        "maxLength": 120,
+        "type": "string"
+      },
+      "tuning": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "tags": {
+        "items": {
+          "maxLength": 80,
+          "minLength": 1,
+          "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "rights": {
+        "items": {
+          "$ref": "#/$defs/RegionalRightsEvidence"
+        },
+        "maxItems": 20,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "source",
+      "source_sha256",
+      "caption"
+    ],
+    "type": "object"
+  },
+  "RegionalRightsEvidence": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "evidence_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "restriction": {
+        "enum": [
+          "conditional",
+          "unrestricted_declared",
+          "noncommercial",
+          "no_derivatives",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "reviewed_by": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "maxLength": 10,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "permissions": {
+        "$ref": "#/$defs/RegionalPermissions"
+      },
+      "public_url": {
+        "anyOf": [
+          {
+            "maxLength": 500,
+            "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "private_reference": {
+        "anyOf": [
+          {
+            "maxLength": 120,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "public_attribution": {
+        "maxLength": 2000,
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "source_sha256",
+      "evidence_sha256",
+      "restriction",
+      "reviewed_by",
+      "reviewed_at",
+      "permissions"
+    ],
+    "type": "object"
+  },
+  "RegionalDatasetReviewRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "dataset_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "tradition": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "split_seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "recordings": {
+        "items": {
+          "$ref": "#/$defs/RegionalRecordingReview"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "excerpts": {
+        "items": {
+          "$ref": "#/$defs/RegionalExcerpt"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "acoustic_review": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticReview"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "dataset_id",
+      "dataset_revision",
+      "expected_revision",
+      "tradition",
+      "recordings",
+      "excerpts"
+    ],
+    "type": "object"
+  },
+  "RegionalDatasetReview": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/RegionalDatasetReviewRequest"
+      }
+    },
+    "required": [
+      "revision",
+      "sha256",
+      "created_at",
+      "request"
+    ],
+    "type": "object"
+  },
+  "RegionalRecordingInspection": {
+    "additionalProperties": false,
+    "properties": {
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "decoded_pcm_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 536870912,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "recording_id",
+      "source_sha256",
+      "decoded_pcm_sha256",
+      "source_bytes",
+      "sample_rate_hz",
+      "channels",
+      "frames"
+    ],
+    "type": "object"
+  },
+  "RegionalSplitRecording": {
+    "additionalProperties": false,
+    "properties": {
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "cluster_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "split": {
+        "enum": [
+          "train",
+          "holdout",
+          "excluded"
+        ],
+        "type": "string"
+      },
+      "exclusion_reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "rights_unknown",
+              "rights_conflict",
+              "restricted_license",
+              "caption_unreviewed"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "adapter_distribution_permitted": {
+        "type": "boolean"
+      },
+      "source_redistribution_permitted": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "recording_id",
+      "cluster_sha256",
+      "split",
+      "adapter_distribution_permitted",
+      "source_redistribution_permitted"
+    ],
+    "type": "object"
+  },
+  "RegionalSplitPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "recordings": {
+        "items": {
+          "$ref": "#/$defs/RegionalSplitRecording"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "independent_groups": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "training_recordings": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "holdout_recordings": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "evaluation_sufficient": {
+        "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "near_copy_detection_unavailable",
+            "provenance_incomplete",
+            "independent_groups_insufficient",
+            "distribution_permission_missing",
+            "source_redistribution_not_permitted",
+            "cultural_labels_user_declared",
+            "rights_declaration_unverified",
+            "holdout_fraction_approximate",
+            "stratification_incomplete",
+            "acoustic_candidates_grouped",
+            "acoustic_screening_limited",
+            "acoustic_information_insufficient"
+          ],
+          "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "acoustic_status": {
+        "enum": [
+          "legacy_unscanned",
+          "screened",
+          "insufficient_information"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "recordings",
+      "independent_groups",
+      "training_recordings",
+      "holdout_recordings",
+      "evaluation_sufficient",
+      "warnings"
+    ],
+    "type": "object"
+  },
+  "RegionalDatasetInspectionRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source": {
+        "$ref": "#/$defs/MusicLoraDatasetSource"
+      }
+    },
+    "required": [
+      "recording_id",
+      "source"
+    ],
+    "type": "object"
+  },
+  "RegionalDatasetPreview": {
+    "additionalProperties": false,
+    "properties": {
+      "review_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "split": {
+        "$ref": "#/$defs/RegionalSplitPlan"
+      },
+      "source_bytes": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "excerpt_bytes": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_prepare": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "regional_dataset_not_found",
+              "regional_dataset_invalid",
+              "regional_dataset_revision_conflict",
+              "regional_dataset_source_changed",
+              "regional_dataset_source_missing",
+              "regional_dataset_rights_required",
+              "regional_dataset_split_insufficient",
+              "regional_dataset_holdout",
+              "regional_dataset_busy",
+              "regional_dataset_storage_unavailable",
+              "regional_dataset_interrupted",
+              "regional_dataset_cancelled",
+              "regional_dataset_worker_unverified",
+              "regional_dataset_limit",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "review_revision",
+      "review_sha256",
+      "split",
+      "source_bytes",
+      "excerpt_bytes",
+      "required_free_bytes",
+      "can_prepare"
+    ],
+    "type": "object"
+  },
+  "RegionalManifestSelection": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "review_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "review_revision",
+      "review_sha256"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "review_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "submission_key": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "review_revision",
+      "review_sha256",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticAudition": {
+    "additionalProperties": false,
+    "properties": {
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "bytes": {
+        "maximum": 33554432,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "const": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 96000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "source_start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "sha256",
+      "bytes",
+      "channels",
+      "frames",
+      "source_start_frame",
+      "source_end_frame"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticCandidate": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "left_excerpt_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "right_excerpt_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "left_channel": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "right_channel": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "left_start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "left_end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "right_start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "right_end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offset_tolerance_sec": {
+        "maximum": 1,
+        "minimum": 0,
+        "type": "number"
+      },
+      "aligned_seconds": {
+        "maximum": 600,
+        "minimum": 3,
+        "type": "number"
+      },
+      "matched_landmarks": {
+        "maximum": 100000,
+        "minimum": 12,
+        "type": "integer"
+      },
+      "distinct_anchors": {
+        "maximum": 20000,
+        "minimum": 6,
+        "type": "integer"
+      },
+      "spectral_agreement": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "left_audition": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticAudition"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "right_audition": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticAudition"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "audition_unavailable_reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "not_retained",
+              "capacity"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "left_excerpt_id",
+      "right_excerpt_id",
+      "left_channel",
+      "right_channel",
+      "left_start_frame",
+      "left_end_frame",
+      "right_start_frame",
+      "right_end_frame",
+      "aligned_seconds",
+      "matched_landmarks",
+      "distinct_anchors",
+      "spectral_agreement"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticExcerpt": {
+    "additionalProperties": false,
+    "properties": {
+      "excerpt_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "decoded_pcm_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "coverage": {
+        "enum": [
+          "screened",
+          "insufficient_information"
+        ],
+        "type": "string"
+      },
+      "landmark_count": {
+        "maximum": 2000000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "excerpt_id",
+      "recording_id",
+      "source_sha256",
+      "decoded_pcm_sha256",
+      "sample_rate_hz",
+      "channels",
+      "start_frame",
+      "end_frame",
+      "coverage",
+      "landmark_count"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticReport": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "method_revision": {
+        "const": "regional-landmarks-v1",
+        "type": "string"
+      },
+      "configuration_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "selection_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "excerpts": {
+        "items": {
+          "$ref": "#/$defs/RegionalAcousticExcerpt"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "candidates": {
+        "items": {
+          "$ref": "#/$defs/RegionalAcousticCandidate"
+        },
+        "maxItems": 4950,
+        "type": "array"
+      },
+      "limitations": {
+        "items": {
+          "enum": [
+            "heuristic_uncalibrated",
+            "selected_excerpts_only",
+            "pitch_and_time_changes_may_be_missed",
+            "window_boundaries_limited",
+            "insufficient_information"
+          ],
+          "type": "string"
+        },
+        "maxItems": 10,
+        "type": "array"
+      }
+    },
+    "required": [
+      "configuration_sha256",
+      "selection_sha256",
+      "excerpts"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticResult": {
+    "additionalProperties": false,
+    "properties": {
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "report": {
+        "$ref": "#/$defs/RegionalAcousticReport"
+      }
+    },
+    "required": [
+      "sha256",
+      "report"
+    ],
+    "type": "object"
+  },
+  "RegionalDatasetManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "schema_version": {
+        "const": 1,
+        "type": "integer"
+      },
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "dataset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "review_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "tradition": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "split_seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "split": {
+        "$ref": "#/$defs/RegionalSplitPlan"
+      },
+      "recordings": {
+        "items": {
+          "$ref": "#/$defs/RegionalManifestRecording"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "excerpts": {
+        "items": {
+          "$ref": "#/$defs/RegionalPreparedExcerpt"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "acoustic_report": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "acoustic_review": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticReview"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "dataset_id",
+      "review_revision",
+      "review_sha256",
+      "created_at",
+      "tradition",
+      "split_seed",
+      "split",
+      "recordings",
+      "excerpts"
+    ],
+    "type": "object"
+  },
+  "RegionalManifestRecording": {
+    "additionalProperties": false,
+    "properties": {
+      "review": {
+        "$ref": "#/$defs/RegionalRecordingReview"
+      },
+      "inspection": {
+        "$ref": "#/$defs/RegionalRecordingInspection"
+      }
+    },
+    "required": [
+      "review",
+      "inspection"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparedExcerpt": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "recording_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "split": {
+        "enum": [
+          "train",
+          "holdout"
+        ],
+        "type": "string"
+      },
+      "source_start_frame": {
+        "maximum": 1382400000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_end_frame": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 115200000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "preprocessing": {
+        "const": "decoded_float32_excerpt_v1",
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "recording_id",
+      "split",
+      "source_start_frame",
+      "source_end_frame",
+      "sample_rate_hz",
+      "channels",
+      "frames",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparedManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "manifest": {
+        "$ref": "#/$defs/RegionalDatasetManifest"
+      }
+    },
+    "required": [
+      "sha256",
+      "manifest"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparationJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/RegionalPreparationRequest"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "phase": {
+        "enum": [
+          "waiting",
+          "snapshot",
+          "cropping",
+          "publishing",
+          "complete"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "completed_items": {
+        "maximum": 200,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "total_items": {
+        "maximum": 200,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "result": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalPreparedManifest"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "prepared_manifest_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_retry_save": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "regional_dataset_not_found",
+              "regional_dataset_invalid",
+              "regional_dataset_revision_conflict",
+              "regional_dataset_source_changed",
+              "regional_dataset_source_missing",
+              "regional_dataset_rights_required",
+              "regional_dataset_split_insufficient",
+              "regional_dataset_holdout",
+              "regional_dataset_busy",
+              "regional_dataset_storage_unavailable",
+              "regional_dataset_interrupted",
+              "regional_dataset_cancelled",
+              "regional_dataset_worker_unverified",
+              "regional_dataset_limit",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "request",
+      "status",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparationJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/RegionalPreparationJob"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "RegionalPreparedSelection": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest_sha256"
+    ],
+    "type": "object"
+  },
+  "MusicLoraRegionalSource": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "excerpt_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest_sha256",
+      "excerpt_id"
+    ],
+    "type": "object"
+  },
+  "StableLoraSample": {
+    "additionalProperties": false,
+    "properties": {
+      "track_id": {
+        "anyOf": [
+          {
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "dataset": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraDatasetSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "regional_manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraRegionalSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "caption": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "caption"
+    ],
+    "type": "object"
+  },
+  "RegionalTrainingSelection": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "samples": {
+        "items": {
+          "$ref": "#/$defs/StableLoraSample"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "held_out_excerpts": {
+        "maximum": 100,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "evaluation_sufficient": {
+        "type": "boolean"
+      },
+      "adapter_distribution_permitted": {
+        "type": "boolean"
+      },
+      "quality_status": {
+        "const": "unverified",
+        "type": "string"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest_sha256",
+      "samples",
+      "held_out_excerpts",
+      "evaluation_sufficient",
+      "adapter_distribution_permitted"
+    ],
+    "type": "object"
+  },
+  "StableLoraTrainingRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "variant": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "samples": {
+        "items": {
+          "$ref": "#/$defs/StableLoraSample"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "max_steps": {
+        "maximum": 100000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "rank": {
+        "enum": [
+          8,
+          16,
+          32
+        ],
+        "type": "integer"
+      },
+      "learning_rate": {
+        "maximum": 0.01,
+        "minimum": 1e-07,
+        "type": "number"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "name",
+      "samples"
+    ],
+    "type": "object"
+  },
+  "RegionalTrainingSubmission": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/StableLoraTrainingRequest"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest_sha256",
+      "request"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticScanRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "dataset_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "review_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "review_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "submission_key": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "dataset_id",
+      "review_revision",
+      "review_sha256",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/RegionalAcousticScanRequest"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "result": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalAcousticResult"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "regional_dataset_invalid",
+              "regional_dataset_source_changed",
+              "regional_dataset_source_missing",
+              "regional_dataset_limit",
+              "regional_dataset_storage_unavailable",
+              "regional_dataset_cancelled",
+              "regional_dataset_interrupted",
+              "regional_dataset_worker_unverified",
+              "regional_dataset_revision_conflict",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "request",
+      "status",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "RegionalAcousticJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/RegionalAcousticJob"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "RegionalMeasuredModel": {
+    "additionalProperties": false,
+    "properties": {
+      "file_name": {
+        "maxLength": 150,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9_.-]+$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "bytes": {
+        "maximum": 100000000000,
+        "minimum": 1,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "file_name",
+      "sha256",
+      "bytes"
+    ],
+    "type": "object"
+  },
+  "RegionalMeasuredRuntime": {
+    "additionalProperties": false,
+    "properties": {
+      "models": {
+        "items": {
+          "$ref": "#/$defs/RegionalMeasuredModel"
+        },
+        "maxItems": 6,
+        "minItems": 1,
+        "type": "array"
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_file_count": {
+        "maximum": 500,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "python_executable_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "python_version": {
+        "maxLength": 80,
+        "minLength": 1,
+        "type": "string"
+      },
+      "platform": {
+        "maxLength": 40,
+        "minLength": 1,
+        "type": "string"
+      },
+      "machine": {
+        "maxLength": 80,
+        "type": "string"
+      },
+      "mlx_version": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "numpy_version": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "models",
+      "source_sha256",
+      "source_file_count",
+      "python_executable_sha256",
+      "python_version",
+      "platform",
+      "machine",
+      "mlx_version",
+      "numpy_version"
+    ],
+    "type": "object"
+  },
+  "RegionalTrainingReceipt": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "request_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "dataset_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "runtime": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/RegionalMeasuredRuntime"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "identity_status": {
+        "enum": [
+          "worker_measured",
+          "unavailable"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "job_id",
+      "request_sha256",
+      "dataset_sha256",
+      "identity_status"
+    ],
+    "type": "object"
+  },
+  "BeatRenderConditioningSource": {
+    "additionalProperties": false,
+    "properties": {
+      "kind": {
+        "const": "beat_render",
+        "type": "string"
+      },
+      "beat_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "beat_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "render_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "kind",
+      "beat_id",
+      "beat_revision",
+      "render_id",
+      "sha256"
+    ],
+    "type": "object"
+  },
+  "LocalMusicRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "const": "stable_audio3",
+        "type": "string"
+      },
+      "title": {
+        "maxLength": 500,
+        "type": "string"
+      },
+      "prompt": {
+        "maxLength": 4000,
+        "minLength": 1,
+        "type": "string"
+      },
+      "lyrics": {
+        "maxLength": 20000,
+        "type": "string"
+      },
+      "settings_mode": {
+        "const": "manual",
+        "type": "string"
+      },
+      "duration_seconds": {
+        "maximum": 380,
+        "minimum": 5,
+        "type": "integer"
+      },
+      "seed": {
+        "maximum": 2147483647,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "variant": {
+        "enum": [
+          "small-music",
+          "medium"
+        ],
+        "type": "string"
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapterSelection"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "conditioning": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "audio_to_audio": "#/$defs/StableAudioConditioning",
+                "inpaint": "#/$defs/StableInpaintConditioning"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/StableAudioConditioning"
+              },
+              {
+                "$ref": "#/$defs/StableInpaintConditioning"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "engine",
+      "prompt",
+      "duration_seconds"
+    ],
+    "type": "object"
+  },
+  "StableAudioConditioning": {
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "const": "audio_to_audio",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "noise_level": {
+        "maximum": 0.99,
+        "minimum": 0.01,
+        "type": "number"
+      }
+    },
+    "required": [
+      "mode",
+      "source",
+      "source_sha256",
+      "noise_level"
+    ],
+    "type": "object"
+  },
+  "StableInpaintConditioning": {
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "const": "inpaint",
+        "type": "string"
+      },
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "start_sec": {
+        "exclusiveMaximum": 380,
+        "minimum": 0,
+        "type": "number"
+      },
+      "end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 380,
+        "type": "number"
+      },
+      "crossfade_sec": {
+        "maximum": 0.05,
+        "minimum": 0,
+        "type": "number"
+      }
+    },
+    "required": [
+      "mode",
+      "source",
+      "source_sha256",
+      "start_sec",
+      "end_sec"
+    ],
+    "type": "object"
+  },
+  "RegionalEvaluationRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "manifest_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "manifest_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "submission_key": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "adapter_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "adapter_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/LocalMusicRequest"
+      }
+    },
+    "required": [
+      "manifest_id",
+      "manifest_sha256",
+      "submission_key",
+      "adapter_id",
+      "adapter_sha256",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicAdapter": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "engine": {
+        "enum": [
+          "stable_audio3",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "enum": [
+          "small-music",
+          "medium",
+          "ar",
+          "nar"
+        ],
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "sha256": {
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 64,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source_job_id": {
+        "anyOf": [
+          {
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "engine",
+      "target",
+      "name",
+      "sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "RegionalComparisonSpec": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|\\+00:00)$",
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/RegionalEvaluationRequest"
+      },
+      "adapter": {
+        "$ref": "#/$defs/MusicAdapter"
+      },
+      "training_job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "training_request": {
+        "$ref": "#/$defs/StableLoraTrainingRequest"
+      },
+      "training_receipt": {
+        "$ref": "#/$defs/RegionalTrainingReceipt"
+      },
+      "held_out_excerpt_ids": {
+        "items": {
+          "maxLength": 32,
+          "minLength": 32,
+          "pattern": "^[0-9a-f]{32}$",
+          "type": "string"
+        },
+        "maxItems": 100,
+        "minItems": 1,
+        "type": "array"
+      },
+      "publisher_declarations": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "quality_status": {
+        "const": "unverified",
+        "type": "string"
+      },
+      "generation_runtime_identity": {
+        "const": "unverified",
+        "type": "string"
+      },
+      "unavailable_metrics": {
+        "items": {
+          "enum": [
+            "fad",
+            "clap",
+            "instrument_classifier",
+            "cultural_authenticity"
+          ],
+          "type": "string"
+        },
+        "maxItems": 4,
+        "type": "array"
+      }
+    },
+    "required": [
+      "id",
+      "created_at",
+      "request",
+      "adapter",
+      "training_job_id",
+      "training_request",
+      "training_receipt",
+      "held_out_excerpt_ids",
+      "publisher_declarations"
+    ],
+    "type": "object"
+  },
+  "RegionalComparisonPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "spec": {
+        "$ref": "#/$defs/RegionalComparisonSpec"
+      }
+    },
+    "required": [
+      "sha256",
+      "spec"
+    ],
+    "type": "object"
+  },
+  "LocalMusicJob": {
+    "properties": {
+      "id": {
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "done",
+          "failed",
+          "cancelled",
+          "interrupted"
+        ],
+        "type": "string"
+      },
+      "created_at": {
+        "type": "string"
+      },
+      "request": {
+        "$ref": "#/$defs/LocalMusicRequest"
+      },
+      "track": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/SavedTrack"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "adapter": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicAdapter"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "conditioning_recipe": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicConditioningRecipe"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "status",
+      "created_at",
+      "request"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningRecipe": {
+    "additionalProperties": false,
+    "properties": {
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "prepared_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "source_channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "source_frames": {
+        "maximum": 72960000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "prepared_rate_hz": {
+        "const": 44100,
+        "type": "integer"
+      },
+      "prepared_channels": {
+        "const": 2,
+        "type": "integer"
+      },
+      "prepared_frames": {
+        "maximum": 16758000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "prepared_gain_db": {
+        "maximum": 0,
+        "minimum": -120,
+        "type": "number"
+      },
+      "mode": {
+        "enum": [
+          "audio_to_audio",
+          "inpaint"
+        ],
+        "type": "string"
+      },
+      "noise_level": {
+        "anyOf": [
+          {
+            "maximum": 0.99,
+            "minimum": 0.01,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "region_start_frame": {
+        "anyOf": [
+          {
+            "maximum": 72960000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "region_end_frame": {
+        "anyOf": [
+          {
+            "maximum": 72960000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "crossfade_frames": {
+        "maximum": 9600,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "source_commit": {
+        "maxLength": 40,
+        "minLength": 40,
+        "pattern": "^[0-9a-f]{40}$",
+        "type": "string"
+      },
+      "source_script_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "encoder_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "output_semantics": {
+        "enum": [
+          "generated_full_mix",
+          "original_pcm_outside_region"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "source_sha256",
+      "prepared_sha256",
+      "source_rate_hz",
+      "source_channels",
+      "source_frames",
+      "prepared_frames",
+      "mode",
+      "source_commit",
+      "source_script_sha256",
+      "encoder_sha256",
+      "output_semantics"
+    ],
+    "type": "object"
+  },
+  "RegionalComparisonArm": {
+    "additionalProperties": false,
+    "properties": {
+      "arm": {
+        "enum": [
+          "base",
+          "adapter"
+        ],
+        "type": "string"
+      },
+      "job": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/LocalMusicJob"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "output_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "audio_url": {
+        "anyOf": [
+          {
+            "maxLength": 160,
+            "pattern": "^/api/music/regional-datasets/comparisons/[0-9a-f]{32}/audio/(base|adapter)$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "submission_unverified": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "arm"
+    ],
+    "type": "object"
+  },
+  "RegionalComparisonState": {
+    "additionalProperties": false,
+    "properties": {
+      "plan": {
+        "$ref": "#/$defs/RegionalComparisonPlan"
+      },
+      "arms": {
+        "items": {
+          "$ref": "#/$defs/RegionalComparisonArm"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      },
+      "listener_reviews": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "plan",
+      "arms",
+      "listener_reviews"
+    ],
+    "type": "object"
+  },
+  "RegionalComparisons": {
+    "additionalProperties": false,
+    "properties": {
+      "comparisons": {
+        "items": {
+          "$ref": "#/$defs/RegionalComparisonState"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "comparisons"
+    ],
+    "type": "object"
+  },
+  "RegionalListeningReview": {
+    "additionalProperties": false,
+    "properties": {
+      "comparison_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "base_output_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "adapter_output_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "reviewer_reference": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+        "type": "string"
+      },
+      "reviewed_at": {
+        "maxLength": 10,
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+        "type": "string"
+      },
+      "tradition_scope": {
+        "maxLength": 200,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "preference": {
+        "enum": [
+          "base",
+          "adapter",
+          "tie",
+          "neither"
+        ],
+        "type": "string"
+      },
+      "timbre": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "phrasing": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "rhythm": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "coherence": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "artifacts": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "cultural_appropriateness": {
+        "maximum": 5,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "notes": {
+        "maxLength": 4000,
+        "type": "string"
+      },
+      "public_attribution": {
+        "maxLength": 200,
+        "type": "string"
+      },
+      "attribution_consented": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "comparison_sha256",
+      "base_output_sha256",
+      "adapter_output_sha256",
+      "reviewer_reference",
+      "reviewed_at",
+      "tradition_scope",
+      "preference",
+      "timbre",
+      "phrasing",
+      "rhythm",
+      "coherence",
+      "artifacts",
+      "cultural_appropriateness"
+    ],
+    "type": "object"
+  },
+  "SongSourceRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "type": "object"
+  },
+  "SongSourceInput": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "excerpt_start_sec": {
+        "maximum": 21600,
+        "minimum": 0,
+        "type": "number"
+      },
+      "excerpt_end_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      }
+    },
+    "required": [
+      "source",
+      "sha256",
+      "excerpt_end_sec"
+    ],
+    "type": "object"
+  },
+  "SongSourceInfo": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 2,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 4147200000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      },
+      "musical_duration_sec": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 600,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "track_id": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "version_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "music_evidence": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "beat_document": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatDocument"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "source",
+      "sha256",
+      "source_bytes",
+      "sample_rate_hz",
+      "channels",
+      "frames",
+      "duration_sec",
+      "track_id",
+      "version_id",
+      "music_evidence",
+      "content_origin"
+    ],
+    "type": "object"
+  },
+  "SongSourceSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 8589934592,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "channels": {
+        "maximum": 2,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "frames": {
+        "maximum": 4147200000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 21600,
+        "type": "number"
+      },
+      "musical_duration_sec": {
+        "anyOf": [
+          {
+            "exclusiveMinimum": 0,
+            "maximum": 600,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "track_id": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "version_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "music_evidence": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "content_origin": {
+        "enum": [
+          "generated",
+          "mixed",
+          "recorded",
+          "unknown"
+        ],
+        "type": "string"
+      },
+      "beat_document": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatDocument"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "source_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "raw_filename": {
+        "maxLength": 16,
+        "pattern": "^raw\\.(wav|mp3|flac|ogg|m4a)$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "sha256",
+      "source_bytes",
+      "sample_rate_hz",
+      "channels",
+      "frames",
+      "duration_sec",
+      "track_id",
+      "version_id",
+      "music_evidence",
+      "content_origin",
+      "source_id",
+      "raw_filename"
+    ],
+    "type": "object"
+  },
+  "BeatSongLaneControl": {
+    "additionalProperties": false,
+    "properties": {
+      "lane_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "muted": {
+        "type": "boolean"
+      },
+      "gain_db": {
+        "maximum": 12.0412,
+        "minimum": -12.0412,
+        "type": "number"
+      },
+      "pan": {
+        "maximum": 1,
+        "minimum": -1,
+        "type": "number"
+      },
+      "highpass_hz": {
+        "anyOf": [
+          {
+            "maximum": 500,
+            "minimum": 20,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "eq_bands": {
+        "items": {
+          "$ref": "#/$defs/EqBand"
+        },
+        "maxItems": 10,
+        "type": "array"
+      },
+      "duck": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/DuckSettings"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "lane_id"
+    ],
+    "type": "object"
+  },
+  "BeatSongSymbolicOrigin": {
+    "additionalProperties": false,
+    "properties": {
+      "original": {
+        "$ref": "#/$defs/BeatRenderConditioningSource"
+      },
+      "semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "integer"
+      },
+      "musical_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "original",
+      "semitones",
+      "musical_sha256"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixDraft": {
+    "additionalProperties": false,
+    "properties": {
+      "title": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "\\S",
+        "type": "string"
+      },
+      "beat": {
+        "$ref": "#/$defs/SongSourceInput"
+      },
+      "song": {
+        "$ref": "#/$defs/SongSourceInput"
+      },
+      "mode": {
+        "enum": [
+          "layer",
+          "replace_drums"
+        ],
+        "type": "string"
+      },
+      "tempo_strategy": {
+        "enum": [
+          "beat_to_song",
+          "song_to_beat"
+        ],
+        "type": "string"
+      },
+      "beat_repeats": {
+        "maximum": 128,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "anchors": {
+        "items": {
+          "$ref": "#/$defs/WarpAnchor"
+        },
+        "maxItems": 4096,
+        "minItems": 2,
+        "type": "array"
+      },
+      "project_bpm": {
+        "maximum": 300,
+        "minimum": 20,
+        "type": "number"
+      },
+      "project_meter": {
+        "$ref": "#/$defs/BeatMeter"
+      },
+      "bass_leader": {
+        "enum": [
+          "song",
+          "beat",
+          "none"
+        ],
+        "type": "string"
+      },
+      "kick_leader": {
+        "enum": [
+          "song",
+          "beat",
+          "none"
+        ],
+        "type": "string"
+      },
+      "controls": {
+        "items": {
+          "$ref": "#/$defs/BeatSongLaneControl"
+        },
+        "maxItems": 32,
+        "type": "array"
+      },
+      "loudness": {
+        "$ref": "#/$defs/LoudnessSettings"
+      },
+      "audio_pitch_semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "number"
+      },
+      "audio_approximation": {
+        "type": "boolean"
+      },
+      "key_review": {
+        "enum": [
+          "unknown",
+          "operator_reviewed"
+        ],
+        "type": "string"
+      },
+      "symbolic_origin": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatSongSymbolicOrigin"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "title",
+      "beat",
+      "song",
+      "anchors",
+      "project_bpm",
+      "project_meter"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixUpdate": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "draft": {
+        "$ref": "#/$defs/BeatSongMixDraft"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "draft"
+    ],
+    "type": "object"
+  },
+  "BeatSongLane": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "label": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "source": {
+        "enum": [
+          "beat",
+          "song"
+        ],
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "drum",
+          "bass",
+          "pitched",
+          "vocals",
+          "other",
+          "mix"
+        ],
+        "type": "string"
+      },
+      "beat_lane_id": {
+        "anyOf": [
+          {
+            "maxLength": 80,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "control": {
+        "$ref": "#/$defs/BeatSongLaneControl"
+      }
+    },
+    "required": [
+      "id",
+      "label",
+      "source",
+      "role",
+      "control"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixPlan": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "draft": {
+        "$ref": "#/$defs/BeatSongMixDraft"
+      },
+      "beat": {
+        "$ref": "#/$defs/SongSourceInfo"
+      },
+      "song": {
+        "$ref": "#/$defs/SongSourceInfo"
+      },
+      "lanes": {
+        "items": {
+          "$ref": "#/$defs/BeatSongLane"
+        },
+        "maxItems": 32,
+        "minItems": 2,
+        "type": "array"
+      },
+      "source_duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 600,
+        "type": "number"
+      },
+      "target_duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 600,
+        "type": "number"
+      },
+      "minimum_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "maximum_ratio": {
+        "maximum": 1.5,
+        "minimum": 0.75,
+        "type": "number"
+      },
+      "needs_native": {
+        "type": "boolean"
+      },
+      "separator_ready": {
+        "type": "boolean"
+      },
+      "native_ready": {
+        "type": "boolean"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "manual_anchors",
+            "key_unknown",
+            "audio_pitch_approximation",
+            "audio_loop_approximation",
+            "separation_bleed_possible",
+            "rights_unknown",
+            "hard_clip_risk",
+            "processed_stems_before_master",
+            "authored_repeats_recompiled",
+            "tails_trimmed_to_song",
+            "chunked_warp_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "revision",
+      "draft",
+      "beat",
+      "song",
+      "lanes",
+      "source_duration_sec",
+      "target_duration_sec",
+      "minimum_ratio",
+      "maximum_ratio",
+      "needs_native",
+      "separator_ready",
+      "native_ready",
+      "warnings",
+      "sha256",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixStorage": {
+    "additionalProperties": false,
+    "properties": {
+      "retained_bytes": {
+        "maximum": 137438953472,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "temporary_bytes": {
+        "maximum": 137438953472,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "required_free_bytes": {
+        "maximum": 274877906944,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "retained_bytes",
+      "temporary_bytes",
+      "required_free_bytes",
+      "can_start"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixPreview": {
+    "additionalProperties": false,
+    "properties": {
+      "plan": {
+        "$ref": "#/$defs/BeatSongMixPlan"
+      },
+      "storage": {
+        "$ref": "#/$defs/BeatSongMixStorage"
+      }
+    },
+    "required": [
+      "plan",
+      "storage"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixStartRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "plan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "submission_key": {
+        "maxLength": 120,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "preview_start_sec": {
+        "anyOf": [
+          {
+            "maximum": 600,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "preview_end_sec": {
+        "anyOf": [
+          {
+            "maximum": 600,
+            "minimum": 0,
+            "type": "number"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "plan_id",
+      "expected_revision",
+      "plan_sha256",
+      "submission_key"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixArtifact": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "mix",
+          "processed",
+          "dry",
+          "plan",
+          "provenance",
+          "bundle"
+        ],
+        "type": "string"
+      },
+      "filename": {
+        "maxLength": 160,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]*$",
+        "type": "string"
+      },
+      "sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "byte_count": {
+        "maximum": 17179869184,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "media_type": {
+        "enum": [
+          "audio/wav",
+          "application/json",
+          "application/zip"
+        ],
+        "type": "string"
+      },
+      "lane_id": {
+        "anyOf": [
+          {
+            "maxLength": 32,
+            "minLength": 32,
+            "pattern": "^[0-9a-f]{32}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "frames": {
+        "anyOf": [
+          {
+            "maximum": 28800000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "kind",
+      "filename",
+      "sha256",
+      "byte_count",
+      "media_type"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixFailure": {
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "enum": [
+          "song_source_missing",
+          "song_source_changed",
+          "song_conditioning_invalid",
+          "beat_mix_alignment_invalid",
+          "beat_mix_key_review_required",
+          "beat_mix_drums_required",
+          "beat_mix_stretch_required",
+          "beat_mix_invalid",
+          "beat_mix_not_found",
+          "beat_mix_revision_conflict",
+          "beat_mix_submission_conflict",
+          "beat_mix_busy",
+          "beat_mix_budget_exceeded",
+          "beat_mix_render_failed",
+          "song_save_failed",
+          "song_cleanup_failed",
+          "song_storage_unavailable",
+          "insufficient_disk"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixManifest": {
+    "additionalProperties": false,
+    "properties": {
+      "job_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "plan_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "preview",
+          "full"
+        ],
+        "type": "string"
+      },
+      "frames": {
+        "maximum": 28800000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "sample_rate_hz": {
+        "const": 48000,
+        "type": "integer"
+      },
+      "channels": {
+        "const": 2,
+        "type": "integer"
+      },
+      "sources": {
+        "items": {
+          "$ref": "#/$defs/SongSourceSnapshot"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      },
+      "artifacts": {
+        "items": {
+          "$ref": "#/$defs/BeatSongMixArtifact"
+        },
+        "maxItems": 100,
+        "minItems": 4,
+        "type": "array"
+      },
+      "lanes": {
+        "items": {
+          "$ref": "#/$defs/BeatSongRenderedLane"
+        },
+        "maxItems": 32,
+        "minItems": 2,
+        "type": "array"
+      },
+      "metrics": {
+        "$ref": "#/$defs/AudioMetrics"
+      },
+      "music_evidence": {
+        "$ref": "#/$defs/MusicEvidence"
+      },
+      "warnings": {
+        "items": {
+          "enum": [
+            "manual_anchors",
+            "key_unknown",
+            "audio_pitch_approximation",
+            "audio_loop_approximation",
+            "separation_bleed_possible",
+            "rights_unknown",
+            "hard_clip_risk",
+            "processed_stems_before_master",
+            "authored_repeats_recompiled",
+            "tails_trimmed_to_song",
+            "chunked_warp_review"
+          ],
+          "type": "string"
+        },
+        "maxItems": 16,
+        "type": "array"
+      },
+      "recipe": {
+        "const": "reviewed-beat-song-v1",
+        "type": "string"
+      },
+      "track_id": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "project_id": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "job_id",
+      "plan_id",
+      "plan_revision",
+      "plan_sha256",
+      "mode",
+      "frames",
+      "sources",
+      "artifacts",
+      "lanes",
+      "metrics",
+      "music_evidence",
+      "warnings"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixProgress": {
+    "additionalProperties": false,
+    "properties": {
+      "phase": {
+        "enum": [
+          "queued",
+          "snapshotting",
+          "separating",
+          "warping",
+          "mixing",
+          "publishing"
+        ],
+        "type": "string"
+      },
+      "completed": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "total": {
+        "anyOf": [
+          {
+            "maximum": 10000,
+            "minimum": 1,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "phase"
+    ],
+    "type": "object"
+  },
+  "BeatSongRenderedLane": {
+    "additionalProperties": false,
+    "properties": {
+      "lane_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "dry_artifact_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      }
+    },
+    "required": [
+      "lane_id",
+      "artifact_id",
+      "dry_artifact_id"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixJob": {
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "plan": {
+        "$ref": "#/$defs/BeatSongMixPlan"
+      },
+      "request": {
+        "$ref": "#/$defs/BeatSongMixStartRequest"
+      },
+      "status": {
+        "enum": [
+          "queued",
+          "running",
+          "cancelling",
+          "cancelled",
+          "done",
+          "failed",
+          "interrupted",
+          "blocked",
+          "saving"
+        ],
+        "type": "string"
+      },
+      "progress": {
+        "$ref": "#/$defs/BeatSongMixProgress"
+      },
+      "manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatSongMixManifest"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "error": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/BeatSongMixFailure"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "created_at": {
+        "maxLength": 40,
+        "minLength": 20,
+        "type": "string"
+      },
+      "started_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "minLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "finished_at": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "minLength": 20,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "id",
+      "plan",
+      "request",
+      "status",
+      "progress",
+      "created_at"
+    ],
+    "type": "object"
+  },
+  "BeatSongMixJobs": {
+    "additionalProperties": false,
+    "properties": {
+      "jobs": {
+        "items": {
+          "$ref": "#/$defs/BeatSongMixJob"
+        },
+        "maxItems": 100,
+        "type": "array"
+      }
+    },
+    "required": [
+      "jobs"
+    ],
+    "type": "object"
+  },
+  "BeatSongTransposeRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "$ref": "#/$defs/BeatRenderConditioningSource"
+      },
+      "semitones": {
+        "maximum": 12,
+        "minimum": -12,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "source",
+      "semitones"
+    ],
+    "type": "object"
+  },
+  "BeatSongTransposePreview": {
+    "additionalProperties": false,
+    "properties": {
+      "document": {
+        "$ref": "#/$defs/BeatDocument"
+      },
+      "symbolic_origin": {
+        "$ref": "#/$defs/BeatSongSymbolicOrigin"
+      }
+    },
+    "required": [
+      "document",
+      "symbolic_origin"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningCapability": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "stable_audio3",
+          "yue2"
+        ],
+        "type": "string"
+      },
+      "mode": {
+        "enum": [
+          "ace_complete",
+          "ace_lego",
+          "ace_cover",
+          "audio_to_audio",
+          "inpaint",
+          "yue_audio_conditioning"
+        ],
+        "type": "string"
+      },
+      "proof_status": {
+        "enum": [
+          "source_verified",
+          "unverified"
+        ],
+        "type": "string"
+      },
+      "runtime_verified": {
+        "const": false,
+        "type": "boolean"
+      },
+      "enabled_small": {
+        "type": "boolean"
+      },
+      "enabled_medium": {
+        "type": "boolean"
+      },
+      "source_commit": {
+        "anyOf": [
+          {
+            "maxLength": 40,
+            "minLength": 40,
+            "pattern": "^[0-9a-f]{40}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "proof_sha256": {
+        "anyOf": [
+          {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "output_semantics": {
+        "enum": [
+          "generated_full_mix",
+          "original_pcm_outside_region",
+          "unverified"
+        ],
+        "type": "string"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "conditioning_source_missing",
+              "conditioning_source_changed",
+              "conditioning_source_invalid",
+              "conditioning_invalid_region",
+              "conditioning_invalid_request",
+              "conditioning_source_busy",
+              "conditioning_encoder_missing",
+              "conditioning_model_changed",
+              "conditioning_runtime_changed",
+              "conditioning_runtime_unavailable",
+              "conditioning_inpaint_format_unsupported",
+              "conditioning_inpaint_duration_mismatch",
+              "conditioning_native_source_unused",
+              "conditioning_snapshot_invalid",
+              "conditioning_output_invalid",
+              "conditioning_task_unsupported",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "notes": {
+        "maxLength": 1500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "engine",
+      "mode",
+      "proof_status",
+      "enabled_small",
+      "enabled_medium",
+      "output_semantics",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningCapabilities": {
+    "additionalProperties": false,
+    "properties": {
+      "modes": {
+        "items": {
+          "$ref": "#/$defs/MusicConditioningCapability"
+        },
+        "maxItems": 6,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "modes"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningPreview": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 536870912,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "source_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "source_channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "source_frames": {
+        "maximum": 72960000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 380,
+        "type": "number"
+      },
+      "required_free_bytes": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "can_start": {
+        "type": "boolean"
+      },
+      "error_code": {
+        "anyOf": [
+          {
+            "enum": [
+              "conditioning_source_missing",
+              "conditioning_source_changed",
+              "conditioning_source_invalid",
+              "conditioning_invalid_region",
+              "conditioning_invalid_request",
+              "conditioning_source_busy",
+              "conditioning_encoder_missing",
+              "conditioning_model_changed",
+              "conditioning_runtime_changed",
+              "conditioning_runtime_unavailable",
+              "conditioning_inpaint_format_unsupported",
+              "conditioning_inpaint_duration_mismatch",
+              "conditioning_native_source_unused",
+              "conditioning_snapshot_invalid",
+              "conditioning_output_invalid",
+              "conditioning_task_unsupported",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256",
+      "source_bytes",
+      "source_rate_hz",
+      "source_channels",
+      "source_frames",
+      "duration_sec",
+      "required_free_bytes",
+      "can_start"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningSourceRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      }
+    },
+    "required": [
+      "source"
+    ],
+    "type": "object"
+  },
+  "MusicConditioningSourceInfo": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "production_asset": "#/$defs/ProductionMusicSource",
+            "stem": "#/$defs/StemMusicSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/StemMusicSource"
+          },
+          {
+            "$ref": "#/$defs/ProductionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "source_bytes": {
+        "maximum": 536870912,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "source_rate_hz": {
+        "maximum": 192000,
+        "minimum": 8000,
+        "type": "integer"
+      },
+      "source_channels": {
+        "enum": [
+          1,
+          2
+        ],
+        "type": "integer"
+      },
+      "source_frames": {
+        "maximum": 1382400000,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "duration_sec": {
+        "exclusiveMinimum": 0,
+        "maximum": 7200,
+        "type": "number"
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256",
+      "source_bytes",
+      "source_rate_hz",
+      "source_channels",
+      "source_frames",
+      "duration_sec"
+    ],
+    "type": "object"
+  },
+  "AceCompleteConditioning": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "mode": {
+        "const": "ace_complete",
+        "type": "string"
+      },
+      "track_classes": {
+        "items": {
+          "enum": [
+            "woodwinds",
+            "brass",
+            "fx",
+            "synth",
+            "strings",
+            "percussion",
+            "keyboard",
+            "guitar",
+            "bass",
+            "drums",
+            "backing_vocals",
+            "vocals"
+          ],
+          "type": "string"
+        },
+        "maxItems": 12,
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256",
+      "mode",
+      "track_classes"
+    ],
+    "type": "object"
+  },
+  "AceLegoConditioning": {
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "discriminator": {
+          "mapping": {
+            "beat_render": "#/$defs/BeatRenderConditioningSource",
+            "version": "#/$defs/VersionMusicSource"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/VersionMusicSource"
+          },
+          {
+            "$ref": "#/$defs/BeatRenderConditioningSource"
+          }
+        ]
+      },
+      "source_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "mode": {
+        "const": "ace_lego",
+        "type": "string"
+      },
+      "track_name": {
+        "enum": [
+          "woodwinds",
+          "brass",
+          "fx",
+          "synth",
+          "strings",
+          "percussion",
+          "keyboard",
+          "guitar",
+          "bass",
+          "drums",
+          "backing_vocals",
+          "vocals"
+        ],
+        "type": "string"
+      }
+    },
+    "required": [
+      "source",
+      "source_sha256",
+      "mode",
+      "track_name"
+    ],
+    "type": "object"
+  },
+  "SongFromBeatCapability": {
+    "additionalProperties": false,
+    "properties": {
+      "mode": {
+        "enum": [
+          "ace_complete",
+          "ace_lego"
+        ],
+        "type": "string"
+      },
+      "base_model": {
+        "const": "acestep-v15-base",
+        "type": "string"
+      },
+      "proof_status": {
+        "enum": [
+          "source_verified",
+          "unverified"
+        ],
+        "type": "string"
+      },
+      "runtime_verified": {
+        "const": false,
+        "type": "boolean"
+      },
+      "installed": {
+        "type": "boolean"
+      },
+      "weights_ready": {
+        "type": "boolean"
+      },
+      "ready": {
+        "type": "boolean"
+      },
+      "source_commit": {
+        "maxLength": 40,
+        "minLength": 40,
+        "pattern": "^[0-9a-f]{40}$",
+        "type": "string"
+      },
+      "proof_sha256": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "output_semantics": {
+        "const": "generated_full_mix",
+        "type": "string"
+      },
+      "minimum_source_seconds": {
+        "const": 10,
+        "type": "integer"
+      },
+      "maximum_source_seconds": {
+        "const": 300,
+        "type": "integer"
+      },
+      "reason": {
+        "anyOf": [
+          {
+            "enum": [
+              "conditioning_source_missing",
+              "conditioning_source_changed",
+              "conditioning_source_invalid",
+              "conditioning_invalid_region",
+              "conditioning_invalid_request",
+              "conditioning_source_busy",
+              "conditioning_encoder_missing",
+              "conditioning_model_changed",
+              "conditioning_runtime_changed",
+              "conditioning_runtime_unavailable",
+              "conditioning_inpaint_format_unsupported",
+              "conditioning_inpaint_duration_mismatch",
+              "conditioning_native_source_unused",
+              "conditioning_snapshot_invalid",
+              "conditioning_output_invalid",
+              "conditioning_task_unsupported",
+              "insufficient_disk"
+            ],
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "notes": {
+        "maxLength": 1500,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "mode",
+      "proof_status",
+      "installed",
+      "weights_ready",
+      "ready",
+      "source_commit",
+      "proof_sha256",
+      "notes"
+    ],
+    "type": "object"
+  },
+  "SongFromBeatCapabilities": {
+    "additionalProperties": false,
+    "properties": {
+      "modes": {
+        "items": {
+          "$ref": "#/$defs/SongFromBeatCapability"
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "type": "array"
+      }
+    },
+    "required": [
+      "modes"
+    ],
+    "type": "object"
+  },
   "ReadingCue": {
     "properties": {
       "passage_id": {
@@ -20160,65 +38982,6 @@ const schemas = {
     ],
     "type": "object"
   },
-  "LocalMusicRequest": {
-    "additionalProperties": false,
-    "properties": {
-      "engine": {
-        "const": "stable_audio3",
-        "type": "string"
-      },
-      "title": {
-        "maxLength": 500,
-        "type": "string"
-      },
-      "prompt": {
-        "maxLength": 4000,
-        "minLength": 1,
-        "type": "string"
-      },
-      "lyrics": {
-        "maxLength": 20000,
-        "type": "string"
-      },
-      "settings_mode": {
-        "const": "manual",
-        "type": "string"
-      },
-      "duration_seconds": {
-        "maximum": 380,
-        "minimum": 5,
-        "type": "integer"
-      },
-      "seed": {
-        "maximum": 2147483647,
-        "minimum": 0,
-        "type": "integer"
-      },
-      "variant": {
-        "enum": [
-          "small-music",
-          "medium"
-        ],
-        "type": "string"
-      },
-      "adapter": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/MusicAdapterSelection"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      }
-    },
-    "required": [
-      "engine",
-      "prompt",
-      "duration_seconds"
-    ],
-    "type": "object"
-  },
   "LocalMusicEngineStatus": {
     "properties": {
       "id": {
@@ -20235,6 +38998,12 @@ const schemas = {
         "type": "boolean"
       },
       "medium_weights_ready": {
+        "type": "boolean"
+      },
+      "small_conditioning_weights_ready": {
+        "type": "boolean"
+      },
+      "medium_conditioning_weights_ready": {
         "type": "boolean"
       },
       "supported": {
@@ -20268,128 +39037,6 @@ const schemas = {
     },
     "required": [
       "engines"
-    ],
-    "type": "object"
-  },
-  "MusicAdapter": {
-    "additionalProperties": false,
-    "properties": {
-      "id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "type": "string"
-      },
-      "engine": {
-        "enum": [
-          "stable_audio3",
-          "yue2"
-        ],
-        "type": "string"
-      },
-      "target": {
-        "enum": [
-          "small-music",
-          "medium",
-          "ar",
-          "nar"
-        ],
-        "type": "string"
-      },
-      "name": {
-        "maxLength": 120,
-        "minLength": 1,
-        "type": "string"
-      },
-      "sha256": {
-        "pattern": "^[0-9a-f]{64}$",
-        "type": "string"
-      },
-      "created_at": {
-        "maxLength": 64,
-        "minLength": 1,
-        "type": "string"
-      },
-      "source_job_id": {
-        "anyOf": [
-          {
-            "pattern": "^[0-9a-f]{32}$",
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      }
-    },
-    "required": [
-      "id",
-      "engine",
-      "target",
-      "name",
-      "sha256",
-      "created_at"
-    ],
-    "type": "object"
-  },
-  "LocalMusicJob": {
-    "properties": {
-      "id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "type": "string"
-      },
-      "status": {
-        "enum": [
-          "queued",
-          "running",
-          "done",
-          "failed",
-          "cancelled",
-          "interrupted"
-        ],
-        "type": "string"
-      },
-      "created_at": {
-        "type": "string"
-      },
-      "request": {
-        "$ref": "#/$defs/LocalMusicRequest"
-      },
-      "track": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/SavedTrack"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "adapter": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/MusicAdapter"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "error_code": {
-        "anyOf": [
-          {
-            "maxLength": 80,
-            "type": "string"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      }
-    },
-    "required": [
-      "id",
-      "status",
-      "created_at",
-      "request"
     ],
     "type": "object"
   },
@@ -20475,120 +39122,6 @@ const schemas = {
     },
     "required": [
       "engines"
-    ],
-    "type": "object"
-  },
-  "MusicLoraDatasetSource": {
-    "additionalProperties": false,
-    "properties": {
-      "dataset_id": {
-        "pattern": "^[0-9a-f]{32}$",
-        "type": "string"
-      },
-      "revision": {
-        "maximum": 9007199254740991,
-        "minimum": 0,
-        "type": "integer"
-      },
-      "sample_id": {
-        "maxLength": 200,
-        "minLength": 1,
-        "pattern": "^[A-Za-z0-9_-]+$",
-        "type": "string"
-      }
-    },
-    "required": [
-      "dataset_id",
-      "revision",
-      "sample_id"
-    ],
-    "type": "object"
-  },
-  "StableLoraSample": {
-    "additionalProperties": false,
-    "properties": {
-      "track_id": {
-        "anyOf": [
-          {
-            "minimum": 1,
-            "type": "integer"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "dataset": {
-        "anyOf": [
-          {
-            "$ref": "#/$defs/MusicLoraDatasetSource"
-          },
-          {
-            "type": "null"
-          }
-        ]
-      },
-      "caption": {
-        "maxLength": 4000,
-        "minLength": 1,
-        "type": "string"
-      }
-    },
-    "required": [
-      "caption"
-    ],
-    "type": "object"
-  },
-  "StableLoraTrainingRequest": {
-    "additionalProperties": false,
-    "properties": {
-      "name": {
-        "maxLength": 120,
-        "minLength": 1,
-        "type": "string"
-      },
-      "variant": {
-        "enum": [
-          "small-music",
-          "medium"
-        ],
-        "type": "string"
-      },
-      "samples": {
-        "items": {
-          "$ref": "#/$defs/StableLoraSample"
-        },
-        "maxItems": 100,
-        "minItems": 1,
-        "type": "array"
-      },
-      "max_steps": {
-        "maximum": 100000,
-        "minimum": 1,
-        "type": "integer"
-      },
-      "rank": {
-        "enum": [
-          8,
-          16,
-          32
-        ],
-        "type": "integer"
-      },
-      "learning_rate": {
-        "maximum": 0.01,
-        "minimum": 1e-07,
-        "type": "number"
-      },
-      "seed": {
-        "maximum": 2147483647,
-        "minimum": 0,
-        "type": "integer"
-      }
-    },
-    "required": [
-      "name",
-      "samples"
     ],
     "type": "object"
   },
@@ -20828,6 +39361,16 @@ const schemas = {
         "anyOf": [
           {
             "$ref": "#/$defs/MusicLoraDatasetSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "regional_manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraRegionalSource"
           },
           {
             "type": "null"
@@ -21262,6 +39805,16 @@ const schemas = {
             "type": "null"
           }
         ]
+      },
+      "regional_manifest": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicLoraRegionalSource"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "type": "object"
@@ -21521,6 +40074,47 @@ const schemas = {
             "type": "null"
           }
         ]
+      },
+      "conditioning": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "audio_to_audio": "#/$defs/StableAudioConditioning",
+                "inpaint": "#/$defs/StableInpaintConditioning"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/StableAudioConditioning"
+              },
+              {
+                "$ref": "#/$defs/StableInpaintConditioning"
+              }
+            ]
+          },
+          {
+            "discriminator": {
+              "mapping": {
+                "ace_complete": "#/$defs/AceCompleteConditioning",
+                "ace_lego": "#/$defs/AceLegoConditioning"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AceCompleteConditioning"
+              },
+              {
+                "$ref": "#/$defs/AceLegoConditioning"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -21722,6 +40316,16 @@ const schemas = {
         },
         "maxItems": 2,
         "type": "array"
+      },
+      "conditioning_preview": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/MusicConditioningPreview"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -21741,6 +40345,30 @@ const schemas = {
       },
       "request": {
         "$ref": "#/$defs/AceGenerationSettings"
+      },
+      "conditioning": {
+        "anyOf": [
+          {
+            "discriminator": {
+              "mapping": {
+                "ace_complete": "#/$defs/AceCompleteConditioning",
+                "ace_lego": "#/$defs/AceLegoConditioning"
+              },
+              "propertyName": "mode"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/AceCompleteConditioning"
+              },
+              {
+                "$ref": "#/$defs/AceLegoConditioning"
+              }
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -21888,6 +40516,25 @@ const schemas = {
     ],
     "type": "object"
   },
+  "QueuedMusicSource": {
+    "additionalProperties": false,
+    "properties": {
+      "owner_id": {
+        "maxLength": 32,
+        "minLength": 32,
+        "pattern": "^[0-9a-f]{32}$",
+        "type": "string"
+      },
+      "snapshot": {
+        "$ref": "#/$defs/SongSourceSnapshot"
+      }
+    },
+    "required": [
+      "owner_id",
+      "snapshot"
+    ],
+    "type": "object"
+  },
   "MusicQueueItem": {
     "additionalProperties": false,
     "properties": {
@@ -21994,6 +40641,16 @@ const schemas = {
           {
             "pattern": "^[0-9a-f]{32}$",
             "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "retained_input": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/QueuedMusicSource"
           },
           {
             "type": "null"
@@ -22243,6 +40900,196 @@ const schemas = {
     "required": [
       "revision",
       "batch_id"
+    ],
+    "type": "object"
+  },
+  "MusicTermsRequirement": {
+    "additionalProperties": false,
+    "properties": {
+      "component_id": {
+        "maxLength": 120,
+        "minLength": 1,
+        "type": "string"
+      },
+      "name": {
+        "maxLength": 160,
+        "minLength": 1,
+        "type": "string"
+      },
+      "scope": {
+        "enum": [
+          "code",
+          "model",
+          "tool",
+          "auxiliary",
+          "source_data",
+          "dataset",
+          "samples"
+        ],
+        "type": "string"
+      },
+      "restriction": {
+        "enum": [
+          "noncommercial",
+          "conditional"
+        ],
+        "type": "string"
+      },
+      "source_url": {
+        "maxLength": 500,
+        "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+(?:[/?#][^\\s\\\\]*)?$",
+        "type": "string"
+      },
+      "terms_digest": {
+        "maxLength": 64,
+        "minLength": 64,
+        "pattern": "^[0-9a-f]{64}$",
+        "type": "string"
+      },
+      "acknowledged": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "component_id",
+      "name",
+      "scope",
+      "restriction",
+      "source_url",
+      "terms_digest",
+      "acknowledged"
+    ],
+    "type": "object"
+  },
+  "MusicTermsSnapshot": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "setup",
+          "generation",
+          "training",
+          "transcription"
+        ],
+        "type": "string"
+      },
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "noncommercial_enabled": {
+        "type": "boolean"
+      },
+      "requirements": {
+        "items": {
+          "$ref": "#/$defs/MusicTermsRequirement"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "allowed": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "engine",
+      "operation",
+      "revision",
+      "noncommercial_enabled",
+      "requirements",
+      "allowed"
+    ],
+    "type": "object"
+  },
+  "MusicTermsAcceptRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "engine": {
+        "enum": [
+          "ace_step",
+          "yue2",
+          "stable_audio3"
+        ],
+        "type": "string"
+      },
+      "operation": {
+        "enum": [
+          "setup",
+          "generation",
+          "training",
+          "transcription"
+        ],
+        "type": "string"
+      },
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "terms_digests": {
+        "items": {
+          "maxLength": 64,
+          "minLength": 64,
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "maxItems": 20,
+        "type": "array"
+      },
+      "allow_noncommercial": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "engine",
+      "operation",
+      "expected_revision",
+      "terms_digests"
+    ],
+    "type": "object"
+  },
+  "MusicTermsSettingsRequest": {
+    "additionalProperties": false,
+    "properties": {
+      "expected_revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "noncommercial_enabled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "expected_revision",
+      "noncommercial_enabled"
+    ],
+    "type": "object"
+  },
+  "MusicTermsSettingsResponse": {
+    "additionalProperties": false,
+    "properties": {
+      "revision": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "noncommercial_enabled": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "revision",
+      "noncommercial_enabled"
     ],
     "type": "object"
   },
@@ -23097,6 +41944,30 @@ const schemas = {
         "maxLength": 200,
         "minLength": 1,
         "type": "string"
+      },
+      "required_free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "free_bytes": {
+        "anyOf": [
+          {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          {
+            "type": "null"
+          }
+        ]
       }
     },
     "required": [
@@ -23355,7 +42226,9 @@ const schemas = {
           "chatterbox",
           "wan22",
           "rvc",
-          "speaker_review"
+          "speaker_review",
+          "music_dsp",
+          "music_beats"
         ],
         "type": "string"
       },
@@ -23517,7 +42390,7 @@ const schemas = {
         "items": {
           "$ref": "#/$defs/SupportModuleState"
         },
-        "maxItems": 17,
+        "maxItems": 18,
         "type": "array"
       },
       "engines": {
@@ -28887,6 +47760,22 @@ export function parseModuleAction(value: unknown): ModuleAction {
   return value
 }
 
+function isModuleComponentIdentity(value: unknown): value is ModuleComponentIdentity {
+  return decodeSchema(schemas.ModuleComponentIdentity, value, schemas)
+}
+export function parseModuleComponentIdentity(value: unknown): ModuleComponentIdentity {
+  if (!isModuleComponentIdentity(value)) throw new TypeError("Invalid ModuleComponentIdentity response")
+  return value
+}
+
+function isModuleLicenseEvidence(value: unknown): value is ModuleLicenseEvidence {
+  return decodeSchema(schemas.ModuleLicenseEvidence, value, schemas)
+}
+export function parseModuleLicenseEvidence(value: unknown): ModuleLicenseEvidence {
+  if (!isModuleLicenseEvidence(value)) throw new TypeError("Invalid ModuleLicenseEvidence response")
+  return value
+}
+
 function isModuleLicenseDeclaration(value: unknown): value is ModuleLicenseDeclaration {
   return decodeSchema(schemas.ModuleLicenseDeclaration, value, schemas)
 }
@@ -29316,6 +48205,1366 @@ function isAceLoraToggleRequest(value: unknown): value is AceLoraToggleRequest {
 }
 export function parseAceLoraToggleRequest(value: unknown): AceLoraToggleRequest {
   if (!isAceLoraToggleRequest(value)) throw new TypeError("Invalid AceLoraToggleRequest response")
+  return value
+}
+
+function isVersionMusicSource(value: unknown): value is VersionMusicSource {
+  return decodeSchema(schemas.VersionMusicSource, value, schemas)
+}
+export function parseVersionMusicSource(value: unknown): VersionMusicSource {
+  if (!isVersionMusicSource(value)) throw new TypeError("Invalid VersionMusicSource response")
+  return value
+}
+
+function isStemMusicSource(value: unknown): value is StemMusicSource {
+  return decodeSchema(schemas.StemMusicSource, value, schemas)
+}
+export function parseStemMusicSource(value: unknown): StemMusicSource {
+  if (!isStemMusicSource(value)) throw new TypeError("Invalid StemMusicSource response")
+  return value
+}
+
+function isProductionMusicSource(value: unknown): value is ProductionMusicSource {
+  return decodeSchema(schemas.ProductionMusicSource, value, schemas)
+}
+export function parseProductionMusicSource(value: unknown): ProductionMusicSource {
+  if (!isProductionMusicSource(value)) throw new TypeError("Invalid ProductionMusicSource response")
+  return value
+}
+
+function isTempoPoint(value: unknown): value is TempoPoint {
+  return decodeSchema(schemas.TempoPoint, value, schemas)
+}
+export function parseTempoPoint(value: unknown): TempoPoint {
+  if (!isTempoPoint(value)) throw new TypeError("Invalid TempoPoint response")
+  return value
+}
+
+function isTempoEstimate(value: unknown): value is TempoEstimate {
+  return decodeSchema(schemas.TempoEstimate, value, schemas)
+}
+export function parseTempoEstimate(value: unknown): TempoEstimate {
+  if (!isTempoEstimate(value)) throw new TypeError("Invalid TempoEstimate response")
+  return value
+}
+
+function isMeterEstimate(value: unknown): value is MeterEstimate {
+  return decodeSchema(schemas.MeterEstimate, value, schemas)
+}
+export function parseMeterEstimate(value: unknown): MeterEstimate {
+  if (!isMeterEstimate(value)) throw new TypeError("Invalid MeterEstimate response")
+  return value
+}
+
+function isKeyCandidate(value: unknown): value is KeyCandidate {
+  return decodeSchema(schemas.KeyCandidate, value, schemas)
+}
+export function parseKeyCandidate(value: unknown): KeyCandidate {
+  if (!isKeyCandidate(value)) throw new TypeError("Invalid KeyCandidate response")
+  return value
+}
+
+function isKeyEstimate(value: unknown): value is KeyEstimate {
+  return decodeSchema(schemas.KeyEstimate, value, schemas)
+}
+export function parseKeyEstimate(value: unknown): KeyEstimate {
+  if (!isKeyEstimate(value)) throw new TypeError("Invalid KeyEstimate response")
+  return value
+}
+
+function isKeyChange(value: unknown): value is KeyChange {
+  return decodeSchema(schemas.KeyChange, value, schemas)
+}
+export function parseKeyChange(value: unknown): KeyChange {
+  if (!isKeyChange(value)) throw new TypeError("Invalid KeyChange response")
+  return value
+}
+
+function isAnalysisSection(value: unknown): value is AnalysisSection {
+  return decodeSchema(schemas.AnalysisSection, value, schemas)
+}
+export function parseAnalysisSection(value: unknown): AnalysisSection {
+  if (!isAnalysisSection(value)) throw new TypeError("Invalid AnalysisSection response")
+  return value
+}
+
+function isVocalInterval(value: unknown): value is VocalInterval {
+  return decodeSchema(schemas.VocalInterval, value, schemas)
+}
+export function parseVocalInterval(value: unknown): VocalInterval {
+  if (!isVocalInterval(value)) throw new TypeError("Invalid VocalInterval response")
+  return value
+}
+
+function isVocalActivity(value: unknown): value is VocalActivity {
+  return decodeSchema(schemas.VocalActivity, value, schemas)
+}
+export function parseVocalActivity(value: unknown): VocalActivity {
+  if (!isVocalActivity(value)) throw new TypeError("Invalid VocalActivity response")
+  return value
+}
+
+function isAnalysisEnergyPoint(value: unknown): value is AnalysisEnergyPoint {
+  return decodeSchema(schemas.AnalysisEnergyPoint, value, schemas)
+}
+export function parseAnalysisEnergyPoint(value: unknown): AnalysisEnergyPoint {
+  if (!isAnalysisEnergyPoint(value)) throw new TypeError("Invalid AnalysisEnergyPoint response")
+  return value
+}
+
+function isMusicAnalysisFeatures(value: unknown): value is MusicAnalysisFeatures {
+  return decodeSchema(schemas.MusicAnalysisFeatures, value, schemas)
+}
+export function parseMusicAnalysisFeatures(value: unknown): MusicAnalysisFeatures {
+  if (!isMusicAnalysisFeatures(value)) throw new TypeError("Invalid MusicAnalysisFeatures response")
+  return value
+}
+
+function isAnalysisEngine(value: unknown): value is AnalysisEngine {
+  return decodeSchema(schemas.AnalysisEngine, value, schemas)
+}
+export function parseAnalysisEngine(value: unknown): AnalysisEngine {
+  if (!isAnalysisEngine(value)) throw new TypeError("Invalid AnalysisEngine response")
+  return value
+}
+
+function isAnalysisResult(value: unknown): value is AnalysisResult {
+  return decodeSchema(schemas.AnalysisResult, value, schemas)
+}
+export function parseAnalysisResult(value: unknown): AnalysisResult {
+  if (!isAnalysisResult(value)) throw new TypeError("Invalid AnalysisResult response")
+  return value
+}
+
+function isMusicAnalysisRequest(value: unknown): value is MusicAnalysisRequest {
+  return decodeSchema(schemas.MusicAnalysisRequest, value, schemas)
+}
+export function parseMusicAnalysisRequest(value: unknown): MusicAnalysisRequest {
+  if (!isMusicAnalysisRequest(value)) throw new TypeError("Invalid MusicAnalysisRequest response")
+  return value
+}
+
+function isMusicAnalysisStoragePreview(value: unknown): value is MusicAnalysisStoragePreview {
+  return decodeSchema(schemas.MusicAnalysisStoragePreview, value, schemas)
+}
+export function parseMusicAnalysisStoragePreview(value: unknown): MusicAnalysisStoragePreview {
+  if (!isMusicAnalysisStoragePreview(value)) throw new TypeError("Invalid MusicAnalysisStoragePreview response")
+  return value
+}
+
+function isMusicAnalysisProgress(value: unknown): value is MusicAnalysisProgress {
+  return decodeSchema(schemas.MusicAnalysisProgress, value, schemas)
+}
+export function parseMusicAnalysisProgress(value: unknown): MusicAnalysisProgress {
+  if (!isMusicAnalysisProgress(value)) throw new TypeError("Invalid MusicAnalysisProgress response")
+  return value
+}
+
+function isMusicAnalysisJob(value: unknown): value is MusicAnalysisJob {
+  return decodeSchema(schemas.MusicAnalysisJob, value, schemas)
+}
+export function parseMusicAnalysisJob(value: unknown): MusicAnalysisJob {
+  if (!isMusicAnalysisJob(value)) throw new TypeError("Invalid MusicAnalysisJob response")
+  return value
+}
+
+function isMusicAnalysisOverrides(value: unknown): value is MusicAnalysisOverrides {
+  return decodeSchema(schemas.MusicAnalysisOverrides, value, schemas)
+}
+export function parseMusicAnalysisOverrides(value: unknown): MusicAnalysisOverrides {
+  if (!isMusicAnalysisOverrides(value)) throw new TypeError("Invalid MusicAnalysisOverrides response")
+  return value
+}
+
+function isWarpAnchor(value: unknown): value is WarpAnchor {
+  return decodeSchema(schemas.WarpAnchor, value, schemas)
+}
+export function parseWarpAnchor(value: unknown): WarpAnchor {
+  if (!isWarpAnchor(value)) throw new TypeError("Invalid WarpAnchor response")
+  return value
+}
+
+function isEqBand(value: unknown): value is EqBand {
+  return decodeSchema(schemas.EqBand, value, schemas)
+}
+export function parseEqBand(value: unknown): EqBand {
+  if (!isEqBand(value)) throw new TypeError("Invalid EqBand response")
+  return value
+}
+
+function isCompressionSettings(value: unknown): value is CompressionSettings {
+  return decodeSchema(schemas.CompressionSettings, value, schemas)
+}
+export function parseCompressionSettings(value: unknown): CompressionSettings {
+  if (!isCompressionSettings(value)) throw new TypeError("Invalid CompressionSettings response")
+  return value
+}
+
+function isFadeSettings(value: unknown): value is FadeSettings {
+  return decodeSchema(schemas.FadeSettings, value, schemas)
+}
+export function parseFadeSettings(value: unknown): FadeSettings {
+  if (!isFadeSettings(value)) throw new TypeError("Invalid FadeSettings response")
+  return value
+}
+
+function isDspTransformRequest(value: unknown): value is DspTransformRequest {
+  return decodeSchema(schemas.DspTransformRequest, value, schemas)
+}
+export function parseDspTransformRequest(value: unknown): DspTransformRequest {
+  if (!isDspTransformRequest(value)) throw new TypeError("Invalid DspTransformRequest response")
+  return value
+}
+
+function isDspArtifactRef(value: unknown): value is DspArtifactRef {
+  return decodeSchema(schemas.DspArtifactRef, value, schemas)
+}
+export function parseDspArtifactRef(value: unknown): DspArtifactRef {
+  if (!isDspArtifactRef(value)) throw new TypeError("Invalid DspArtifactRef response")
+  return value
+}
+
+function isDuckSettings(value: unknown): value is DuckSettings {
+  return decodeSchema(schemas.DuckSettings, value, schemas)
+}
+export function parseDuckSettings(value: unknown): DuckSettings {
+  if (!isDuckSettings(value)) throw new TypeError("Invalid DuckSettings response")
+  return value
+}
+
+function isDspMixInput(value: unknown): value is DspMixInput {
+  return decodeSchema(schemas.DspMixInput, value, schemas)
+}
+export function parseDspMixInput(value: unknown): DspMixInput {
+  if (!isDspMixInput(value)) throw new TypeError("Invalid DspMixInput response")
+  return value
+}
+
+function isDspMixRequest(value: unknown): value is DspMixRequest {
+  return decodeSchema(schemas.DspMixRequest, value, schemas)
+}
+export function parseDspMixRequest(value: unknown): DspMixRequest {
+  if (!isDspMixRequest(value)) throw new TypeError("Invalid DspMixRequest response")
+  return value
+}
+
+function isDspEngineIdentity(value: unknown): value is DspEngineIdentity {
+  return decodeSchema(schemas.DspEngineIdentity, value, schemas)
+}
+export function parseDspEngineIdentity(value: unknown): DspEngineIdentity {
+  if (!isDspEngineIdentity(value)) throw new TypeError("Invalid DspEngineIdentity response")
+  return value
+}
+
+function isDspMeasuredInput(value: unknown): value is DspMeasuredInput {
+  return decodeSchema(schemas.DspMeasuredInput, value, schemas)
+}
+export function parseDspMeasuredInput(value: unknown): DspMeasuredInput {
+  if (!isDspMeasuredInput(value)) throw new TypeError("Invalid DspMeasuredInput response")
+  return value
+}
+
+function isDspTransformResult(value: unknown): value is DspTransformResult {
+  return decodeSchema(schemas.DspTransformResult, value, schemas)
+}
+export function parseDspTransformResult(value: unknown): DspTransformResult {
+  if (!isDspTransformResult(value)) throw new TypeError("Invalid DspTransformResult response")
+  return value
+}
+
+function isDspMixResult(value: unknown): value is DspMixResult {
+  return decodeSchema(schemas.DspMixResult, value, schemas)
+}
+export function parseDspMixResult(value: unknown): DspMixResult {
+  if (!isDspMixResult(value)) throw new TypeError("Invalid DspMixResult response")
+  return value
+}
+
+function isAlignmentRequest(value: unknown): value is AlignmentRequest {
+  return decodeSchema(schemas.AlignmentRequest, value, schemas)
+}
+export function parseAlignmentRequest(value: unknown): AlignmentRequest {
+  if (!isAlignmentRequest(value)) throw new TypeError("Invalid AlignmentRequest response")
+  return value
+}
+
+function isAlignmentPhraseDiagnostic(value: unknown): value is AlignmentPhraseDiagnostic {
+  return decodeSchema(schemas.AlignmentPhraseDiagnostic, value, schemas)
+}
+export function parseAlignmentPhraseDiagnostic(value: unknown): AlignmentPhraseDiagnostic {
+  if (!isAlignmentPhraseDiagnostic(value)) throw new TypeError("Invalid AlignmentPhraseDiagnostic response")
+  return value
+}
+
+function isAlignmentResult(value: unknown): value is AlignmentResult {
+  return decodeSchema(schemas.AlignmentResult, value, schemas)
+}
+export function parseAlignmentResult(value: unknown): AlignmentResult {
+  if (!isAlignmentResult(value)) throw new TypeError("Invalid AlignmentResult response")
+  return value
+}
+
+function isMusicArtifactDependency(value: unknown): value is MusicArtifactDependency {
+  return decodeSchema(schemas.MusicArtifactDependency, value, schemas)
+}
+export function parseMusicArtifactDependency(value: unknown): MusicArtifactDependency {
+  if (!isMusicArtifactDependency(value)) throw new TypeError("Invalid MusicArtifactDependency response")
+  return value
+}
+
+function isMusicArtifactGroup(value: unknown): value is MusicArtifactGroup {
+  return decodeSchema(schemas.MusicArtifactGroup, value, schemas)
+}
+export function parseMusicArtifactGroup(value: unknown): MusicArtifactGroup {
+  if (!isMusicArtifactGroup(value)) throw new TypeError("Invalid MusicArtifactGroup response")
+  return value
+}
+
+function isMusicArtifactInventory(value: unknown): value is MusicArtifactInventory {
+  return decodeSchema(schemas.MusicArtifactInventory, value, schemas)
+}
+export function parseMusicArtifactInventory(value: unknown): MusicArtifactInventory {
+  if (!isMusicArtifactInventory(value)) throw new TypeError("Invalid MusicArtifactInventory response")
+  return value
+}
+
+function isMusicArtifactCleanupRequest(value: unknown): value is MusicArtifactCleanupRequest {
+  return decodeSchema(schemas.MusicArtifactCleanupRequest, value, schemas)
+}
+export function parseMusicArtifactCleanupRequest(value: unknown): MusicArtifactCleanupRequest {
+  if (!isMusicArtifactCleanupRequest(value)) throw new TypeError("Invalid MusicArtifactCleanupRequest response")
+  return value
+}
+
+function isMusicArtifactCleanupItem(value: unknown): value is MusicArtifactCleanupItem {
+  return decodeSchema(schemas.MusicArtifactCleanupItem, value, schemas)
+}
+export function parseMusicArtifactCleanupItem(value: unknown): MusicArtifactCleanupItem {
+  if (!isMusicArtifactCleanupItem(value)) throw new TypeError("Invalid MusicArtifactCleanupItem response")
+  return value
+}
+
+function isMusicArtifactCleanupPlan(value: unknown): value is MusicArtifactCleanupPlan {
+  return decodeSchema(schemas.MusicArtifactCleanupPlan, value, schemas)
+}
+export function parseMusicArtifactCleanupPlan(value: unknown): MusicArtifactCleanupPlan {
+  if (!isMusicArtifactCleanupPlan(value)) throw new TypeError("Invalid MusicArtifactCleanupPlan response")
+  return value
+}
+
+function isConfirmMusicArtifactCleanup(value: unknown): value is ConfirmMusicArtifactCleanup {
+  return decodeSchema(schemas.ConfirmMusicArtifactCleanup, value, schemas)
+}
+export function parseConfirmMusicArtifactCleanup(value: unknown): ConfirmMusicArtifactCleanup {
+  if (!isConfirmMusicArtifactCleanup(value)) throw new TypeError("Invalid ConfirmMusicArtifactCleanup response")
+  return value
+}
+
+function isMusicArtifactCleanupOutcome(value: unknown): value is MusicArtifactCleanupOutcome {
+  return decodeSchema(schemas.MusicArtifactCleanupOutcome, value, schemas)
+}
+export function parseMusicArtifactCleanupOutcome(value: unknown): MusicArtifactCleanupOutcome {
+  if (!isMusicArtifactCleanupOutcome(value)) throw new TypeError("Invalid MusicArtifactCleanupOutcome response")
+  return value
+}
+
+function isMusicArtifactCleanupReceipt(value: unknown): value is MusicArtifactCleanupReceipt {
+  return decodeSchema(schemas.MusicArtifactCleanupReceipt, value, schemas)
+}
+export function parseMusicArtifactCleanupReceipt(value: unknown): MusicArtifactCleanupReceipt {
+  if (!isMusicArtifactCleanupReceipt(value)) throw new TypeError("Invalid MusicArtifactCleanupReceipt response")
+  return value
+}
+
+function isBeatDocument(value: unknown): value is BeatDocument {
+  return decodeSchema(schemas.BeatDocument, value, schemas)
+}
+export function parseBeatDocument(value: unknown): BeatDocument {
+  if (!isBeatDocument(value)) throw new TypeError("Invalid BeatDocument response")
+  return value
+}
+
+function isBeatRenderRequest(value: unknown): value is BeatRenderRequest {
+  return decodeSchema(schemas.BeatRenderRequest, value, schemas)
+}
+export function parseBeatRenderRequest(value: unknown): BeatRenderRequest {
+  if (!isBeatRenderRequest(value)) throw new TypeError("Invalid BeatRenderRequest response")
+  return value
+}
+
+function isBeatInstrumentManifest(value: unknown): value is BeatInstrumentManifest {
+  return decodeSchema(schemas.BeatInstrumentManifest, value, schemas)
+}
+export function parseBeatInstrumentManifest(value: unknown): BeatInstrumentManifest {
+  if (!isBeatInstrumentManifest(value)) throw new TypeError("Invalid BeatInstrumentManifest response")
+  return value
+}
+
+function isBeatMidiTuning(value: unknown): value is BeatMidiTuning {
+  return decodeSchema(schemas.BeatMidiTuning, value, schemas)
+}
+export function parseBeatMidiTuning(value: unknown): BeatMidiTuning {
+  if (!isBeatMidiTuning(value)) throw new TypeError("Invalid BeatMidiTuning response")
+  return value
+}
+
+function isBeatCreateRequest(value: unknown): value is BeatCreateRequest {
+  return decodeSchema(schemas.BeatCreateRequest, value, schemas)
+}
+export function parseBeatCreateRequest(value: unknown): BeatCreateRequest {
+  if (!isBeatCreateRequest(value)) throw new TypeError("Invalid BeatCreateRequest response")
+  return value
+}
+
+function isBeatUpdateRequest(value: unknown): value is BeatUpdateRequest {
+  return decodeSchema(schemas.BeatUpdateRequest, value, schemas)
+}
+export function parseBeatUpdateRequest(value: unknown): BeatUpdateRequest {
+  if (!isBeatUpdateRequest(value)) throw new TypeError("Invalid BeatUpdateRequest response")
+  return value
+}
+
+function isBeatRestoreRequest(value: unknown): value is BeatRestoreRequest {
+  return decodeSchema(schemas.BeatRestoreRequest, value, schemas)
+}
+export function parseBeatRestoreRequest(value: unknown): BeatRestoreRequest {
+  if (!isBeatRestoreRequest(value)) throw new TypeError("Invalid BeatRestoreRequest response")
+  return value
+}
+
+function isBeatVariationRequest(value: unknown): value is BeatVariationRequest {
+  return decodeSchema(schemas.BeatVariationRequest, value, schemas)
+}
+export function parseBeatVariationRequest(value: unknown): BeatVariationRequest {
+  if (!isBeatVariationRequest(value)) throw new TypeError("Invalid BeatVariationRequest response")
+  return value
+}
+
+function isBeatHumanizeRequest(value: unknown): value is BeatHumanizeRequest {
+  return decodeSchema(schemas.BeatHumanizeRequest, value, schemas)
+}
+export function parseBeatHumanizeRequest(value: unknown): BeatHumanizeRequest {
+  if (!isBeatHumanizeRequest(value)) throw new TypeError("Invalid BeatHumanizeRequest response")
+  return value
+}
+
+function isBeatDocuments(value: unknown): value is BeatDocuments {
+  return decodeSchema(schemas.BeatDocuments, value, schemas)
+}
+export function parseBeatDocuments(value: unknown): BeatDocuments {
+  if (!isBeatDocuments(value)) throw new TypeError("Invalid BeatDocuments response")
+  return value
+}
+
+function isBeatRevisions(value: unknown): value is BeatRevisions {
+  return decodeSchema(schemas.BeatRevisions, value, schemas)
+}
+export function parseBeatRevisions(value: unknown): BeatRevisions {
+  if (!isBeatRevisions(value)) throw new TypeError("Invalid BeatRevisions response")
+  return value
+}
+
+function isBeatArchiveResponse(value: unknown): value is BeatArchiveResponse {
+  return decodeSchema(schemas.BeatArchiveResponse, value, schemas)
+}
+export function parseBeatArchiveResponse(value: unknown): BeatArchiveResponse {
+  if (!isBeatArchiveResponse(value)) throw new TypeError("Invalid BeatArchiveResponse response")
+  return value
+}
+
+function isBeatKits(value: unknown): value is BeatKits {
+  return decodeSchema(schemas.BeatKits, value, schemas)
+}
+export function parseBeatKits(value: unknown): BeatKits {
+  if (!isBeatKits(value)) throw new TypeError("Invalid BeatKits response")
+  return value
+}
+
+function isBeatJobRequest(value: unknown): value is BeatJobRequest {
+  return decodeSchema(schemas.BeatJobRequest, value, schemas)
+}
+export function parseBeatJobRequest(value: unknown): BeatJobRequest {
+  if (!isBeatJobRequest(value)) throw new TypeError("Invalid BeatJobRequest response")
+  return value
+}
+
+function isBeatJob(value: unknown): value is BeatJob {
+  return decodeSchema(schemas.BeatJob, value, schemas)
+}
+export function parseBeatJob(value: unknown): BeatJob {
+  if (!isBeatJob(value)) throw new TypeError("Invalid BeatJob response")
+  return value
+}
+
+function isBeatJobs(value: unknown): value is BeatJobs {
+  return decodeSchema(schemas.BeatJobs, value, schemas)
+}
+export function parseBeatJobs(value: unknown): BeatJobs {
+  if (!isBeatJobs(value)) throw new TypeError("Invalid BeatJobs response")
+  return value
+}
+
+function isBeatStoragePreview(value: unknown): value is BeatStoragePreview {
+  return decodeSchema(schemas.BeatStoragePreview, value, schemas)
+}
+export function parseBeatStoragePreview(value: unknown): BeatStoragePreview {
+  if (!isBeatStoragePreview(value)) throw new TypeError("Invalid BeatStoragePreview response")
+  return value
+}
+
+function isBeatRenderManifest(value: unknown): value is BeatRenderManifest {
+  return decodeSchema(schemas.BeatRenderManifest, value, schemas)
+}
+export function parseBeatRenderManifest(value: unknown): BeatRenderManifest {
+  if (!isBeatRenderManifest(value)) throw new TypeError("Invalid BeatRenderManifest response")
+  return value
+}
+
+function isBeatPresetCatalog(value: unknown): value is BeatPresetCatalog {
+  return decodeSchema(schemas.BeatPresetCatalog, value, schemas)
+}
+export function parseBeatPresetCatalog(value: unknown): BeatPresetCatalog {
+  if (!isBeatPresetCatalog(value)) throw new TypeError("Invalid BeatPresetCatalog response")
+  return value
+}
+
+function isBeatPresetCompileRequest(value: unknown): value is BeatPresetCompileRequest {
+  return decodeSchema(schemas.BeatPresetCompileRequest, value, schemas)
+}
+export function parseBeatPresetCompileRequest(value: unknown): BeatPresetCompileRequest {
+  if (!isBeatPresetCompileRequest(value)) throw new TypeError("Invalid BeatPresetCompileRequest response")
+  return value
+}
+
+function isBeatPresetCompilation(value: unknown): value is BeatPresetCompilation {
+  return decodeSchema(schemas.BeatPresetCompilation, value, schemas)
+}
+export function parseBeatPresetCompilation(value: unknown): BeatPresetCompilation {
+  if (!isBeatPresetCompilation(value)) throw new TypeError("Invalid BeatPresetCompilation response")
+  return value
+}
+
+function isBuiltMusicProject(value: unknown): value is BuiltMusicProject {
+  return decodeSchema(schemas.BuiltMusicProject, value, schemas)
+}
+export function parseBuiltMusicProject(value: unknown): BuiltMusicProject {
+  if (!isBuiltMusicProject(value)) throw new TypeError("Invalid BuiltMusicProject response")
+  return value
+}
+
+function isMusicProjectPublication(value: unknown): value is MusicProjectPublication {
+  return decodeSchema(schemas.MusicProjectPublication, value, schemas)
+}
+export function parseMusicProjectPublication(value: unknown): MusicProjectPublication {
+  if (!isMusicProjectPublication(value)) throw new TypeError("Invalid MusicProjectPublication response")
+  return value
+}
+
+function isBeatClipLink(value: unknown): value is BeatClipLink {
+  return decodeSchema(schemas.BeatClipLink, value, schemas)
+}
+export function parseBeatClipLink(value: unknown): BeatClipLink {
+  if (!isBeatClipLink(value)) throw new TypeError("Invalid BeatClipLink response")
+  return value
+}
+
+function isMusicProjectArtifact(value: unknown): value is MusicProjectArtifact {
+  return decodeSchema(schemas.MusicProjectArtifact, value, schemas)
+}
+export function parseMusicProjectArtifact(value: unknown): MusicProjectArtifact {
+  if (!isMusicProjectArtifact(value)) throw new TypeError("Invalid MusicProjectArtifact response")
+  return value
+}
+
+function isMusicProjectProvenance(value: unknown): value is MusicProjectProvenance {
+  return decodeSchema(schemas.MusicProjectProvenance, value, schemas)
+}
+export function parseMusicProjectProvenance(value: unknown): MusicProjectProvenance {
+  if (!isMusicProjectProvenance(value)) throw new TypeError("Invalid MusicProjectProvenance response")
+  return value
+}
+
+function isSelectedSource(value: unknown): value is SelectedSource {
+  return decodeSchema(schemas.SelectedSource, value, schemas)
+}
+export function parseSelectedSource(value: unknown): SelectedSource {
+  if (!isSelectedSource(value)) throw new TypeError("Invalid SelectedSource response")
+  return value
+}
+
+function isReplacementAssetImport(value: unknown): value is ReplacementAssetImport {
+  return decodeSchema(schemas.ReplacementAssetImport, value, schemas)
+}
+export function parseReplacementAssetImport(value: unknown): ReplacementAssetImport {
+  if (!isReplacementAssetImport(value)) throw new TypeError("Invalid ReplacementAssetImport response")
+  return value
+}
+
+function isReplacementAssetResponse(value: unknown): value is ReplacementAssetResponse {
+  return decodeSchema(schemas.ReplacementAssetResponse, value, schemas)
+}
+export function parseReplacementAssetResponse(value: unknown): ReplacementAssetResponse {
+  if (!isReplacementAssetResponse(value)) throw new TypeError("Invalid ReplacementAssetResponse response")
+  return value
+}
+
+function isSeedTarget(value: unknown): value is SeedTarget {
+  return decodeSchema(schemas.SeedTarget, value, schemas)
+}
+export function parseSeedTarget(value: unknown): SeedTarget {
+  if (!isSeedTarget(value)) throw new TypeError("Invalid SeedTarget response")
+  return value
+}
+
+function isRvcTarget(value: unknown): value is RvcTarget {
+  return decodeSchema(schemas.RvcTarget, value, schemas)
+}
+export function parseRvcTarget(value: unknown): RvcTarget {
+  if (!isRvcTarget(value)) throw new TypeError("Invalid RvcTarget response")
+  return value
+}
+
+function isReplacementFitSettings(value: unknown): value is ReplacementFitSettings {
+  return decodeSchema(schemas.ReplacementFitSettings, value, schemas)
+}
+export function parseReplacementFitSettings(value: unknown): ReplacementFitSettings {
+  if (!isReplacementFitSettings(value)) throw new TypeError("Invalid ReplacementFitSettings response")
+  return value
+}
+
+function isReplacementDiagnostics(value: unknown): value is ReplacementDiagnostics {
+  return decodeSchema(schemas.ReplacementDiagnostics, value, schemas)
+}
+export function parseReplacementDiagnostics(value: unknown): ReplacementDiagnostics {
+  if (!isReplacementDiagnostics(value)) throw new TypeError("Invalid ReplacementDiagnostics response")
+  return value
+}
+
+function isConvertReplacementRequest(value: unknown): value is ConvertReplacementRequest {
+  return decodeSchema(schemas.ConvertReplacementRequest, value, schemas)
+}
+export function parseConvertReplacementRequest(value: unknown): ConvertReplacementRequest {
+  if (!isConvertReplacementRequest(value)) throw new TypeError("Invalid ConvertReplacementRequest response")
+  return value
+}
+
+function isPreparedReplacementRequest(value: unknown): value is PreparedReplacementRequest {
+  return decodeSchema(schemas.PreparedReplacementRequest, value, schemas)
+}
+export function parsePreparedReplacementRequest(value: unknown): PreparedReplacementRequest {
+  if (!isPreparedReplacementRequest(value)) throw new TypeError("Invalid PreparedReplacementRequest response")
+  return value
+}
+
+function isHybridReplacementRequest(value: unknown): value is HybridReplacementRequest {
+  return decodeSchema(schemas.HybridReplacementRequest, value, schemas)
+}
+export function parseHybridReplacementRequest(value: unknown): HybridReplacementRequest {
+  if (!isHybridReplacementRequest(value)) throw new TypeError("Invalid HybridReplacementRequest response")
+  return value
+}
+
+function isReplacementMixSettings(value: unknown): value is ReplacementMixSettings {
+  return decodeSchema(schemas.ReplacementMixSettings, value, schemas)
+}
+export function parseReplacementMixSettings(value: unknown): ReplacementMixSettings {
+  if (!isReplacementMixSettings(value)) throw new TypeError("Invalid ReplacementMixSettings response")
+  return value
+}
+
+function isReplacementProcessing(value: unknown): value is ReplacementProcessing {
+  return decodeSchema(schemas.ReplacementProcessing, value, schemas)
+}
+export function parseReplacementProcessing(value: unknown): ReplacementProcessing {
+  if (!isReplacementProcessing(value)) throw new TypeError("Invalid ReplacementProcessing response")
+  return value
+}
+
+function isReplacementArtifact(value: unknown): value is ReplacementArtifact {
+  return decodeSchema(schemas.ReplacementArtifact, value, schemas)
+}
+export function parseReplacementArtifact(value: unknown): ReplacementArtifact {
+  if (!isReplacementArtifact(value)) throw new TypeError("Invalid ReplacementArtifact response")
+  return value
+}
+
+function isReplacementRender(value: unknown): value is ReplacementRender {
+  return decodeSchema(schemas.ReplacementRender, value, schemas)
+}
+export function parseReplacementRender(value: unknown): ReplacementRender {
+  if (!isReplacementRender(value)) throw new TypeError("Invalid ReplacementRender response")
+  return value
+}
+
+function isReplacementActionRequest(value: unknown): value is ReplacementActionRequest {
+  return decodeSchema(schemas.ReplacementActionRequest, value, schemas)
+}
+export function parseReplacementActionRequest(value: unknown): ReplacementActionRequest {
+  if (!isReplacementActionRequest(value)) throw new TypeError("Invalid ReplacementActionRequest response")
+  return value
+}
+
+function isReplacementUpdateRequest(value: unknown): value is ReplacementUpdateRequest {
+  return decodeSchema(schemas.ReplacementUpdateRequest, value, schemas)
+}
+export function parseReplacementUpdateRequest(value: unknown): ReplacementUpdateRequest {
+  if (!isReplacementUpdateRequest(value)) throw new TypeError("Invalid ReplacementUpdateRequest response")
+  return value
+}
+
+function isReplacementMixEditRequest(value: unknown): value is ReplacementMixEditRequest {
+  return decodeSchema(schemas.ReplacementMixEditRequest, value, schemas)
+}
+export function parseReplacementMixEditRequest(value: unknown): ReplacementMixEditRequest {
+  if (!isReplacementMixEditRequest(value)) throw new TypeError("Invalid ReplacementMixEditRequest response")
+  return value
+}
+
+function isAlignmentEditRequest(value: unknown): value is AlignmentEditRequest {
+  return decodeSchema(schemas.AlignmentEditRequest, value, schemas)
+}
+export function parseAlignmentEditRequest(value: unknown): AlignmentEditRequest {
+  if (!isAlignmentEditRequest(value)) throw new TypeError("Invalid AlignmentEditRequest response")
+  return value
+}
+
+function isReplacementPreviewWindow(value: unknown): value is ReplacementPreviewWindow {
+  return decodeSchema(schemas.ReplacementPreviewWindow, value, schemas)
+}
+export function parseReplacementPreviewWindow(value: unknown): ReplacementPreviewWindow {
+  if (!isReplacementPreviewWindow(value)) throw new TypeError("Invalid ReplacementPreviewWindow response")
+  return value
+}
+
+function isReplacementRenderRequest(value: unknown): value is ReplacementRenderRequest {
+  return decodeSchema(schemas.ReplacementRenderRequest, value, schemas)
+}
+export function parseReplacementRenderRequest(value: unknown): ReplacementRenderRequest {
+  if (!isReplacementRenderRequest(value)) throw new TypeError("Invalid ReplacementRenderRequest response")
+  return value
+}
+
+function isReplacementPlanResponse(value: unknown): value is ReplacementPlanResponse {
+  return decodeSchema(schemas.ReplacementPlanResponse, value, schemas)
+}
+export function parseReplacementPlanResponse(value: unknown): ReplacementPlanResponse {
+  if (!isReplacementPlanResponse(value)) throw new TypeError("Invalid ReplacementPlanResponse response")
+  return value
+}
+
+function isReplacementPlanSummary(value: unknown): value is ReplacementPlanSummary {
+  return decodeSchema(schemas.ReplacementPlanSummary, value, schemas)
+}
+export function parseReplacementPlanSummary(value: unknown): ReplacementPlanSummary {
+  if (!isReplacementPlanSummary(value)) throw new TypeError("Invalid ReplacementPlanSummary response")
+  return value
+}
+
+function isReplacementPlansResponse(value: unknown): value is ReplacementPlansResponse {
+  return decodeSchema(schemas.ReplacementPlansResponse, value, schemas)
+}
+export function parseReplacementPlansResponse(value: unknown): ReplacementPlansResponse {
+  if (!isReplacementPlansResponse(value)) throw new TypeError("Invalid ReplacementPlansResponse response")
+  return value
+}
+
+function isReplacementCapabilities(value: unknown): value is ReplacementCapabilities {
+  return decodeSchema(schemas.ReplacementCapabilities, value, schemas)
+}
+export function parseReplacementCapabilities(value: unknown): ReplacementCapabilities {
+  if (!isReplacementCapabilities(value)) throw new TypeError("Invalid ReplacementCapabilities response")
+  return value
+}
+
+function isReplacementStoragePreview(value: unknown): value is ReplacementStoragePreview {
+  return decodeSchema(schemas.ReplacementStoragePreview, value, schemas)
+}
+export function parseReplacementStoragePreview(value: unknown): ReplacementStoragePreview {
+  if (!isReplacementStoragePreview(value)) throw new TypeError("Invalid ReplacementStoragePreview response")
+  return value
+}
+
+function isRvcRuntimeFile(value: unknown): value is RvcRuntimeFile {
+  return decodeSchema(schemas.RvcRuntimeFile, value, schemas)
+}
+export function parseRvcRuntimeFile(value: unknown): RvcRuntimeFile {
+  if (!isRvcRuntimeFile(value)) throw new TypeError("Invalid RvcRuntimeFile response")
+  return value
+}
+
+function isRvcRuntimeIdentity(value: unknown): value is RvcRuntimeIdentity {
+  return decodeSchema(schemas.RvcRuntimeIdentity, value, schemas)
+}
+export function parseRvcRuntimeIdentity(value: unknown): RvcRuntimeIdentity {
+  if (!isRvcRuntimeIdentity(value)) throw new TypeError("Invalid RvcRuntimeIdentity response")
+  return value
+}
+
+function isRvcModelImport(value: unknown): value is RvcModelImport {
+  return decodeSchema(schemas.RvcModelImport, value, schemas)
+}
+export function parseRvcModelImport(value: unknown): RvcModelImport {
+  if (!isRvcModelImport(value)) throw new TypeError("Invalid RvcModelImport response")
+  return value
+}
+
+function isRvcRegisteredModel(value: unknown): value is RvcRegisteredModel {
+  return decodeSchema(schemas.RvcRegisteredModel, value, schemas)
+}
+export function parseRvcRegisteredModel(value: unknown): RvcRegisteredModel {
+  if (!isRvcRegisteredModel(value)) throw new TypeError("Invalid RvcRegisteredModel response")
+  return value
+}
+
+function isRvcModelsResponse(value: unknown): value is RvcModelsResponse {
+  return decodeSchema(schemas.RvcModelsResponse, value, schemas)
+}
+export function parseRvcModelsResponse(value: unknown): RvcModelsResponse {
+  if (!isRvcModelsResponse(value)) throw new TypeError("Invalid RvcModelsResponse response")
+  return value
+}
+
+function isMashupSourcePreviewRequest(value: unknown): value is MashupSourcePreviewRequest {
+  return decodeSchema(schemas.MashupSourcePreviewRequest, value, schemas)
+}
+export function parseMashupSourcePreviewRequest(value: unknown): MashupSourcePreviewRequest {
+  if (!isMashupSourcePreviewRequest(value)) throw new TypeError("Invalid MashupSourcePreviewRequest response")
+  return value
+}
+
+function isMashupSourcePreview(value: unknown): value is MashupSourcePreview {
+  return decodeSchema(schemas.MashupSourcePreview, value, schemas)
+}
+export function parseMashupSourcePreview(value: unknown): MashupSourcePreview {
+  if (!isMashupSourcePreview(value)) throw new TypeError("Invalid MashupSourcePreview response")
+  return value
+}
+
+function isMashupCreateRequest(value: unknown): value is MashupCreateRequest {
+  return decodeSchema(schemas.MashupCreateRequest, value, schemas)
+}
+export function parseMashupCreateRequest(value: unknown): MashupCreateRequest {
+  if (!isMashupCreateRequest(value)) throw new TypeError("Invalid MashupCreateRequest response")
+  return value
+}
+
+function isMashupState(value: unknown): value is MashupState {
+  return decodeSchema(schemas.MashupState, value, schemas)
+}
+export function parseMashupState(value: unknown): MashupState {
+  if (!isMashupState(value)) throw new TypeError("Invalid MashupState response")
+  return value
+}
+
+function isMashupStates(value: unknown): value is MashupStates {
+  return decodeSchema(schemas.MashupStates, value, schemas)
+}
+export function parseMashupStates(value: unknown): MashupStates {
+  if (!isMashupStates(value)) throw new TypeError("Invalid MashupStates response")
+  return value
+}
+
+function isMashupTimingUpdate(value: unknown): value is MashupTimingUpdate {
+  return decodeSchema(schemas.MashupTimingUpdate, value, schemas)
+}
+export function parseMashupTimingUpdate(value: unknown): MashupTimingUpdate {
+  if (!isMashupTimingUpdate(value)) throw new TypeError("Invalid MashupTimingUpdate response")
+  return value
+}
+
+function isMashupGeneratePlanRequest(value: unknown): value is MashupGeneratePlanRequest {
+  return decodeSchema(schemas.MashupGeneratePlanRequest, value, schemas)
+}
+export function parseMashupGeneratePlanRequest(value: unknown): MashupGeneratePlanRequest {
+  if (!isMashupGeneratePlanRequest(value)) throw new TypeError("Invalid MashupGeneratePlanRequest response")
+  return value
+}
+
+function isMashupEditPlanRequest(value: unknown): value is MashupEditPlanRequest {
+  return decodeSchema(schemas.MashupEditPlanRequest, value, schemas)
+}
+export function parseMashupEditPlanRequest(value: unknown): MashupEditPlanRequest {
+  if (!isMashupEditPlanRequest(value)) throw new TypeError("Invalid MashupEditPlanRequest response")
+  return value
+}
+
+function isMashupJobRequest(value: unknown): value is MashupJobRequest {
+  return decodeSchema(schemas.MashupJobRequest, value, schemas)
+}
+export function parseMashupJobRequest(value: unknown): MashupJobRequest {
+  if (!isMashupJobRequest(value)) throw new TypeError("Invalid MashupJobRequest response")
+  return value
+}
+
+function isMashupJob(value: unknown): value is MashupJob {
+  return decodeSchema(schemas.MashupJob, value, schemas)
+}
+export function parseMashupJob(value: unknown): MashupJob {
+  if (!isMashupJob(value)) throw new TypeError("Invalid MashupJob response")
+  return value
+}
+
+function isMashupJobs(value: unknown): value is MashupJobs {
+  return decodeSchema(schemas.MashupJobs, value, schemas)
+}
+export function parseMashupJobs(value: unknown): MashupJobs {
+  if (!isMashupJobs(value)) throw new TypeError("Invalid MashupJobs response")
+  return value
+}
+
+function isMashupStoragePreview(value: unknown): value is MashupStoragePreview {
+  return decodeSchema(schemas.MashupStoragePreview, value, schemas)
+}
+export function parseMashupStoragePreview(value: unknown): MashupStoragePreview {
+  if (!isMashupStoragePreview(value)) throw new TypeError("Invalid MashupStoragePreview response")
+  return value
+}
+
+function isMashupRenderManifest(value: unknown): value is MashupRenderManifest {
+  return decodeSchema(schemas.MashupRenderManifest, value, schemas)
+}
+export function parseMashupRenderManifest(value: unknown): MashupRenderManifest {
+  if (!isMashupRenderManifest(value)) throw new TypeError("Invalid MashupRenderManifest response")
+  return value
+}
+
+function isMashupFailure(value: unknown): value is MashupFailure {
+  return decodeSchema(schemas.MashupFailure, value, schemas)
+}
+export function parseMashupFailure(value: unknown): MashupFailure {
+  if (!isMashupFailure(value)) throw new TypeError("Invalid MashupFailure response")
+  return value
+}
+
+function isMashupTiming(value: unknown): value is MashupTiming {
+  return decodeSchema(schemas.MashupTiming, value, schemas)
+}
+export function parseMashupTiming(value: unknown): MashupTiming {
+  if (!isMashupTiming(value)) throw new TypeError("Invalid MashupTiming response")
+  return value
+}
+
+function isMashupPlacement(value: unknown): value is MashupPlacement {
+  return decodeSchema(schemas.MashupPlacement, value, schemas)
+}
+export function parseMashupPlacement(value: unknown): MashupPlacement {
+  if (!isMashupPlacement(value)) throw new TypeError("Invalid MashupPlacement response")
+  return value
+}
+
+function isRegionalDatasetReviewRequest(value: unknown): value is RegionalDatasetReviewRequest {
+  return decodeSchema(schemas.RegionalDatasetReviewRequest, value, schemas)
+}
+export function parseRegionalDatasetReviewRequest(value: unknown): RegionalDatasetReviewRequest {
+  if (!isRegionalDatasetReviewRequest(value)) throw new TypeError("Invalid RegionalDatasetReviewRequest response")
+  return value
+}
+
+function isRegionalDatasetReview(value: unknown): value is RegionalDatasetReview {
+  return decodeSchema(schemas.RegionalDatasetReview, value, schemas)
+}
+export function parseRegionalDatasetReview(value: unknown): RegionalDatasetReview {
+  if (!isRegionalDatasetReview(value)) throw new TypeError("Invalid RegionalDatasetReview response")
+  return value
+}
+
+function isRegionalRecordingInspection(value: unknown): value is RegionalRecordingInspection {
+  return decodeSchema(schemas.RegionalRecordingInspection, value, schemas)
+}
+export function parseRegionalRecordingInspection(value: unknown): RegionalRecordingInspection {
+  if (!isRegionalRecordingInspection(value)) throw new TypeError("Invalid RegionalRecordingInspection response")
+  return value
+}
+
+function isRegionalSplitPlan(value: unknown): value is RegionalSplitPlan {
+  return decodeSchema(schemas.RegionalSplitPlan, value, schemas)
+}
+export function parseRegionalSplitPlan(value: unknown): RegionalSplitPlan {
+  if (!isRegionalSplitPlan(value)) throw new TypeError("Invalid RegionalSplitPlan response")
+  return value
+}
+
+function isRegionalDatasetInspectionRequest(value: unknown): value is RegionalDatasetInspectionRequest {
+  return decodeSchema(schemas.RegionalDatasetInspectionRequest, value, schemas)
+}
+export function parseRegionalDatasetInspectionRequest(value: unknown): RegionalDatasetInspectionRequest {
+  if (!isRegionalDatasetInspectionRequest(value)) throw new TypeError("Invalid RegionalDatasetInspectionRequest response")
+  return value
+}
+
+function isRegionalDatasetPreview(value: unknown): value is RegionalDatasetPreview {
+  return decodeSchema(schemas.RegionalDatasetPreview, value, schemas)
+}
+export function parseRegionalDatasetPreview(value: unknown): RegionalDatasetPreview {
+  if (!isRegionalDatasetPreview(value)) throw new TypeError("Invalid RegionalDatasetPreview response")
+  return value
+}
+
+function isRegionalManifestSelection(value: unknown): value is RegionalManifestSelection {
+  return decodeSchema(schemas.RegionalManifestSelection, value, schemas)
+}
+export function parseRegionalManifestSelection(value: unknown): RegionalManifestSelection {
+  if (!isRegionalManifestSelection(value)) throw new TypeError("Invalid RegionalManifestSelection response")
+  return value
+}
+
+function isRegionalPreparationRequest(value: unknown): value is RegionalPreparationRequest {
+  return decodeSchema(schemas.RegionalPreparationRequest, value, schemas)
+}
+export function parseRegionalPreparationRequest(value: unknown): RegionalPreparationRequest {
+  if (!isRegionalPreparationRequest(value)) throw new TypeError("Invalid RegionalPreparationRequest response")
+  return value
+}
+
+function isRegionalPreparationJob(value: unknown): value is RegionalPreparationJob {
+  return decodeSchema(schemas.RegionalPreparationJob, value, schemas)
+}
+export function parseRegionalPreparationJob(value: unknown): RegionalPreparationJob {
+  if (!isRegionalPreparationJob(value)) throw new TypeError("Invalid RegionalPreparationJob response")
+  return value
+}
+
+function isRegionalPreparationJobs(value: unknown): value is RegionalPreparationJobs {
+  return decodeSchema(schemas.RegionalPreparationJobs, value, schemas)
+}
+export function parseRegionalPreparationJobs(value: unknown): RegionalPreparationJobs {
+  if (!isRegionalPreparationJobs(value)) throw new TypeError("Invalid RegionalPreparationJobs response")
+  return value
+}
+
+function isRegionalPreparedManifest(value: unknown): value is RegionalPreparedManifest {
+  return decodeSchema(schemas.RegionalPreparedManifest, value, schemas)
+}
+export function parseRegionalPreparedManifest(value: unknown): RegionalPreparedManifest {
+  if (!isRegionalPreparedManifest(value)) throw new TypeError("Invalid RegionalPreparedManifest response")
+  return value
+}
+
+function isRegionalPreparedSelection(value: unknown): value is RegionalPreparedSelection {
+  return decodeSchema(schemas.RegionalPreparedSelection, value, schemas)
+}
+export function parseRegionalPreparedSelection(value: unknown): RegionalPreparedSelection {
+  if (!isRegionalPreparedSelection(value)) throw new TypeError("Invalid RegionalPreparedSelection response")
+  return value
+}
+
+function isRegionalTrainingSelection(value: unknown): value is RegionalTrainingSelection {
+  return decodeSchema(schemas.RegionalTrainingSelection, value, schemas)
+}
+export function parseRegionalTrainingSelection(value: unknown): RegionalTrainingSelection {
+  if (!isRegionalTrainingSelection(value)) throw new TypeError("Invalid RegionalTrainingSelection response")
+  return value
+}
+
+function isRegionalTrainingSubmission(value: unknown): value is RegionalTrainingSubmission {
+  return decodeSchema(schemas.RegionalTrainingSubmission, value, schemas)
+}
+export function parseRegionalTrainingSubmission(value: unknown): RegionalTrainingSubmission {
+  if (!isRegionalTrainingSubmission(value)) throw new TypeError("Invalid RegionalTrainingSubmission response")
+  return value
+}
+
+function isRegionalAcousticScanRequest(value: unknown): value is RegionalAcousticScanRequest {
+  return decodeSchema(schemas.RegionalAcousticScanRequest, value, schemas)
+}
+export function parseRegionalAcousticScanRequest(value: unknown): RegionalAcousticScanRequest {
+  if (!isRegionalAcousticScanRequest(value)) throw new TypeError("Invalid RegionalAcousticScanRequest response")
+  return value
+}
+
+function isRegionalAcousticJob(value: unknown): value is RegionalAcousticJob {
+  return decodeSchema(schemas.RegionalAcousticJob, value, schemas)
+}
+export function parseRegionalAcousticJob(value: unknown): RegionalAcousticJob {
+  if (!isRegionalAcousticJob(value)) throw new TypeError("Invalid RegionalAcousticJob response")
+  return value
+}
+
+function isRegionalAcousticJobs(value: unknown): value is RegionalAcousticJobs {
+  return decodeSchema(schemas.RegionalAcousticJobs, value, schemas)
+}
+export function parseRegionalAcousticJobs(value: unknown): RegionalAcousticJobs {
+  if (!isRegionalAcousticJobs(value)) throw new TypeError("Invalid RegionalAcousticJobs response")
+  return value
+}
+
+function isRegionalAcousticResult(value: unknown): value is RegionalAcousticResult {
+  return decodeSchema(schemas.RegionalAcousticResult, value, schemas)
+}
+export function parseRegionalAcousticResult(value: unknown): RegionalAcousticResult {
+  if (!isRegionalAcousticResult(value)) throw new TypeError("Invalid RegionalAcousticResult response")
+  return value
+}
+
+function isRegionalAcousticReport(value: unknown): value is RegionalAcousticReport {
+  return decodeSchema(schemas.RegionalAcousticReport, value, schemas)
+}
+export function parseRegionalAcousticReport(value: unknown): RegionalAcousticReport {
+  if (!isRegionalAcousticReport(value)) throw new TypeError("Invalid RegionalAcousticReport response")
+  return value
+}
+
+function isRegionalAcousticReview(value: unknown): value is RegionalAcousticReview {
+  return decodeSchema(schemas.RegionalAcousticReview, value, schemas)
+}
+export function parseRegionalAcousticReview(value: unknown): RegionalAcousticReview {
+  if (!isRegionalAcousticReview(value)) throw new TypeError("Invalid RegionalAcousticReview response")
+  return value
+}
+
+function isRegionalTrainingReceipt(value: unknown): value is RegionalTrainingReceipt {
+  return decodeSchema(schemas.RegionalTrainingReceipt, value, schemas)
+}
+export function parseRegionalTrainingReceipt(value: unknown): RegionalTrainingReceipt {
+  if (!isRegionalTrainingReceipt(value)) throw new TypeError("Invalid RegionalTrainingReceipt response")
+  return value
+}
+
+function isRegionalEvaluationRequest(value: unknown): value is RegionalEvaluationRequest {
+  return decodeSchema(schemas.RegionalEvaluationRequest, value, schemas)
+}
+export function parseRegionalEvaluationRequest(value: unknown): RegionalEvaluationRequest {
+  if (!isRegionalEvaluationRequest(value)) throw new TypeError("Invalid RegionalEvaluationRequest response")
+  return value
+}
+
+function isRegionalComparisonPlan(value: unknown): value is RegionalComparisonPlan {
+  return decodeSchema(schemas.RegionalComparisonPlan, value, schemas)
+}
+export function parseRegionalComparisonPlan(value: unknown): RegionalComparisonPlan {
+  if (!isRegionalComparisonPlan(value)) throw new TypeError("Invalid RegionalComparisonPlan response")
+  return value
+}
+
+function isRegionalComparisonState(value: unknown): value is RegionalComparisonState {
+  return decodeSchema(schemas.RegionalComparisonState, value, schemas)
+}
+export function parseRegionalComparisonState(value: unknown): RegionalComparisonState {
+  if (!isRegionalComparisonState(value)) throw new TypeError("Invalid RegionalComparisonState response")
+  return value
+}
+
+function isRegionalComparisons(value: unknown): value is RegionalComparisons {
+  return decodeSchema(schemas.RegionalComparisons, value, schemas)
+}
+export function parseRegionalComparisons(value: unknown): RegionalComparisons {
+  if (!isRegionalComparisons(value)) throw new TypeError("Invalid RegionalComparisons response")
+  return value
+}
+
+function isRegionalListeningReview(value: unknown): value is RegionalListeningReview {
+  return decodeSchema(schemas.RegionalListeningReview, value, schemas)
+}
+export function parseRegionalListeningReview(value: unknown): RegionalListeningReview {
+  if (!isRegionalListeningReview(value)) throw new TypeError("Invalid RegionalListeningReview response")
+  return value
+}
+
+function isSongSourceRequest(value: unknown): value is SongSourceRequest {
+  return decodeSchema(schemas.SongSourceRequest, value, schemas)
+}
+export function parseSongSourceRequest(value: unknown): SongSourceRequest {
+  if (!isSongSourceRequest(value)) throw new TypeError("Invalid SongSourceRequest response")
+  return value
+}
+
+function isSongSourceInput(value: unknown): value is SongSourceInput {
+  return decodeSchema(schemas.SongSourceInput, value, schemas)
+}
+export function parseSongSourceInput(value: unknown): SongSourceInput {
+  if (!isSongSourceInput(value)) throw new TypeError("Invalid SongSourceInput response")
+  return value
+}
+
+function isSongSourceInfo(value: unknown): value is SongSourceInfo {
+  return decodeSchema(schemas.SongSourceInfo, value, schemas)
+}
+export function parseSongSourceInfo(value: unknown): SongSourceInfo {
+  if (!isSongSourceInfo(value)) throw new TypeError("Invalid SongSourceInfo response")
+  return value
+}
+
+function isSongSourceSnapshot(value: unknown): value is SongSourceSnapshot {
+  return decodeSchema(schemas.SongSourceSnapshot, value, schemas)
+}
+export function parseSongSourceSnapshot(value: unknown): SongSourceSnapshot {
+  if (!isSongSourceSnapshot(value)) throw new TypeError("Invalid SongSourceSnapshot response")
+  return value
+}
+
+function isBeatSongMixDraft(value: unknown): value is BeatSongMixDraft {
+  return decodeSchema(schemas.BeatSongMixDraft, value, schemas)
+}
+export function parseBeatSongMixDraft(value: unknown): BeatSongMixDraft {
+  if (!isBeatSongMixDraft(value)) throw new TypeError("Invalid BeatSongMixDraft response")
+  return value
+}
+
+function isBeatSongMixUpdate(value: unknown): value is BeatSongMixUpdate {
+  return decodeSchema(schemas.BeatSongMixUpdate, value, schemas)
+}
+export function parseBeatSongMixUpdate(value: unknown): BeatSongMixUpdate {
+  if (!isBeatSongMixUpdate(value)) throw new TypeError("Invalid BeatSongMixUpdate response")
+  return value
+}
+
+function isBeatSongMixPreview(value: unknown): value is BeatSongMixPreview {
+  return decodeSchema(schemas.BeatSongMixPreview, value, schemas)
+}
+export function parseBeatSongMixPreview(value: unknown): BeatSongMixPreview {
+  if (!isBeatSongMixPreview(value)) throw new TypeError("Invalid BeatSongMixPreview response")
+  return value
+}
+
+function isBeatSongMixPlan(value: unknown): value is BeatSongMixPlan {
+  return decodeSchema(schemas.BeatSongMixPlan, value, schemas)
+}
+export function parseBeatSongMixPlan(value: unknown): BeatSongMixPlan {
+  if (!isBeatSongMixPlan(value)) throw new TypeError("Invalid BeatSongMixPlan response")
+  return value
+}
+
+function isBeatSongMixStartRequest(value: unknown): value is BeatSongMixStartRequest {
+  return decodeSchema(schemas.BeatSongMixStartRequest, value, schemas)
+}
+export function parseBeatSongMixStartRequest(value: unknown): BeatSongMixStartRequest {
+  if (!isBeatSongMixStartRequest(value)) throw new TypeError("Invalid BeatSongMixStartRequest response")
+  return value
+}
+
+function isBeatSongMixJob(value: unknown): value is BeatSongMixJob {
+  return decodeSchema(schemas.BeatSongMixJob, value, schemas)
+}
+export function parseBeatSongMixJob(value: unknown): BeatSongMixJob {
+  if (!isBeatSongMixJob(value)) throw new TypeError("Invalid BeatSongMixJob response")
+  return value
+}
+
+function isBeatSongMixJobs(value: unknown): value is BeatSongMixJobs {
+  return decodeSchema(schemas.BeatSongMixJobs, value, schemas)
+}
+export function parseBeatSongMixJobs(value: unknown): BeatSongMixJobs {
+  if (!isBeatSongMixJobs(value)) throw new TypeError("Invalid BeatSongMixJobs response")
+  return value
+}
+
+function isBeatSongMixManifest(value: unknown): value is BeatSongMixManifest {
+  return decodeSchema(schemas.BeatSongMixManifest, value, schemas)
+}
+export function parseBeatSongMixManifest(value: unknown): BeatSongMixManifest {
+  if (!isBeatSongMixManifest(value)) throw new TypeError("Invalid BeatSongMixManifest response")
+  return value
+}
+
+function isBeatSongMixFailure(value: unknown): value is BeatSongMixFailure {
+  return decodeSchema(schemas.BeatSongMixFailure, value, schemas)
+}
+export function parseBeatSongMixFailure(value: unknown): BeatSongMixFailure {
+  if (!isBeatSongMixFailure(value)) throw new TypeError("Invalid BeatSongMixFailure response")
+  return value
+}
+
+function isBeatSongTransposeRequest(value: unknown): value is BeatSongTransposeRequest {
+  return decodeSchema(schemas.BeatSongTransposeRequest, value, schemas)
+}
+export function parseBeatSongTransposeRequest(value: unknown): BeatSongTransposeRequest {
+  if (!isBeatSongTransposeRequest(value)) throw new TypeError("Invalid BeatSongTransposeRequest response")
+  return value
+}
+
+function isBeatSongTransposePreview(value: unknown): value is BeatSongTransposePreview {
+  return decodeSchema(schemas.BeatSongTransposePreview, value, schemas)
+}
+export function parseBeatSongTransposePreview(value: unknown): BeatSongTransposePreview {
+  if (!isBeatSongTransposePreview(value)) throw new TypeError("Invalid BeatSongTransposePreview response")
+  return value
+}
+
+function isVoiceMixSettings(value: unknown): value is VoiceMixSettings {
+  return decodeSchema(schemas.VoiceMixSettings, value, schemas)
+}
+export function parseVoiceMixSettings(value: unknown): VoiceMixSettings {
+  if (!isVoiceMixSettings(value)) throw new TypeError("Invalid VoiceMixSettings response")
+  return value
+}
+
+function isVoiceMixArtifact(value: unknown): value is VoiceMixArtifact {
+  return decodeSchema(schemas.VoiceMixArtifact, value, schemas)
+}
+export function parseVoiceMixArtifact(value: unknown): VoiceMixArtifact {
+  if (!isVoiceMixArtifact(value)) throw new TypeError("Invalid VoiceMixArtifact response")
+  return value
+}
+
+function isVoiceMixReport(value: unknown): value is VoiceMixReport {
+  return decodeSchema(schemas.VoiceMixReport, value, schemas)
+}
+export function parseVoiceMixReport(value: unknown): VoiceMixReport {
+  if (!isVoiceMixReport(value)) throw new TypeError("Invalid VoiceMixReport response")
+  return value
+}
+
+function isMusicConditioningCapabilities(value: unknown): value is MusicConditioningCapabilities {
+  return decodeSchema(schemas.MusicConditioningCapabilities, value, schemas)
+}
+export function parseMusicConditioningCapabilities(value: unknown): MusicConditioningCapabilities {
+  if (!isMusicConditioningCapabilities(value)) throw new TypeError("Invalid MusicConditioningCapabilities response")
+  return value
+}
+
+function isMusicConditioningPreview(value: unknown): value is MusicConditioningPreview {
+  return decodeSchema(schemas.MusicConditioningPreview, value, schemas)
+}
+export function parseMusicConditioningPreview(value: unknown): MusicConditioningPreview {
+  if (!isMusicConditioningPreview(value)) throw new TypeError("Invalid MusicConditioningPreview response")
+  return value
+}
+
+function isMusicConditioningRecipe(value: unknown): value is MusicConditioningRecipe {
+  return decodeSchema(schemas.MusicConditioningRecipe, value, schemas)
+}
+export function parseMusicConditioningRecipe(value: unknown): MusicConditioningRecipe {
+  if (!isMusicConditioningRecipe(value)) throw new TypeError("Invalid MusicConditioningRecipe response")
+  return value
+}
+
+function isMusicConditioningSourceRequest(value: unknown): value is MusicConditioningSourceRequest {
+  return decodeSchema(schemas.MusicConditioningSourceRequest, value, schemas)
+}
+export function parseMusicConditioningSourceRequest(value: unknown): MusicConditioningSourceRequest {
+  if (!isMusicConditioningSourceRequest(value)) throw new TypeError("Invalid MusicConditioningSourceRequest response")
+  return value
+}
+
+function isMusicConditioningSourceInfo(value: unknown): value is MusicConditioningSourceInfo {
+  return decodeSchema(schemas.MusicConditioningSourceInfo, value, schemas)
+}
+export function parseMusicConditioningSourceInfo(value: unknown): MusicConditioningSourceInfo {
+  if (!isMusicConditioningSourceInfo(value)) throw new TypeError("Invalid MusicConditioningSourceInfo response")
+  return value
+}
+
+function isAceCompleteConditioning(value: unknown): value is AceCompleteConditioning {
+  return decodeSchema(schemas.AceCompleteConditioning, value, schemas)
+}
+export function parseAceCompleteConditioning(value: unknown): AceCompleteConditioning {
+  if (!isAceCompleteConditioning(value)) throw new TypeError("Invalid AceCompleteConditioning response")
+  return value
+}
+
+function isAceLegoConditioning(value: unknown): value is AceLegoConditioning {
+  return decodeSchema(schemas.AceLegoConditioning, value, schemas)
+}
+export function parseAceLegoConditioning(value: unknown): AceLegoConditioning {
+  if (!isAceLegoConditioning(value)) throw new TypeError("Invalid AceLegoConditioning response")
+  return value
+}
+
+function isSongFromBeatCapabilities(value: unknown): value is SongFromBeatCapabilities {
+  return decodeSchema(schemas.SongFromBeatCapabilities, value, schemas)
+}
+export function parseSongFromBeatCapabilities(value: unknown): SongFromBeatCapabilities {
+  if (!isSongFromBeatCapabilities(value)) throw new TypeError("Invalid SongFromBeatCapabilities response")
   return value
 }
 
@@ -29780,6 +50029,46 @@ function isMusicQueueCancelRequest(value: unknown): value is MusicQueueCancelReq
 }
 export function parseMusicQueueCancelRequest(value: unknown): MusicQueueCancelRequest {
   if (!isMusicQueueCancelRequest(value)) throw new TypeError("Invalid MusicQueueCancelRequest response")
+  return value
+}
+
+function isMusicTermsRequirement(value: unknown): value is MusicTermsRequirement {
+  return decodeSchema(schemas.MusicTermsRequirement, value, schemas)
+}
+export function parseMusicTermsRequirement(value: unknown): MusicTermsRequirement {
+  if (!isMusicTermsRequirement(value)) throw new TypeError("Invalid MusicTermsRequirement response")
+  return value
+}
+
+function isMusicTermsSnapshot(value: unknown): value is MusicTermsSnapshot {
+  return decodeSchema(schemas.MusicTermsSnapshot, value, schemas)
+}
+export function parseMusicTermsSnapshot(value: unknown): MusicTermsSnapshot {
+  if (!isMusicTermsSnapshot(value)) throw new TypeError("Invalid MusicTermsSnapshot response")
+  return value
+}
+
+function isMusicTermsAcceptRequest(value: unknown): value is MusicTermsAcceptRequest {
+  return decodeSchema(schemas.MusicTermsAcceptRequest, value, schemas)
+}
+export function parseMusicTermsAcceptRequest(value: unknown): MusicTermsAcceptRequest {
+  if (!isMusicTermsAcceptRequest(value)) throw new TypeError("Invalid MusicTermsAcceptRequest response")
+  return value
+}
+
+function isMusicTermsSettingsRequest(value: unknown): value is MusicTermsSettingsRequest {
+  return decodeSchema(schemas.MusicTermsSettingsRequest, value, schemas)
+}
+export function parseMusicTermsSettingsRequest(value: unknown): MusicTermsSettingsRequest {
+  if (!isMusicTermsSettingsRequest(value)) throw new TypeError("Invalid MusicTermsSettingsRequest response")
+  return value
+}
+
+function isMusicTermsSettingsResponse(value: unknown): value is MusicTermsSettingsResponse {
+  return decodeSchema(schemas.MusicTermsSettingsResponse, value, schemas)
+}
+export function parseMusicTermsSettingsResponse(value: unknown): MusicTermsSettingsResponse {
+  if (!isMusicTermsSettingsResponse(value)) throw new TypeError("Invalid MusicTermsSettingsResponse response")
   return value
 }
 

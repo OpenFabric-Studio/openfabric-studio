@@ -1,0 +1,2715 @@
+{
+  "version": "report-v1-provisional",
+  "presets": [
+    {
+      "id": "guzheng_dawn",
+      "title": "Guzheng Dawn",
+      "region": "china",
+      "tradition": "Chinese instrumental",
+      "category": "traditional",
+      "bpm_default": 60.0,
+      "bpm_min": 40.0,
+      "bpm_max": 90.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "cn_gong_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "guzheng",
+          "label": "Guzheng",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "dizi",
+          "label": "Dizi",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "xiao",
+          "label": "Xiao",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "fixed_grid_free_time_approximation",
+      "prompt_tags": [
+        "guzheng dawn inspired",
+        "chinese instrumental"
+      ],
+      "notes": "Report §6.4 proposal 1. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Fixed grid is only an editable timing sketch and does not implement free phrasing. ",
+      "report_number": 1
+    },
+    {
+      "id": "erhu_elegy",
+      "title": "Erhu Elegy",
+      "region": "china",
+      "tradition": "Chinese instrumental",
+      "category": "traditional",
+      "bpm_default": 65.0,
+      "bpm_min": 40.0,
+      "bpm_max": 90.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "cn_yu_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "erhu",
+          "label": "Erhu",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "yangqin",
+          "label": "Yangqin",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "pipa",
+          "label": "Pipa",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "erhu elegy inspired",
+        "chinese instrumental"
+      ],
+      "notes": "Report §6.4 proposal 2. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 2
+    },
+    {
+      "id": "peking_opera_drums",
+      "title": "Peking Opera Drums",
+      "region": "china",
+      "tradition": "Peking-opera-inspired percussion",
+      "category": "traditional",
+      "bpm_default": 110.0,
+      "bpm_min": 90.0,
+      "bpm_max": 160.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "cn_luogu_opera",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "bangu",
+          "label": "Bangu",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "large_gong",
+          "label": "Large Gong",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "small_gong",
+          "label": "Small Gong",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "cymbals",
+          "label": "Cymbals",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "jinghu",
+          "label": "Jinghu",
+          "role": "pitched",
+          "hits": []
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "peking opera drums inspired",
+        "peking-opera-inspired percussion"
+      ],
+      "notes": "Report §6.4 proposal 3. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 3
+    },
+    {
+      "id": "guofeng_trap",
+      "title": "Guofeng Trap",
+      "region": "china",
+      "tradition": "Guofeng fusion",
+      "category": "fusion",
+      "bpm_default": 80.0,
+      "bpm_min": 70.0,
+      "bpm_max": 95.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "cn_yu_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "cn_guofeng_pop",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "guzheng",
+          "label": "Guzheng",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "dizi",
+          "label": "Dizi",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "electronic_808",
+          "label": "Electronic 808",
+          "role": "bass",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": -1,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "trap_hats",
+          "label": "Trap Hats",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "guofeng trap inspired",
+        "guofeng fusion"
+      ],
+      "notes": "Report §6.4 proposal 4. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 4
+    },
+    {
+      "id": "lion_dance",
+      "title": "Lion Dance",
+      "region": "china",
+      "tradition": "Lion-dance-inspired percussion",
+      "category": "traditional",
+      "bpm_default": 140.0,
+      "bpm_min": 120.0,
+      "bpm_max": 170.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "cn_lion_dance",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "lion_dance_drum",
+          "label": "Lion Dance Drum",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "large_gong",
+          "label": "Large Gong",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "cymbals",
+          "label": "Cymbals",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "tempo_envelope_required",
+      "prompt_tags": [
+        "lion dance inspired",
+        "lion-dance-inspired percussion"
+      ],
+      "notes": "Report §6.4 proposal 5. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 5
+    },
+    {
+      "id": "cpop_ballad",
+      "title": "C-pop Ballad",
+      "region": "china",
+      "tradition": "Mandopop-inspired",
+      "category": "modern_pop",
+      "bpm_default": 72.0,
+      "bpm_min": 50.0,
+      "bpm_max": 100.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "cn_qingyue_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "piano",
+          "label": "Piano",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "strings",
+          "label": "Strings",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "erhu",
+          "label": "Erhu",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "c-pop ballad inspired",
+        "mandopop-inspired"
+      ],
+      "notes": "Report §6.4 proposal 6. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 6
+    },
+    {
+      "id": "kyoto_koto",
+      "title": "Kyoto Koto",
+      "region": "japan",
+      "tradition": "Koto/shakuhachi-inspired",
+      "category": "traditional",
+      "bpm_default": 60.0,
+      "bpm_min": 40.0,
+      "bpm_max": 90.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_in_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "koto",
+          "label": "Koto",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "shakuhachi",
+          "label": "Shakuhachi",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "fixed_grid_free_time_approximation",
+      "prompt_tags": [
+        "kyoto koto inspired",
+        "koto/shakuhachi-inspired"
+      ],
+      "notes": "Report §6.4 proposal 7. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Fixed grid is only an editable timing sketch and does not implement free phrasing. ",
+      "report_number": 7
+    },
+    {
+      "id": "matsuri_taiko",
+      "title": "Matsuri Taiko",
+      "region": "japan",
+      "tradition": "Festival-inspired taiko",
+      "category": "traditional",
+      "bpm_default": 120.0,
+      "bpm_min": 110.0,
+      "bpm_max": 140.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_yo_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "jp_taiko_matsuri",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "nagado_taiko",
+          "label": "Nagado Taiko",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "shime_taiko",
+          "label": "Shime Taiko",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "shinobue",
+          "label": "Shinobue",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "matsuri taiko inspired",
+        "festival-inspired taiko"
+      ],
+      "notes": "Report §6.4 proposal 8. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 8
+    },
+    {
+      "id": "lofi_kyoto",
+      "title": "Lo-fi Kyoto",
+      "region": "japan",
+      "tradition": "Japanese lo-fi fusion",
+      "category": "fusion",
+      "bpm_default": 82.0,
+      "bpm_min": 75.0,
+      "bpm_max": 90.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_in_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "jp_lofi_koto",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "koto",
+          "label": "Koto",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "electric_piano",
+          "label": "Electric Piano",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "snare",
+          "label": "Snare",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "closed_hat",
+          "label": "Closed Hat",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.58,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "lo-fi kyoto inspired",
+        "japanese lo-fi fusion"
+      ],
+      "notes": "Report §6.4 proposal 9. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 9
+    },
+    {
+      "id": "tokyo_city_pop",
+      "title": "Tokyo City Pop",
+      "region": "japan",
+      "tradition": "City-pop-inspired",
+      "category": "modern_pop",
+      "bpm_default": 110.0,
+      "bpm_min": 100.0,
+      "bpm_max": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_major_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "jp_citypop",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "electric_bass",
+          "label": "Electric Bass",
+          "role": "bass",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": -1,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "electric_piano",
+          "label": "Electric Piano",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "brass",
+          "label": "Brass",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "snare",
+          "label": "Snare",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-6",
+          "instrument_id": "closed_hat",
+          "label": "Closed Hat",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "tokyo city pop inspired",
+        "city-pop-inspired"
+      ],
+      "notes": "Report §6.4 proposal 10. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 10
+    },
+    {
+      "id": "okinawa_breeze",
+      "title": "Okinawa Breeze",
+      "region": "japan",
+      "tradition": "Okinawan-inspired fusion",
+      "category": "fusion",
+      "bpm_default": 100.0,
+      "bpm_min": 70.0,
+      "bpm_max": 130.0,
+      "meter": {
+        "numerator": 2,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_ryukyu_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "sanshin",
+          "label": "Sanshin",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "sanba",
+          "label": "Sanba",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "shaker",
+          "label": "Shaker",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "okinawa breeze inspired",
+        "okinawan-inspired fusion"
+      ],
+      "notes": "Report §6.4 proposal 11. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 11
+    },
+    {
+      "id": "shamisen_rock",
+      "title": "Shamisen Rock",
+      "region": "japan",
+      "tradition": "Tsugaru-shamisen/rock fusion",
+      "category": "fusion",
+      "bpm_default": 125.0,
+      "bpm_min": 90.0,
+      "bpm_max": 160.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "jp_yo_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "tsugaru_shamisen",
+          "label": "Tsugaru Shamisen",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "snare",
+          "label": "Snare",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "closed_hat",
+          "label": "Closed Hat",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "shamisen rock inspired",
+        "tsugaru-shamisen/rock fusion"
+      ],
+      "notes": "Report §6.4 proposal 12. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 12
+    },
+    {
+      "id": "gayageum_sanjo",
+      "title": "Gayageum Sanjo",
+      "region": "korea",
+      "tradition": "Sanjo progression target",
+      "category": "traditional",
+      "bpm_default": 60.0,
+      "bpm_min": 40.0,
+      "bpm_max": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "kr_gyemyeonjo_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "gayageum",
+          "label": "Gayageum",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "janggu",
+          "label": "Janggu",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "cycle_progression_required",
+      "prompt_tags": [
+        "gayageum sanjo inspired",
+        "sanjo progression target"
+      ],
+      "notes": "Report §6.4 proposal 13. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Jinyangjo-to-jajinmori progression and ornaments are not expressible by this single fixed-meter candidate.",
+      "report_number": 13
+    },
+    {
+      "id": "samulnori_fire",
+      "title": "Samulnori Fire",
+      "region": "korea",
+      "tradition": "Samulnori grouping candidate",
+      "category": "traditional",
+      "bpm_default": 96.0,
+      "bpm_min": 80.0,
+      "bpm_max": 110.0,
+      "meter": {
+        "numerator": 12,
+        "denominator": 8
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "kr_samulnori_gutgeori",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "kkwaenggwari",
+          "label": "Kkwaenggwari",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 16,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "jing",
+          "label": "Jing",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 20,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "janggu",
+          "label": "Janggu",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 16,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "buk",
+          "label": "Buk",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 20,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "samulnori fire inspired",
+        "samulnori grouping candidate"
+      ],
+      "notes": "Report §6.4 proposal 14. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 14
+    },
+    {
+      "id": "kgugak_pop",
+      "title": "K-Gugak Pop",
+      "region": "korea",
+      "tradition": "Gugak/pop fusion",
+      "category": "modern_pop",
+      "bpm_default": 110.0,
+      "bpm_min": 95.0,
+      "bpm_max": 130.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "kr_pyeongjo_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "kr_kpop_gugak_fusion",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "gayageum",
+          "label": "Gayageum",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "haegeum",
+          "label": "Haegeum",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "electronic_808",
+          "label": "Electronic 808",
+          "role": "bass",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": -1,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "synth",
+          "label": "Synth",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 3,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 11,
+              "velocity": 80,
+              "degree": 4,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-6",
+          "instrument_id": "closed_hat",
+          "label": "Closed Hat",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 2,
+              "velocity": 78
+            },
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 6,
+              "velocity": 78
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 10,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            },
+            {
+              "index": 14,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "k-gugak pop inspired",
+        "gugak/pop fusion"
+      ],
+      "notes": "Report §6.4 proposal 15. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 15
+    },
+    {
+      "id": "javanese_lancaran",
+      "title": "Javanese Lancaran",
+      "region": "indonesia",
+      "tradition": "Javanese cycle target",
+      "category": "traditional",
+      "bpm_default": 80.0,
+      "bpm_min": 60.0,
+      "bpm_max": 100.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 4,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "slendro_pack",
+      "rhythm_id": "id_lancaran",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "saron",
+          "label": "Saron",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "bonang",
+          "label": "Bonang",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "kenong",
+          "label": "Kenong",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 16,
+              "velocity": 78
+            },
+            {
+              "index": 24,
+              "velocity": 78
+            },
+            {
+              "index": 32,
+              "velocity": 78
+            },
+            {
+              "index": 40,
+              "velocity": 78
+            },
+            {
+              "index": 48,
+              "velocity": 78
+            },
+            {
+              "index": 56,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "gong_ageng",
+          "label": "Gong Ageng",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 63,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "kendhang",
+          "label": "Kendhang",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 16,
+              "velocity": 78
+            },
+            {
+              "index": 24,
+              "velocity": 78
+            },
+            {
+              "index": 32,
+              "velocity": 78
+            },
+            {
+              "index": 40,
+              "velocity": 78
+            },
+            {
+              "index": 48,
+              "velocity": 78
+            },
+            {
+              "index": 56,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "javanese lancaran inspired",
+        "javanese cycle target"
+      ],
+      "notes": "Report §6.4 proposal 16. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 16
+    },
+    {
+      "id": "pelog_night",
+      "title": "Pelog Night",
+      "region": "indonesia",
+      "tradition": "Pelog/ketawang target",
+      "category": "traditional",
+      "bpm_default": 65.0,
+      "bpm_min": 40.0,
+      "bpm_max": 100.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "pelog_pack",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "gender",
+          "label": "Gender",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "gambang",
+          "label": "Gambang",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "suling",
+          "label": "Suling",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "gong_ageng",
+          "label": "Gong Ageng",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 15,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "pelog night inspired",
+        "pelog/ketawang target"
+      ],
+      "notes": "Report §6.4 proposal 17. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 17
+    },
+    {
+      "id": "bali_kotekan",
+      "title": "Bali Kotekan",
+      "region": "indonesia",
+      "tradition": "Balinese interlocking target",
+      "category": "traditional",
+      "bpm_default": 140.0,
+      "bpm_min": 120.0,
+      "bpm_max": 160.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "bali_pair_pack",
+      "rhythm_id": "id_bali_kotekan",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "gangsa_polos",
+          "label": "Gangsa Polos",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "gangsa_sangsih",
+          "label": "Gangsa Sangsih",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "kendang_bali",
+          "label": "Kendang Bali",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "bali kotekan inspired",
+        "balinese interlocking target"
+      ],
+      "notes": "Report §6.4 proposal 18. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 18
+    },
+    {
+      "id": "gamelan_electronica",
+      "title": "Gamelan Electronica",
+      "region": "indonesia",
+      "tradition": "Gamelan/electronic fusion",
+      "category": "fusion",
+      "bpm_default": 120.0,
+      "bpm_min": 100.0,
+      "bpm_max": 140.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "slendro_pack",
+      "rhythm_id": null,
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "saron",
+          "label": "Saron",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "bonang",
+          "label": "Bonang",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "gong_ageng",
+          "label": "Gong Ageng",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 15,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-5",
+          "instrument_id": "synth_bass",
+          "label": "Synth Bass",
+          "role": "bass",
+          "hits": []
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "gamelan electronica inspired",
+        "gamelan/electronic fusion"
+      ],
+      "notes": "Report §6.4 proposal 19. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 19
+    },
+    {
+      "id": "raga_dusk",
+      "title": "Raga Dusk",
+      "region": "india",
+      "tradition": "Kalyan pitch-collection candidate",
+      "category": "traditional",
+      "bpm_default": 90.0,
+      "bpm_min": 70.0,
+      "bpm_max": 120.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 4,
+      "steps_per_quarter": 4,
+      "scale_id": "in_kalyan_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "in_teentaal_fusion",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "sitar",
+          "label": "Sitar",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 4,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 8,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 12,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 16,
+              "velocity": 80,
+              "degree": 4,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 20,
+              "velocity": 80,
+              "degree": 5,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 24,
+              "velocity": 80,
+              "degree": 6,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 28,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 32,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 36,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 40,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 44,
+              "velocity": 80,
+              "degree": 4,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 48,
+              "velocity": 80,
+              "degree": 5,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 52,
+              "velocity": 80,
+              "degree": 6,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 56,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 60,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "tanpura",
+          "label": "Tanpura",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 17,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 25,
+              "velocity": 80,
+              "degree": 4,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 33,
+              "velocity": 80,
+              "degree": 5,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 41,
+              "velocity": 80,
+              "degree": 6,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 49,
+              "velocity": 80,
+              "degree": 0,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 57,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "tabla",
+          "label": "Tabla",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            },
+            {
+              "index": 16,
+              "velocity": 78
+            },
+            {
+              "index": 24,
+              "velocity": 78
+            },
+            {
+              "index": 32,
+              "velocity": 78
+            },
+            {
+              "index": 40,
+              "velocity": 78
+            },
+            {
+              "index": 48,
+              "velocity": 78
+            },
+            {
+              "index": 56,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "raga dusk inspired",
+        "kalyan pitch-collection candidate"
+      ],
+      "notes": "Report §6.4 proposal 20. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Kalyan pitch collection only; Yaman ascent/descent, characteristic phrases and ornament rules are not implemented. ",
+      "report_number": 20
+    },
+    {
+      "id": "bhangra_rush",
+      "title": "Bhangra Rush",
+      "region": "india",
+      "tradition": "Punjabi pop/dhol fusion",
+      "category": "modern_pop",
+      "bpm_default": 104.0,
+      "bpm_min": 95.0,
+      "bpm_max": 110.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "in_khamaj_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "in_bhangra",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "dhol",
+          "label": "Dhol",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "tumbi",
+          "label": "Tumbi",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "synth_bass",
+          "label": "Synth Bass",
+          "role": "bass",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": -1,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": -1,
+              "gate_steps": 2.0
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "bhangra rush inspired",
+        "punjabi pop/dhol fusion"
+      ],
+      "notes": "Report §6.4 proposal 21. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 21
+    },
+    {
+      "id": "bollywood_groove",
+      "title": "Bollywood Groove",
+      "region": "india",
+      "tradition": "Film/pop fusion",
+      "category": "modern_pop",
+      "bpm_default": 116.0,
+      "bpm_min": 100.0,
+      "bpm_max": 128.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": "in_kafi_report",
+      "tuning_id": "twelve_tet_candidate",
+      "rhythm_id": "in_bollywood_dance",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "dholak",
+          "label": "Dholak",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "strings",
+          "label": "Strings",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 1,
+              "velocity": 80,
+              "degree": 1,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 9,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "sarangi",
+          "label": "Sarangi",
+          "role": "pitched",
+          "hits": [
+            {
+              "index": 2,
+              "velocity": 80,
+              "degree": 2,
+              "octave": 0,
+              "gate_steps": 2.0
+            },
+            {
+              "index": 10,
+              "velocity": 80,
+              "degree": 3,
+              "octave": 0,
+              "gate_steps": 2.0
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "bollywood groove inspired",
+        "film/pop fusion"
+      ],
+      "notes": "Report §6.4 proposal 22. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. ",
+      "report_number": 22
+    },
+    {
+      "id": "siam_court",
+      "title": "Siam Court",
+      "region": "thailand",
+      "tradition": "Piphat-inspired target",
+      "category": "traditional",
+      "bpm_default": 100.0,
+      "bpm_min": 80.0,
+      "bpm_max": 140.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "thai_pack",
+      "rhythm_id": "th_ching_cycle",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "ranat_ek",
+          "label": "Ranat Ek",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "khong_wong",
+          "label": "Khong Wong",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "pi",
+          "label": "Pi",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "ching",
+          "label": "Ching",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "siam court inspired",
+        "piphat-inspired target"
+      ],
+      "notes": "Report §6.4 proposal 23. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 23
+    },
+    {
+      "id": "isan_mor_lam",
+      "title": "Isan Mor Lam",
+      "region": "thailand",
+      "tradition": "Isan fusion target",
+      "category": "fusion",
+      "bpm_default": 130.0,
+      "bpm_min": 120.0,
+      "bpm_max": 140.0,
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "scale_id": null,
+      "tuning_id": "khaen_pack",
+      "rhythm_id": "th_molam_khaen",
+      "lanes": [
+        {
+          "id": "part-1",
+          "instrument_id": "khaen",
+          "label": "Khaen",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-2",
+          "instrument_id": "phin",
+          "label": "Phin",
+          "role": "pitched",
+          "hits": []
+        },
+        {
+          "id": "part-3",
+          "instrument_id": "kick",
+          "label": "Kick",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 0,
+              "velocity": 100
+            },
+            {
+              "index": 8,
+              "velocity": 78
+            }
+          ]
+        },
+        {
+          "id": "part-4",
+          "instrument_id": "snare",
+          "label": "Snare",
+          "role": "drum",
+          "hits": [
+            {
+              "index": 4,
+              "velocity": 78
+            },
+            {
+              "index": 12,
+              "velocity": 78
+            }
+          ]
+        }
+      ],
+      "swing": 0.5,
+      "timing": "candidate_grid",
+      "prompt_tags": [
+        "isan mor lam inspired",
+        "isan fusion target"
+      ],
+      "notes": "Report §6.4 proposal 24. Experimental sparse grid and motif, not a reviewed performance or authenticity claim. No sound assets are bundled by this catalog; exact matching sample regions and declared redistribution evidence are required. Whole-set/source-specific tuning is unknown; melodic events are withheld rather than inventing intervals. ",
+      "report_number": 24
+    }
+  ]
+}

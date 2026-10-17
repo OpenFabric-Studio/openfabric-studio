@@ -14,6 +14,7 @@ from ..module_catalog import configured_environment, inventory, plan
 from ..module_contracts import ModuleInventory, ModuleInstallJob, ModuleInstallRequest, ModuleJobsResponse, ModulePlan, ModulePlanRequest
 from ..module_jobs import ModuleSetupError, service
 from ..module_security import require_local_origin
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,13 @@ async def list_jobs() -> ModuleJobsResponse:
 @router.post('/jobs', response_model=ModuleInstallJob)
 async def create_job(body: ModuleInstallRequest) -> ModuleInstallJob:
     with _errors():
+        if body.download_models:
+            if body.music_training_engine is not None:
+                require_usage(body.music_training_engine, 'training')
+            else:
+                for feature in body.features:
+                    if feature == 'ace_step' or feature == 'yue2' or feature == 'stable_audio3':
+                        require_usage(feature, 'setup')
         return await service().create(body)
 
 

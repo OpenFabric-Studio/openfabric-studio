@@ -148,6 +148,18 @@ class TrackFavoritesApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 404, response.text)
         self.assertEqual(response.json(), {"detail": "track not found"})
 
+    async def test_completed_music_workflows_do_not_break_library_history_or_favorites(self) -> None:
+        for origin in ('beat', 'mashup', 'beat_song'):
+            with self.subTest(origin=origin):
+                track_id = db.insert_track(model=origin, title=f'{origin} fixture', lyrics='', seed=None,
+                    duration_ms=1000, wall_ms=None, params={}, audio_path=db.FILES_DIR / f'{origin}.wav', abc_path=None)
+                response = await self.client.get('/api/tracks')
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(next(item['model'] for item in response.json()['data'] if item['id'] == track_id), origin)
+                favorite = await self.client.put(f'/api/tracks/{track_id}/favorite', json={'is_favorite': True})
+                self.assertEqual(favorite.status_code, 200, favorite.text)
+                self.assertTrue(favorite.json()['is_favorite'])
+
     async def test_non_boolean_and_missing_favorite_values_are_rejected_before_update(self) -> None:
         track_id = await self.upload()
         for body in ({}, {"is_favorite": 1}, {"is_favorite": 0}, {"is_favorite": "true"}, {"is_favorite": None}):

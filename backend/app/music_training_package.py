@@ -17,7 +17,7 @@ import soundfile as sf
 
 from .module_catalog import ModuleEnvironment
 from .music_training_contracts import MusicLoraTrainingRequest
-from .music_training_setup import _licenses, recipes, training_assets
+from .music_training_setup import recipes, training_assets, training_license_declarations
 
 _BACKEND = Path(__file__).resolve().parents[1]
 _REPOSITORY = _BACKEND.parent
@@ -139,7 +139,7 @@ def prepare_package(request: MusicLoraTrainingRequest, sources: list[Path], newd
         virtual = ModuleEnvironment.for_root(staging / 'runtime', platform='linux', architecture='x86_64')
         assets = [dict(item.artifact.model_dump(mode='json'), path=item.target.relative_to(virtual.root).as_posix())
                   for item in training_assets(virtual, request.engine)]
-        license_rows = [entry.model_dump(mode='json', exclude_none=True) for entry in _licenses(request.engine)]
+        license_rows = [entry.model_dump(mode='json', exclude_none=True) for entry in training_license_declarations(request.engine)]
         (staging / 'README.txt').write_text(
             'OpenFabric Studio portable NVIDIA training package\n\n'
             'CUDA execution is UNVERIFIED. The same pinned model boundary was tested on Apple Silicon; CUDA needs its own train/load/preview evidence.\n'

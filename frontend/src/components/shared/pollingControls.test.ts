@@ -6,6 +6,7 @@ import { i18n, setLocale } from '../../i18n'
 import * as stemsApi from '../../api/stems'
 import * as midiApi from '../../api/midi'
 import * as voicesApi from '../../api/voices'
+import * as termsApi from '../../api/musicTerms'
 vi.mock('../../views/voice/ArtistProductionPanel.vue', () => ({ default: { template: '<section data-artist-production-fixture />' } }))
 import * as localEnginesApi from '../../api/localEngines'
 import type { StemsStatus } from '../../api/stems'
@@ -19,6 +20,7 @@ import { preparedVoice } from '../../views/voice/voiceTestFixtures'
 
 vi.mock('../../api/stems', () => ({ getSeparationStatus: vi.fn(), startSeparation: vi.fn(), cancelSeparation: vi.fn(), deleteStems: vi.fn() }))
 vi.mock('../../api/midi', () => ({ getMidiStatus: vi.fn(), startTranscription: vi.fn(), cancelTranscription: vi.fn(), deleteMidi: vi.fn() }))
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 vi.mock('../../api/localEngines', async original => ({ ...await original<typeof import('../../api/localEngines')>(), listLocalEngines: vi.fn() }))
 vi.mock('../../api/voices', async (original) => ({
   ...await original<typeof import('../../api/voices')>(),
@@ -59,6 +61,7 @@ beforeEach(() => {
   setLocale('en')
   vi.mocked(stemsApi.getSeparationStatus).mockResolvedValue(idleStems)
   vi.mocked(midiApi.getMidiStatus).mockResolvedValue(midiStatus('idle'))
+  vi.mocked(termsApi.getMusicTerms).mockResolvedValue({ engine: 'yue2', operation: 'transcription', revision: 0, noncommercial_enabled: false, allowed: true, requirements: [] })
   vi.mocked(voicesApi.listVoices).mockResolvedValue([])
   vi.mocked(localEnginesApi.listLocalEngines).mockResolvedValue({ engines: [], video_preference: 'ltx', note: 'Song videos stay on LTX.' })
   vi.mocked(voicesApi.getActiveVoiceId).mockReturnValue(null)

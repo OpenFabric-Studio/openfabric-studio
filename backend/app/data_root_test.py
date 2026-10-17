@@ -32,6 +32,91 @@ from app.data_root import (
 
 
 class DataRootTests(unittest.TestCase):
+    def test_mashup_and_replacement_private_worker_identities_follow_library_move(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            mashup = src / 'files' / '_mashups' / 'jobs' / ('a' * 32)
+            replacement = src / 'files' / 'replacements' / ('b' * 32) / 'attempts' / ('c' * 32)
+            song_mix = src / 'files' / '_song_mixes' / ('f' * 32) / 'commands'
+            for workspace in (mashup, replacement, song_mix):
+                workspace.mkdir(parents=True)
+                (workspace / 'retained.wav').write_bytes(b'original fixture bytes')
+            mashup_worker = {'pid': 100, 'token': 'd' * 32, 'receipt': str(mashup / 'worker.json')}
+            replacement_worker = {'pid': 101, 'token': 'e' * 32, 'receipt': str(replacement / 'worker.json')}
+            song_worker = {'pid': 102, 'token': 'f' * 32, 'receipt': str(song_mix / 'worker.json')}
+            (mashup / 'worker.json').write_text(json.dumps(mashup_worker))
+            (replacement / 'worker.json').write_text(json.dumps(replacement_worker))
+            (song_mix / 'worker.json').write_text(json.dumps(song_worker))
+            with sqlite3.connect(src / 'aicollector.db') as connection:
+                connection.execute('CREATE TABLE mashup_jobs(worker_identity_json TEXT)')
+                connection.execute('INSERT INTO mashup_jobs VALUES(?)', (json.dumps(mashup_worker),))
+                connection.execute('CREATE TABLE replacement_attempts(worker_json TEXT,body_json TEXT)')
+                connection.execute('INSERT INTO replacement_attempts VALUES(?,?)', (json.dumps(replacement_worker), json.dumps({'worker': replacement_worker, 'relative_path': 'replacements/retained.wav'})))
+                connection.execute('CREATE TABLE beat_song_mix_jobs(worker_identity_json TEXT)')
+                connection.execute('INSERT INTO beat_song_mix_jobs VALUES(?)', (json.dumps(song_worker),))
+            migrate_library(src, dest)
+            with sqlite3.connect(dest / 'aicollector.db') as connection:
+                moved_mashup = json.loads(connection.execute('SELECT worker_identity_json FROM mashup_jobs').fetchone()[0])
+                encoded, body = connection.execute('SELECT worker_json,body_json FROM replacement_attempts').fetchone()
+                moved_song = json.loads(connection.execute('SELECT worker_identity_json FROM beat_song_mix_jobs').fetchone()[0])
+            moved_replacement, document = json.loads(encoded), json.loads(body)
+            self.assertEqual(document['worker'], moved_replacement)
+            self.assertEqual(document['relative_path'], 'replacements/retained.wav')
+            for identity in (moved_mashup, moved_replacement, moved_song):
+                receipt = Path(identity['receipt'])
+                self.assertTrue(receipt.is_relative_to(dest))
+                self.assertEqual(json.loads(receipt.read_text()), identity)
+                self.assertEqual((receipt.parent / 'retained.wav').read_bytes(), b'original fixture bytes')
+
+    def test_beat_samples_renders_and_worker_receipts_follow_library_move(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            workspace = src / 'files' / '_beats' / 'renders' / ('a' * 32)
+            workspace.mkdir(parents=True)
+            (workspace / 'mix.wav').write_bytes(b'generated beat fixture')
+            identity = {'pid': 100, 'token': 'b' * 32, 'receipt': str(workspace / 'worker-receipt.json')}
+            (workspace / 'worker-receipt.json').write_text(json.dumps(identity))
+            with sqlite3.connect(src / 'aicollector.db') as connection:
+                connection.execute('CREATE TABLE beat_render_jobs(worker_identity_json TEXT)')
+                connection.execute('INSERT INTO beat_render_jobs VALUES(?)', (json.dumps(identity),))
+            migrate_library(src, dest)
+            moved = dest / 'files' / '_beats' / 'renders' / ('a' * 32)
+            self.assertEqual((moved / 'mix.wav').read_bytes(), b'generated beat fixture')
+            restored = json.loads((moved / 'worker-receipt.json').read_text())
+            self.assertEqual(restored['receipt'], str(moved / 'worker-receipt.json'))
+            with sqlite3.connect(dest / 'aicollector.db') as connection:
+                stored = json.loads(connection.execute('SELECT worker_identity_json FROM beat_render_jobs').fetchone()[0])
+            self.assertEqual(stored, restored)
+            self.assertFalse((src / 'files').exists())
+
+    def test_analysis_snapshots_receipts_and_cleanup_journals_follow_library_move(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
+            workspace = src / 'music-analysis' / ('a' * 32)
+            workspace.mkdir(parents=True)
+            (workspace / 'source.wav').write_bytes(b'original retained audio')
+            identity = {'pid': 100, 'token': 'b' * 32, 'receipt': str(workspace / 'worker-1.json')}
+            (workspace / 'identity.json').write_text(json.dumps(identity))
+            journals = src / 'music-artifacts'
+            journals.mkdir()
+            journal = {'relative_path': 'music-analysis/' + 'a' * 32, 'status': 'pending'}
+            (journals / 'plan.json').write_text(json.dumps(journal))
+            with sqlite3.connect(src / 'aicollector.db') as connection:
+                connection.execute('CREATE TABLE music_analysis_jobs(worker_identity_json TEXT)')
+                connection.execute('INSERT INTO music_analysis_jobs VALUES(?)', (json.dumps(identity),))
+            migrate_library(src, dest)
+            moved = dest / 'music-analysis' / ('a' * 32)
+            self.assertEqual((moved / 'source.wav').read_bytes(), b'original retained audio')
+            restored = json.loads((moved / 'identity.json').read_text())
+            self.assertEqual(restored['receipt'], str(moved / 'worker-1.json'))
+            self.assertEqual(restored['token'], identity['token'])
+            self.assertEqual(json.loads((dest / 'music-artifacts' / 'plan.json').read_text()), journal)
+            with sqlite3.connect(dest / 'aicollector.db') as connection:
+                stored = json.loads(connection.execute('SELECT worker_identity_json FROM music_analysis_jobs').fetchone()[0])
+            self.assertEqual(stored, restored)
+            self.assertFalse((src / 'music-analysis').exists())
+            self.assertFalse((src / 'music-artifacts').exists())
+
     def test_dataset_library_is_moved_with_active_and_trashed_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
@@ -68,7 +153,7 @@ class DataRootTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             src, dest = Path(tmp).resolve() / 'old', Path(tmp).resolve() / 'new'
             originals: dict[Path, bytes] = {}
-            for name in ('local-music', 'music-lora', 'stable-lora-training', 'music-lora-training'):
+            for name in ('local-music', 'music-lora', 'stable-lora-training', 'music-lora-training', 'music-analysis', 'music-artifacts'):
                 folder = src / name
                 folder.mkdir(parents=True)
                 metadata = folder / 'request.json'
@@ -760,7 +845,8 @@ class DataRootTests(unittest.TestCase):
             self.assertEqual(
                 [folder["key"] for folder in status["folders"]],
                 ["tracks", "voices", "videos", "videoProjects", "videoCharacters", "videoCharacterTraining", "videoCharacterTrainer", "providers",
-                 "audiobooks", "speechProfiles", "speechTrials", "localMusic", "musicAdapters", "musicTraining", "musicTrainingRuns", "models", "logs", "database"],
+                 "audiobooks", "speechProfiles", "speechTrials", "localMusic", "musicAdapters", "musicTraining", "musicTrainingRuns",
+                 "musicAnalysis", "musicArtifacts", "models", "logs", "database"],
             )
 
     def test_parse_chosen_folder_strips_the_dialog_slash(self) -> None:

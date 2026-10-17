@@ -12,6 +12,8 @@ import * as datasets from '../../api/loraDataset'
 import { parseLoraDatasetOperationResponse, type MusicLoraTrainingJob } from '../../api/generated'
 import { pendingMusicAdapter } from '../../composables/generationDrafts'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 import { hasOpenDialog } from '../../composables/useDialogA11y'
 import ModelLoraTraining from './ModelLoraTraining.vue'
 vi.mock('../../api/musicTraining', () => ({ musicTrainingStatus: vi.fn(), listMusicTraining: vi.fn(), submitMusicTraining: vi.fn(), createMusicTrainingPackage: vi.fn(), musicTrainingPackageUrl: (id: string) => `/api/music-lora/training/jobs/${id}/package`, cancelMusicTraining: vi.fn(), trainMissingMusicPlanner: vi.fn() }))
@@ -32,6 +34,7 @@ function button(node: ParentNode, label: string) { const found = [...node.queryS
 async function input(node: ParentNode, name: string, value: string) { const field = node.querySelector(`[name="${name}"]`); if (!(field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement)) throw new Error(`Missing ${name}`); field.value = value; field.dispatchEvent(new Event('input', { bubbles: true })); await settle() }
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true }))
   vi.mocked(captions.listTrainingCaptions).mockResolvedValue({ jobs: [] })
   vi.mocked(captions.submitTrainingCaptions).mockRejectedValue(new ApiError('training_caption_busy', 409))
   vi.mocked(api.musicTrainingStatus).mockResolvedValue({ engines: [{ engine: 'yue2', supported: true, installed: true, weights_ready: true, paired_ready: true, device: 'mps', validation: 'experimental' }] })

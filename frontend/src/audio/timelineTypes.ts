@@ -1,5 +1,6 @@
 import type { ChannelSettings, MasterSettings } from './mixerEngine'
 import type { MidiNote } from './miniMidiPlayer'
+import type { BeatClipLink, MusicProjectArtifact, MusicProjectProvenance } from '../api/generated'
 
 export type ClipType = 'audio' | 'midi'
 
@@ -22,6 +23,8 @@ export interface Clip {
   instrument?: 'sawtooth' | 'square' | 'sine' | 'triangle'
   muted?: boolean
   solo?: boolean
+  beatLink?: BeatClipLink
+  sourceArtifact?: MusicProjectArtifact
 }
 
 export interface TimelineLane {
@@ -40,6 +43,7 @@ export interface TimelineProject {
   bpm: number
   snapEnabled: boolean
   loopRegion?: { start: number; end: number; enabled: boolean }
+  musicProvenance?: MusicProjectProvenance
 }
 
 /**

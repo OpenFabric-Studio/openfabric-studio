@@ -15,6 +15,7 @@ from ..job_lifecycle import run_owned_thread
 from ..module_security import require_local_origin
 from ..music_lora_contracts import MusicLoraError
 from ..music_training_contracts import MusicLoraTrainingJob, MusicLoraTrainingJobs, MusicLoraTrainingRequest, MusicLoraTrainingStatuses, YueLoraPairSettings
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -63,11 +64,13 @@ async def jobs() -> MusicLoraTrainingJobs:
 
 @router.post('/jobs', response_model=MusicLoraTrainingJob)
 async def submit(body: MusicLoraTrainingRequest) -> MusicLoraTrainingJob:
+    require_usage(body.engine, 'training')
     return await music_training.submit(body)
 
 
 @router.post('/packages', response_model=MusicLoraTrainingJob)
 async def package(body: MusicLoraTrainingRequest) -> MusicLoraTrainingJob:
+    require_usage(body.engine, 'training')
     return await music_training.submit(body, kind='nvidia-package')
 
 
@@ -83,6 +86,7 @@ async def cancel(identifier: str) -> MusicLoraTrainingJob:
 
 @router.post('/jobs/{identifier}/planner', response_model=MusicLoraTrainingJob)
 async def planner(identifier: str, body: YueLoraPairSettings) -> MusicLoraTrainingJob:
+    require_usage('yue2', 'training')
     return await music_training.submit_planner(identifier, body)
 
 

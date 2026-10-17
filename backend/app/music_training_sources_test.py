@@ -26,6 +26,18 @@ class MusicTrainingSourcesTests(unittest.TestCase):
         old = '{"name":"Old run","variant":"small-music","samples":[{"track_id":1,"caption":"Piano"}],"max_steps":1000,"rank":16,"learning_rate":0.0001,"seed":42}'
         self.assertEqual(fingerprint(request), hashlib.sha256(old.encode()).hexdigest())
 
+    def test_regional_manifest_selection_is_distinct_bounded_and_exclusive(self) -> None:
+        reference = {'manifest_id': 'a' * 32, 'manifest_sha256': 'b' * 64, 'excerpt_id': 'c' * 32}
+        selected = MusicLoraSource.model_validate({'regional_manifest': reference})
+        self.assertIsNotNone(selected.regional_manifest)
+        for value in ({'track_id': 1, 'regional_manifest': reference}, {'regional_manifest': {**reference, 'excerpt_id': 'c' * 32 + '\n'}},
+                {'regional_manifest': {**reference, 'manifest_sha256': 'b' * 64 + '\n'}}):
+            with self.assertRaises(ValidationError):
+                MusicLoraSource.model_validate(value)
+        with self.assertRaises(MusicLoraError) as unsupported:
+            source_path(selected, prefix='music_training')
+        self.assertEqual(unsupported.exception.code, 'music_training_dataset_invalid')
+
     def test_dataset_source_uses_saved_revision_and_rejects_escapes_without_native_engine(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

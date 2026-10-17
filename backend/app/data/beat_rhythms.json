@@ -1,0 +1,297 @@
+{
+  "rhythms": [
+    {
+      "id": "jp_taiko_matsuri",
+      "title": "Matsuri-inspired taiko candidate",
+      "region": "japan",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 110.0,
+      "bpm_max": 140.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Don/ka/doko intent requires actual stroke recordings; sparse grid is not a verified kuchi-shoga transcription."
+    },
+    {
+      "id": "jp_lofi_koto",
+      "title": "Lo-fi koto fusion candidate",
+      "region": "japan",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 75.0,
+      "bpm_max": 90.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Swung boom-bap and a small scale-locked motif."
+    },
+    {
+      "id": "jp_citypop",
+      "title": "City-pop-inspired candidate",
+      "region": "japan",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 100.0,
+      "bpm_max": 120.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Four-on-floor with candidate bass/keyboard parts; full extended-chord voicings are not encoded."
+    },
+    {
+      "id": "cn_luogu_opera",
+      "title": "Opera percussion candidate",
+      "region": "china",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 90.0,
+      "bpm_max": 160.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Leading bangu with generic gong/cymbal responses, not a school-specific luogu score."
+    },
+    {
+      "id": "cn_guofeng_pop",
+      "title": "Guofeng pop fusion candidate",
+      "region": "china",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 70.0,
+      "bpm_max": 95.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Half-time quarter-note clock; ornament recordings/glissandi not supplied."
+    },
+    {
+      "id": "cn_lion_dance",
+      "title": "Lion-dance-inspired envelope target",
+      "region": "china",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 120.0,
+      "bpm_max": 170.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Actual acceleration is not represented by a fixed-BPM BeatDocument; compilation remains blocked."
+    },
+    {
+      "id": "kr_samulnori_gutgeori",
+      "title": "Gutgeori grouping candidate",
+      "region": "korea",
+      "meter": {
+        "numerator": 12,
+        "denominator": 8
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        6,
+        6,
+        6,
+        6
+      ],
+      "markers": [],
+      "bpm_min": 80.0,
+      "bpm_max": 110.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. 12/8 grouping is report-proposed; actual quarter-note BPM shown rather than dotted-beat BPM."
+    },
+    {
+      "id": "kr_kpop_gugak_fusion",
+      "title": "Gugak/pop fusion candidate",
+      "region": "korea",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 95.0,
+      "bpm_max": 130.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Pop rhythm plus separate gayageum and haegeum roles."
+    },
+    {
+      "id": "id_lancaran",
+      "title": "Lancaran cycle target",
+      "region": "indonesia",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 4,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "markers": [
+        {
+          "index": 63,
+          "label": "gong-ending subdivision target"
+        }
+      ],
+      "bpm_min": 60.0,
+      "bpm_max": 100.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. 16 beats / four groups; gong-ending metadata is a target, not a reviewed stroke transcription."
+    },
+    {
+      "id": "id_bali_kotekan",
+      "title": "Kotekan interlocking target",
+      "region": "indonesia",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 120.0,
+      "bpm_max": 160.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Complementary polos/sangsih intent requires source-specific paired tuning; no guessed detuning."
+    },
+    {
+      "id": "in_teentaal_fusion",
+      "title": "Teentaal fusion candidate",
+      "region": "india",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 4,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16,
+        16,
+        16,
+        16
+      ],
+      "markers": [
+        {
+          "index": 0,
+          "label": "sam (beat 1)"
+        },
+        {
+          "index": 32,
+          "label": "khali (beat 9)"
+        }
+      ],
+      "bpm_min": 70.0,
+      "bpm_max": 120.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Four groups of four quarter-note beats; sam at beat 1 and khali at beat 9. Candidate tabla strokes require actual matching articulations."
+    },
+    {
+      "id": "in_bhangra",
+      "title": "Bhangra/dhol fusion candidate",
+      "region": "india",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 95.0,
+      "bpm_max": 110.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Sparse dhol accents plus tumbi motif; no claim of a reviewed chaal transcription."
+    },
+    {
+      "id": "in_bollywood_dance",
+      "title": "Film/pop dance candidate",
+      "region": "india",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 100.0,
+      "bpm_max": 128.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Four-on-floor plus a dholak role and string hook."
+    },
+    {
+      "id": "th_ching_cycle",
+      "title": "Ching open/damped target",
+      "region": "thailand",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 80.0,
+      "bpm_max": 140.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Open/damped alternation and sam chan/song chan/chan dio density levels remain source-review targets."
+    },
+    {
+      "id": "th_molam_khaen",
+      "title": "Isan fusion target",
+      "region": "thailand",
+      "meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bars": 1,
+      "steps_per_quarter": 4,
+      "grouping_steps": [
+        16
+      ],
+      "markers": [],
+      "bpm_min": 120.0,
+      "bpm_max": 140.0,
+      "notes": "Report §6.3 proposal; transcription and quarter-note tempo interpretation are unreviewed. Khaen drone and phin motif require source-specific tuning rather than a generic pentatonic label."
+    }
+  ]
+}

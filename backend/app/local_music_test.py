@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import errno
 import io
 import json
 import os
@@ -10,6 +11,8 @@ import sys
 import tempfile
 import unittest
 import wave
+import numpy as np
+import soundfile as sf
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI, HTTPException
@@ -17,6 +20,7 @@ import httpx
 from pydantic import ValidationError
 
 from app import db, local_music
+from app import module_catalog
 from app.local_music_contracts import LocalMusicEngineStatus, LocalMusicEngines, LocalMusicError, LocalMusicRequest
 from app.video_process import WorkerIdentity
 from app.contracts import TracksResponse
@@ -86,6 +90,120 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         self.connection.close()
         for item in reversed(self.patches):
             item.stop()
+
+    async def test_float_inpaint_output_preserves_overshoot_and_rejects_nonfinite(self) -> None:
+        path = self.root / 'inpaint.wav'
+        samples = np.full((8000, 2), 1.5, dtype=np.float32)
+        sf.write(path, samples, 8000, subtype='FLOAT')
+        self.assertEqual(local_music._validate_audio(path), 1000.0)
+        samples[100, 0] = float('nan')
+        sf.write(path, samples, 8000, subtype='FLOAT')
+        with self.assertRaises(LocalMusicError):
+            local_music._validate_audio(path)
+
+    async def test_conditioned_owner_retains_real_version_and_splices_before_publication(self) -> None:
+        from app import audio_versions, music_conditioning
+        from app.music_conditioning import ConditioningRuntimeProof
+        import hashlib
+        original = db.FILES_DIR / 'upload' / 'original.wav'
+        original.parent.mkdir(parents=True)
+        samples = np.full((240000, 2), .15, dtype=np.float32)
+        samples[100, 0] = 1.5
+        sf.write(original, samples, 48000, subtype='FLOAT')
+        original_bytes = original.read_bytes()
+        track = db.insert_track(model='upload', title='Original', lyrics='', seed=None, duration_ms=5000,
+            wall_ms=None, params={}, audio_path=original, abc_path=None)
+        version = audio_versions.retain_original(track, original)
+        source = {'kind': 'version', 'track_id': track, 'version_id': version.id}
+        self.worker.write_text('import argparse,shutil\np=argparse.ArgumentParser()\np.add_argument("--init-audio");p.add_argument("--init-noise-level");p.add_argument("--inpaint-range");p.add_argument("--seconds");p.add_argument("--out")\na=p.parse_args()\nshutil.copyfile(a.init_audio,a.out)\n')
+        proof = ConditioningRuntimeProof(hashlib.sha256(self.worker.read_bytes()).hexdigest(), 'c' * 64)
+
+        def command(request: LocalMusicRequest, output: Path, *, conditioning=None):
+            self.assertIsNotNone(conditioning)
+            recipe = conditioning.recipe
+            prepared = output.parent / 'conditioning.wav'
+            raw = output.parent / 'raw.wav'
+            options = request.conditioning
+            argv = [str(self.worker), '--init-audio', str(prepared), '--seconds', '5', '--out', str(raw)]
+            if options.mode == 'audio_to_audio':
+                argv.extend(['--init-noise-level', str(options.noise_level)])
+            else:
+                argv.extend(['--inpaint-range', f'{options.start_sec:.17g},{options.end_sec:.17g}'])
+            descriptor = {'mode': recipe.mode, 'source_wav': str(prepared), 'source_sha256': recipe.prepared_sha256,
+                'source_frames': recipe.prepared_frames, 'script_sha256': recipe.source_script_sha256,
+                'noise_level': recipe.noise_level, 'start_sec': options.start_sec if options.mode == 'inpaint' else None,
+                'end_sec': options.end_sec if options.mode == 'inpaint' else None}
+            specification = output.parent / 'request.json'
+            specification.write_text(json.dumps({'argv': argv, 'cwd': str(self.root), 'raw_output': str(raw),
+                'output': str(output), 'ffmpeg': module_catalog.shutil.which('ffmpeg'), 'conditioning': descriptor}))
+            worker = Path(__file__).resolve().parents[1] / 'scripts/local_music_worker.py'
+            return [sys.executable, str(worker), '--request', str(specification)], self.root, dict(os.environ)
+
+        for mode in ('audio_to_audio', 'inpaint'):
+            options = {'mode': mode, 'source': source, 'source_sha256': hashlib.sha256(original_bytes).hexdigest(),
+                **({'noise_level': .6} if mode == 'audio_to_audio' else {'start_sec': 1.0, 'end_sec': 2.0})}
+            request = LocalMusicRequest.model_validate({'engine': 'stable_audio3', 'prompt': 'Instrumental',
+                'duration_seconds': 5, 'conditioning': options})
+            with patch.object(music_conditioning, 'verify_runtime', new=AsyncMock(return_value=proof)), \
+                    patch.object(local_music, 'prepare_worker', side_effect=command):
+                job = await local_music.submit(request)
+                await local_music._tasks[job.id]
+            final = local_music.get(job.id)
+            self.assertEqual((final.status, final.error_code), ('done', None))
+            self.assertIsNotNone(final.conditioning_recipe)
+            self.assertIsNotNone(final.track)
+            self.assertTrue(local_music._artifact(job.id, 'conditioning-original.wav').is_file())
+            self.assertIn('_music_conditioning', final.track.params)
+            output, rate = sf.read(local_music._output(final), dtype='float32', always_2d=True)
+            if mode == 'inpaint':
+                self.assertEqual((len(output), rate), (240000, 48000))
+                np.testing.assert_array_equal(output[:48000], samples[:48000])
+                np.testing.assert_array_equal(output[96000:], samples[96000:])
+            else:
+                self.assertEqual((len(output), rate), (220500, 44100))
+            self.assertEqual(original.read_bytes(), original_bytes)
+
+    async def test_conditioned_recovery_never_publishes_unattested_native_output(self) -> None:
+        request = LocalMusicRequest.model_validate({'engine': 'stable_audio3', 'prompt': 'Piano',
+            'duration_seconds': 5, 'conditioning': {'mode': 'inpaint', 'source': {'kind': 'version',
+                'track_id': 1, 'version_id': 'b' * 32}, 'source_sha256': 'c' * 64, 'start_sec': 1.0, 'end_sec': 2.0}})
+        job = local_music._StoredJob(id='a' * 32, status='running', created_at='2026-10-17', request=request)
+        self.connection.execute('INSERT INTO local_music_jobs(id,payload_json,created_at) VALUES(?,?,?)',
+            (job.id, job.model_dump_json(), job.created_at)); self.connection.commit()
+        pending = local_music._artifact(job.id, 'output.wav', create=True)
+        pending.write_bytes(audio_bytes())
+        before = pending.read_bytes()
+        await local_music.recover()
+        self.assertEqual(local_music.get(job.id).error_code, 'conditioning_snapshot_invalid')
+        self.assertEqual(pending.read_bytes(), before)
+        self.assertEqual(db.list_tracks(), [])
+
+    async def test_original_guard_cancels_preparation_before_gpu_and_retains_source(self) -> None:
+        from app import music_conditioning
+        from app.music_conditioning import ConditioningRuntimeProof, ConditioningSourceProjection
+        from app.music_analysis_contracts import VersionMusicSource
+        original = self.root / 'source.wav'; original.write_bytes(audio_bytes())
+        request = LocalMusicRequest.model_validate({'engine': 'stable_audio3', 'prompt': 'Piano',
+            'duration_seconds': 5, 'conditioning': {'mode': 'audio_to_audio', 'source': {'kind': 'version',
+                'track_id': 1, 'version_id': 'b' * 32}, 'source_sha256': 'c' * 64, 'noise_level': .6}})
+        started, drained = asyncio.Event(), asyncio.Event()
+        async def prepare(*args, **kwargs):
+            started.set()
+            try:
+                await asyncio.sleep(60)
+            finally:
+                drained.set()
+        with patch.object(music_conditioning, '_resolve', return_value=ConditioningSourceProjection(original, 1, None)), \
+                patch.object(music_conditioning, 'verify_runtime', new=AsyncMock(return_value=ConditioningRuntimeProof('d' * 64, 'e' * 64))), \
+                patch.object(music_conditioning, 'prepare', side_effect=prepare):
+            job = await local_music.submit(request)
+            await asyncio.wait_for(started.wait(), 2)
+            from app.stems import gpu_lock
+            self.assertFalse(gpu_lock.locked())
+            async with music_conditioning.protect_source_removal(1):
+                self.assertTrue(drained.is_set())
+                self.assertEqual(local_music.get(job.id).status, 'cancelled')
+        self.assertEqual(original.read_bytes(), audio_bytes())
         self.temporary.cleanup()
 
     def body(self, engine: str = 'stable_audio3') -> LocalMusicRequest:
@@ -111,10 +229,139 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(final.track.model, engine)
                 self.assertEqual(final.track.params['local_music_job_id'], identifier)
                 self.assertNotIn('settings_mode', final.track.params)
+                self.assertIn('_music_evidence', final.track.params)
+                self.assertIn('publisher_declared', str(final.track.params['_music_evidence']))
             await local_music.recover()
             await local_music.recover()
         self.assertEqual(len(db.list_tracks()), 1)
         self.assertFalse(local_music.work_busy())
+
+    async def test_completed_audio_projects_original_receipt_without_hashing_current_voice_version(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            identifier = await self.submit_and_finish()
+        original = local_music._output(local_music.get(identifier))
+        alternate = self.root / 'files/voice.wav'; alternate.write_bytes(audio_bytes())
+        self.connection.execute('UPDATE tracks SET audio_path=?', (str(alternate),)); self.connection.commit()
+        with patch.object(local_music, '_digest', side_effect=AssertionError('metadata projection must not hash audio')):
+            projected = local_music.completed_audio(identifier)
+        self.assertEqual(projected.path, original.resolve())
+        self.assertEqual(projected.sha256, local_music._digest(original))
+        self.assertEqual(projected.track_id, local_music.get(identifier).track.id)
+        self.connection.execute('UPDATE local_music_jobs SET track_id=NULL WHERE id=?', (identifier,)); self.connection.commit()
+        with self.assertRaises(LocalMusicError):
+            local_music.completed_audio(identifier)
+        self.assertTrue(original.exists()); self.assertTrue(alternate.exists())
+
+    async def test_insufficient_pcm_space_rejects_before_creating_a_job(self) -> None:
+        required = (95 + 10) * 192000 * 2 * 4 * 2 + 64 * 1024**2
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=required - 1)), \
+                patch.object(local_music, 'prepare_worker', side_effect=self.command) as prepare, self.assertRaises(LocalMusicError) as caught:
+            await local_music.submit(self.body())
+        self.assertEqual(caught.exception.code, 'insufficient_disk')
+        prepare.assert_not_called()
+        self.assertEqual(local_music.list_jobs().jobs, [])
+
+    async def test_space_is_rechecked_before_starting_the_worker(self) -> None:
+        usage = module_catalog.shutil.disk_usage(self.root)
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command) as prepare:
+            job = await local_music.submit(self.body())
+            with patch.object(module_catalog.shutil, 'disk_usage', return_value=usage._replace(free=1)):
+                await local_music._tasks[job.id]
+        self.assertEqual(local_music.get(job.id).error_code, 'insufficient_disk')
+        prepare.assert_not_called()
+        self.assertEqual(db.list_tracks(), [])
+
+    async def test_publication_refuses_an_existing_output_and_retains_complete_pending_audio(self) -> None:
+        def command(request: LocalMusicRequest, output: Path) -> tuple[list[str], Path, dict[str, str]]:
+            local_music._output(local_music.get(output.parent.name)).write_bytes(b'preserve existing output')
+            return self.command(request, output)
+        with patch.object(local_music, 'prepare_worker', side_effect=command):
+            identifier = await self.submit_and_finish()
+        job = local_music.get(identifier)
+        self.assertEqual(job.status, 'failed')
+        self.assertEqual(job.error_code, 'local_music_output_exists')
+        self.assertEqual(local_music._output(job).read_bytes(), b'preserve existing output')
+        self.assertEqual(local_music._pending(job).read_bytes(), audio_bytes())
+        self.assertEqual(db.list_tracks(), [])
+
+    async def test_racing_output_is_never_replaced_during_publication(self) -> None:
+        original = os.link
+        def race(source: str | os.PathLike[str], target: str | os.PathLike[str], *, follow_symlinks: bool = True) -> None:
+            Path(target).write_bytes(b'concurrent user data')
+            original(source, target, follow_symlinks=follow_symlinks)
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command), patch.object(local_music.os, 'link', side_effect=race):
+            identifier = await self.submit_and_finish()
+        job = local_music.get(identifier)
+        self.assertEqual(job.error_code, 'local_music_output_exists')
+        self.assertEqual(local_music._output(job).read_bytes(), b'concurrent user data')
+        self.assertEqual(local_music._pending(job).read_bytes(), audio_bytes())
+        self.assertEqual(db.list_tracks(), [])
+
+    async def test_audio_changed_during_publication_is_not_registered(self) -> None:
+        original = os.link
+        def changed(source: str | os.PathLike[str], target: str | os.PathLike[str], *, follow_symlinks: bool = True) -> None:
+            Path(source).write_bytes(audio_bytes() + b'changed after hashing')
+            original(source, target, follow_symlinks=follow_symlinks)
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command), patch.object(local_music.os, 'link', side_effect=changed):
+            identifier = await self.submit_and_finish()
+        job = local_music.get(identifier)
+        self.assertEqual(job.error_code, 'local_music_output_changed')
+        self.assertTrue(local_music._pending(job).is_file())
+        self.assertEqual(db.list_tracks(), [])
+
+    async def test_disk_full_during_publication_retains_complete_audio_for_recovery(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command), \
+                patch.object(local_music.os, 'link', side_effect=OSError(errno.ENOSPC, 'disk full')):
+            identifier = await self.submit_and_finish()
+        job = local_music.get(identifier)
+        self.assertEqual(job.error_code, 'insufficient_disk')
+        self.assertEqual(local_music._pending(job).read_bytes(), audio_bytes())
+        self.assertEqual(db.list_tracks(), [])
+        await local_music.recover()
+        self.assertEqual(local_music.get(identifier).status, 'done')
+
+    async def test_catalog_space_is_rechecked_before_track_registration(self) -> None:
+        linked = False
+        original = os.link
+        def publish(source: str | os.PathLike[str], target: str | os.PathLike[str], *, follow_symlinks: bool = True) -> None:
+            nonlocal linked
+            original(source, target, follow_symlinks=follow_symlinks)
+            linked = True
+        def available(path: Path) -> int:
+            return 1 if linked and path == self.root else 100 * 1024**3
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command), \
+                patch.object(local_music, 'available_bytes', side_effect=available), \
+                patch.object(local_music.os, 'link', side_effect=publish):
+            identifier = await self.submit_and_finish()
+        job = local_music.get(identifier)
+        self.assertEqual(job.error_code, 'insufficient_disk')
+        self.assertEqual(local_music._pending(job).read_bytes(), audio_bytes())
+        self.assertEqual(db.list_tracks(), [])
+        await local_music.recover()
+        self.assertEqual(local_music.get(identifier).status, 'done')
+
+    async def test_recovery_publication_refuses_a_racing_output(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command):
+            job = await local_music.submit(self.body())
+            await local_music.cancel(job.id)
+        pending = local_music._artifact(job.id, 'output.wav', create=True)
+        pending.write_bytes(audio_bytes())
+        job.status = 'failed'
+        local_music._store(job)
+        self.connection.execute('UPDATE local_music_jobs SET output_sha256=? WHERE id=?', (local_music._digest(pending), job.id))
+        self.connection.commit()
+        original = os.link
+        def race(source: str | os.PathLike[str], target: str | os.PathLike[str], *, follow_symlinks: bool = True) -> None:
+            Path(target).write_bytes(b'recovery race winner')
+            original(source, target, follow_symlinks=follow_symlinks)
+        with patch.object(local_music.os, 'link', side_effect=race):
+            await local_music.recover()
+        job = local_music.get(job.id)
+        self.assertEqual(job.error_code, 'local_music_output_exists')
+        self.assertEqual(local_music._output(job).read_bytes(), b'recovery race winner')
+        self.assertEqual(pending.read_bytes(), audio_bytes())
+        self.assertEqual(db.list_tracks(), [])
 
 
     async def test_legacy_persisted_request_without_mode_remains_manual(self) -> None:
@@ -382,13 +629,9 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_music.get(identifier).status, 'done')
         self.assertEqual(len(db.list_tracks()), 1)
 
-    async def test_rename_failure_keeps_validated_pending_audio_for_recovery(self) -> None:
-        original = Path.replace
-        def interrupted(path: Path, target: str | os.PathLike[str]) -> Path:
-            if path.name == 'output.wav':
-                raise OSError('interrupted rename')
-            return original(path, target)
-        with patch.object(local_music, 'prepare_worker', side_effect=self.command), patch.object(Path, 'replace', new=interrupted):
+    async def test_publication_failure_keeps_validated_pending_audio_for_recovery(self) -> None:
+        with patch.object(local_music, 'prepare_worker', side_effect=self.command), \
+                patch.object(local_music.os, 'link', side_effect=OSError('interrupted publication')):
             identifier = await self.submit_and_finish()
         job = local_music.get(identifier)
         self.assertEqual(job.status, 'failed')
@@ -418,19 +661,14 @@ class LocalMusicJobsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(local_music.get(job.id).status, 'done')
         self.assertEqual(len(db.list_tracks()), 1)
 
-    async def test_recovery_rename_failure_preserves_newly_validated_output(self) -> None:
+    async def test_recovery_publication_failure_preserves_newly_validated_output(self) -> None:
         with patch.object(local_music, 'prepare_worker', side_effect=self.command):
             job = await local_music.submit(self.body())
             await local_music.cancel(job.id)
         job.status = 'running'
         local_music._store(job)
         local_music._artifact(job.id, 'output.wav', create=True).write_bytes(audio_bytes())
-        original = Path.replace
-        def interrupted(path: Path, target: str | os.PathLike[str]) -> Path:
-            if path.name == 'output.wav':
-                raise OSError('interrupted recovery rename')
-            return original(path, target)
-        with patch.object(Path, 'replace', new=interrupted):
+        with patch.object(local_music.os, 'link', side_effect=OSError('interrupted recovery publication')):
             await local_music.recover()
         self.assertTrue(local_music._pending(job).is_file())
         await local_music.recover()

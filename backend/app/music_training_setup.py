@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from .atomic_files import write_object
 from .job_lifecycle import await_cleanup
 from .module_catalog import ModuleEnvironment, available_bytes, platform_key
-from .module_contracts import LicenseScope, ModuleLicenseDeclaration, ModulePlan, ModulePlanRequest, ModulePlanStep
+from .module_contracts import LicenseCopyleft, LicenseScope, ModuleComponentIdentity, ModuleLicenseDeclaration, ModuleLicenseEvidence, ModulePlan, ModulePlanRequest, ModulePlanStep
 from .module_install import SourcePin, _uv_env, DownloadArtifact
 from .module_jobs import InstallContext, InstallOutcome, ModuleSetupError
 from .module_music_models import ModelArtifact, _path, _preflight, _publish, _valid_file
@@ -186,14 +186,36 @@ def prepared(environment: ModuleEnvironment, engine: MusicTrainingEngine) -> boo
     return environment_ready(environment, engine) and weights_ready(environment, engine)
 
 
-def _licenses(engine: MusicTrainingEngine) -> list[ModuleLicenseDeclaration]:
-    rows: list[tuple[str, str, LicenseScope, str, str]] = [
-        ('yue-trainer', 'Headless YuE2 trainer', 'code', 'Apache-2.0', 'https://github.com/speedyrulz/ComfyUI-YuE2-Trainer/blob/6a9355efff60589d93b41b569676f09d5db85d09/LICENSE'),
-        ('comfy-training', 'ComfyUI YuE2 model runtime', 'code', 'GPL-3.0', 'https://github.com/Comfy-Org/ComfyUI/blob/b058ec652802e1de24f1d429b3c7c1fb868f791c/LICENSE'),
-        ('yue-training-base', 'YuE2 BF16 training checkpoint', 'model', 'CC-BY-NC-4.0', 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE')]
-    return [ModuleLicenseDeclaration(component_id=identifier, name=name, scope=scope, status='declared', declared_license=license_name,
-        source_url=url, notes='Code and model terms are separate. YuE2 permits some creator output monetization; this does not establish commercial adapter redistribution rights.', reviewed_at='2026-10-15')
-        for identifier, name, scope, license_name, url in rows]
+def training_license_declarations(engine: MusicTrainingEngine) -> list[ModuleLicenseDeclaration]:
+    rows: list[tuple[str, str, LicenseScope, str, str, str, str, LicenseCopyleft]] = [
+        ('yue-trainer', 'Headless YuE2 trainer', 'code', 'Apache-2.0', 'https://github.com/speedyrulz/ComfyUI-YuE2-Trainer/blob/6a9355efff60589d93b41b569676f09d5db85d09/LICENSE',
+            '6a9355efff60589d93b41b569676f09d5db85d09', 'cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30', 'none_declared'),
+        ('comfy-training', 'ComfyUI YuE2 model runtime', 'code', 'GPL-3.0', 'https://github.com/Comfy-Org/ComfyUI/blob/b058ec652802e1de24f1d429b3c7c1fb868f791c/LICENSE',
+            'b058ec652802e1de24f1d429b3c7c1fb868f791c', '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986', 'strong'),
+        ('yue-training-base', 'YuE2 BF16 training checkpoint', 'model', 'CC-BY-NC-4.0', 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE',
+            '1647252d68b70cbead046ffd3f7caf036dde47ee', 'c7a0e99360555513ff56815b5dbbc8f0b27a3ad762ceaeeab6838baea9743b3a', 'unknown')]
+    result: list[ModuleLicenseDeclaration] = []
+    for identifier, name, scope, license_name, url, revision, sha256, copyleft in rows:
+        evidence = [ModuleLicenseEvidence(kind='license_file', source_url=url, revision=revision,
+            sha256=sha256, observed_at='2026-10-17', reviewer='OpenFabric Studio primary-source review')]
+        identities: list[ModuleComponentIdentity] = []
+        if scope == 'model':
+            for artifact in _published_artifacts(engine):
+                repository, resource = artifact.url.split('/resolve/', 1)
+                model_revision, filename = resource.split('/', 1)
+                identities.append(ModuleComponentIdentity(repository_url=repository,
+                    revision=model_revision, filename=filename, sha256=artifact.sha256))
+            evidence.append(ModuleLicenseEvidence(kind='publisher_model_card',
+                source_url='https://huggingface.co/Comfy-Org/YuE2/raw/2f76ca75e6ee094169de899cc7fc99d6887e2196/README.md',
+                revision='2f76ca75e6ee094169de899cc7fc99d6887e2196', sha256='84cc15563f695b19ab2712a8a21c232f741b9297a33d16aaf4537f052868ffe2',
+                observed_at='2026-10-17', reviewer='OpenFabric Studio primary-source review'))
+        result.append(ModuleLicenseDeclaration(component_id=identifier, name=name, scope=scope,
+            status='declared', declared_license=license_name, source_url=url,
+            notes='Code and BF16 training-model terms are separate. YuE2 permits some creator output monetization; this does not establish commercial adapter redistribution or source-recording rights. Expected payload metadata was checked without downloading weights.',
+            reviewed_at='2026-10-17', restriction='noncommercial' if scope == 'model' else 'unrestricted_declared',
+            redistribution='unknown' if scope == 'model' else 'declared_allowed',
+            copyleft=copyleft, evidence=evidence, identities=identities))
+    return result
 
 
 def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePlan:
@@ -222,7 +244,7 @@ def plan(request: ModulePlanRequest, environment: ModuleEnvironment) -> ModulePl
     detail = ('Existing unowned training files were preserved; use a new managed location or review those files manually.' if conflict else
         'Prepare isolated pinned training dependencies and required models. Existing generation source, environments, models and user data are preserved.')
     step = ModulePlanStep(module_id=engine, name='YuE2 training preparation',
-        operation=operation, estimated_download_bytes=size, detail=detail, actions=[], licenses=_licenses(engine))
+        operation=operation, estimated_download_bytes=size, detail=detail, actions=[], licenses=training_license_declarations(engine))
     warnings = ['Training environments and checkpoint files are separate from generation.',
         'Training setup is experimental on Apple Silicon. Installation does not establish musical quality or adapter compatibility.']
     if not installed:

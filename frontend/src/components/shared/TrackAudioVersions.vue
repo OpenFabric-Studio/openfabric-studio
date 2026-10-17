@@ -12,6 +12,11 @@ import StatusBadge from './StatusBadge.vue'
 import VoiceApplyStatus from './VoiceApplyStatus.vue'
 import TaggedAudioDownload from './TaggedAudioDownload.vue'
 import AudioQualityReport from './AudioQualityReport.vue'
+import MusicAnalysisPanel from './MusicAnalysisPanel.vue'
+import VoiceMixControls from './VoiceMixControls.vue'
+import VoiceMixReport from './VoiceMixReport.vue'
+import { parseVoiceMixSettings } from '../../api/generated'
+import type { VoiceMixSettings } from '../../api/generated'
 const props = defineProps<{ trackId: number; fallbackAudioUrl?: string | null; fallbackFilename?: string | null; voiceApplying?: boolean }>()
 const emit = defineEmits<{ playing: [value: boolean]; processing: [value: boolean] }>()
 const { t, te } = useI18n()
@@ -29,6 +34,8 @@ const playbackStarting = ref(false)
 // state again when the request starts, fails, or is cancelled.
 watch(() => playerPlaying.value || playbackStarting.value, value => emit('playing', value), { flush: 'sync' })
 const voiceId = ref('')
+const voiceMix = ref<VoiceMixSettings | null>(null)
+const voiceMixValid = ref(true)
 const format = ref<AudioExportFormat>('mp3')
 const sourceOrigin = ref<'auto' | 'recorded' | 'unknown'>('auto')
 const analysis = computed(() => [...exports.value].reverse().find(item => item.operation === 'analyze' && item.status === 'done' && item.version_id === selectedId.value))
@@ -48,6 +55,11 @@ let session = 0
 let playbackRequest = 0
 let actionController: AbortController | undefined
 const selected = computed(() => versions.value.find(item => item.id === selectedId.value))
+const selectedMix = computed(() => {
+  const report = selected.value?.mix
+  return report?.audio_version_id === selected.value?.id && report?.source.track_id === props.trackId
+    && (!selected.value?.source_version_id || selected.value.source_version_id === report.source.version_id) ? report : null
+})
 const playbackFile = computed(() => playback.value?.export ?? playback.value?.version)
 const playable = computed(() => playbackFile.value?.audio_url ?? (!loaded.value ? props.fallbackAudioUrl : null))
 const playbackFilename = computed(() => playbackFile.value?.filename ?? (!loaded.value ? props.fallbackFilename : null))
@@ -200,10 +212,11 @@ async function perform(action: (signal: AbortSignal) => Promise<void>) {
 }
 function current(signal: AbortSignal, trackId: number) { return !disposed && !signal.aborted && trackId === props.trackId }
 function addVoice() {
-  if (!originalAvailable.value || !readyVoices.value.some(item => item.id === voiceId.value)) return
+  if (!originalAvailable.value || !readyVoices.value.some(item => item.id === voiceId.value) || !voiceMixValid.value) return
   const trackId = props.trackId, chosenVoice = voiceId.value
+  const mix = voiceMix.value === null ? null : parseVoiceMixSettings(voiceMix.value)
   void perform(async signal => {
-    const version = await createAudioVersion(trackId, chosenVoice, signal)
+    const version = mix === null ? await createAudioVersion(trackId, chosenVoice, signal) : await createAudioVersion(trackId, chosenVoice, signal, { mix })
     if (!current(signal, trackId)) return
     upsertVersion(version)
     selectedId.value = version.id
@@ -265,6 +278,8 @@ watch(() => props.trackId, () => {
   versions.value = []
   exports.value = []
   originalAvailable.value = false
+  voiceMix.value = null
+  voiceMixValid.value = true
   loaded.value = false
   refresh()
 }, { immediate: true })
@@ -298,6 +313,8 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
     <a v-if="playable" :href="playable" :download="playbackFilename ?? ''" class="inline-block text-xs text-accent1 hover:underline">{{ t('trackAudio.downloadSelected', { format: playbackFormat }) }}</a>
     <TaggedAudioDownload v-if="playback" class="ml-3" :track-id="trackId" :version-id="playback.version.id" :export-id="playback.export?.id" />
     <AudioQualityReport :metrics="playbackMetrics" :target-result="playback?.export?.target_result" :measurement-unavailable="measurementsUnavailable" />
+    <MusicAnalysisPanel v-if="selected?.status === 'done'" :source="{ kind: 'version', track_id: props.trackId, version_id: selected.id }" />
+    <VoiceMixReport :report="selectedMix" :requested="!!selected?.mix_settings" :completed="selected?.status === 'done'" />
     <p v-if="playback?.export && !(playback.export.strict_release && playback.export.provenance?.production?.gate.approved_for_release)" data-release-review role="note" class="text-xs text-amber-300">{{ t(playback.export.provenance?.production ? 'exportQuality.productionReview' : 'exportQuality.legacyLineage') }}</p>
     <div v-if="playback?.export?.provenance" class="flex flex-wrap gap-3 text-xs text-text-dim"><span>{{ t('exportQuality.origin', { origin: playback.export.provenance.content_origin }) }}</span><a v-if="playback.export.provenance_url" :href="playback.export.provenance_url" download class="text-accent1 underline">{{ t('exportQuality.json') }}</a><a v-if="playback.export.manifest_url" :href="playback.export.manifest_url" download class="text-accent1 underline">{{ t('exportQuality.manifest') }}</a></div>
     <div v-if="selected && selected.status !== 'done' && !active(selected.status)" class="flex flex-wrap items-center gap-2 text-xs" aria-live="polite">
@@ -312,9 +329,10 @@ onBeforeUnmount(() => { disposed = true; session++; playbackRequest++; playerPla
         <p v-if="voicesUnavailable" role="status" class="text-xs text-status-failed">{{ t('trackAudio.voicesUnavailable') }}</p>
         <div class="flex flex-wrap items-end gap-2">
           <label class="min-w-36 flex-1 space-y-1 text-xs text-text-dim"><span class="block">{{ t('trackAudio.voice') }}</span><select v-model="voiceId" :disabled="pending || !originalAvailable" class="w-full rounded-lg border border-border bg-panel p-2 text-text"><option v-if="!readyVoices.length" value="">{{ t('trackAudio.noVoices') }}</option><option v-for="voice in readyVoices" :key="voice.id" :value="voice.id">{{ voice.name }}</option></select></label>
-          <button type="button" :disabled="pending || !originalAvailable || !voiceId" class="rounded-lg border border-border bg-panel px-3 py-2 text-xs text-accent1 disabled:opacity-50" @click="addVoice">{{ t('trackAudio.addVoice') }}</button>
+          <button type="button" :disabled="pending || !originalAvailable || !voiceId || !voiceMixValid" class="rounded-lg border border-border bg-panel px-3 py-2 text-xs text-accent1 disabled:opacity-50" @click="addVoice">{{ t('trackAudio.addVoice') }}</button>
           <RouterLink to="/voice-clone" class="text-xs text-accent1 hover:underline">{{ t('voiceClone.manage') }}</RouterLink>
         </div>
+        <VoiceMixControls v-model="voiceMix" :disabled="pending || !originalAvailable" @valid="voiceMixValid = $event" />
         <div class="flex flex-wrap items-end gap-2">
           <label class="space-y-1 text-xs text-text-dim"><span class="block">{{ t('trackAudio.format') }}</span><select v-model="format" :disabled="pending" class="rounded-lg border border-border bg-panel p-2 text-text"><option value="mp3">MP3</option><option value="wav">WAV</option><option value="flac">FLAC</option></select></label>
           <button type="button" :disabled="pending || selected?.status !== 'done'" class="rounded-lg border border-border bg-panel px-3 py-2 text-xs text-accent1 disabled:opacity-50" @click="addExport">{{ t('trackAudio.export') }}</button>

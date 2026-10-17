@@ -14,6 +14,7 @@ from .. import stable_lora
 from ..module_security import require_local_origin
 from ..music_lora_contracts import MusicLoraError
 from ..stable_lora_contracts import StableLoraTrainingJob, StableLoraTrainingJobs, StableLoraTrainingRequest, StableLoraTrainingStatus
+from .routes_music_terms import require_usage
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,7 @@ async def jobs() -> StableLoraTrainingJobs:
 
 @router.post('/jobs', response_model=StableLoraTrainingJob)
 async def submit(body: StableLoraTrainingRequest) -> StableLoraTrainingJob:
+    require_usage('stable_audio3', 'training')
     return await stable_lora.submit(body)
 
 

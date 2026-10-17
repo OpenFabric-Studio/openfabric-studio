@@ -386,6 +386,44 @@
         "sha256": "c5caafc6bd29fc3d4cb7a08b0d3725041fa2100711f86a4f05d2638c532871d2",
         "bytes": 1704313504
       }
+    ],
+    "ace-base": [
+      {
+        "path": "checkpoints/acestep-v15-base/apg_guidance.py",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/apg_guidance.py",
+        "sha256": "0c0ce9755952c99307ecad2fac67863d43258e34541cd37ce2f2221f59e76b15",
+        "bytes": 7956
+      },
+      {
+        "path": "checkpoints/acestep-v15-base/config.json",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/config.json",
+        "sha256": "9bb4f832f2e5e6c8bf7bddab3c6a6da1b13c01d072efbf0ed3c830536c473359",
+        "bytes": 1940
+      },
+      {
+        "path": "checkpoints/acestep-v15-base/configuration_acestep_v15.py",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/configuration_acestep_v15.py",
+        "sha256": "b89870c5c7a7ce060eb0bcdbb5ffc86b0b1a324ca325a26be552ea1b42496dc5",
+        "bytes": 13130
+      },
+      {
+        "path": "checkpoints/acestep-v15-base/model.safetensors",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/model.safetensors",
+        "sha256": "4177f600501a6d4bd81cadaa0abac557ffd15c54e5c8cb52053cdb24a0844d6b",
+        "bytes": 4787825604
+      },
+      {
+        "path": "checkpoints/acestep-v15-base/modeling_acestep_v15_base.py",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/modeling_acestep_v15_base.py",
+        "sha256": "d5f67ca269f8b854a86e203b843534ab62728193e45277115f667b00ab5aa2b6",
+        "bytes": 95545
+      },
+      {
+        "path": "checkpoints/acestep-v15-base/silence_latent.pt",
+        "url": "https://huggingface.co/ACE-Step/acestep-v15-base/resolve/e432212fec32b8965a14ffa57ae653438d6abd14/silence_latent.pt",
+        "sha256": "a778e9dd942f5e8b2c09c55370782d318834432b03dabbcdf70e6ed49ad6358b",
+        "bytes": 3841215
+      }
     ]
   }
 }

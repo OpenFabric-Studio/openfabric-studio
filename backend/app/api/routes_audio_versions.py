@@ -39,7 +39,22 @@ async def list_versions(track_id: TrackId) -> TrackAudioVersionsResponse:
 @router.post('/{track_id}/versions', response_model=AudioVersion)
 async def create_version(track_id: TrackId, request: CreateAudioVersionRequest) -> AudioVersion:
     with _storage_errors():
-        return audio_versions.start_version(track_id, request.voice_id)
+        return audio_versions.start_version(track_id, request.voice_id, mix=request.mix)
+
+
+@router.get('/{track_id}/versions/{version_id}/mix/artifacts/{artifact_id}')
+async def mix_artifact(track_id: TrackId, version_id: VersionId, artifact_id: VersionId) -> FileResponse:
+    from .. import voice_mix
+    from ..music_dsp import MusicDspError
+    with _storage_errors():
+        record = audio_versions._stored(track_id, version_id)
+        if record.path is None:
+            raise HTTPException(status_code=404, detail='audio_version_missing')
+        try:
+            path = await voice_mix.artifact_path(record.path, version_id, artifact_id)
+        except MusicDspError as error:
+            raise HTTPException(status_code=409, detail=error.code) from error
+    return FileResponse(path, media_type='audio/wav', filename=path.name)
 
 
 @router.get('/{track_id}/versions/{version_id}/audio')

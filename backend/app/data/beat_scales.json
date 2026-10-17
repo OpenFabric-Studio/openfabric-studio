@@ -1,0 +1,448 @@
+{
+  "scales": [
+    {
+      "id": "cn_gong_report",
+      "title": "Gong candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "cn_shang_report",
+      "title": "Shang candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        500.0,
+        700.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Rotation candidate, not a universal definition."
+    },
+    {
+      "id": "cn_jue_report",
+      "title": "Jue candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        300.0,
+        500.0,
+        800.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Rotation candidate."
+    },
+    {
+      "id": "cn_zhi_report",
+      "title": "Zhi candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        500.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Rotation candidate."
+    },
+    {
+      "id": "cn_yu_report",
+      "title": "Yu candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        300.0,
+        500.0,
+        700.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "cn_qingyue_report",
+      "title": "Qingyue candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        500.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "cn_yayue_report",
+      "title": "Yayue candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        600.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "cn_yanyue_report",
+      "title": "Yanyue candidate",
+      "region": "china",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        500.0,
+        700.0,
+        900.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_yo_report",
+      "title": "Yo candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        500.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_in_report",
+      "title": "In / Miyako-bushi candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        500.0,
+        700.0,
+        800.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Names are not interchangeable in every repertoire."
+    },
+    {
+      "id": "jp_hirajoshi_report",
+      "title": "Hirajoshi candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        300.0,
+        700.0,
+        800.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. One reported variant; other published variants differ."
+    },
+    {
+      "id": "jp_kumoi_report",
+      "title": "Kumoi candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        300.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Reported variant."
+    },
+    {
+      "id": "jp_iwato_report",
+      "title": "Iwato candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        500.0,
+        600.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_yonanuki_major_report",
+      "title": "Yonanuki major candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_yonanuki_minor_report",
+      "title": "Yonanuki minor candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        300.0,
+        700.0,
+        800.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_ryukyu_report",
+      "title": "Ryukyu candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        400.0,
+        500.0,
+        700.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. "
+    },
+    {
+      "id": "jp_major_report",
+      "title": "Major for city-pop arrangement candidate",
+      "region": "japan",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        500.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Generic arrangement scale; no claim that this alone defines city pop."
+    },
+    {
+      "id": "kr_pyeongjo_report",
+      "title": "Pyeongjo approximation",
+      "region": "korea",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        500.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Explicit equal-tempered approximation; nonghyeon/sigimsae are not encoded."
+    },
+    {
+      "id": "kr_gyemyeonjo_report",
+      "title": "Gyemyeonjo approximation",
+      "region": "korea",
+      "degrees_cents": [
+        0.0,
+        300.0,
+        500.0,
+        700.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Explicit equal-tempered approximation; no claim of complete sanjo performance."
+    },
+    {
+      "id": "in_bilawal_report",
+      "title": "Bilawal pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        500.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_kalyan_report",
+      "title": "Kalyan pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        600.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_khamaj_report",
+      "title": "Khamaj pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        500.0,
+        700.0,
+        900.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_kafi_report",
+      "title": "Kafi pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        300.0,
+        500.0,
+        700.0,
+        900.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_asavari_report",
+      "title": "Asavari pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        300.0,
+        500.0,
+        700.0,
+        800.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_bhairavi_report",
+      "title": "Bhairavi pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        300.0,
+        500.0,
+        700.0,
+        800.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_bhairav_report",
+      "title": "Bhairav pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        400.0,
+        500.0,
+        700.0,
+        800.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_purvi_report",
+      "title": "Purvi pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        400.0,
+        600.0,
+        700.0,
+        800.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_marwa_report",
+      "title": "Marwa pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        400.0,
+        600.0,
+        700.0,
+        900.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_todi_report",
+      "title": "Todi pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        300.0,
+        600.0,
+        700.0,
+        800.0,
+        1100.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_bhupali_report",
+      "title": "Bhupali pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        400.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_malkauns_report",
+      "title": "Malkauns pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        300.0,
+        500.0,
+        800.0,
+        1000.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    },
+    {
+      "id": "in_durga_report",
+      "title": "Durga pitch collection candidate",
+      "region": "india",
+      "degrees_cents": [
+        0.0,
+        200.0,
+        500.0,
+        700.0,
+        900.0
+      ],
+      "notes": "Report §6.2 candidate in 12-TET; variants and traditional functions require musician review. Pitch collection only: ascent/descent, emphasis, phrases and ornaments of a raga are not implemented."
+    }
+  ]
+}

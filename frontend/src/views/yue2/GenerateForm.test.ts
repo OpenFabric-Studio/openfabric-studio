@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick, reactive, type App } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import GenerateForm from './GenerateForm.vue'
@@ -7,6 +7,9 @@ import { i18n, setLocale } from '../../i18n'
 import type { JsonObject, ReferenceAbcResponse } from '../../api/contracts'
 import * as references from '../../api/references'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
+beforeEach(() => { vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true })) })
 import { pendingMusicAdapter, pendingYueDraft, pendingYueReference } from '../../composables/generationDrafts'
 const state = reactive<{ pendingParamsInsert: JsonObject | null; pendingAbcInsert: string | null }>({ pendingParamsInsert: null, pendingAbcInsert: null })
 const generateBatch = vi.fn()
@@ -19,6 +22,20 @@ afterEach(() => { app?.unmount(); app = undefined; document.body.replaceChildren
 async function settle() { for (let index = 0; index < 5; index++) await nextTick() }
 async function mount() { setLocale('en'); const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: GenerateForm }] }); await router.push('/'); const container = document.body.appendChild(document.createElement('div')); app = createApp(GenerateForm).use(i18n).use(router); app.mount(container); await settle(); return container }
 function button(container: HTMLElement, label: string) { const found = [...container.querySelectorAll('button')].find(node => node.textContent?.trim() === label); if (!found) throw new Error(`Missing ${label}`); return found }
+it('keeps new YuE generation blocked until explicit non-commercial acknowledgement', async () => {
+  const before = { engine: 'yue2', operation: 'generation', revision: 0, noncommercial_enabled: false, allowed: false,
+    requirements: [{ component_id: 'yue-weights', name: 'YuE weights', scope: 'model', restriction: 'noncommercial', source_url: 'https://example.org/terms', terms_digest: 'a'.repeat(64), acknowledged: false }] } satisfies Awaited<ReturnType<typeof terms.getMusicTerms>>
+  vi.mocked(terms.getMusicTerms).mockResolvedValue(before)
+  vi.mocked(terms.acceptMusicTerms).mockResolvedValue({ ...before, allowed: true, noncommercial_enabled: true, revision: 1, requirements: before.requirements.map(row => ({ ...row, acknowledged: true })) })
+  const container = await mount()
+  expect(button(container, '✨ Create music').disabled).toBe(true)
+  const choices = container.querySelectorAll('section[aria-label="Publisher terms"] input')
+  for (const choice of choices) { if (!(choice instanceof HTMLInputElement)) throw new Error('Missing terms choice'); choice.click() }
+  await settle(); button(container, 'Accept reviewed terms').click(); await settle()
+  expect(terms.acceptMusicTerms).toHaveBeenCalledWith(expect.objectContaining({ engine: 'yue2', operation: 'generation', allow_noncommercial: true }), expect.any(AbortSignal))
+  expect(button(container, '✨ Create music').disabled).toBe(false)
+  expect(generateBatch).not.toHaveBeenCalled()
+})
 it('applies trained acoustic adapter previews and clears both adapters for the base comparison', async () => {
   pendingMusicAdapter.value = { engine: 'yue2', target: 'nar', selection: { id: 'b'.repeat(32), strength: 1 } }
   const container = await mount()

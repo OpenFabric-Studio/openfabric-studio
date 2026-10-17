@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import * as library from '../../api/musicLora'
@@ -18,6 +18,10 @@ import type { LoraDatasetOperationResponse } from '../../api/generated'
 import ModelLoraTraining from './ModelLoraTraining.vue'
 import TrainingOptionsHelp from './TrainingOptionsHelp.vue'
 import TrainingJobProgress from './TrainingJobProgress.vue'
+import MusicTermsCard from '../../components/shared/MusicTermsCard.vue'
+const RegionalDatasetReview = defineAsyncComponent(() => import('./RegionalDatasetReview.vue'))
+const regionalReviewOpen = ref(false)
+function regionalToggle(event: Event) { if (event.target instanceof HTMLDetailsElement) regionalReviewOpen.value = event.target.open }
 
 const props = withDefaults(defineProps<{ engine?: Exclude<MusicLoraCapabilities['engines'][number]['engine'], 'ace_step'> }>(), { engine: 'stable_audio3' })
 const { t } = useI18n()
@@ -50,7 +54,8 @@ const weightsReady = computed(() => variant.value === 'small-music' ? status.val
 const stableCapability = computed(() => capabilities.value.find(engine => engine.engine === 'stable_audio3'))
 const ready = computed(() => status.value?.supported && status.value.installed && weightsReady.value && stableCapability.value?.training)
 const setupRequired = computed(() => status.value && (!status.value.supported || !status.value.installed || !weightsReady.value || stableCapability.value?.training === false))
-const canTrain = computed(() => ready.value && historyKnown.value && !active.value && !trainingNameTaken.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
+const termsBlocked = ref(false)
+const canTrain = computed(() => !termsBlocked.value && ready.value && historyKnown.value && !active.value && !trainingNameTaken.value && name.value.trim().length > 0 && name.value.length <= 120 && samples.value.length > 0 && samples.value.length <= 100
   && samples.value.every(sample => sample.caption.trim().length > 0 && sample.caption.length <= 4000)
   && Number.isInteger(maxSteps.value) && maxSteps.value >= 1 && maxSteps.value <= 100000
   && Number.isFinite(learningRate.value) && learningRate.value >= 0.0000001 && learningRate.value <= 0.01
@@ -77,6 +82,8 @@ let alive = true, generation = 0, controller: AbortController | undefined
 function ongoing(job: StableLoraTrainingJob): boolean { return job.status === 'queued' || job.status === 'running' }
 function errorText(code: string | null | undefined, fallback: string): string {
   switch (code) {
+    case 'music_terms_required':
+    case 'music_noncommercial_disabled': return t('musicTerms.required')
     case 'music_lora_name_exists': return t('musicLora.errors.nameExists')
     case 'music_lora_name_unavailable': return t('musicLora.errors.nameUnavailable')
     case 'music_lora_format_invalid':
@@ -209,6 +216,7 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
     </section>
 
     <form v-if="props.engine === 'stable_audio3'" data-training :aria-label="t('musicLora.stableTraining')" class="space-y-6 rounded-xl border border-border bg-panel p-5" @submit.prevent="start">
+      <MusicTermsCard engine="stable_audio3" operation="training" @blocked="termsBlocked = $event" />
       <fieldset class="min-w-0 space-y-4">
         <legend class="mb-3 font-semibold text-text">{{ t('musicLora.simple.nameStep') }}</legend>
         <div class="grid gap-4 sm:grid-cols-2">
@@ -247,6 +255,9 @@ onBeforeUnmount(() => { alive = false; ++generation; controller?.abort(); poll.s
       </fieldset>
     </form>
 
+    <CollapsibleDetails v-if="props.engine === 'stable_audio3'" :summary="t('regionalDatasets.title')" @toggle="regionalToggle">
+      <RegionalDatasetReview v-if="regionalReviewOpen" :disabled="busy || active" />
+    </CollapsibleDetails>
     <section v-if="props.engine === 'stable_audio3'" class="space-y-4">
       <h3 class="font-semibold text-text">{{ t('musicLora.trainingHistory') }}</h3>
       <p v-if="!jobs.length" class="text-sm text-text-dim">{{ t('musicLora.emptyTraining') }}</p>

@@ -10,6 +10,18 @@ import { appNavigationEn } from './appNavigation'
 import { homeOverviewEn } from './homeOverview'
 import { musicWorkspaceEn } from './musicWorkspace'
 import { musicQueueEn } from './musicQueue'
+import { musicTermsEn } from './musicTerms'
+import { musicAnalysisEn } from './musicAnalysis'
+import { musicArtifactsEn } from './musicArtifacts'
+import { beatsEn } from './beats'
+import { beatPresetsEn } from './beatPresets'
+import { voiceMixEn } from './voiceMix'
+import { musicConditioningEnglish } from './musicConditioning'
+import { songFromBeatEnglish } from './songFromBeat'
+import { replacementEnglish } from './replacement'
+import { mashupsEnglish } from './mashups'
+import { beatSongMixesEnglish } from './beatSongMixes'
+import { regionalDatasetsEnglish } from './regionalDatasets'
 import { localMusicEn } from './localMusic'
 import { musicLoraEn } from './musicLora'
 import { loraRecoveryEn } from './loraRecovery'
@@ -60,6 +72,18 @@ export default {
   homeOverview: homeOverviewEn,
   musicWorkspace: musicWorkspaceEn,
   musicQueue: musicQueueEn,
+  musicTerms: musicTermsEn,
+  musicAnalysis: musicAnalysisEn,
+  musicArtifacts: musicArtifactsEn,
+  beats: beatsEn,
+  beatPresets: beatPresetsEn,
+  voiceMix: voiceMixEn,
+  musicConditioning: musicConditioningEnglish,
+  songFromBeat: songFromBeatEnglish,
+  replacement: replacementEnglish,
+  mashups: mashupsEnglish,
+  beatSongMixes: beatSongMixesEnglish,
+  regionalDatasets: regionalDatasetsEnglish,
   localMusic: localMusicEn,
   musicLora: musicLoraEn,
   loraRecovery: loraRecoveryEn,
@@ -597,6 +621,8 @@ voiceProfiles: {
     musicAdapters: 'managed music adapters and their metadata',
     musicTraining: 'Stable Audio training inputs, checkpoints and worker logs',
     musicTrainingRuns: 'YuE training inputs, checkpoints and worker logs',
+    musicAnalysis: 'saved music analysis, source snapshots and recovery files',
+    musicArtifacts: 'reviewed cleanup plans, receipts and retained recovery files',
     models: 'singing models downloaded for Voice Clone',
     logs: 'logs from generation, training, and the engines',
     database: 'catalog of songs and projects',

@@ -58,6 +58,31 @@ class AudioVersionsTests(unittest.IsolatedAsyncioTestCase):
         if db._db is not None:
             db._db.close()
 
+    async def test_measured_settings_survive_cancel_reload_and_retry_on_the_same_version(self) -> None:
+        from app.voice_mix_contracts import VoiceMixSettings
+        engine = self.root / 'engine'
+        engine.mkdir()
+        (engine / 'inference.py').write_text('# fixture engine', encoding='utf-8')
+        entered = asyncio.Event()
+        jobs: list[voice_build.ApplyJob] = []
+        async def wait(job: voice_build.ApplyJob) -> None:
+            jobs.append(job)
+            entered.set()
+            await asyncio.Event().wait()
+        settings = VoiceMixSettings(vocal_level='manual', manual_gain_db=-3.0)
+        with patch.object(voice_build, '_apply_inner', side_effect=wait):
+            version = audio_versions.start_version(self.track_id, self.voice_id, mix=settings)
+            await entered.wait()
+            self.assertEqual(version.mix_settings, settings)
+            self.assertEqual(jobs[0].mix_settings, settings)
+            await audio_versions.cancel_version(self.track_id, version.id)
+            entered.clear()
+            self.assertEqual(audio_versions.list_versions(self.track_id).versions[-1].mix_settings, settings)
+            retried = await audio_versions.retry_version(self.track_id, version.id)
+            await entered.wait()
+            self.assertEqual(retried.mix_settings, settings)
+            self.assertEqual(jobs[-1].mix_settings, settings)
+
     async def test_progress_follows_actual_holder_and_freezes_after_cancellation(self) -> None:
         entered, release = asyncio.Event(), asyncio.Event()
         async def wait(job: voice_build.ApplyJob) -> None:

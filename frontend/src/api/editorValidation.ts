@@ -3,6 +3,7 @@ import { defaultMasterSettings } from '../audio/mixerEngine'
 import type { ChannelSettings, MasterSettings, MixSettings } from '../audio/mixerEngine'
 import type { Clip, TimelineLane, TimelineProject } from '../audio/timelineTypes'
 import type { MidiNote } from '../audio/miniMidiPlayer'
+import { parseBeatClipLink, parseMusicProjectArtifact, parseMusicProjectProvenance } from './generated'
 
 function invalid(): never {
   throw new TypeError('Invalid saved editor settings')
@@ -113,6 +114,8 @@ function parseClip(value: unknown): Clip {
     notes: optional(row.notes, (item) => array(item, parseNote)),
     instrument: optional(row.instrument, (item) => literal(item, ['sawtooth', 'square', 'sine', 'triangle'])),
     muted: optional(row.muted, boolean), solo: optional(row.solo, boolean),
+    beatLink: row.beatLink == null ? undefined : parseBeatClipLink(row.beatLink),
+    sourceArtifact: row.sourceArtifact == null ? undefined : parseMusicProjectArtifact(row.sourceArtifact),
   }
 }
 
@@ -127,7 +130,7 @@ function parseLane(value: unknown): TimelineLane {
 export function parseTimelineProject(value: unknown): TimelineProject {
   const row = object(value)
   if (row.version !== 1) return invalid()
-  const loopRegion = optional(row.loopRegion, (value) => {
+  const loopRegion = optional(row.loopRegion ?? undefined, (value) => {
     const loop = object(value), start = number(loop.start, 0)
     return { start, end: number(loop.end, start), enabled: boolean(loop.enabled) }
   })
@@ -135,5 +138,6 @@ export function parseTimelineProject(value: unknown): TimelineProject {
     version: 1, lanes: array(row.lanes, parseLane), master: parseMasterSettings(row.master),
     pxPerSecond: number(row.pxPerSecond, 5, 400), bpm: number(row.bpm, 20, 999),
     snapEnabled: boolean(row.snapEnabled), loopRegion,
+    musicProvenance: row.musicProvenance == null ? undefined : parseMusicProjectProvenance(row.musicProvenance),
   }
 }

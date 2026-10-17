@@ -6,6 +6,8 @@ export const localMusicEn = {
   missingSelectedWeights: 'Model weights for the selected model are missing. Open engine setup in Settings.', busy: 'Another generation or setup operation is running. Wait for it to finish or cancel it before trying again.',
   loadFailed: 'Could not refresh local music. Check engine setup and refresh history.',
   actionFailed: 'Could not confirm the generation action. Refresh history before trying again.',
+  insufficientDisk: 'There is not enough free space for the audio and temporary files. Free some space, then try again. Existing recordings are preserved.',
+  outputExists: 'An output file already exists at this job destination. It has been preserved. Refresh history before starting another attempt.',
   historyIncomplete: 'Some history could not be read. Existing audio is preserved; review your library before regenerating.',
   title: 'Track title', prompt: 'Music description or style tags', duration: 'Duration (seconds)', seed: 'Seed', variant: 'Stable Audio model',
   small: 'Small Music', medium: 'Medium', instrumental: 'Instrumental generation; lyrics are not supported in this integration.',

@@ -6,7 +6,7 @@ import * as tracksApi from '../../api/tracks'
 import type { SavedTrack } from '../../api/tracks'
 
 const { t } = useI18n()
-const props = withDefaults(defineProps<{ trackOnly?: boolean; selectedTrackIds?: readonly number[] }>(), { trackOnly: false, selectedTrackIds: () => [] })
+const props = withDefaults(defineProps<{ trackOnly?: boolean; selectedTrackIds?: readonly number[]; fullMixLabel?: string }>(), { trackOnly: false, selectedTrackIds: () => [] })
 
 const emit = defineEmits<{
   pick: [payload: { sourceUrl: string; sourceLabel: string; trackId?: number }]
@@ -111,7 +111,7 @@ async function onFileSelected(event: Event) {
                 :disabled="props.trackOnly && props.selectedTrackIds.includes(trk.id)"
                 @click="pick(trk.audio_url, trk.title || t('library.trackFallback'), trk.id)"
               >
-                {{ t(props.trackOnly ? props.selectedTrackIds.includes(trk.id) ? 'library.alreadyAdded' : 'library.addToTraining' : 'library.fullMix') }}
+                {{ props.trackOnly && props.selectedTrackIds.includes(trk.id) ? t('library.alreadyAdded') : props.fullMixLabel ?? t(props.trackOnly ? 'library.addToTraining' : 'library.fullMix') }}
               </button>
               <button
                 v-for="name in props.trackOnly ? [] : Object.keys(trk.stems || {})"

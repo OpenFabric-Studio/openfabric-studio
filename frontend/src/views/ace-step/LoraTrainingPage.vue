@@ -719,6 +719,7 @@ async function checkTrainedFiles() {
       <template v-if="exportReview">
         <p>{{ t('loraExport.destination') }}</p><p class="break-all font-mono text-text">{{ exportReview.result.export_path }}</p>
         <p>{{ t('loraExport.source') }}</p><p class="break-all font-mono">{{ exportReview.result.source }}</p>
+        <p v-if="exportReview.result.required_free_bytes != null && exportReview.result.free_bytes != null">{{ t('loraExport.storage', { required: (exportReview.result.required_free_bytes / 1024 ** 2).toFixed(1), free: (exportReview.result.free_bytes / 1024 ** 2).toFixed(1) }) }}</p>
         <p class="rounded-lg border border-border p-3 text-text">{{ t('loraExport.noDeletion') }}</p>
         <p v-if="store.exportError" role="alert" class="text-status-failed">{{ store.exportError }}</p>
         <div class="flex flex-wrap gap-3">

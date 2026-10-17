@@ -22,6 +22,7 @@ from .video_contracts import VIDEO_CLIENT_MODELS
 from .audio_version_contracts import AudioVersion, TrackAudioVersionsResponse, CreateAudioVersionRequest
 from .audio_encoding import CLIENT_MODELS as AUDIO_CLIENT_MODELS
 from .voice_profile_contracts import VOICE_PROFILE_CLIENT_MODELS
+from .voice_mix_contracts import VoiceMixReport, VoiceMixSettings
 from .audiobook_contracts import AUDIOBOOK_CLIENT_MODELS
 
 WorkStatus = Literal["idle", "queued", "running", "done", "failed", "cancelled"]
@@ -38,6 +39,7 @@ class CreateVoiceRequest(Contract):
 class ApplyVoiceRequest(Contract):
     voice_id: str
     track_id: int
+    mix: VoiceMixSettings | None = None
 
 
 class BuildVoiceRequest(Contract):
@@ -170,6 +172,8 @@ class ApplyStatusResponse(Contract):
     started_at: float = Field(default=0, ge=0)
     duration_sec: float = Field(default=0, ge=0)
     job_progress: VoiceJobProgress | None = None
+    mix_settings: VoiceMixSettings | None = None
+    mix: VoiceMixReport | None = None
 
 
 class VoiceReplacementResponse(Contract):
@@ -317,7 +321,7 @@ class LibraryFolderInfo(Contract):
         "speechTrials", "models", "logs", "database",
         "videoProjects", "videoCharacters", "videoCharacterTraining",
         "videoCharacterTrainer", "providers",
-        "localMusic", "musicAdapters", "musicTraining", "musicTrainingRuns",
+        "localMusic", "musicAdapters", "musicTraining", "musicTrainingRuns", "musicAnalysis", "musicArtifacts",
     ]
 
 

@@ -10,12 +10,13 @@ import httpx
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from . import ace_jobs, config, local_music, music_queue_ownership as ownership, native_yue, resource_admission, video_jobs, yue_jobs
+from . import ace_jobs, config, local_music, music_queue_ownership as ownership, native_yue, resource_admission, video_jobs, yue_jobs, song_capabilities, song_from_beat
 from .contracts import JsonObject, SavedTrack
 from .generation_contracts import AceGenerationSettings
 from .local_music_contracts import LocalMusicError
 from .music_lora_contracts import MusicLoraError
 from .music_queue_contracts import MusicQueueError, MusicQueueItem, MusicQueuePayload
+from .song_from_beat_contracts import AceMusicConditioning, AceCompleteConditioning, AceLegoConditioning
 from .orchestrator.manager import manager
 from .orchestrator.state import ModelStatus
 
@@ -58,15 +59,29 @@ async def _ace_request(client: httpx.AsyncClient, endpoint: str, payload: JsonOb
     return result
 
 
-async def _prepare_ace() -> None:
+async def _prepare_ace(*, expected_model: str | None = None, instance_id: str | None = None,
+                       allow_init: bool = True) -> None:
     # Queue requests use explicit captions, so they do not require the LM.
-    async with httpx.AsyncClient(timeout=600, follow_redirects=False) as client:
+    if expected_model is not None and (instance_id is None or manager.owned_instance('ace_step') != instance_id):
+        raise MusicQueueError('music_queue_cleanup_failed', 503)
+    async with httpx.AsyncClient(timeout=600, follow_redirects=False, trust_env=False) as client:
         health = _AceHealth.model_validate(await _ace_request(client, '/health'))
+        if expected_model is not None and health.models_initialized and health.loaded_model != expected_model:
+            raise MusicQueueError('conditioning_model_changed')
         if not health.models_initialized:
-            _AceMessage.model_validate(await _ace_request(client, '/v1/init', {'init_llm': False}))
+            if not allow_init:
+                raise MusicQueueError('conditioning_model_changed')
+            if expected_model is not None and manager.owned_instance('ace_step') != instance_id:
+                raise MusicQueueError('music_queue_cleanup_failed', 503)
+            request: JsonObject = {'init_llm': False}
+            if expected_model is not None:
+                request['model'] = expected_model
+            _AceMessage.model_validate(await _ace_request(client, '/v1/init', request))
             health = _AceHealth.model_validate(await _ace_request(client, '/health'))
             if not health.models_initialized:
                 raise ValueError('ACE model initialization incomplete')
+            if expected_model is not None and health.loaded_model != expected_model:
+                raise MusicQueueError('conditioning_model_changed')
         # This is session-global native state; browser adapter choices are irrelevant.
         _AceMessage.model_validate(await _ace_request(client, '/v1/lora/unload', {}))
 
@@ -153,8 +168,12 @@ async def recover_child(item: MusicQueueItem) -> EngineResult | None:
     return inspect_child(item)
 
 
-def _ace_params(settings: AceGenerationSettings, seed: int) -> JsonObject:
-    if (settings.mode != 'custom' or settings.useRefAudio or settings.taskType != 'text2music' or
+def _ace_params(settings: AceGenerationSettings, seed: int, *, conditioning: AceMusicConditioning | None = None) -> JsonObject:
+    source_valid = (settings.taskType == 'text2music' and not settings.useRefAudio if conditioning is None else
+        settings.useRefAudio and settings.selectedModel == song_capabilities.BASE_MODEL and
+        ((isinstance(conditioning, AceCompleteConditioning) and settings.taskType == 'complete' and settings.trackClasses == conditioning.track_classes)
+         or (isinstance(conditioning, AceLegoConditioning) and settings.taskType == 'lego' and settings.trackName == conditioning.track_name)))
+    if (settings.mode != 'custom' or not source_valid or
             settings.voiceId is not None or settings.loraName is not None or settings.styleReferenceRequiresReupload or
             settings.loraRequiresReselection or settings.batchSize != 1 or settings.durationAuto or
             settings.randomSeed or settings.seed != seed or settings.audioFormat != 'wav' or settings.useCotCaption):
@@ -165,6 +184,12 @@ def _ace_params(settings: AceGenerationSettings, seed: int) -> JsonObject:
         'batch_size': 1, 'audio_format': 'wav', 'use_cot_caption': False,
         'model': settings.selectedModel or config.ACE_STEP_DIT_MODEL,
         '_generation_settings': _object.validate_json(settings.model_dump_json())}
+    if conditioning is not None:
+        params.update({'task_type': settings.taskType, 'thinking': False, 'use_cot_language': False})
+        if isinstance(conditioning, AceCompleteConditioning):
+            params['track_classes'] = list(conditioning.track_classes)
+        else:
+            params['track_name'] = conditioning.track_name
     for key, value in (('bpm', settings.bpm), ('key_scale', settings.keyScale),
                        ('time_signature', settings.timeSignature), ('vocal_language', settings.vocalLanguage),
                        ('inference_steps', settings.inferenceSteps), ('guidance_scale', settings.guidanceScale)):
@@ -180,6 +205,8 @@ class EngineSession:
         self._unverified: set[str] = set()
         self._children: dict[str, MusicQueueItem] = {}
         self._current: str | None = None
+        self._ace_base = False
+        self._ace_proof: song_capabilities.AceRuntimeProof | None = None
 
     async def _stop(self, engine: str, instance: str) -> None:
         if (engine not in manager._processes and manager.owned_instance(engine) is None and
@@ -200,12 +227,18 @@ class EngineSession:
         _owner_access()
         if self._unverified:
             raise MusicQueueError('music_queue_cleanup_failed', 503)
-        if self._current == payload.engine:
+        base = payload.engine == 'ace_step' and payload.conditioning is not None
+        if self._current == payload.engine and (payload.engine != 'ace_step' or self._ace_base == base):
             if payload.engine not in _NATIVE:
                 return
             if self._owned.get(payload.engine) == manager.owned_instance(payload.engine):
+                if base:
+                    await _prepare_ace(expected_model=song_capabilities.BASE_MODEL,
+                        instance_id=self._owned[payload.engine], allow_init=False)
                 return
             raise MusicQueueError('music_queue_cleanup_failed', 503)
+        proof = await song_capabilities.verify_runtime() if base else None
+        specs = song_from_beat.launch_specs() if base else None
         if self._current is not None:
             await self.close()
         async with resource_admission.admission_lock:
@@ -226,13 +259,19 @@ class EngineSession:
                     await self._stop(engine, instance)
             if payload.engine in _NATIVE:
                 try:
-                    await manager.switch_to(payload.engine)
+                    if specs is None:
+                        await manager.switch_to(payload.engine)
+                    else:
+                        await manager.switch_to(payload.engine, process_specs=specs)
                     instance = manager.owned_instance(payload.engine)
                     if instance is None:
                         raise MusicQueueError('music_queue_cleanup_failed', 503)
                     self._owned[payload.engine] = instance
                     if payload.engine == 'ace_step':
-                        await _prepare_ace()
+                        if base:
+                            await _prepare_ace(expected_model=song_capabilities.BASE_MODEL, instance_id=instance)
+                        else:
+                            await _prepare_ace()
                 except BaseException as error:
                     if payload.engine in manager._processes and payload.engine not in self._owned:
                         self._unverified.add(payload.engine)
@@ -241,6 +280,8 @@ class EngineSession:
                     logger.exception('Queue native engine startup failed')
                     raise MusicQueueError('music_queue_engine_start_failed', 503) from error
         self._current = payload.engine
+        self._ace_base = base
+        self._ace_proof = proof
 
     async def submit(self, item: MusicQueueItem) -> str:
         _owner_access()
@@ -250,18 +291,29 @@ class EngineSession:
         if payload.engine in _NATIVE and self._owned.get(payload.engine) != manager.owned_instance(payload.engine):
             raise MusicQueueError('music_queue_cleanup_failed', 503)
         if payload.engine == 'ace_step':
-            params = _ace_params(payload.request, item.resolved_seed)
+            params = _ace_params(payload.request, item.resolved_seed, conditioning=payload.conditioning)
             try:
                 async with resource_admission.native_admission(video_jobs.work_busy):
-                    released = await ace_jobs.submit(params, payload.request.customPrompt.strip()[:60], None, None)
+                    if payload.conditioning is not None:
+                        if item.retained_input is None or self._ace_proof is None:
+                            raise MusicQueueError('conditioning_snapshot_invalid')
+                        await _prepare_ace(expected_model=song_capabilities.BASE_MODEL,
+                            instance_id=self._owned[payload.engine], allow_init=False)
+                        released = await ace_jobs.submit(params, payload.request.customPrompt.strip()[:60], None, None,
+                            retained_input=item.retained_input, conditioning=payload.conditioning, conditioning_proof=self._ace_proof)
+                    else:
+                        released = await ace_jobs.submit(params, payload.request.customPrompt.strip()[:60], None, None)
                     identifier = released.task_id
                     # Lease release awaits: retain the accepted child before that boundary.
                     self._children[item.id] = item.model_copy(update={'child_job_id': identifier})
             except resource_admission.ResourceBusyError as error:
                 raise MusicQueueError(error.code) from error
             except Exception as error:
+                if isinstance(error, MusicQueueError):
+                    raise
                 if isinstance(error, HTTPException) and isinstance(error.detail, str) and (error.status_code, error.detail) in {
                     (409, 'ace_lora_selection_mismatch'), (502, 'ace_lora_status_unavailable'), (503, 'model_inactive'),
+                    (422, 'conditioning_snapshot_invalid'),
                 }:
                     code = 'ace_lora_model_inactive' if error.detail == 'model_inactive' else error.detail
                     raise MusicQueueError(code, error.status_code) from error
@@ -282,8 +334,12 @@ class EngineSession:
         else:
             if payload.request.seed != item.resolved_seed:
                 raise MusicQueueError('music_queue_plan_invalid', 422)
+            if payload.request.conditioning is not None and item.retained_input is None:
+                raise MusicQueueError('conditioning_snapshot_invalid', 422)
             try:
-                identifier = (await local_music.submit(payload.request)).id
+                child = (await local_music.submit(payload.request, retained_input=item.retained_input)
+                    if item.retained_input is not None else await local_music.submit(payload.request))
+                identifier = child.id
             except (LocalMusicError, MusicLoraError) as error:
                 raise MusicQueueError(error.code, error.status) from error
             except HTTPException as error:
@@ -404,3 +460,5 @@ class EngineSession:
             for engine, instance in tuple(self._owned.items()):
                 await self._stop(engine, instance)
         self._current = None
+        self._ace_base = False
+        self._ace_proof = None

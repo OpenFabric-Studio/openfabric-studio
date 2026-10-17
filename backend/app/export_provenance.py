@@ -45,11 +45,13 @@ def manifest(export_id: str,subject: Literal['track_audio','stem','speech_trial'
     media: Path,components: list[ProvenanceComponent],*,transformations: list[str] | None=None,
     measured_audio: AudioMetrics | None=None,visible_ai_label: bool=False,
     audio_target: LoudnessSettings | None=None,audio_target_result: TargetResult | None=None) -> ExportProvenance:
+    from .music_evidence import merge_music_evidence
     return ExportProvenance(export_id=export_id,subject=subject,created_at=datetime.now(timezone.utc).isoformat(),
         artifact_sha256=digest(media),content_origin=origin(components),components=components,
         classification_basis='contains_user_declaration' if any(item.classification_basis=='user_declared' for item in components) else 'app_workflow',
         transformations=transformations or [],measured_audio=measured_audio,visible_ai_label=visible_ai_label,
-        audio_target=audio_target,audio_target_result=audio_target_result)
+        audio_target=audio_target,audio_target_result=audio_target_result,
+        music_evidence=merge_music_evidence([item.music_evidence for item in components]) if any(item.music_evidence is not None for item in components) else None)
 
 
 def text(value: ExportProvenance) -> str:
@@ -61,6 +63,18 @@ def text(value: ExportProvenance) -> str:
         if item.engine:lines.append(f'  Engine: {item.engine}; model={item.model_id or "unknown"}; identity={item.engine_fingerprint or "unknown"}')
         if item.provider_receipt_id:lines.append(f'  Provider receipt: {item.provider_receipt_id}; job={item.provider_job_id or "unavailable"}')
     lines.extend(['','Processing:',*(f'- {step}' for step in value.transformations)])
+    if value.music_evidence is not None:
+        music = value.music_evidence
+        lines.extend(['', f'Music component restriction: {music.restriction}',
+            f'Component identities: {music.identity_basis}; not verification of installed bytes.',
+            f'Recorded lineage complete: {music.lineage_complete}; source rights are not cleared.'])
+        for component in music.components:
+            lines.append(f'- {component.component_id}: {component.scope}; {component.restriction}; terms={component.source_url or "unknown"}')
+            for identity in component.identities:
+                lines.append(f'  Publisher identity: revision={identity.revision or "unknown"}; SHA-256={identity.sha256 or "unknown"}')
+        for adapter in music.adapters:
+            lines.append(f'- Adapter {adapter.id}: {adapter.engine}/{adapter.target}; SHA-256={adapter.sha256}; strength={adapter.strength}')
+        lines.extend(music.public_attributions)
     if value.production is not None:
         proof=value.production
         lines.extend(['',f'Clean Master source graph: {proof.graph_root_id}; SHA-256={proof.graph_sha256}',
@@ -84,6 +98,12 @@ def path_for(media: Path,format: Literal['json','txt']) -> Path:
 def write(media: Path,value: ExportProvenance) -> None:
     if digest(media)!=value.artifact_sha256:raise ProvenanceError('manifest_media_changed')
     shared=value.model_copy(deep=True)
+    from .music_evidence import shareable_music_evidence
+    if shared.music_evidence is not None:
+        shared.music_evidence = shareable_music_evidence(shared.music_evidence)
+    for component in shared.components:
+        if component.music_evidence is not None:
+            component.music_evidence = shareable_music_evidence(component.music_evidence)
     if shared.production is not None:
         shared.production=shareable_production(shared.production)
     documents=((path_for(media,'json'),shared.model_dump_json(indent=2)+'\n'),(path_for(media,'txt'),text(shared)))
@@ -140,6 +160,7 @@ def metadata_args(export_id: str,content_origin: ContentOrigin,previous_comment:
 
 def track_component(track_id: int,version_id: str,source_sha256: str,*,is_voice: bool=False) -> ProvenanceComponent:
     from . import db
+    from .music_evidence import track_music_evidence
     row=db.get_track(track_id)
     raw_model: object=row['model'] if row is not None and 'model' in row.keys() else None
     model=raw_model if isinstance(raw_model,str) else 'upload'
@@ -149,7 +170,7 @@ def track_component(track_id: int,version_id: str,source_sha256: str,*,is_voice:
         if isinstance(raw_params,str):
             try:params=TypeAdapter(JsonObject).validate_json(raw_params)
             except ValidationError:pass
-    content: ContentOrigin='generated' if model in {'ace_step','yue2','openrouter'} else 'unknown'
+    content: ContentOrigin='generated' if model in {'ace_step','yue2','stable_audio3','openrouter'} else 'unknown'
     if row is not None and model=='editor':
         ancestors=params.get('source_track_ids')
         if isinstance(ancestors,list) and 0<len(ancestors)<=100:
@@ -160,12 +181,16 @@ def track_component(track_id: int,version_id: str,source_sha256: str,*,is_voice:
                 parent=db.get_track(identifier)
                 raw_parent: object=parent['model'] if parent is not None and 'model' in parent.keys() else None
                 parent_model=raw_parent if isinstance(raw_parent,str) else ''
-                kinds.add('generated' if parent_model in {'ace_step','yue2','openrouter'} else 'unknown')
+                kinds.add('generated' if parent_model in {'ace_step','yue2','stable_audio3','openrouter'} else 'unknown')
             if kinds=={'generated'}:content='generated'
             elif 'generated' in kinds:content='mixed'
     if is_voice:content='generated' if content=='generated' else 'mixed'
+    music_evidence = track_music_evidence(track_id)
+    if is_voice:
+        music_evidence.lineage_complete = False
     component=ProvenanceComponent(role='audio',content_origin=content,source_id=f'track:{track_id}:version:{version_id}',
-        source_sha256=source_sha256,engine='seed-vc' if is_voice else model if content!='unknown' else None)
+        source_sha256=source_sha256,engine='seed-vc' if is_voice else model if content!='unknown' else None,
+        music_evidence=music_evidence)
     if content=='unknown':component.classification_basis='unverified'
     if row is not None and model=='openrouter':
         from .openrouter_contracts import OpenRouterReceipt
@@ -176,6 +201,21 @@ def track_component(track_id: int,version_id: str,source_sha256: str,*,is_voice:
             else:
                 component.model_id=parsed.model_id;component.provider_receipt_id=parsed.id
                 component.provider_job_id=parsed.remote_id
+    if model=='upload' and params.get('source')=='voice_replacement_v2' and not is_voice:
+        from .replacement_jobs import publication_component
+        replacement=publication_component(track_id,source_sha256,params)
+        if replacement is not None:
+            component=replacement
+    elif model=='mashup' and not is_voice:
+        from .mashups import publication_component as mashup_publication
+        published=mashup_publication(track_id,source_sha256,params)
+        if published is not None:
+            component=published
+    elif model=='beat_song' and not is_voice:
+        from .beat_song_mix import publication_component as beat_song_publication
+        published=beat_song_publication(track_id,source_sha256,params)
+        if published is not None:
+            component=published
     return component
 
 

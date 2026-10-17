@@ -48,6 +48,110 @@ class MusicQueueContractTests(unittest.TestCase):
 
 
 class MusicQueuePlanTests(unittest.IsolatedAsyncioTestCase):
+    async def test_ace_conditioning_pins_base_and_exposes_source_duration_without_a_length_promise(self) -> None:
+        from app import song_capabilities, song_from_beat
+        from app.music_conditioning_contracts import MusicConditioningPreview
+        body = self.request(MusicQueueEngineSelection.model_validate({'engine': 'ace_step', 'conditioning': {
+            'mode': 'ace_complete', 'source': {'kind': 'version', 'track_id': 1, 'version_id': 'a' * 32},
+            'source_sha256': 'b' * 64, 'track_classes': ['bass', 'guitar']}}))
+        options = body.selections[0].conditioning
+        self.assertIsNotNone(options)
+        checked = MusicConditioningPreview(source=options.source, source_sha256='b' * 64, source_bytes=100,
+            source_rate_hz=48000, source_channels=2, source_frames=480001, duration_sec=480001 / 48000,
+            required_free_bytes=1000, free_bytes=2000, can_start=True)
+        state = song_capabilities.capabilities().model_copy(deep=True)
+        state = state.model_copy(update={'modes': [row.model_copy(update={'installed': True,
+            'weights_ready': True, 'ready': True, 'reason': None}) for row in state.modes]})
+        with patch.object(song_capabilities, 'capabilities', return_value=state), \
+             patch.object(song_from_beat, 'preview', new=AsyncMock(return_value=checked)):
+            result = await music_queue_plan.preview(body)
+        self.assertTrue(result.can_enqueue)
+        self.assertEqual(result.models[0].duration_mode, 'model_led')
+        self.assertIsNone(result.models[0].effective_duration_seconds)
+        self.assertEqual(result.models[0].conditioning_preview, checked)
+        payload = result.items[0].payload
+        self.assertEqual(payload.engine, 'ace_step')
+        self.assertEqual(payload.request.selectedModel, 'acestep-v15-base')
+        self.assertEqual(payload.request.taskType, 'complete')
+        self.assertEqual(payload.conditioning, options)
+
+    async def test_instrumental_brief_cannot_request_ace_vocals(self) -> None:
+        selection = MusicQueueEngineSelection.model_validate({'engine': 'ace_step', 'conditioning': {
+            'mode': 'ace_lego', 'source': {'kind': 'version', 'track_id': 1, 'version_id': 'a' * 32},
+            'source_sha256': 'b' * 64, 'track_name': 'vocals'}})
+        result = await music_queue_plan.preview(self.request(selection, instrumental=True, lyrics=''))
+        self.assertFalse(result.can_enqueue)
+        self.assertEqual(result.models[0].error_code, 'music_queue_instrumental_vocal_role')
+        result = await music_queue_plan.preview(self.request(selection, instrumental=False, lyrics=''))
+        self.assertFalse(result.can_enqueue)
+        self.assertEqual(result.models[0].error_code, 'music_queue_ace_vocal_lyrics_required')
+    async def test_conditioning_is_a_typed_payload_and_missing_encoder_blocks_the_plan(self) -> None:
+        from app.music_conditioning_contracts import MusicConditioningPreview
+        body = MusicQueuePreviewRequest.model_validate({'brief': {'description': 'Instrumental variation', 'instrumental': True, 'duration_seconds': 10},
+            'selections': [{'engine': 'stable_audio3', 'conditioning': {'mode': 'audio_to_audio', 'source': {'kind': 'version', 'track_id': 1, 'version_id': 'a' * 32}, 'source_sha256': 'b' * 64, 'noise_level': .6}}]})
+        source = body.selections[0].conditioning
+        self.assertIsNotNone(source)
+        checked = MusicConditioningPreview(source=source.source, source_sha256='b' * 64, source_bytes=100,
+            source_rate_hz=48000, source_channels=2, source_frames=480000, duration_sec=10,
+            required_free_bytes=1000, free_bytes=2000, can_start=False, error_code='conditioning_encoder_missing')
+        with patch('app.music_conditioning.preview', new=AsyncMock(return_value=checked)):
+            result = await music_queue_plan.preview(body)
+        self.assertFalse(result.can_enqueue)
+        self.assertEqual(result.models[0].error_code, 'conditioning_encoder_missing')
+        self.assertFalse(result.items)
+
+    async def test_queue_forecast_includes_its_extra_retained_source_copy(self) -> None:
+        from app.music_conditioning_contracts import MusicConditioningPreview
+        body = MusicQueuePreviewRequest.model_validate({'brief': {'description': 'Instrumental', 'instrumental': True, 'duration_seconds': 10},
+            'selections': [{'engine': 'stable_audio3', 'conditioning': {'mode': 'audio_to_audio', 'source': {'kind': 'version', 'track_id': 1, 'version_id': 'a' * 32}, 'source_sha256': 'b' * 64, 'noise_level': .6}}]})
+        option = body.selections[0].conditioning
+        self.assertIsNotNone(option)
+        checked = MusicConditioningPreview(source=option.source, source_sha256='b' * 64, source_bytes=400,
+            source_rate_hz=48000, source_channels=2, source_frames=480000, duration_sec=10,
+            required_free_bytes=1000, free_bytes=1200, can_start=True)
+        with patch('app.music_conditioning.preview', new=AsyncMock(return_value=checked)):
+            result = await music_queue_plan.preview(body)
+        self.assertFalse(result.can_enqueue)
+        self.assertEqual(result.models[0].error_code, 'insufficient_disk')
+        self.assertEqual(result.models[0].conditioning_preview.required_free_bytes, 1400)
+
+    async def test_two_conditioned_engines_budget_both_queue_copies_without_recharging_retained_inputs(self) -> None:
+        from app import song_capabilities, song_from_beat
+        from app.export_provenance_contracts import MusicEvidence
+        from app.beat_song_mix_contracts import SongSourceSnapshot
+        from app.music_conditioning_contracts import MusicConditioningPreview
+        from app.queued_music_source_contracts import QueuedMusicSource
+        body = MusicQueuePreviewRequest.model_validate({'brief': {'description': 'Instrumental',
+            'instrumental': True, 'duration_seconds': 10}, 'selections': [
+                {'engine': 'ace_step', 'conditioning': {'mode': 'ace_lego', 'source': {'kind': 'version',
+                    'track_id': 1, 'version_id': 'a' * 32}, 'source_sha256': 'b' * 64, 'track_name': 'bass'}},
+                {'engine': 'stable_audio3', 'conditioning': {'mode': 'audio_to_audio', 'source': {'kind': 'version',
+                    'track_id': 1, 'version_id': 'a' * 32}, 'source_sha256': 'b' * 64, 'noise_level': .6}}]})
+        source = body.selections[0].conditioning.source
+        checked = MusicConditioningPreview(source=source, source_sha256='b' * 64, source_bytes=400,
+            source_rate_hz=48000, source_channels=2, source_frames=480000, duration_sec=10,
+            required_free_bytes=600, free_bytes=1200, can_start=True)
+        ace = checked.model_copy(update={'required_free_bytes': 1000})
+        state = song_capabilities.capabilities().model_copy(deep=True)
+        state = state.model_copy(update={'modes': [row.model_copy(update={'installed': True,
+            'weights_ready': True, 'ready': True, 'reason': None}) for row in state.modes]})
+        retained = QueuedMusicSource(owner_id='c' * 32, snapshot=SongSourceSnapshot(source=source,
+            sha256='b' * 64, source_bytes=400, sample_rate_hz=48000, channels=2, frames=480000,
+            duration_sec=10, track_id=1, version_id='a' * 32, content_origin='unknown', music_evidence=MusicEvidence(),
+            source_id='d' * 32, raw_filename='raw.wav'))
+        with patch.object(song_capabilities, 'capabilities', return_value=state), \
+             patch.object(song_from_beat, 'preview', new=AsyncMock(return_value=ace)) as ace_preview, \
+             patch('app.music_conditioning.preview', new=AsyncMock(return_value=checked)):
+            result = await music_queue_plan.preview(body)
+            self.assertFalse(result.can_enqueue)
+            self.assertEqual([model.conditioning_preview.required_free_bytes for model in result.models], [1400, 1400])
+            self.assertEqual([model.error_code for model in result.models], ['insufficient_disk', 'insufficient_disk'])
+            self.assertFalse(result.items)
+            ace_preview.return_value = checked
+            result = await music_queue_plan.preview(body, retained_inputs=[retained])
+            self.assertTrue(result.can_enqueue)
+            self.assertEqual([model.conditioning_preview.required_free_bytes for model in result.models], [600, 600])
+
     async def asyncSetUp(self) -> None:
         self.ready = patch.object(music_queue_plan, 'catalog', new=AsyncMock(return_value=ready_catalog()))
         self.ready.start()

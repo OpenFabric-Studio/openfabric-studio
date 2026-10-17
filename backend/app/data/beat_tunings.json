@@ -1,0 +1,82 @@
+{
+  "tunings": [
+    {
+      "id": "twelve_tet_candidate",
+      "title": "12-TET report approximation",
+      "kind": "twelve_tet_candidate",
+      "degrees_cents": [
+        0.0,
+        100.0,
+        200.0,
+        300.0,
+        400.0,
+        500.0,
+        600.0,
+        700.0,
+        800.0,
+        900.0,
+        1000.0,
+        1100.0
+      ],
+      "notes": "Equal temperament is an explicit candidate representation, not a claim about a tradition or performer."
+    },
+    {
+      "id": "slendro_pack",
+      "title": "Slendro ensemble measurement required",
+      "kind": "sample_specific_required",
+      "notes": "No source-specific tuning or instrument recording has been measured or admitted; no equal-tempered substitute is supplied."
+    },
+    {
+      "id": "pelog_pack",
+      "title": "Pelog ensemble / selected pathet measurement required",
+      "kind": "sample_specific_required",
+      "notes": "No source-specific tuning or instrument recording has been measured or admitted; no equal-tempered substitute is supplied."
+    },
+    {
+      "id": "bali_pair_pack",
+      "title": "Balinese paired ensemble measurement required",
+      "kind": "sample_specific_required",
+      "notes": "No source-specific tuning or instrument recording has been measured or admitted; no equal-tempered substitute is supplied."
+    },
+    {
+      "id": "thai_pack",
+      "title": "Thai instrument set measurement required",
+      "kind": "sample_specific_required",
+      "notes": "No source-specific tuning or instrument recording has been measured or admitted; no equal-tempered substitute is supplied."
+    },
+    {
+      "id": "khaen_pack",
+      "title": "Isan khaen mode measurement required",
+      "kind": "sample_specific_required",
+      "notes": "No source-specific tuning or instrument recording has been measured or admitted; no equal-tempered substitute is supplied."
+    },
+    {
+      "id": "synthetic_equal_five",
+      "title": "Synthetic five equal divisions experiment",
+      "kind": "equal_division_experiment",
+      "degrees_cents": [
+        0.0,
+        240.0,
+        480.0,
+        720.0,
+        960.0
+      ],
+      "notes": "Mathematical experiment only. Not a measured slendro ensemble; no preset selects this table."
+    },
+    {
+      "id": "synthetic_equal_seven",
+      "title": "Synthetic seven equal divisions experiment",
+      "kind": "equal_division_experiment",
+      "degrees_cents": [
+        0.0,
+        171.42857142857142,
+        342.85714285714283,
+        514.2857142857143,
+        685.7142857142857,
+        857.1428571428571,
+        1028.5714285714287
+      ],
+      "notes": "Report Thai equal-division hypothesis only, not a measured Thai instrument set. No preset selects this table."
+    }
+  ]
+}

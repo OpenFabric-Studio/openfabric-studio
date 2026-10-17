@@ -10,6 +10,8 @@ import * as modules from '../../api/modules'
 import * as datasets from '../../api/loraDataset'
 import { parseLoraDatasetOperationResponse } from '../../api/generated'
 import { ApiError } from '../../api/http'
+import * as terms from '../../api/musicTerms'
+vi.mock('../../api/musicTerms', () => ({ getMusicTerms: vi.fn(), acceptMusicTerms: vi.fn(), updateMusicTermsSettings: vi.fn() }))
 import type { MusicAdapter, StableLoraTrainingJob, StableLoraTrainingJobs } from '../../api/generated'
 import MusicLoraPage from './MusicLoraPage.vue'
 vi.mock('./ModelLoraTraining.vue', () => ({ default: { template: '<section data-model-training></section>' } }))
@@ -28,6 +30,7 @@ function button(node: ParentNode, label: string) { const found = [...node.queryS
 async function input(node: ParentNode, name: string, value: string) { const element = node.querySelector(`[name="${name}"]`); if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement || element instanceof HTMLSelectElement)) throw new Error(`Missing ${name}`); element.value = value; element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); await settle() }
 beforeEach(() => {
   vi.resetAllMocks()
+  vi.mocked(terms.getMusicTerms).mockImplementation(async (engine, operation) => ({ engine, operation, revision: 0, noncommercial_enabled: false, requirements: [], allowed: true }))
   vi.mocked(modules.listModuleJobs).mockResolvedValue([])
   vi.mocked(datasets.listLoraDatasets).mockResolvedValue({ datasets: [], issues: [] })
   vi.mocked(adapters.musicLoraCapabilities).mockResolvedValue({ engines: [{ engine: 'ace_step', loading: true, training: true, reason: 'native' }, { engine: 'stable_audio3', loading: true, training: true, reason: 'native' }, { engine: 'yue2', loading: true, training: false, reason: 'inference_only' }] })

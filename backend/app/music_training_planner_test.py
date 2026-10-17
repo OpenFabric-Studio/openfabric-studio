@@ -295,8 +295,9 @@ class MissingPlannerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 403)
             response = await client.post(route, json={'planner_steps': True})
             self.assertEqual(response.status_code, 422)
-            with patch.object(music_training, '_run', new=AsyncMock()):
+            with patch.object(music_training, '_run', new=AsyncMock()), patch('app.api.routes_music_training.require_usage') as admission:
                 response = await client.post(route, json={'planner_steps': 5})
                 self.assertEqual(response.status_code, 200, response.text)
+                admission.assert_called_once_with('yue2', 'training')
                 await music_training._tasks[response.json()['id']]
             self.assertEqual(response.json()['request']['yue_ar_source_job_id'], self.parent.id)

@@ -15,7 +15,7 @@ import os
 import shutil
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -915,6 +915,20 @@ def active_track_ids() -> set[int]:
 
 @asynccontextmanager
 async def protect_stem_replacement(track_id: int) -> AsyncIterator[None]:
+    from .music_analysis import MusicAnalysisError, protect_stem_replacement as protect_analysis_stems
+    from .music_conditioning import protect_stem_replacement as protect_conditioning_stems
+    from .local_music_contracts import LocalMusicError
+    from .replacement_jobs import ReplacementError, protect_stem_replacement as protect_replacement_stems
+    try:
+        async with _protect_stem_replacement(track_id):
+            async with protect_analysis_stems(track_id), protect_conditioning_stems(track_id), protect_replacement_stems(track_id):
+                yield
+    except (MusicAnalysisError, LocalMusicError, ReplacementError) as error:
+        raise AudioExportError(error.code) from error
+
+
+@asynccontextmanager
+async def _protect_stem_replacement(track_id: int) -> AsyncIterator[None]:
     async with _lock:
         if track_id in _deleting or track_id in _stem_deleting or any(
             document.track_id == track_id and document.stem_name is not None
@@ -1018,25 +1032,46 @@ async def retry_stem_export(track_id: int, name: str, identifier: str) -> StemAu
 
 @asynccontextmanager
 async def protect_stem_exports_removal(track_id: int) -> AsyncIterator[None]:
-    async with _lock:
-        if track_id in _stem_deleting or track_id in _deleting:
-            raise AudioExportError('track_busy')
-        from . import stems
-        if stems.is_active(track_id):
-            raise AudioExportError('stem_busy')
-        _stem_deleting.add(track_id)
-        try:
-            documents = [doc for doc in _documents(track_id) if doc.stem_name is not None]
-            await await_cleanup(_drain_all(documents, propagate=True))
-            for document in documents:
-                shutil.rmtree(_directory(track_id, document.id))
-        except BaseException:
-            _stem_deleting.discard(track_id)
-            raise
+    from .music_analysis import MusicAnalysisError
+    from .local_music_contracts import LocalMusicError
+    from .replacement_jobs import ReplacementError
     try:
-        yield
-    finally:
-        _stem_deleting.discard(track_id)
+        async with _protect_stem_exports_removal(track_id):
+            yield
+    except (MusicAnalysisError, LocalMusicError, ReplacementError) as error:
+        raise AudioExportError(error.code) from error
+
+
+@asynccontextmanager
+async def _protect_stem_exports_removal(track_id: int) -> AsyncIterator[None]:
+    from .music_analysis import protect_stem_replacement as protect_analysis_stems
+    from .music_conditioning import protect_stem_replacement as protect_conditioning_stems
+    from .replacement_jobs import protect_stem_replacement as protect_replacement_stems
+    async with AsyncExitStack() as source_guards:
+        async with _lock:
+            if track_id in _stem_deleting or track_id in _deleting:
+                raise AudioExportError('track_busy')
+            from . import stems
+            if stems.is_active(track_id):
+                raise AudioExportError('stem_busy')
+            _stem_deleting.add(track_id)
+            try:
+                # Drain source readers before deleting exports; retain their guard
+                # across releasing this lock and the caller's source deletion.
+                await source_guards.enter_async_context(protect_analysis_stems(track_id))
+                await source_guards.enter_async_context(protect_conditioning_stems(track_id))
+                await source_guards.enter_async_context(protect_replacement_stems(track_id))
+                documents = [doc for doc in _documents(track_id) if doc.stem_name is not None]
+                await await_cleanup(_drain_all(documents, propagate=True))
+                for document in documents:
+                    shutil.rmtree(_directory(track_id, document.id))
+            except BaseException:
+                _stem_deleting.discard(track_id)
+                raise
+        try:
+            yield
+        finally:
+            _stem_deleting.discard(track_id)
 
 
 async def cancel_track_exports(track_id: int) -> None:

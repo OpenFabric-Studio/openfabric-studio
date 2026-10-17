@@ -146,3 +146,59 @@ class StableLoraRuntimeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((run / 'completion.json').exists())
         self.assertFalse((run / 'checkpoints').exists())
+
+    def test_worker_rejects_changed_manifest_excerpt_before_encoding_or_training(self) -> None:
+        run, source, original = self.worker_fixture()
+        payload = json.loads((run / 'request.json').read_text())
+        payload['source_sha256s'] = ['0' * 64]
+        payload['request']['samples'][0]['regional_manifest'] = {'manifest_id': 'a' * 32,
+            'manifest_sha256': 'b' * 64, 'excerpt_id': 'c' * 32}
+        (run / 'request.json').write_text(json.dumps(payload))
+        worker = Path(__file__).resolve().parents[1] / 'scripts/stable_lora_worker.py'
+        result = subprocess.run([sys.executable, str(worker), '--request', str(run / 'request.json')], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('training_source_changed', result.stderr)
+        self.assertFalse((run / 'latents').exists()); self.assertFalse((run / 'checkpoints').exists())
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_worker_does_not_allow_manifest_source_to_omit_expected_digest(self) -> None:
+        run, _source, _original = self.worker_fixture()
+        payload = json.loads((run / 'request.json').read_text())
+        payload['request']['samples'][0]['regional_manifest'] = {'manifest_id': 'a' * 32,
+            'manifest_sha256': 'b' * 64, 'excerpt_id': 'c' * 32}
+        (run / 'request.json').write_text(json.dumps(payload))
+        worker = Path(__file__).resolve().parents[1] / 'scripts/stable_lora_worker.py'
+        result = subprocess.run([sys.executable, str(worker), '--request', str(run / 'request.json')], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((run / 'latents').exists())
+
+    def test_worker_records_measured_runtime_and_model_hashes_bound_by_completion(self) -> None:
+        run, source, original = self.worker_fixture()
+        model = self.root / 'models/base.npz'; model.parent.mkdir(); model.write_bytes(b'fixture model identity')
+        payload = json.loads((run / 'request.json').read_text())
+        payload['runtime_proof'] = {'root': str(self.root.resolve()), 'models': [
+            {'path': 'models/base.npz', 'sha256': hashlib.sha256(model.read_bytes()).hexdigest(), 'bytes': model.stat().st_size}]}
+        payload['source_sha256s'] = [hashlib.sha256(original).hexdigest()]
+        (run / 'request.json').write_text(json.dumps(payload))
+        worker = Path(__file__).resolve().parents[1] / 'scripts/stable_lora_worker.py'
+        result = subprocess.run([sys.executable, str(worker), '--request', str(run / 'request.json')], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        evidence = json.loads((run / 'dataset.json').read_text())['runtime_identity']
+        self.assertEqual(evidence['models'], payload['runtime_proof']['models'])
+        self.assertEqual(evidence['source_file_count'], 2)
+        self.assertRegex(evidence['source_sha256'], '^[0-9a-f]{64}$')
+        self.assertNotIn(str(self.root), json.dumps(evidence))
+        completion = json.loads((run / 'completion.json').read_text())
+        self.assertEqual(completion['dataset_sha256'], hashlib.sha256((run / 'dataset.json').read_bytes()).hexdigest())
+
+    def test_changed_expected_runtime_model_fails_before_encoder(self) -> None:
+        run, _source, _original = self.worker_fixture()
+        model = self.root / 'base.npz'; model.write_bytes(b'changed model')
+        payload = json.loads((run / 'request.json').read_text())
+        payload['runtime_proof'] = {'root': str(self.root.resolve()), 'models': [
+            {'path': 'base.npz', 'sha256': '0' * 64, 'bytes': model.stat().st_size}]}
+        (run / 'request.json').write_text(json.dumps(payload))
+        worker = Path(__file__).resolve().parents[1] / 'scripts/stable_lora_worker.py'
+        result = subprocess.run([sys.executable, str(worker), '--request', str(run / 'request.json')], capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((run / 'latents').exists()); self.assertFalse((run / 'completion.json').exists())

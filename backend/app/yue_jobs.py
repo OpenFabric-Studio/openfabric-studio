@@ -17,6 +17,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from . import audio_versions, db, generation_library, music_lora, native_yue, video_jobs
 from .config import MODELS, yue2_specs, YUE2_LORA_AVAILABLE, YUE2_PROGRESS_AVAILABLE
 from .contracts import JsonObject, JsonValue
+from .export_provenance_contracts import MusicEvidence
+from .music_evidence import capture_music_evidence, serialize_music_evidence
 from .job_lifecycle import await_cleanup, cancel_and_wait
 from .music_lora_contracts import MusicAdapter, MusicAdapterSelection, MusicLoraError
 from .orchestrator.manager import manager
@@ -46,6 +48,7 @@ class _StoredJob(BaseModel):
     response: YueJobResponse
     track_id: int | None = None
     adapters: list[MusicAdapter] = Field(default_factory=list, max_length=2)
+    music_evidence: MusicEvidence | None = None
 
 
 class _NativeModel(BaseModel):
@@ -211,7 +214,11 @@ def submit(request: YueSubmitRequest) -> YueJobResponse:
         title=(request.title.strip() or (request.settings.title.strip() if request.settings is not None else "") or "Untitled")[:500], lyrics=request.lyrics, seed=request.seed,
         precision=request.precision, options=request.options, voice_id=request.voice_id,
         ar_adapter=request.ar_adapter, nar_adapter=request.nar_adapter)
-    stored = _StoredJob(request=request, response=response, adapters=adapters)
+    evidence = capture_music_evidence('yue2')
+    # Supplied scores have no retained upstream source/analyzer link; rights evidence stays intact.
+    if request.options.abc is not None:
+        evidence.lineage_complete = False
+    stored = _StoredJob(request=request, response=response, adapters=adapters, music_evidence=evidence)
     db.get_db().execute('INSERT INTO yue_jobs(id,payload_json,created_at) VALUES(?,?,?)',
                         (job_id, stored.model_dump_json(), response.created_at))
     db.get_db().commit()
@@ -302,6 +309,8 @@ def _catalog_audio(job: _StoredJob, destination: Path) -> int:
         if selection is not None:
             provenance.append({**manifest, 'strength': selection.strength})
     params['_music_adapters'] = provenance
+    if job.music_evidence is not None:
+        params['_music_evidence'] = serialize_music_evidence(job.music_evidence)
     settings = job.request.settings or generation_library.snapshot_from_params('yue2', params, job.request.lyrics, job.request.seed, job.response.title)
     settings = settings.model_copy(update={'arAdapter': job.request.ar_adapter, 'narAdapter': job.request.nar_adapter,
         'bpm': job.request.options.bpm, 'keyScale': job.request.options.key_scale, 'timeSignature': job.request.options.time_signature})

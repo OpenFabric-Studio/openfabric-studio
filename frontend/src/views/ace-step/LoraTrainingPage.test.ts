@@ -263,6 +263,18 @@ it('does not reinterpret the old export path as a parent or export after cancell
   expect(api.exportLora).not.toHaveBeenCalled()
   expect(localStorage.getItem('aicollector_ace_loras_v1')).toBeNull()
 })
+it('shows the server disk forecast before copying and keeps low-disk errors understandable', async () => {
+  await readyExport()
+  vi.mocked(api.previewLoraExport).mockResolvedValue({ ...exportResult, required_free_bytes: 100 * 1024**2, free_bytes: 500 * 1024**2 })
+  button('Export and register').click(); await settle()
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('100.0 MiB')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('500.0 MiB')
+  expect(api.exportLora).not.toHaveBeenCalled()
+  button('Cancel').click(); await settle()
+  vi.mocked(api.previewLoraExport).mockRejectedValue(new ApiError('insufficient_disk', 409))
+  button('Export and register').click(); await settle()
+  expect(document.body.textContent).toContain('not enough free space')
+})
 it('refuses an existing destination without registering an adapter', async () => {
   await readyExport()
   vi.mocked(api.previewLoraExport).mockRejectedValue(new ApiError('lora_export_destination_exists', 409))

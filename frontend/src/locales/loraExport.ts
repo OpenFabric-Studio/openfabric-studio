@@ -18,6 +18,7 @@ export const loraExportEn = {
   destination: 'New export folder',
   review: 'Review LoRA export',
   source: 'Checkpoint to copy',
+  storage: 'Space required: {required} MiB, including a 64 MiB reserve. Available at destination: {free} MiB. The original checkpoint stays on disk.',
   noDeletion: 'No existing files will be deleted or replaced. If this destination already exists, export will stop.',
   confirm: 'Create folder and export',
   preparing: 'Checking destination…',

@@ -7,6 +7,49 @@ from unittest.mock import patch
 
 
 class VideoIoTests(unittest.IsolatedAsyncioTestCase):
+    async def test_bounded_hash_and_copy_stop_when_source_grows_after_preflight(self) -> None:
+        from app.video_io import copy_verified, hash_file
+        from app.video_projects import VideoProjectError
+        import hashlib
+
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / 'source'
+            dest = Path(tmp) / 'dest'
+            real = Path.open
+
+            class GrowingReader:
+                def __init__(self, handle):
+                    self.handle = handle
+                    self.grew = False
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *args):
+                    self.handle.close()
+
+                def read(self, size):
+                    value = self.handle.read(size)
+                    if not self.grew:
+                        self.grew = True
+                        with real(source, 'ab') as append:
+                            append.write(b'added after preflight' * 10000)
+                    return value
+
+            def opening(path, *args, **kwargs):
+                handle = real(path, *args, **kwargs)
+                return GrowingReader(handle) if path == source and args and args[0] == 'rb' else handle
+
+            for copying in (False, True):
+                source.write_bytes(b'original')
+                with self.subTest(copying=copying), patch.object(Path, 'open', new=opening):
+                    with self.assertRaises(VideoProjectError):
+                        if copying:
+                            await copy_verified(source, dest, hashlib.sha256(b'original').hexdigest(), max_bytes=8)
+                        else:
+                            await hash_file(source, max_bytes=8)
+                self.assertFalse(dest.exists())
+
     async def test_copy_refuses_to_overwrite_or_delete_existing_destination(
         self,
     ) -> None:

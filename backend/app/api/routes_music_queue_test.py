@@ -12,18 +12,20 @@ import httpx
 from app import music_queue, music_queue_ownership, music_queue_plan, music_queue_store
 from app.api import routes_music_queue as routes
 from app.contracts import JsonObject
+from app.local_music_contracts import LocalMusicRequest
 from app.music_lora_contracts import MusicLoraError
 from app.music_queue_contracts import (
-    MusicQueueCancelRequest, MusicQueueCatalog, MusicQueueControlRequest,
+    MusicQueueBatch, MusicQueueCancelRequest, MusicQueueCatalog, MusicQueueControlRequest,
     MusicQueueBrief, MusicQueueEngineSelection, MusicQueueEnqueueRequest,
     MusicQueueError, MusicQueuePreviewRequest, MusicQueueReadiness,
-    MusicQueueReorderRequest, MusicQueueRetryRequest, MusicQueueSnapshot,
+    MusicQueueItem, MusicQueueReorderRequest, MusicQueueRetryRequest, MusicQueueSnapshot, MusicQueueStableRequest,
 )
 from app.resource_admission import ResourceBusyError
 
 
 class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
+        self.enterContext(patch.object(routes, 'require_usage'))
         app = FastAPI()
         app.include_router(routes.router)
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://127.0.0.1:9000')
@@ -39,6 +41,12 @@ class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
         self.enqueued = MusicQueueEnqueueRequest(**self.request.model_dump(), revision=7,
             submission_key='submission-1', preview_fingerprint=self.plan.fingerprint)
         self.batch_id, self.item_id = 'a' * 32, 'b' * 32
+        self.retry_state = MusicQueueSnapshot(revision=7, status='paused', batches=[MusicQueueBatch(
+            id=self.batch_id, created_at='2026-10-17', brief=self.request.brief, selections=self.request.selections,
+            models=self.plan.models, preview_fingerprint=self.plan.fingerprint, items=[MusicQueueItem(
+                id=self.item_id, batch_id=self.batch_id, engine='stable_audio3', variation_index=1,
+                resolved_seed=1, status='failed', payload=MusicQueueStableRequest(engine='stable_audio3',
+                    request=LocalMusicRequest(engine='stable_audio3', prompt='Jazz', duration_seconds=30)))])])
 
     async def test_read_only_routes_return_typed_snapshot_and_catalog(self) -> None:
         catalog = MusicQueueCatalog(engines=[self.ready])
@@ -63,7 +71,9 @@ class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post('/api/music-queue/batches', json=self.enqueued.model_dump(mode='json'))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), self.state.model_dump(mode='json'))
-        enqueue.assert_awaited_once_with(self.enqueued)
+        enqueue.assert_awaited_once()
+        self.assertEqual(enqueue.await_args.args, (self.enqueued,))
+        self.assertTrue(callable(enqueue.await_args.kwargs.get('admit')))
 
     async def test_every_control_action_and_retry_mode_preserves_typed_fields(self) -> None:
         for action in ('start', 'pause', 'cancel_active'):
@@ -74,7 +84,8 @@ class MusicQueueApiTests(unittest.IsolatedAsyncioTestCase):
                 operation.assert_awaited_once_with(body)
         for mode in ('save', 'inference'):
             retry = MusicQueueRetryRequest.model_validate({'revision': 7, 'item_id': self.item_id, 'mode': mode})
-            with self.subTest(mode=mode), patch.object(music_queue, 'retry', new=AsyncMock(return_value=self.state)) as operation:
+            with self.subTest(mode=mode), patch.object(music_queue, 'snapshot', return_value=self.retry_state), \
+                    patch.object(music_queue, 'retry', new=AsyncMock(return_value=self.state)) as operation:
                 response = await self.client.post('/api/music-queue/retry', json=retry.model_dump(mode='json'))
                 self.assertEqual(response.status_code, 200)
                 operation.assert_awaited_once_with(retry)

@@ -7,6 +7,10 @@ export class ApiError extends Error {
   }
 }
 
+export function isDefiniteClientError(cause: unknown): cause is ApiError {
+  return cause instanceof ApiError && cause.status >= 400 && cause.status < 500 && cause.status !== 408 && cause.status !== 429
+}
+
 async function parseErrorBody(resp: Response): Promise<string> {
   try {
     const data: unknown = await resp.clone().json()

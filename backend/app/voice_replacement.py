@@ -19,6 +19,7 @@ from .client_contracts import ApplyStatusResponse, VoiceReplacementResponse
 from .job_lifecycle import await_cleanup
 from .video_process import WorkerOutputError, run_owned_command
 from .track_view import track_response
+from .voice_mix_contracts import VoiceMixSettings
 
 logger = logging.getLogger(__name__)
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
@@ -139,7 +140,7 @@ async def _rollback(track_ids: list[int], files: list[Path]) -> None:
                 logger.exception('Could not remove a replacement upload')
 
 
-async def replace_voice(upload: UploadFile, voice_id: str) -> VoiceReplacementResponse:
+async def replace_voice(upload: UploadFile, voice_id: str, *, mix: VoiceMixSettings | None = None) -> VoiceReplacementResponse:
     """Accept only after both independent rows and the owned apply task exist."""
     tracks: list[int] = []
     files: list[Path] = []
@@ -171,7 +172,8 @@ async def replace_voice(upload: UploadFile, voice_id: str) -> VoiceReplacementRe
             wall_ms=None, params={'source': 'voice_replacement', 'source_track_id': source_id, 'source_filename': filename,
                 'voice_id': voice_id, 'audio_format': 'wav', 'task_type': 'voice_replacement'}, audio_path=result, abc_path=None)
         tracks.append(track_id)
-        application = ApplyStatusResponse.model_validate(voice_build.start_apply(voice_id, track_id))
+        application = ApplyStatusResponse.model_validate(voice_build.start_apply(voice_id, track_id, mix=mix)
+            if mix is not None else voice_build.start_apply(voice_id, track_id))
         source_row, result_row = db.get_track(source_id), db.get_track(track_id)
         if source_row is None or result_row is None:
             raise HTTPException(status_code=409, detail='track_missing')

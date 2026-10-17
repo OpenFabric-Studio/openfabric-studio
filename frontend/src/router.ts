@@ -7,6 +7,10 @@ export const appRoutes: RouteRecordRaw[] = [
       path: '/music', component: () => import('./views/music/MusicPage.vue'),
       children: [
         { path: '', name: 'music', component: () => import('./views/music/MusicQueuePage.vue') },
+        { path: 'beats', name: 'music-beats', component: () => import('./views/music/BeatMakerPage.vue'), props: route => ({ beatId: typeof route.query.beat_id === 'string' ? route.query.beat_id : undefined, revision: typeof route.query.revision === 'string' ? route.query.revision : undefined }) },
+        { path: 'voice-replacement', name: 'music-voice-replacement', component: () => import('./views/music/ReplacementPage.vue'), props: route => ({ planId: typeof route.query.plan_id === 'string' ? route.query.plan_id : undefined }) },
+        { path: 'beat-song-mix', name: 'music-beat-song-mix', component: () => import('./views/music/BeatSongMixPage.vue'), props: route => ({ planId: typeof route.query.plan_id === 'string' ? route.query.plan_id : undefined }) },
+        { path: 'mashups', name: 'music-mashups', component: () => import('./views/music/MashupPage.vue'), props: route => ({ mashupId: typeof route.query.mashup_id === 'string' ? route.query.mashup_id : undefined }) },
         { path: 'ace-step', name: 'ace-step', component: () => import('./views/ace-step/AceStepPage.vue') },
         { path: 'openrouter', name: 'openrouter-music', component: () => import('./views/music/CloudMusicPanel.vue') },
         { path: 'yue2', name: 'yue2', component: () => import('./views/yue2/Yue2Page.vue') },

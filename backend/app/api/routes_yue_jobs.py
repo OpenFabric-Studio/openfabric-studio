@@ -7,6 +7,7 @@ from fastapi import APIRouter, Path
 
 from .. import yue_jobs
 from ..yue_contracts import DeleteYueJobResponse, YueJobResponse, YueJobsResponse, YueSubmitRequest
+from .routes_music_terms import require_usage
 
 router = APIRouter(prefix='/api/yue-jobs', tags=['yue-jobs'])
 JobId = Annotated[str, Path(pattern=r'^[0-9a-f]{32}$')]
@@ -14,6 +15,7 @@ JobId = Annotated[str, Path(pattern=r'^[0-9a-f]{32}$')]
 
 @router.post('', response_model=YueJobResponse)
 async def submit(body: YueSubmitRequest) -> YueJobResponse:
+    require_usage('yue2', 'generation')
     return yue_jobs.submit(body)
 
 

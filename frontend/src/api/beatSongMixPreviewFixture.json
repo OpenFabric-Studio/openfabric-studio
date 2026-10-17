@@ -1,0 +1,167 @@
+{
+  "plan": {
+    "id": "b45e75d628ef4dbf9b69edf26511eade",
+    "revision": 0,
+    "draft": {
+      "title": "Owned layer",
+      "beat": {
+        "source": {
+          "kind": "version",
+          "track_id": 1,
+          "version_id": "b795c6d428394b8f9be527b9d5364465"
+        },
+        "sha256": "bdd8d6abfc6efe888fea2a9eaa9233e6cd10d29a70607efe6812fa57c291ffc7",
+        "excerpt_start_sec": 0.0,
+        "excerpt_end_sec": 0.2
+      },
+      "song": {
+        "source": {
+          "kind": "version",
+          "track_id": 2,
+          "version_id": "162184206c534765b7a06fd47706437b"
+        },
+        "sha256": "28fcccac9726aafab23efe143427581a58547bc71b15e4ea1d708a27e891e17d",
+        "excerpt_start_sec": 0.0,
+        "excerpt_end_sec": 0.2
+      },
+      "mode": "layer",
+      "tempo_strategy": "beat_to_song",
+      "beat_repeats": 1,
+      "anchors": [
+        {
+          "source_sec": 0.0,
+          "target_sec": 0.0
+        },
+        {
+          "source_sec": 0.2,
+          "target_sec": 0.2
+        }
+      ],
+      "project_bpm": 120.0,
+      "project_meter": {
+        "numerator": 4,
+        "denominator": 4
+      },
+      "bass_leader": "none",
+      "kick_leader": "none",
+      "controls": [],
+      "loudness": {
+        "profile": "off",
+        "integrated_lufs": -16.0,
+        "true_peak_dbtp": -2.0
+      },
+      "audio_pitch_semitones": 0.0,
+      "audio_approximation": false,
+      "key_review": "unknown",
+      "symbolic_origin": null
+    },
+    "beat": {
+      "source": {
+        "kind": "version",
+        "track_id": 1,
+        "version_id": "b795c6d428394b8f9be527b9d5364465"
+      },
+      "sha256": "bdd8d6abfc6efe888fea2a9eaa9233e6cd10d29a70607efe6812fa57c291ffc7",
+      "source_bytes": 76888,
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "frames": 9600,
+      "duration_sec": 0.2,
+      "musical_duration_sec": null,
+      "track_id": 1,
+      "version_id": "b795c6d428394b8f9be527b9d5364465",
+      "music_evidence": {
+        "restriction": "unknown",
+        "identity_basis": "publisher_declared",
+        "components": [],
+        "adapters": [],
+        "lineage_complete": false,
+        "public_attributions": []
+      },
+      "content_origin": "unknown",
+      "beat_document": null
+    },
+    "song": {
+      "source": {
+        "kind": "version",
+        "track_id": 2,
+        "version_id": "162184206c534765b7a06fd47706437b"
+      },
+      "sha256": "28fcccac9726aafab23efe143427581a58547bc71b15e4ea1d708a27e891e17d",
+      "source_bytes": 76888,
+      "sample_rate_hz": 48000,
+      "channels": 2,
+      "frames": 9600,
+      "duration_sec": 0.2,
+      "musical_duration_sec": null,
+      "track_id": 2,
+      "version_id": "162184206c534765b7a06fd47706437b",
+      "music_evidence": {
+        "restriction": "unknown",
+        "identity_basis": "publisher_declared",
+        "components": [],
+        "adapters": [],
+        "lineage_complete": false,
+        "public_attributions": []
+      },
+      "content_origin": "unknown",
+      "beat_document": null
+    },
+    "lanes": [
+      {
+        "id": "1d3734ac370a92ce4650ed9933807cb6",
+        "label": "Beat mix",
+        "source": "beat",
+        "role": "mix",
+        "beat_lane_id": null,
+        "control": {
+          "lane_id": "1d3734ac370a92ce4650ed9933807cb6",
+          "muted": false,
+          "gain_db": 0.0,
+          "pan": 0.0,
+          "highpass_hz": null,
+          "eq_bands": [],
+          "duck": null
+        }
+      },
+      {
+        "id": "f28d2853234e0426019368e0ce2af4ac",
+        "label": "Song mix",
+        "source": "song",
+        "role": "mix",
+        "beat_lane_id": null,
+        "control": {
+          "lane_id": "f28d2853234e0426019368e0ce2af4ac",
+          "muted": false,
+          "gain_db": 0.0,
+          "pan": 0.0,
+          "highpass_hz": null,
+          "eq_bands": [],
+          "duck": null
+        }
+      }
+    ],
+    "source_duration_sec": 0.2,
+    "target_duration_sec": 0.2,
+    "minimum_ratio": 1.0,
+    "maximum_ratio": 1.0,
+    "needs_native": false,
+    "separator_ready": false,
+    "native_ready": false,
+    "warnings": [
+      "manual_anchors",
+      "rights_unknown",
+      "processed_stems_before_master",
+      "key_unknown"
+    ],
+    "sha256": "dc2598040040990c5632faa11f72d8d9cf0ddbea4ac5a378c9b1b3781a92ee29",
+    "created_at": "2026-10-17T12:19:20.011782+00:00"
+  },
+  "storage": {
+    "retained_bytes": 1075376,
+    "temporary_bytes": 2764800,
+    "required_free_bytes": 541671132,
+    "free_bytes": 538235068416,
+    "can_start": true
+  }
+}

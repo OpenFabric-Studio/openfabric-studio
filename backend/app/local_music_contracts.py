@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .contracts import Contract, SavedTrack
 from .music_lora_contracts import MusicAdapter, MusicAdapterSelection
+from .music_conditioning_contracts import MusicConditioningRecipe, StableMusicConditioning
 
 LocalMusicEngineId = Literal['stable_audio3']
 
@@ -31,6 +32,8 @@ class LocalMusicRequest(Contract):
     seed: int = Field(default=0, ge=0, le=2147483647, strict=True)
     variant: Literal['small-music', 'medium'] = 'small-music'
     adapter: MusicAdapterSelection | None = None
+    # Preserve byte-stable legacy queue payloads protected by immutable SQL triggers.
+    conditioning: StableMusicConditioning | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @model_validator(mode='after')
     def validate_engine_inputs(self) -> Self:
@@ -40,6 +43,8 @@ class LocalMusicRequest(Contract):
             raise ValueError('stable_audio3_instrumental_only')
         if self.duration_seconds > (120 if self.variant == 'small-music' else 380):
             raise ValueError('stable_audio3_duration_invalid')
+        if self.conditioning is not None and self.conditioning.mode == 'inpaint' and self.conditioning.end_sec > self.duration_seconds:
+            raise ValueError('conditioning_invalid_region')
         return self
 
 
@@ -49,6 +54,8 @@ class LocalMusicEngineStatus(Contract):
     weights_ready: bool
     small_weights_ready: bool = False
     medium_weights_ready: bool = False
+    small_conditioning_weights_ready: bool = False
+    medium_conditioning_weights_ready: bool = False
     supported: bool
     runtime: str
     detail: str
@@ -66,6 +73,7 @@ class LocalMusicJob(Contract):
     track: SavedTrack | None = None
     adapter: MusicAdapter | None = None
     error_code: str | None = Field(default=None, max_length=80)
+    conditioning_recipe: MusicConditioningRecipe | None = None
 
 
 class LocalMusicJobs(Contract):

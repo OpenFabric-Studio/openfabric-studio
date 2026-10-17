@@ -17,6 +17,7 @@ source can plausibly contain, and each written to its own .mid.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import base64
 import json
 import logging
@@ -191,13 +192,15 @@ def forget(track_id: int) -> None:
         _jobs.pop((track_id, s), None)
 
 
-async def start(track_id: int, source: str, *, force: bool = False) -> MidiJob:
+async def start(track_id: int, source: str, *, force: bool = False, admit: Callable[[], None] | None = None) -> MidiJob:
     key = (track_id, source)
     job = _jobs.get(key)
     if job and job.status in ("queued", "running"):
         return job
     if job and job.status == "done" and not force:
         return job
+    if admit is not None:
+        admit()
     from .resource_admission import require_setup_idle
     require_setup_idle()
     job = MidiJob(status="queued")

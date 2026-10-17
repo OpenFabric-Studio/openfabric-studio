@@ -132,8 +132,14 @@ class MusicTrainingPreparationTests(unittest.IsolatedAsyncioTestCase):
         recipe = setup.recipes()
         self.assertEqual(set(recipe), {'yue2'})
         self.assertEqual([item.pin.commit for item in recipe['yue2'].sources], ['6a9355efff60589d93b41b569676f09d5db85d09', 'b058ec652802e1de24f1d429b3c7c1fb868f791c'])
-        terms = next(row for row in setup._licenses('yue2') if row.component_id == 'yue-training-base')
+        terms = next(row for row in setup.training_license_declarations('yue2') if row.component_id == 'yue-training-base')
         self.assertEqual(terms.source_url, 'https://github.com/multimodal-art-projection/YuE/blob/1647252d68b70cbead046ffd3f7caf036dde47ee/MODEL_LICENSE')
+        self.assertEqual(terms.restriction, 'noncommercial')
+        self.assertEqual(terms.redistribution, 'unknown')
+        self.assertEqual(terms.identities[0].repository_url, 'https://huggingface.co/Comfy-Org/YuE2')
+        self.assertEqual(terms.identities[0].revision, '2f76ca75e6ee094169de899cc7fc99d6887e2196')
+        self.assertEqual(terms.identities[0].sha256, '33765adbf9813c9a50318218760b2fd819a319862460a04884607581961c6fee')
+        self.assertTrue(any(item.kind == 'publisher_model_card' for item in terms.evidence))
         for item in (Path(setup.__file__).parent / 'assets').glob('music-training-*-requirements.txt'):
             self.assertTrue(all('==' in line and not line.startswith(('-', '#')) for line in item.read_text().splitlines()))
 

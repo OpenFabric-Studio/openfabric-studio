@@ -4,6 +4,8 @@ from __future__ import annotations
 import asyncio
 import threading
 import unittest
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -14,6 +16,31 @@ from app import audio_exports_test as export_test_support
 class StemExportTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = export_test_support.AudioExportTests.asyncSetUp
     asyncTearDown = export_test_support.AudioExportTests.asyncTearDown
+
+    async def test_failed_conditioning_drain_keeps_completed_exports_and_source(self) -> None:
+        from app import music_conditioning
+        from app.local_music_contracts import LocalMusicError
+        source = self.make_source()
+        job = await exports.create_stem_export(self.track_id, 'vocals', 'mp3')
+        await asyncio.wait_for(exports._tasks[job.id], 15)
+        retained = exports._directory(self.track_id, job.id)
+
+        @asynccontextmanager
+        async def blocked(track_id: int) -> AsyncIterator[None]:
+            self.assertEqual(track_id, self.track_id)
+            raise LocalMusicError('conditioning_source_busy', 409)
+            yield
+
+        with patch.object(music_conditioning, 'protect_stem_replacement', blocked):
+            for guard in (exports.protect_stem_replacement, exports.protect_stem_exports_removal):
+                with self.assertRaises(exports.AudioExportError) as caught:
+                    async with guard(self.track_id):
+                        self.fail('Unverified conditioning worker must block source replacement')
+                self.assertEqual(caught.exception.code, 'conditioning_source_busy')
+                self.assertTrue(source.is_file())
+                self.assertTrue(retained.is_dir())
+                self.assertNotIn(self.track_id, exports._stem_deleting)
+        self.assertEqual(exports.get_stem_export(self.track_id, 'vocals', job.id).status, 'done')
 
     def make_source(self) -> Path:
         path = db.FILES_DIR / 'vocals.wav'

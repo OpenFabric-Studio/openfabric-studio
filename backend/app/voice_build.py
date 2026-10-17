@@ -52,6 +52,8 @@ from .voice_artifacts import resolve_model_artifact as resolve_registered_model
 from .voice_preparation import PreparationDocument
 from .voice_progress import VoiceProgressTracker, read_progress, finish_progress
 from .artist_contracts import ArtistConsentVersion
+from .voice_mix_contracts import VoiceMixReport, VoiceMixSettings
+from .voice_mix import PinnedConversion
 from . import voice_authorization
 if TYPE_CHECKING:
     from .client_contracts import VoiceProfileResponse
@@ -197,6 +199,9 @@ class ApplyJob:
     production_vocal_asset_id: str | None = None
     authorization: ArtistConsentVersion | None = None
     model_artifact: ModelArtifact | None = None
+    mix_settings: VoiceMixSettings | None = None
+    mix_report: VoiceMixReport | None = None
+    pinned_conversion: PinnedConversion | None = None
     usage_id: str = field(default_factory=lambda: uuid.uuid4().hex)
 
 
@@ -852,6 +857,29 @@ async def _ffmpeg(args: list[str], slot: VoiceProcessSlot, cancelled: Callable[[
     return text
 
 
+async def _mix_command(job: ApplyJob, argv: list[str], timeout: float) -> bytes:
+    """Use the apply owner's supervisor for every shared DSP command."""
+    _check(job)
+    proc = await spawn_apply_worker(argv, Path.cwd(), os.environ.copy(), asyncio.subprocess.PIPE)
+    job.slot.track(proc)
+    drained = False
+    try:
+        output = await _communicate_apply(proc, timeout)
+        drained = True
+    except BaseException:
+        await await_cleanup(kill_proc(proc))
+        drained = True
+        raise
+    finally:
+        if drained:
+            job.slot.track(None)
+    _check(job)
+    if proc.returncode != 0:
+        logger.warning('Voice mix command failed: %s', output.decode('utf-8', errors='replace')[-1500:])
+        raise VoiceBuildError('voice_mix_failed')
+    return output
+
+
 async def _probe_duration(path: Path) -> float:
     result = await run_owned_command([
         _tool("ffprobe"),
@@ -1351,6 +1379,8 @@ async def _run_build(job: BuildJob) -> None:
 def start_build(voice_id: str, *, clean: bool = False, preparation_revision: str | None = None,
     training_steps: Literal[0, 200, 500, 1000] = 200, resume: bool = False, compare_checkpoints: bool = False) -> dict:
     authorization = voice_authorization.authorize(voice_id, 'train')
+    from .replacement_jobs import require_voice_idle
+    require_voice_idle(voice_id)
     from .resource_admission import require_setup_idle
     require_setup_idle()
     path = voice_dir(voice_id)
@@ -1499,6 +1529,8 @@ def require_ready_voice(voice_id: str) -> None:
 
 
 async def release_voice(voice_id: str) -> None:
+    from .replacement_jobs import cancel_for_voice
+    await cancel_for_voice(voice_id)
     from .voice_preparation import cancel, request_cancellation
     request_cancellation(voice_dir(voice_id))
     job = _builds.get(voice_id)
@@ -1576,6 +1608,8 @@ def _apply_payload(job: ApplyJob) -> dict:
         "duration_sec": job.duration_sec,
         "audio_version_id": job.audio_version_id,
         "job_progress": job.timing.progress.model_dump(mode='json'),
+        "mix_settings": job.mix_settings.model_dump(mode='json') if job.mix_settings is not None else None,
+        "mix": job.mix_report.model_dump(mode='json') if job.mix_report is not None else None,
     }
 
 
@@ -1664,6 +1698,12 @@ def apply_view(payload: dict) -> dict:
     phase = payload.get("phase") or ""
     voice_id = payload.get("voice_id") or ""
     progress = read_progress(payload.get('job_progress'))
+    try:
+        settings = VoiceMixSettings.model_validate(payload['mix_settings']) if payload.get('mix_settings') is not None else None
+        report = VoiceMixReport.model_validate(payload['mix']) if payload.get('mix') is not None else None
+    except ValidationError:
+        logger.exception('Invalid retained voice mix report')
+        settings, report = None, None
     return {
         "status": payload.get("status") or "idle",
         "error": payload.get("error") or "",
@@ -1675,6 +1715,8 @@ def apply_view(payload: dict) -> dict:
         "started_at": _number(payload.get("started_at")),
         "duration_sec": _number(payload.get("duration_sec")),
         "job_progress": progress.model_dump(mode='json') if progress is not None else None,
+        "mix_settings": settings.model_dump(mode='json') if settings is not None else None,
+        "mix": report.model_dump(mode='json') if report is not None else None,
     }
 
 
@@ -1824,6 +1866,31 @@ def _apply_paths(row: sqlite3.Row) -> tuple[Path, Path]:
     return original, destination
 
 
+def _publish_apply(job: ApplyJob, destination: Path, partial: Path, converted: Path) -> None:
+    _check(job)
+    voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
+    if job.production_run_id is not None:
+        from .production_render import converted_master
+        converted_master(job, converted, partial)
+    partial.replace(destination)
+    if job.production_run_id is not None:
+        from .production_render import complete_run
+        complete_run(job, destination)
+    if not db.update_track_audio(job.track_id, destination):
+        raise VoiceBuildError('track_missing')
+    db.delete_track_stems(job.track_id)
+    db.delete_track_midi(job.track_id)
+    job.audio_url = f'/api/tracks/{job.track_id}/audio?v={int(destination.stat().st_mtime)}'
+    job.status = 'done'
+    job.phase = ''
+    job.timing.phase('complete', total=1, current=1, unit='tasks')
+    job.error = ''
+    job.error_code = ''
+    _write_apply(job)
+    if job.work_dir is not None:
+        shutil.rmtree(job.work_dir, ignore_errors=True)
+
+
 async def _apply_inner(job: ApplyJob) -> None:
     voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
     _apply_phase(job, 'preparing')
@@ -1862,6 +1929,37 @@ async def _apply_inner(job: ApplyJob) -> None:
     except EngineCompatibilityError as exc:
         raise VoiceBuildError(exc.code) from exc
     ensure_whisper_float32_off_cuda()
+    conversion_snapshot = None
+    if job.mix_settings is not None:
+        from .voice_mix import configure_conversion, observe_conversion
+        if job.pinned_conversion is None:
+            raise VoiceBuildError('dsp_runtime_unverified')
+        conversion_snapshot = await observe_conversion(job.pinned_conversion)
+        if job.audio_version_id is None:
+            raise VoiceBuildError('dsp_invalid_source')
+        configure_conversion(destination, job.audio_version_id, conversion_snapshot)
+        if job.audio_version_id is not None:
+            from .voice_mix import artifact_path, read_report
+            from .video_io import copy_verified, hash_file
+            from .music_dsp import MAX_SOURCE_BYTES
+            report = read_report(destination, job.audio_version_id)
+            if report is not None and report.conversion == conversion_snapshot and report.settings == job.mix_settings:
+                from .audio_version_store import get as get_version
+                version = get_version(db.get_db(), job.audio_version_id)
+                if (version is None or report.source.track_id != version.public.track_id
+                        or report.source.version_id != version.public.source_version_id
+                        or await hash_file(audio, max_bytes=MAX_SOURCE_BYTES) != report.source_sha256):
+                    raise VoiceBuildError('dsp_source_changed')
+                _apply_phase(job, 'mixing')
+                master = await artifact_path(destination, job.audio_version_id, report.mix.id)
+                partial = partial_wav(destination)
+                job.partial_outputs.add(partial)
+                await copy_verified(master, partial, report.mix.audio_sha256, max_bytes=master.stat().st_size)
+                if await observe_conversion(job.pinned_conversion) != conversion_snapshot:
+                    raise VoiceBuildError('dsp_source_changed')
+                job.mix_report = report
+                _publish_apply(job, destination, partial, master)
+                return
 
     _apply_phase(job, 'waiting')
     work = voices_root() / "_apply" / f"work_{job.track_id}"
@@ -1905,20 +2003,9 @@ async def _apply_inner(job: ApplyJob) -> None:
     await phase_safe_mono(target_ref, mono_reference, job.slot)
     _check(job)
     log_name = f"voice_convert_{job.track_id}"
-    command = [
-        str(python),
-        "inference.py",
-        "--source", str(mono_source),
-        "--target", str(mono_reference),
-        "--output", str(converted),
-        "--diffusion-steps", str(DIFFUSION_STEPS),
-        "--inference-cfg-rate", "0.7",
-        "--f0-condition", "True",
-        "--auto-f0-adjust", "False",
-        "--fp16", "False",
-    ]
-    if checkpoint and config:
-        command.extend(["--checkpoint", str(checkpoint), "--config", str(config)])
+    from .voice_conversion import seed_command
+    command = seed_command(python, mono_source, mono_reference, converted,
+        diffusion_steps=DIFFUSION_STEPS, checkpoint=checkpoint, configuration=config)
     _apply_phase(job, 'waiting')
     async with gpu_lease(gpu_lock, 'voice_conversion', _voice_name(job.voice_id)):
         _check(job)
@@ -1931,6 +2018,10 @@ async def _apply_inner(job: ApplyJob) -> None:
         watcher = asyncio.create_task(_watch_apply(job, log_name, stop))
         try:
             voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
+            if job.pinned_conversion is not None:
+                from .voice_mix import observe_conversion
+                if await observe_conversion(job.pinned_conversion) != conversion_snapshot:
+                    raise VoiceBuildError('dsp_source_changed')
             if production is not None:
                 from .production_render import require_run
                 require_run(production)
@@ -1954,52 +2045,47 @@ async def _apply_inner(job: ApplyJob) -> None:
     converted_metrics = await _measure_conversion(wavs[0], expected_seconds, job, 'converted')
     if abs(converted_metrics.duration_delta_sec) > max(.25, .01 * expected_seconds):
         raise VoiceBuildError('output_duration_mismatch')
-    gain = vocal_gain(source_metrics.level_db, converted_metrics.level_db)
-    matched = work / 'matched_vocal.wav'
-    await _ffmpeg(['-y', '-i', str(wavs[0]), '-af', f'volume={gain:.8f},alimiter=limit=0.99:level=false:latency=true',
-        '-c:a', 'pcm_f32le', str(matched)], job.slot, lambda: job.cancel)
-    logger.info('Voice apply %s measured duration_delta=%.3f s, source_level=%.1f dBFS, converted_level=%.1f dBFS, gain=%.3f',
-        job.track_id, converted_metrics.duration_delta_sec, source_metrics.level_db, converted_metrics.level_db, gain)
     dest = destination
     partial = partial_wav(dest)
     job.partial_outputs.add(partial)
     accompaniment = [stems['accompaniment']] if production else [stems['drums'], stems['bass'], stems['other']]
-    mix_inputs = [argument for path in accompaniment for argument in ('-i', str(path))]
-    await _ffmpeg(
-        [
-            "-y",
-            "-i", str(matched),
-            *mix_inputs,
-            "-filter_complex", remix_filter(1 + len(accompaniment)),
-            "-map", "[out]",
-            *(["-c:a", "pcm_f32le"] if production is not None else []),
-            "-f", "wav",
-            str(partial),
-        ],
-        job.slot,
-        lambda: job.cancel,
-    )
-    _check(job)
-    voice_authorization.recheck(job.voice_id, job.authorization, 'convert')
-    if production is not None:
-        from .production_render import converted_master
-        converted_master(job, matched, partial)
-    partial.replace(dest)
-    if production is not None:
-        from .production_render import complete_run
-        complete_run(job, dest)
-    if not db.update_track_audio(job.track_id, dest):
-        raise VoiceBuildError("track_missing")
-    db.delete_track_stems(job.track_id)
-    db.delete_track_midi(job.track_id)
-    job.audio_url = f"/api/tracks/{job.track_id}/audio?v={int(dest.stat().st_mtime)}"
-    job.status = "done"
-    job.phase = ""
-    job.timing.phase('complete', total=1, current=1, unit='tasks')
-    job.error = ""
-    job.error_code = ""
-    _write_apply(job)
-    shutil.rmtree(work, ignore_errors=True)
+    if job.mix_settings is not None:
+        from .audio_version_store import get as get_version
+        from .music_analysis_contracts import VersionMusicSource
+        from .voice_mix import artifact_path, observe_conversion, render_converted_mix
+        from .video_io import copy_verified
+        if job.audio_version_id is None or conversion_snapshot is None or job.pinned_conversion is None:
+            raise VoiceBuildError('dsp_invalid_source')
+        version = get_version(db.get_db(), job.audio_version_id)
+        if version is None or version.public.source_version_id is None:
+            raise VoiceBuildError('dsp_invalid_source')
+        async def command(argv: list[str], timeout: float) -> bytes:
+            return await _mix_command(job, argv, timeout)
+        job.mix_report = await render_converted_mix(job.mix_settings,
+            VersionMusicSource(track_id=version.public.track_id, version_id=version.public.source_version_id), audio,
+            stems['vocals'], wavs[0], accompaniment, job.audio_version_id, dest, conversion_snapshot, command)
+        _check(job)
+        if await observe_conversion(job.pinned_conversion) != conversion_snapshot:
+            raise VoiceBuildError('dsp_source_changed')
+        master = await artifact_path(dest, job.audio_version_id, job.mix_report.mix.id)
+        await copy_verified(master, partial, job.mix_report.mix.audio_sha256, max_bytes=master.stat().st_size)
+        from .video_io import hash_file
+        from .music_dsp import MAX_SOURCE_BYTES
+        if await hash_file(audio, max_bytes=MAX_SOURCE_BYTES) != job.mix_report.source_sha256:
+            raise VoiceBuildError('dsp_source_changed')
+        matched = master  # Strict production cannot enter this opt-in branch.
+    else:
+        gain = vocal_gain(source_metrics.level_db, converted_metrics.level_db)
+        matched = work / 'matched_vocal.wav'
+        await _ffmpeg(['-y', '-i', str(wavs[0]), '-af', f'volume={gain:.8f},alimiter=limit=0.99:level=false:latency=true',
+            '-c:a', 'pcm_f32le', str(matched)], job.slot, lambda: job.cancel)
+        logger.info('Voice apply %s measured duration_delta=%.3f s, source_level=%.1f dBFS, converted_level=%.1f dBFS, gain=%.3f',
+            job.track_id, converted_metrics.duration_delta_sec, source_metrics.level_db, converted_metrics.level_db, gain)
+        mix_inputs = [argument for path in accompaniment for argument in ('-i', str(path))]
+        await _ffmpeg(['-y', '-i', str(matched), *mix_inputs, '-filter_complex', remix_filter(1 + len(accompaniment)),
+            '-map', '[out]', *(['-c:a', 'pcm_f32le'] if production is not None else []), '-f', 'wav', str(partial)],
+            job.slot, lambda: job.cancel)
+    _publish_apply(job, dest, partial, matched)
 
 
 def _cleanup_apply_files(job: ApplyJob) -> None:
@@ -2015,6 +2101,7 @@ def _cleanup_apply_files(job: ApplyJob) -> None:
 async def _run_apply(job: ApplyJob) -> None:
     from .artist_production import ProductionError
     from .artists import ArtistError
+    from .music_dsp import MusicDspError
     try:
         await _apply_inner(job)
     except asyncio.CancelledError:
@@ -2030,8 +2117,8 @@ async def _run_apply(job: ApplyJob) -> None:
         job.error_code = "cancelled"
         job.error = ""
         _write_apply(job)
-    except VoiceBuildError as exc:
-        logger.warning("Voice job failed (%s): %s", exc.code, exc.detail, exc_info=True)
+    except (VoiceBuildError, MusicDspError) as exc:
+        logger.warning("Voice job failed (%s): %s", exc.code, exc.detail if isinstance(exc, VoiceBuildError) else exc.code, exc_info=True)
         if job.cancel:
             job.status = "cancelled"
             job.error_code = "cancelled"
@@ -2078,7 +2165,9 @@ async def _run_apply(job: ApplyJob) -> None:
 
 
 def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = None,
-                production_run_id: str | None = None) -> dict:
+                production_run_id: str | None = None, mix: VoiceMixSettings | None = None) -> dict:
+    if production_run_id is not None and mix is not None:
+        raise HTTPException(status_code=409, detail='voice_mix_strict_production_unsupported')
     authorization = voice_authorization.authorize(voice_id, 'convert')
     from .resource_admission import require_setup_idle
     require_setup_idle()
@@ -2104,7 +2193,8 @@ def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = 
         raise HTTPException(status_code=404, detail="track_missing")
     current = _applies.get(track_id)
     if current is not None and current.status in _APPLY_ACTIVE:
-        if audio_version_id is not None and current.audio_version_id != audio_version_id:
+        if (audio_version_id is not None and current.audio_version_id != audio_version_id
+                or mix is not None and mix != current.mix_settings):
             raise HTTPException(status_code=409, detail='apply_busy')
         return apply_status(track_id)
     from .audio_versions import application_paths, prepare_application, version_for_worker
@@ -2114,7 +2204,30 @@ def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = 
     if audio_version_id is None:
         audio_version_id = prepare_application(track_id, voice_id).id
         created_version = True
-    application_paths(track_id, audio_version_id)
+    _source_path, mix_destination = application_paths(track_id, audio_version_id)
+    from . import voice_mix
+    from .music_dsp import MusicDspError
+    try:
+        stored_settings = voice_mix.read_settings(mix_destination, audio_version_id)
+        settings = mix if mix is not None else stored_settings
+        if settings is not None and production_run_id is not None:
+            raise HTTPException(status_code=409, detail='voice_mix_strict_production_unsupported')
+        recorded_model = voice_mix.read_conversion(mix_destination, audio_version_id) if settings is not None else None
+        model_id = registry.active_model_id or 'trained'
+        if recorded_model is not None:
+            if recorded_model.voice_id != voice_id:
+                raise MusicDspError('dsp_source_changed')
+            model_id = recorded_model.model_revision_id
+            pinned_artifact = resolve_model_artifact(voice_path, model_id)
+        pinned = voice_mix.pin_conversion(pinned_artifact, voice_id, model_id,
+            SEED_VC_DIR / 'inference.py', DIFFUSION_STEPS) if settings is not None else None
+        if settings is not None:
+            voice_mix.configure(mix_destination, audio_version_id, settings)
+    except (MusicDspError, OSError) as error:
+        if created_version:
+            from .audio_version_store import remove
+            remove(db.get_db(), audio_version_id)
+        raise HTTPException(status_code=409, detail=error.code if isinstance(error, MusicDspError) else 'dsp_runtime_unverified') from error
     job = ApplyJob(
         voice_id=voice_id,
         track_id=track_id,
@@ -2122,6 +2235,8 @@ def start_apply(voice_id: str, track_id: int, *, audio_version_id: str | None = 
         audio_version_id=audio_version_id,
         authorization=authorization,
         production_run_id=production_run_id,
+        mix_settings=settings,
+        pinned_conversion=pinned,
     )
     job.model_artifact = pinned_artifact
     job.started_at = job.timing.progress.queued_at

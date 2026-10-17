@@ -74,7 +74,9 @@ def _samples(path: Path) -> tuple[int,float,int,int]:
     return count,peak,full,near
 
 
-async def measure(source: Path,root: Path,run: RunCommand,*,name: str='source') -> Measurement:
+async def measure(source: Path,root: Path,run: RunCommand,*,name: str='source',max_decoded_bytes: int | None=None) -> Measurement:
+    if max_decoded_bytes is not None and not 0<max_decoded_bytes<=MAX_DECODED_BYTES:
+        raise AudioQualityError('audio_decode_budget_exceeded')
     # Preserve the decoded channel layout. Counting only a downmix can conceal
     # clipping in an individual original channel.
     raw_probe=await run([tool('ffprobe'),'-v','error',*INPUT,'-select_streams','a:0','-show_entries','stream=sample_rate,channels','-of','json',str(source)],60)
@@ -82,21 +84,30 @@ async def measure(source: Path,root: Path,run: RunCommand,*,name: str='source') 
         stream=Probe.model_validate_json(raw_probe).streams[0];rate=int(stream.sample_rate)
         if not 8000<=rate<=384000:raise ValueError('unsupported rate')
     except (ValidationError,ValueError,IndexError):raise AudioQualityError('audio_measurement_failed') from None
+    # FFmpeg -fs may write one additional packet. Fixed 1,024-frame packets and
+    # a reserved packet keep the actual file inside a caller's disk allowance.
+    packet_bytes=1024*stream.channels*4
+    limit=MAX_DECODED_BYTES if max_decoded_bytes is None else max_decoded_bytes-packet_bytes
+    if limit<4:raise AudioQualityError('audio_decode_budget_exceeded')
     output=await run([tool('ffmpeg'),'-nostats','-nostdin','-v','info',*INPUT,'-i',str(source),'-map','0:a:0','-vn',
         '-af','loudnorm=I=-23:TP=-1:LRA=50:print_format=json','-f','null','-'],3600)
     measured=report(output)
     version=next((line[:200] for line in output.decode('utf-8',errors='replace').splitlines() if line.startswith('ffmpeg version ')),'unavailable')
     raw=root/f'{name}.analysis.f32';raw.unlink(missing_ok=True)
-    complete=False
+    complete=False;decode_completed=False
     try:
         await run([tool('ffmpeg'),'-v','error','-nostdin','-y',*INPUT,'-i',str(source),'-map','0:a:0','-vn','-c:a','pcm_f32le',
-            '-f','f32le','-fs',str(MAX_DECODED_BYTES),str(raw)],3600)
+            *(['-af','asetnsamples=n=1024:p=0'] if max_decoded_bytes is not None else []),
+            '-f','f32le','-fs',str(limit),str(raw)],3600)
+        decode_completed=True
+        if max_decoded_bytes is not None and raw.stat().st_size>=limit:
+            raise AudioQualityError('audio_decode_budget_exceeded')
         count,peak,full,near=await await_cleanup(asyncio.to_thread(_samples,raw))
         complete=True
     finally:
         # The owner retains incomplete files if a process drain could not be
         # verified. Removing a pathname is not cancellation of its writer.
-        if complete:raw.unlink(missing_ok=True)
+        if complete or decode_completed:raw.unlink(missing_ok=True)
     seconds=count/stream.channels/rate
     def source_hash() -> str:
         checksum=hashlib.sha256()

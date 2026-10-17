@@ -6,6 +6,7 @@ from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextlib import closing, contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
+import errno
 import json
 import logging
 from pathlib import Path
@@ -24,7 +25,7 @@ from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree
 from .module_catalog import approval_scope, ModuleEnvironment, configured_environment, DEFINITIONS, now, plan
 from .module_contracts import (
     ModuleId, ModuleInstallJob, ModuleInstallRequest, ModuleJobsResponse, ModuleJobStep, ModulePlan,
-    ModulePlanRequest, ModuleStepState, ModuleDownloadProgress,
+    ModulePlanRequest, ModulePlanStep, ModuleStepState, ModuleDownloadProgress,
 )
 from .module_contracts import ModuleErrorCode as ModuleErrorCode
 from .module_diagnostics import append_event, failure_for, public_job
@@ -436,7 +437,7 @@ class ModuleJobService:
         if allow_reuse and current.steps and all(step.operation == 'reuse' for step in current.steps):
             return current
         if not current.can_install:
-            if (request.stable_training_variant is not None or request.stable_generation_variant is not None) and any(step.operation == 'manual' for step in current.steps):
+            if (request.stable_training_variant is not None or request.stable_generation_variant is not None or request.stable_conditioning_variant is not None or request.ace_generation_model is not None) and any(step.operation == 'manual' for step in current.steps):
                 raise ModuleSetupError('environment_unverified')
             if current.steps and all(step.operation in ('reuse', 'unsupported') for step in current.steps) and any(step.operation == 'reuse' for step in current.steps):
                 raise ModuleSetupError('already_installed')
@@ -455,6 +456,8 @@ class ModuleJobService:
                 features=request.features, download_models=request.download_models, reinstall=request.reinstall,
                 stable_training_variant=request.stable_training_variant,
                 stable_generation_variant=request.stable_generation_variant,
+                stable_conditioning_variant=request.stable_conditioning_variant,
+                ace_generation_model=request.ace_generation_model,
                 music_training_engine=request.music_training_engine,
                 steps=[ModuleJobStep(module_id=step.module_id, name=step.name, state='queued', detail=step.detail) for step in current.steps])
             stored = StoredModuleJob(job=job, plan=current, review_scope=approval_scope(request, self.environment))
@@ -476,6 +479,25 @@ class ModuleJobService:
             self.tasks[job.id] = asyncio.create_task(self._execute(job.id))
             return job.model_copy(deep=True)
 
+    async def _preflight_step(self, stored: StoredModuleJob, planned: ModulePlanStep) -> None:
+        identifier = planned.module_id
+        request = ModulePlanRequest(features=[identifier], download_models=stored.plan.download_models,
+            reinstall=[identifier] if identifier in stored.plan.reinstall else [],
+            stable_training_variant=stored.plan.stable_training_variant if identifier == 'stable_audio3' else None,
+            stable_generation_variant=stored.plan.stable_generation_variant if identifier == 'stable_audio3' else None,
+            stable_conditioning_variant=stored.plan.stable_conditioning_variant if identifier == 'stable_audio3' else None,
+            ace_generation_model=stored.plan.ace_generation_model if identifier == 'ace_step' else None,
+            music_training_engine=stored.plan.music_training_engine if identifier == stored.plan.music_training_engine else None)
+        current = await plan(request, self.environment)
+        selected = next((step for step in current.steps if step.module_id == identifier), None)
+        if selected is None or planned.estimated_download_bytes is not None and (
+                selected.estimated_download_bytes is None or selected.estimated_download_bytes > planned.estimated_download_bytes):
+            raise ModuleSetupError('plan_changed')
+        if selected.operation == 'reuse' or selected.operation == 'verify' and selected.estimated_download_bytes == 0:
+            return
+        if current.required_free_bytes > 0 and (current.free_bytes is None or current.free_bytes < current.required_free_bytes):
+            raise ModuleSetupError('insufficient_disk')
+
     async def _execute(self, identifier: str) -> None:
         context = InstallContext(self, identifier)
         try:
@@ -492,12 +514,20 @@ class ModuleJobService:
                 append_event(step, f'Starting {step.name} setup.', stored.job.updated_at)
                 self.store.write(stored)
                 dependency_manual = any(other.module_id in DEFINITIONS[step.module_id].dependencies and other.state in ('manual', 'failed', 'skipped') for other in stored.job.steps[:index])
+                if planned.operation in ('install', 'verify') and not dependency_manual:
+                    await self._preflight_step(stored, planned)
                 if planned.operation == 'reuse':
                     result = InstallOutcome('verified', planned.detail)
                 elif planned.operation == 'unsupported':
                     result = InstallOutcome('manual', 'Unsupported on this platform. No installation was attempted.')
                 elif planned.operation == 'manual' or dependency_manual:
                     result = InstallOutcome('manual', planned.detail if not dependency_manual else 'Complete the preceding manual dependency setup, then review this feature again.')
+                elif stored.plan.ace_generation_model is not None:
+                    from .module_music_models import setup_ace_conditioning_models
+                    result = await setup_ace_conditioning_models(context)
+                elif stored.plan.stable_conditioning_variant is not None:
+                    from .stable_lora_setup import prepare_conditioning
+                    result = await prepare_conditioning(context, stored.plan.stable_conditioning_variant)
                 elif stored.plan.stable_generation_variant is not None:
                     from .stable_lora_setup import prepare_generation
                     result = await prepare_generation(context, stored.plan.stable_generation_variant)
@@ -538,7 +568,13 @@ class ModuleJobService:
         except Exception as exc:
             logger.exception('Module installation failed for job %s', identifier)
             stored = self.store.read(identifier)
-            code: ModuleErrorCode = exc.code if isinstance(exc, ModuleSetupError) else 'installation_failed'
+            code: ModuleErrorCode
+            if isinstance(exc, ModuleSetupError):
+                code = exc.code
+            elif isinstance(exc, OSError) and exc.errno == errno.ENOSPC:
+                code = 'insufficient_disk'
+            else:
+                code = 'installation_failed'
             stored.job.state = 'failed'
             stored.job.error_code = code
             stored.job.updated_at = now()
@@ -605,11 +641,15 @@ class ModuleJobService:
                 raise ModuleSetupError('setup_busy')
             request = ModulePlanRequest(features=stored.job.features, download_models=stored.job.download_models, reinstall=stored.job.reinstall,
                 stable_training_variant=stored.job.stable_training_variant, stable_generation_variant=stored.job.stable_generation_variant,
+                stable_conditioning_variant=stored.job.stable_conditioning_variant,
+                ace_generation_model=stored.job.ace_generation_model,
                 music_training_engine=stored.job.music_training_engine)
             completed = {step.module_id for step in stored.job.steps if step.state == 'verified'}
             remaining = ModulePlanRequest(features=request.features, download_models=request.download_models,
                 stable_training_variant=request.stable_training_variant,
                 stable_generation_variant=request.stable_generation_variant,
+                stable_conditioning_variant=request.stable_conditioning_variant,
+                ace_generation_model=request.ace_generation_model,
                 music_training_engine=request.music_training_engine,
                 reinstall=[identifier for identifier in stored.plan.reinstall if identifier in request.reinstall and identifier not in completed])
             current = await self._review(remaining, allow_reuse=True)

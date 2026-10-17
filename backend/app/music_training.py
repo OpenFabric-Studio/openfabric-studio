@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+import errno
 import logging
 from pathlib import Path, PureWindowsPath
 import re
@@ -20,6 +21,7 @@ from .gpu_lease import gpu_lease
 from .job_lifecycle import await_cleanup, cancel_and_wait, kill_process_tree, run_owned_thread
 from .music_lora import find_by_job as find_by_job, register_file as register_file, resolve, validate_file
 from .music_lora_contracts import MusicAdapterSelection, MusicLoraError
+from .module_catalog import available_bytes
 from .music_training_contracts import MusicLoraPackageCompletion, MusicLoraTrainingCompletion, MusicLoraTrainingPairCompletion, MusicLoraTrainingProgress, MusicLoraTrainingJob, MusicLoraTrainingJobs, MusicLoraTrainingRequest, MusicTrainingKind, YueLoraPairSettings
 from .music_training_runtime import artifact_base, fingerprint as fingerprint, prepare_package_worker as prepare_package_worker, prepare_worker as prepare_worker, status as status
 from .stems import gpu_lock
@@ -31,6 +33,7 @@ _tasks: dict[str, asyncio.Task[None]] = {}
 _unverified: set[str] = set()
 _closing = False
 _object = TypeAdapter(JsonObject)
+_DISK_RESERVE_BYTES = 64 * 1024**2
 
 
 def migrate(connection: sqlite3.Connection) -> None:
@@ -154,6 +157,31 @@ def _sources(request: MusicLoraTrainingRequest) -> list[Path]:
     return [source_path(sample, prefix='music_training') for sample in request.samples]
 
 
+def _require_disk_space(path: Path, required: int) -> None:
+    free = available_bytes(path)
+    if free is None or free < required:
+        raise MusicLoraError('insufficient_disk')
+
+
+def _require_work_space(request: MusicLoraTrainingRequest, sources: list[Path], kind: MusicTrainingKind) -> None:
+    """Admission floor for the pinned worker, not a measured peak-disk guarantee."""
+    pcm = len(sources) * (request.segment_seconds + 1) * 48000 * 2 * 2
+    if kind == 'nvidia-package':
+        required = 2 * (sum(source.stat().st_size for source in sources) + (pcm if request.yue_pair is not None else 0))
+    else:
+        latents = len(sources) * (request.segment_seconds * 25 + 1) * 64 * 2
+        # Pinned YuE2-3B: 28 layers, merged QKV/MLP; BF16 exports and two FP32 AdamW moments.
+        parameters = 28 * request.rank * (6144 + 4096 + 14336 + 8192)
+        native = 28 * request.rank * (4096 + 3072 + 3072 + 4096 + 3 * 8192) * 4
+        phases = [request.max_steps, *([request.yue_pair.planner_steps] if request.yue_pair is not None else [])]
+        checkpoints = sum((steps + 24) // 25 for steps in phases)
+        required = 2 * pcm + 2 * latents + checkpoints * (parameters * 10 + 2 * 1024**2) + 2 * native * len(phases)
+        # shortcut: 2 MiB/checkpoint plus 64 MiB cover serialization/log allowances; measure vendor scratch on hardware.
+    required += _DISK_RESERVE_BYTES
+    for path in (db.DATA_DIR, db.DATA_DIR / 'music-lora-training', db.DATA_DIR / 'music-lora'):
+        _require_disk_space(path, required)
+
+
 def _planner_source(identifier: str) -> PlannerSource:
     from .yue_planner_source import verify
     try:
@@ -239,6 +267,7 @@ def _publish_pair(job: MusicLoraTrainingJob, completion_path: Path) -> None:
                 raise MusicLoraError('music_training_completion_invalid', 422)
             resolve(MusicAdapterSelection(id=existing.id), engine='yue2', target=artifact.target)
         else:
+            _require_disk_space(db.DATA_DIR / 'music-lora', _artifact(job.id, artifact.checkpoint).stat().st_size + _DISK_RESERVE_BYTES)
             existing = register_file(_artifact(job.id, artifact.checkpoint), name=job.request.name,
                 engine='yue2', target=artifact.target, source_job_id=job.id)
         job.adapters.append(existing)
@@ -273,6 +302,7 @@ def _publish_planner(job: MusicLoraTrainingJob) -> None:
     validate_file(checkpoint, engine='yue2', target='ar')
     existing = find_by_job(job.id, target='ar')
     if existing is None:
+        _require_disk_space(db.DATA_DIR / 'music-lora', checkpoint.stat().st_size + _DISK_RESERVE_BYTES)
         existing = register_file(checkpoint, name=job.request.name, engine='yue2', target='ar', source_job_id=job.id)
     elif existing.engine != 'yue2' or existing.sha256 != completion.sha256:
         raise MusicLoraError('music_training_completion_invalid', 422)
@@ -282,6 +312,7 @@ def _publish_planner(job: MusicLoraTrainingJob) -> None:
 
 
 def _publish(job: MusicLoraTrainingJob) -> None:
+    _require_disk_space(db.DATA_DIR, _DISK_RESERVE_BYTES)
     if job.kind == 'nvidia-package':
         completion_path = _artifact(job.id, 'package-completion.json')
         if completion_path.stat().st_size > 4096:
@@ -320,6 +351,7 @@ def _publish(job: MusicLoraTrainingJob) -> None:
     checkpoint = _artifact(job.id, completion.checkpoint)
     if checkpoint.suffix != '.safetensors' or digest(checkpoint) != completion.sha256 or digest(_artifact(job.id, 'dataset.json'), 2 * 1024 * 1024) != completion.dataset_sha256 or artifact_base(checkpoint, job.request) != completion.base_sha256:
         raise MusicLoraError('music_training_checkpoint_changed', 409)
+    _require_disk_space(db.DATA_DIR / 'music-lora', checkpoint.stat().st_size + _DISK_RESERVE_BYTES)
     job.adapter = register_file(checkpoint, name=job.request.name, engine=job.request.engine, target=target, source_job_id=job.id)
     job.adapters = [job.adapter]
 
@@ -364,6 +396,7 @@ async def _run(identifier: str) -> None:
                 _require_ready(job.request)
             planner_source = _require_planner_request(job.request) if job.request.yue_ar_source_job_id is not None else None
             sources = [audio.path for audio in planner_source.audio] if planner_source is not None else _sources(job.request)
+            _require_work_space(job.request, sources, job.kind)
             prepare = prepare_worker if job.kind == 'training' else prepare_package_worker
             if planner_source is not None:
                 argv, cwd, env = prepare_worker(job.request, _directory(identifier), sources, prepared_audio=planner_source.audio)
@@ -418,7 +451,12 @@ async def _run(identifier: str) -> None:
         job.adapter, job.adapters = published, adapters
         job.status = 'failed'
         job.finished_at = datetime.now(timezone.utc).isoformat()
-        job.error_code = error.code if isinstance(error, MusicLoraError) else 'music_training_failed'
+        if isinstance(error, MusicLoraError):
+            job.error_code = error.code
+        elif isinstance(error, OSError) and error.errno == errno.ENOSPC:
+            job.error_code = 'insufficient_disk'
+        else:
+            job.error_code = 'music_training_failed'
         _store(job)
     finally:
         try:
@@ -450,8 +488,8 @@ async def submit(request: MusicLoraTrainingRequest, *, kind: MusicTrainingKind =
             raise MusicLoraError('music_training_busy')
         if kind == 'training':
             _require_ready(request)
-        if planner_source is None:
-            _sources(request)
+        sources = [audio.path for audio in planner_source.audio] if planner_source is not None else _sources(request)
+        _require_work_space(request, sources, kind)
         with name_transaction():
             if family is not None and _planner_child_exists(family):
                 raise MusicLoraError('music_training_planner_exists', 409)
@@ -550,7 +588,12 @@ async def recover() -> None:
                     job.adapter, job.adapters = publication.adapter, publication.adapters
                 job.status = 'failed'
                 job.finished_at = job.finished_at or datetime.now(timezone.utc).isoformat()
-                job.error_code = error.code if isinstance(error, MusicLoraError) else 'music_training_completion_invalid' if isinstance(error, (ValueError, ValidationError)) else 'music_training_recovery_failed'
+                if isinstance(error, MusicLoraError):
+                    job.error_code = error.code
+                elif isinstance(error, OSError) and error.errno == errno.ENOSPC:
+                    job.error_code = 'insufficient_disk'
+                else:
+                    job.error_code = 'music_training_completion_invalid' if isinstance(error, (ValueError, ValidationError)) else 'music_training_recovery_failed'
                 _store(job)
             except (MusicLoraError, sqlite3.Error):
                 logger.warning('Unavailable training metadata retained during recovery')

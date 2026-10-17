@@ -37,6 +37,39 @@ class ProductionLineageTests(unittest.TestCase):
             evidence_ref='signed fixture agreement', note='Fixture declaration only'))
         return asset.id
 
+    def test_version_reference_registration_uses_catalog_identity_without_global_scan(self) -> None:
+        from app import artist_production as evidence, audio_versions
+        path = db.FILES_DIR / 'generated.wav'
+        path.write_bytes(b'version bytes')
+        track = db.insert_track(model='ace_step', title='Generated', lyrics='', seed=None, duration_ms=1000,
+            wall_ms=None, params={}, audio_path=path, abc_path=None)
+        version = audio_versions.retain_original(track, path)
+        from app.export_provenance import digest
+        with patch.object(evidence, '_known_generated', side_effect=AssertionError('catalog-wide hash scan')):
+            asset = evidence.register_version_reference(track, version.id, digest(path))
+        self.assertEqual(asset.origin, 'ai_generated')
+        self.assertEqual(asset.classification_basis, 'app_workflow')
+        self.assertTrue(asset.reference_only)
+        self.assertIsNone(asset.declaration)
+        self.assertFalse(evidence.validate_graph(asset.id).technical_eligible)
+        self.assertEqual(evidence.register_version_reference(track, version.id, digest(path)).id, asset.id)
+        with self.assertRaises(evidence.ProductionError):
+            evidence.register_version_reference(track, version.id, 'f' * 64)
+
+    def test_version_reference_reuses_existing_classification_without_creating_approval(self) -> None:
+        from app import artist_production as evidence, audio_versions
+        identifier = self.source('known.wav')
+        asset = evidence.get_asset(identifier)
+        path = evidence.asset_path(identifier)
+        track = db.insert_track(model='upload', title='Known', lyrics='', seed=None, duration_ms=1000,
+            wall_ms=None, params={}, audio_path=path, abc_path=None)
+        version = audio_versions.retain_original(track, path)
+        result = evidence.register_version_reference(track, version.id, asset.sha256)
+        self.assertEqual(result.id, identifier)
+        self.assertEqual(result.reviews, asset.reviews)
+        with self.assertRaises(evidence.ProductionError):
+            evidence.register_version_reference(track + 100, version.id, asset.sha256)
+
     def test_reviewed_human_sources_and_transform_survive_catalog_restart(self) -> None:
         from app.artist_production import create_transform, validate_graph, get_asset
         guide = self.source('guide.wav')

@@ -1,0 +1,60 @@
+{
+  "id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "revision": 1,
+  "request": {
+    "schema_version": 1,
+    "title": "Prepared fixture",
+    "source": {
+      "source": {
+        "kind": "version",
+        "track_id": 1,
+        "version_id": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "audio_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    },
+    "separator": "high",
+    "fit": {
+      "max_stretch": 1.25,
+      "pitch_shift_semitones": 0,
+      "pitch_nudge_semitones": 0.0,
+      "cleanup": "off",
+      "keep_breaths": true
+    },
+    "prepared": {
+      "source": {
+        "kind": "version",
+        "track_id": 2,
+        "version_id": "dddddddddddddddddddddddddddddddd"
+      },
+      "audio_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    },
+    "mode": "prepared"
+  },
+  "mix": {
+    "schema_version": 1,
+    "vocal_level": "match_original",
+    "manual_gain_db": 0.0,
+    "eq_bands": [],
+    "compression": null,
+    "loudness": {
+      "profile": "off",
+      "integrated_lufs": -16.0,
+      "true_peak_dbtp": -2.0
+    },
+    "master_level": "off",
+    "space": "off",
+    "ir_asset_id": null,
+    "wet": 0.0
+  },
+  "status": "draft",
+  "phase": "inspecting",
+  "active_attempt_id": null,
+  "alignment": null,
+  "reviewed_phrase_ids": [],
+  "alignment_reviewed": false,
+  "artifacts": [],
+  "renders": [],
+  "error_code": null,
+  "warnings": [],
+  "updated_at": "2026-10-17T10:00:00Z"
+}

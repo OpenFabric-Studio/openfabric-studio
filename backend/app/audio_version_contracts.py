@@ -7,6 +7,7 @@ from pydantic import ConfigDict, Field
 
 from .contracts import Contract, JobStatus
 from .voice_contracts import VoiceJobProgress
+from .voice_mix_contracts import VoiceMixReport, VoiceMixSettings
 
 AudioVersionId = Annotated[str, Field(pattern=r'^[0-9a-f]{32}$')]
 
@@ -27,6 +28,8 @@ class AudioVersion(Contract):
     duration_ms: float | None = Field(default=None, ge=0)
     source_version_id: AudioVersionId | None = None
     job_progress: VoiceJobProgress | None = None
+    mix_settings: VoiceMixSettings | None = None
+    mix: VoiceMixReport | None = None
 
 
 class TrackAudioVersionsResponse(Contract):
@@ -38,3 +41,4 @@ class TrackAudioVersionsResponse(Contract):
 class CreateAudioVersionRequest(Contract):
     model_config = ConfigDict(extra='forbid')
     voice_id: AudioVersionId
+    mix: VoiceMixSettings | None = None

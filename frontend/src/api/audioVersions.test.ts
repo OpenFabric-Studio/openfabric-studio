@@ -32,3 +32,11 @@ it('rejects unsafe identifiers before sending a request', async () => {
   await expect(listAudioVersions(-1)).rejects.toThrow()
   expect(fetch).not.toHaveBeenCalled()
 })
+
+it('sends opt-in mixing only when explicitly requested and validates numeric settings', async () => {
+  const fetch = respond(version)
+  await createAudioVersion(42, 'b'.repeat(32), undefined, { mix: { vocal_level: 'manual', manual_gain_db: 3 } })
+  expect(fetch).toHaveBeenLastCalledWith('/api/tracks/42/versions', expect.objectContaining({ body: JSON.stringify({ voice_id: 'b'.repeat(32), mix: { vocal_level: 'manual', manual_gain_db: 3 } }) }))
+  await expect(createAudioVersion(42, 'b'.repeat(32), undefined, { mix: { manual_gain_db: NaN } })).rejects.toThrow()
+  expect(fetch).toHaveBeenCalledTimes(1)
+})
